@@ -20,6 +20,7 @@ fn enemy_ai_hero_knockout_runs_shared_ai_cleanup() {
         TickCtx::new(&crate::sim_rng::test_context(), &assets),
         victim,
         true,
+        None,
         true,
     );
 

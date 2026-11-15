@@ -682,7 +682,13 @@ fn no_animation_fresh_push_knockout_does_not_repeat_ko_side_effects() {
     let assets = assets_with_sword_profile(1, 50);
     // Model concussion handling's already-completed fresh-KO prefix,
     // then translate push damage without an animation.
-    engine.apply_knockout_side_effects(TickCtx::new(&sim, &assets), victim, true, false);
+    engine.apply_knockout_side_effects(
+        TickCtx::new(&sim, &assets),
+        victim,
+        true,
+        Some(attacker),
+        false,
+    );
     let damage =
         crate::sequence::SequenceElement::new(1, Command::ReceiveSwordDamage, Some(victim));
     let sequence = {

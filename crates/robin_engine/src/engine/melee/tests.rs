@@ -538,6 +538,7 @@ fn dispatch_crowded_cross_sector_swordfight(
     (engine, owner, opponent, seq_id)
 }
 
+mod auto_loot;
 mod combat;
 /// Original-game actor translation case
 /// Entering a swordfight
