@@ -958,6 +958,10 @@ pub(super) fn restore_campaign(
                     num_purses: source.status.purses,
                     name: source.status.name.clone(),
                     name_override: None,
+                    // Original-game parity traces predate the Rust perk line,
+                    // so they describe characters that own no perk.
+                    keep_moving_in_combat: false,
+                    auto_loot: false,
                     beam_me_index_in_sherwood: source.status.beam_me_index_in_sherwood,
                 },
             })
