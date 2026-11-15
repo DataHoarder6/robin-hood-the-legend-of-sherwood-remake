@@ -585,6 +585,7 @@ mod combat;
 /// `SOLDIER_CONCUSSION_HEALING_SPEED` because `&LevelAssets`
 /// wasn't reachable from `dispatch_console_command`.
 mod movement;
+mod no_friendly_fire;
 mod orders;
 mod perception;
 mod projectiles;
