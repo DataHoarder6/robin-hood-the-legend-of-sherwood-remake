@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Format the Rust files this commit touches, with the toolchain the repository
+# pins in rust-toolchain.toml.
+#
+# Whole-tree `scripts/check-quality.sh format` is a CI gate; a commit hook that
+# ran it would block on anyone else's unformatted file in a shared tree. This
+# checks the staged files only, which is the part the commit is responsible for.
+set -euo pipefail
+
+repository=$(git rev-parse --show-toplevel)
+cd -- "$repository"
+
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+(( ${#files[@]} == 0 )) && exit 0
+
+exec rustfmt --check --edition 2024 -- "${files[@]}"
