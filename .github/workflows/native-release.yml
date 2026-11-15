@@ -203,10 +203,11 @@ jobs:
         env:
           ROBIN_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
           ROBIN_REQUIRE_BUILD_IDENTITY: "1"
-          # Static C runtime on Windows: the bare exe then runs on a machine
-          # with no VC++ redistributable installed, which is what the
-          # direct-install artifact below is for.
-          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: ${{ matrix.runtime == 'win-x64' && '-C target-feature=+crt-static' || '' }}
+          # No crt-static for the Windows link: a vendored C dependency links
+          # the DLL CRT, and mixing it with the static CRT fails with a wall of
+          # LNK2005 duplicate-symbol errors in libucrt. The bare exe therefore
+          # needs the VC++ runtime, which every machine that built the game or
+          # ran the installer already has.
         run: |
           # TODO: Bundle FFmpeg DLLs on Windows, then switch `release` to
           # `full` so packaged builds also include video and RetroArch presets.
