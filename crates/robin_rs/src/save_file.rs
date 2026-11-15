@@ -1414,6 +1414,7 @@ mod tests {
         status.num_arrows = 9;
         status.grant_perk(Perk::KeepMovingInCombat);
         status.grant_perk(Perk::AutoLoot);
+        status.grant_perk(Perk::NoFriendlyFireDamage);
         let mut campaign = Campaign::default();
         campaign.characters.push(PcDescription {
             character_profile_idx: Some(CharacterProfileIdx(0)),
@@ -1441,6 +1442,7 @@ mod tests {
                     // below; they must load through `#[serde(default)]`.
                     map.remove("keep_moving_in_combat");
                     map.remove("auto_loot");
+                    map.remove("no_friendly_fire_damage");
                     if let Some(coop) = map.get_mut("coop").and_then(|v| v.as_object_mut()) {
                         coop.remove("campaign");
                         coop.remove("team");
@@ -1475,10 +1477,11 @@ mod tests {
                 PcStatus {
                     keep_moving_in_combat: false,
                     auto_loot: false,
+                    no_friendly_fire_damage: false,
                     ..status.clone()
                 },
                 "a save written before the perk fields existed keeps its \
-                 progression and ammo and loads both perks as unowned"
+                 progression and ammo and loads every perk as unowned"
             );
         }
         assert_eq!(SAVE_FORMAT_VERSION, 97);

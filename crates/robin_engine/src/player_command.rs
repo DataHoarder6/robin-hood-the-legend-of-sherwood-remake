@@ -1470,6 +1470,12 @@ pub enum PlayerCommand {
         character_idx: u16,
         perk: crate::pc_status::Perk,
     },
+    /// Set the "no friendly-fire damage" perk on these PCs.  Appended to
+    /// preserve every current-main bitcode variant index.
+    SetNoFriendlyFireDamage {
+        pcs: Vec<EntityId>,
+        enabled: bool,
+    },
 }
 
 impl PlayerCommand {
@@ -1535,6 +1541,7 @@ impl PlayerCommand {
                 | Self::SetKeepMovingInCombat { .. }
                 | Self::SetAutoLoot { .. }
                 | Self::CampaignPurchasePerk { .. }
+                | Self::SetNoFriendlyFireDamage { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }
