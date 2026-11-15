@@ -1,19 +1,19 @@
-//! Characterisation: what happens to a PC movement carrying
-//! [`MoveFlags::FORCE_SWORD_MOVEMENT`] when a swordfight starts around the
-//! moving PC.
+//! A PC movement carrying [`MoveFlags::FORCE_SWORD_MOVEMENT`] when a
+//! swordfight starts around the moving PC.
 //!
 //! `group_move_pc_simple_route` stamps that flag for the "fight through,
-//! don't stop" perk, and `abort_orphaned_sword_movement` reads it when the
-//! last opponent leaves. These tests pin what the engine actually does when
-//! an enemy starts the fight while the movement is still walking, and
-//! whether the destination is honoured once the fight ends. They assert the
-//! measured behaviour; they do not ask for a particular one.
+//! don't stop" perk. Fight entry prepares the opponent with
+//! `stop_owner_current(Preference)`, whose `stop_movement_for_owner` phase
+//! either rewrites the movement into a waiting transition or interrupts it.
 //!
-//! Measured: the entry interrupts (destroys) the movement before the actor
-//! ever gets a movement frame, in both the flagged and the unflagged case, and
-//! the PC never resumes toward its destination. The flag is not consulted on
-//! this path — it only guards `abort_orphaned_sword_movement`, which needs a
-//! movement that is still `InProgress` when the last opponent leaves.
+//! Measured: a flagged movement survives that stop, keeps its
+//! `WalkingWithSword` order and destination, advances on every frame it is in
+//! progress while the opponent stays engaged, and reaches its destination.
+//! The single non-advancing frame is the PC's own reciprocal
+//! `EnterSwordfight` at `PostponeEverythingButInjuries`, which queues the
+//! movement behind the raise-sword animation. Precedence pins both
+//! directions: an `Injury`-level stop (a hit or knockout) still interrupts the
+//! flagged movement, and an unflagged movement is still destroyed at entry.
 
 #[cfg(test)]
 mod suite {
@@ -120,6 +120,10 @@ mod suite {
                 -4.0, -4.0, 4.0, 4.0,
             ));
         element.sprite.position_iface.set_anti_collision_on(false);
+        element
+            .sprite
+            .position_iface
+            .set_pathfinder_index(crate::position_interface::PathfinderIndex::new(0).unwrap());
         element.set_position_map(start);
         element.set_sector(Some(sector));
 
@@ -200,9 +204,13 @@ mod suite {
             .life_points(50)
             .enemy_ai(enemy_ai)
             .build();
-        enemy
-            .element_data_mut()
-            .set_position_map(MapPoint::new(110.0, fixture.start.y));
+        // Beside the walk, not on it: a swordfighter standing inside the
+        // mover's move box would block the step itself (world collision),
+        // which is a different cancellation than the fight entry.
+        enemy.element_data_mut().set_position_map(MapPoint::new(
+            fixture.start.x + 10.0,
+            fixture.start.y + 18.0,
+        ));
         enemy.position_iface_mut().set_anti_collision_on(false);
         enemy.element_data_mut().set_sector(Some(fixture.sector));
         let enemy = fixture.engine.add_test_entity(enemy);
@@ -232,11 +240,14 @@ mod suite {
             .expect("the movement element must stay registered")
     }
 
-    fn tick(fixture: &mut Fixture, frames: usize) {
+    /// One production-ordered frame: the owner systems tick, then the
+    /// sequence phase dispatches what those ticks queued. The fight entry
+    /// launches the PC's reciprocal `EnterSwordfight` behind the owner phase,
+    /// so a tick that runs only owner envelopes would never see it.
+    fn frame(fixture: &mut Fixture) {
         let assets = assets_with_test_pc_profile();
-        for _ in 0..frames {
-            fixture.engine.t_tick_actor_owner_envelopes(&assets);
-        }
+        fixture.engine.t_tick_actor_owner_envelopes(&assets);
+        fixture.engine.t_hourglass_phase_sequences(&assets);
     }
 
     fn position(fixture: &Fixture) -> MapPoint {
@@ -245,6 +256,34 @@ mod suite {
             .ent(fixture.owner)
             .element_data()
             .position_map()
+    }
+
+    fn distance(from: MapPoint, to: MapPoint) -> f32 {
+        let dx = to.x - from.x;
+        let dy = to.y - from.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    fn distance_to_destination(fixture: &Fixture) -> f32 {
+        distance(position(fixture), fixture.destination)
+    }
+
+    fn assert_forced_flags(fixture: &Fixture, force: bool) {
+        let SequenceElementData::Movement {
+            destination, flags, ..
+        } = &movement_element(fixture).data
+        else {
+            panic!("movement fixture changed data kind")
+        };
+        assert_eq!(
+            *destination, fixture.destination,
+            "the authored destination must stay recorded on the element"
+        );
+        assert_eq!(
+            flags.contains(MoveFlags::FORCE_SWORD_MOVEMENT),
+            force,
+            "the fixture must carry exactly the flag under test"
+        );
     }
 
     /// Everything these tests assert about a movement that a fight started
@@ -262,21 +301,7 @@ mod suite {
             element.orders.is_empty(),
             "an interrupted movement keeps no orders to resume from"
         );
-        let SequenceElementData::Movement {
-            destination, flags, ..
-        } = &element.data
-        else {
-            panic!("movement fixture changed data kind")
-        };
-        assert_eq!(
-            *destination, fixture.destination,
-            "the authored destination is still recorded on the destroyed element"
-        );
-        assert_eq!(
-            flags.contains(MoveFlags::FORCE_SWORD_MOVEMENT),
-            force,
-            "the fixture must carry exactly the flag under test"
-        );
+        assert_forced_flags(fixture, force);
         assert_eq!(
             position(fixture),
             fixture.start,
@@ -284,46 +309,148 @@ mod suite {
         );
     }
 
+    /// The perk: a movement carrying [`MoveFlags::FORCE_SWORD_MOVEMENT`]
+    /// outranks the fight-entry stop, so the PC walks on through the fight
+    /// and reaches the destination it was given.
     #[test]
-    fn forced_pc_sword_move_is_destroyed_by_an_enemy_initiated_swordfight() {
+    fn forced_pc_sword_move_keeps_advancing_through_an_enemy_initiated_swordfight() {
         let mut fixture = install_pc_sword_move(true);
         enemy_engages(&mut fixture);
 
-        assert_destroyed_at_entry(&fixture, true);
+        {
+            let element = movement_element(&fixture);
+            assert_eq!(
+                element.state,
+                SequenceState::InProgress,
+                "the fight-entry stop leaves a forced sword movement running"
+            );
+            assert_eq!(
+                element.orders.len(),
+                1,
+                "a kept movement keeps its WalkingWithSword order"
+            );
+        }
+        assert_forced_flags(&fixture, true);
 
-        tick(&mut fixture, 2);
+        let mut last_distance = distance_to_destination(&fixture);
+        let mut advancing_frames = 0;
+        let mut postponed_frames = 0;
+        for _ in 0..64 {
+            let state_before = movement_element(&fixture).state;
+            frame(&mut fixture);
+            assert_eq!(
+                fixture.engine.human(fixture.owner).opponents.len(),
+                1,
+                "the enemy stays engaged for the whole walk"
+            );
+            let distance = distance_to_destination(&fixture);
+            assert!(
+                distance <= last_distance,
+                "the forced movement never backs away from its destination \
+                 ({last_distance} -> {distance})"
+            );
+            match state_before {
+                SequenceState::InProgress => {
+                    assert!(
+                        distance < last_distance,
+                        "a forced movement that is in progress advances on every frame \
+                         while an opponent is engaged ({last_distance} -> {distance})"
+                    );
+                    advancing_frames += 1;
+                }
+                SequenceState::Postponed => {
+                    // The same fight entry launches the PC's reciprocal
+                    // `EnterSwordfight` at `PostponeEverythingButInjuries`, which
+                    // queues the movement behind the raise-sword sequence for
+                    // one frame. That is the priority ladder, not the stop.
+                    postponed_frames += 1;
+                }
+                other => {
+                    panic!("unexpected movement state {other:?} while walking through a fight")
+                }
+            }
+            last_distance = distance;
+            if distance == 0.0 {
+                break;
+            }
+        }
+
+        assert!(
+            advancing_frames >= 5,
+            "the movement must have walked on for several frames, got {advancing_frames}"
+        );
         assert_eq!(
-            movement_element(&fixture).state,
-            SequenceState::Interrupted,
-            "the fight does not revive the movement"
+            postponed_frames, 1,
+            "only the PC's own raise-sword entry postpones the movement, and only once"
         );
         assert_eq!(
             position(&fixture),
-            fixture.start,
-            "the PC stands still for the whole fight"
+            fixture.destination,
+            "the PC reaches the authored destination while still in the fight"
+        );
+        assert_eq!(
+            movement_element(&fixture).state,
+            SequenceState::Terminated,
+            "the movement ends by arriving, not by the fight"
+        );
+    }
+
+    /// The other direction of the same precedence: the forced movement ranks
+    /// above `Preference` (fight entry) and below `Injury`. A hit or knockout
+    /// stops an injured or unconscious PC from walking on.
+    #[test]
+    fn forced_pc_sword_move_is_still_interrupted_by_an_injury_stop() {
+        let mut fixture = install_pc_sword_move(true);
+        enemy_engages(&mut fixture);
+        for _ in 0..3 {
+            frame(&mut fixture);
+        }
+        assert_eq!(
+            movement_element(&fixture).state,
+            SequenceState::InProgress,
+            "the forced movement is walking before the hit lands"
+        );
+        let before_hit = position(&fixture);
+        assert!(
+            distance(before_hit, fixture.destination)
+                < distance(fixture.start, fixture.destination),
+            "the forced movement made progress before the hit"
         );
 
-        // The fight ends: every opponent is gone (knocked out / cleared).
-        fixture.engine.human_mut(fixture.owner).opponents.clear();
-        tick(&mut fixture, 6);
+        // `Injury` is the level a hit/knockout teardown stops the victim at
+        // (`ReceiveDamage` elements carry it); the fight-entry stop is weaker.
+        let assets = assets_with_test_pc_profile();
+        let sim = crate::sim_rng::test_context();
+        fixture.engine.stop_actor_orders(
+            TickCtx::new(&sim, &assets),
+            &mut Vec::new(),
+            fixture.owner,
+            SequencePriority::Injury,
+        );
 
         assert_eq!(
             movement_element(&fixture).state,
             SequenceState::Interrupted,
-            "FORCE_SWORD_MOVEMENT does not resurrect an entry-interrupted movement after \
-             the fight ends; the flag is only read by `abort_orphaned_sword_movement`, \
-             which needs an element that is still InProgress"
+            "FORCE_SWORD_MOVEMENT ranks below Injury: a hit or knockout still \
+             interrupts the forced movement"
+        );
+        assert!(
+            movement_element(&fixture).orders.is_empty(),
+            "an interrupted forced movement keeps no orders to resume from"
+        );
+
+        for _ in 0..4 {
+            frame(&mut fixture);
+        }
+        assert_eq!(
+            position(&fixture),
+            before_hit,
+            "an injured PC never advances again, however the fight ends"
         );
         assert_eq!(
             fixture.engine.human(fixture.owner).opponents.len(),
-            0,
-            "the fight is over for the PC"
-        );
-        assert_eq!(
-            position(&fixture),
-            fixture.start,
-            "the PC does not resume toward its destination, and never reaches {:?}",
-            fixture.destination
+            1,
+            "the fight is still live, so only the injury interrupted the move"
         );
     }
 
@@ -334,7 +461,8 @@ mod suite {
 
         assert_destroyed_at_entry(&fixture, false);
 
-        tick(&mut fixture, 2);
+        frame(&mut fixture);
+        frame(&mut fixture);
         assert_eq!(
             movement_element(&fixture).state,
             SequenceState::Interrupted,
@@ -347,7 +475,9 @@ mod suite {
         );
 
         fixture.engine.human_mut(fixture.owner).opponents.clear();
-        tick(&mut fixture, 6);
+        for _ in 0..6 {
+            frame(&mut fixture);
+        }
 
         assert_eq!(
             movement_element(&fixture).state,

@@ -135,6 +135,17 @@ fn with_swordfight_preparation_scope<R>(
     Some(body())
 }
 
+/// Whether `actor` is the one being prepared inside the synchronous
+/// swordfight-entry body.
+///
+/// The body stops the prepared actor's weak work with `Stop(Preference)`.
+/// A movement carrying `MoveFlags::FORCE_SWORD_MOVEMENT` survives that stop,
+/// so the movement stopper has to know that this Stop is the fight entry and
+/// not, say, a bow equip at the same priority.
+pub(crate) fn in_swordfight_preparation(actor: EntityId) -> bool {
+    SWORDFIGHT_PREPARATION_STACK.with(|stack| stack.borrow().iter().any(|(a, _)| *a == actor))
+}
+
 /// Choose the side whose existing opponents are purged when two already
 /// engaged fighters meet. Original always chooses the Royalist side. For
 /// arbitrary allegiances, the lower authored allegiance ID is the canonical
