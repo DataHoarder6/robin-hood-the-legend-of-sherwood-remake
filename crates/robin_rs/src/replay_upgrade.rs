@@ -184,7 +184,7 @@ fn upgrade_header(header: &mut serde_json::Value) -> Result<u32> {
         .context("replay header has no valid schema")?;
     ensure!(
         version == REPLAY_SCHEMA_VERSION
-            || (version == 57 && (67..=71).contains(&REPLAY_SCHEMA_VERSION))
+            || (version == 57 && REPLAY_SCHEMA_VERSION >= 67)
             || ((64..=65).contains(&version) && REPLAY_SCHEMA_VERSION == 66)
             || ((43..=56).contains(&version) && (43..=56).contains(&REPLAY_SCHEMA_VERSION)),
         "replay schema {version} needs an input migration before upgrading to {REPLAY_SCHEMA_VERSION}"
