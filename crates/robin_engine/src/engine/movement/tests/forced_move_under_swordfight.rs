@@ -14,6 +14,10 @@
 //! movement behind the raise-sword animation. Precedence pins both
 //! directions: an `Injury`-level stop (a hit or knockout) still interrupts the
 //! flagged movement, and an unflagged movement is still destroyed at entry.
+//!
+//! The same holds when the PC is the entry's *initiator*: swordfight
+//! preparation opens its scope for the opponent, so the entry never stops the
+//! PC's own movement at all, and the flagged movement simply walks on.
 
 #[cfg(test)]
 mod suite {
@@ -192,28 +196,33 @@ mod suite {
         }
     }
 
-    /// An enemy soldier in melee range starts the fight: the moving PC is the
-    /// *opponent* of the entry, which is how a fight begins around a PC that
-    /// is already walking.
-    fn enemy_engages(fixture: &mut Fixture) -> EntityId {
-        let assets = assets_with_test_pc_profile();
-        let sim = crate::sim_rng::test_context();
+    /// An enemy soldier standing in melee range beside the walk. Beside, not
+    /// on it: a swordfighter inside the mover's move box would block the step
+    /// itself (world collision), which is a different cancellation than the
+    /// fight entry.
+    fn enemy_beside_path(fixture: &mut Fixture) -> EntityId {
         let mut enemy_ai = crate::ai_enemy::EnemyAi::new(0);
         enemy_ai.hth_weapon_id = 1;
         let mut enemy = TestActor::soldier(Posture::Upright)
             .life_points(50)
             .enemy_ai(enemy_ai)
             .build();
-        // Beside the walk, not on it: a swordfighter standing inside the
-        // mover's move box would block the step itself (world collision),
-        // which is a different cancellation than the fight entry.
         enemy.element_data_mut().set_position_map(MapPoint::new(
             fixture.start.x + 10.0,
             fixture.start.y + 18.0,
         ));
         enemy.position_iface_mut().set_anti_collision_on(false);
         enemy.element_data_mut().set_sector(Some(fixture.sector));
-        let enemy = fixture.engine.add_test_entity(enemy);
+        fixture.engine.add_test_entity(enemy)
+    }
+
+    /// An enemy soldier in melee range starts the fight: the moving PC is the
+    /// *opponent* of the entry, which is how a fight begins around a PC that
+    /// is already walking.
+    fn enemy_engages(fixture: &mut Fixture) -> EntityId {
+        let assets = assets_with_test_pc_profile();
+        let sim = crate::sim_rng::test_context();
+        let enemy = enemy_beside_path(fixture);
         assert!(
             fixture.engine.enter_swordfight(
                 TickCtx::new(&sim, &assets),
@@ -227,6 +236,37 @@ mod suite {
             fixture.engine.human(fixture.owner).opponents.len(),
             1,
             "the PC must be in the fight it was pulled into"
+        );
+        enemy
+    }
+
+    /// The mirror image of [`enemy_engages`]: the walking PC is the entry's
+    /// *initiator*. `enter_swordfight_impl` opens the preparation scope for
+    /// the *opponent*, so the `stop_owner_current(Preference)` it runs — and
+    /// the priority ranking that lets `FORCE_SWORD_MOVEMENT` outrank it —
+    /// never reaches the PC's own movement on this side.
+    fn pc_initiates(fixture: &mut Fixture) -> EntityId {
+        let assets = assets_with_test_pc_profile();
+        let sim = crate::sim_rng::test_context();
+        let enemy = enemy_beside_path(fixture);
+        assert!(
+            fixture.engine.enter_swordfight(
+                TickCtx::new(&sim, &assets),
+                fixture.owner,
+                enemy,
+                false,
+            ),
+            "the PC must be able to start the fight with the enemy beside its path"
+        );
+        assert_eq!(
+            fixture.engine.human(fixture.owner).opponents.len(),
+            1,
+            "the initiating PC is in the fight it started"
+        );
+        assert_eq!(
+            fixture.engine.human(enemy).opponents.len(),
+            1,
+            "the enemy is engaged by the initiating PC"
         );
         enemy
     }
@@ -490,6 +530,99 @@ mod suite {
             fixture.start,
             "the PC does not resume toward its destination, and never reaches {:?}",
             fixture.destination
+        );
+    }
+
+    /// The perk measured from the other side: the PC starts the fight. The
+    /// enemy-initiated case pins the ranking that lets the flag outrank
+    /// `stop_owner_current(Preference)`; here there is no stop to outrank,
+    /// because swordfight preparation and its stop are scoped to the
+    /// opponent. The forced movement must advance on every `InProgress`
+    /// frame, never be postponed, and arrive.
+    #[test]
+    fn forced_pc_sword_move_advances_through_a_swordfight_the_pc_initiated() {
+        let mut fixture = install_pc_sword_move(true);
+        let enemy = pc_initiates(&mut fixture);
+
+        {
+            let element = movement_element(&fixture);
+            assert_eq!(
+                element.state,
+                SequenceState::InProgress,
+                "no step of the PC-initiated entry touches the initiator's own movement"
+            );
+            assert_eq!(
+                element.orders.len(),
+                1,
+                "the movement keeps its WalkingWithSword order"
+            );
+        }
+        assert_forced_flags(&fixture, true);
+
+        let mut last_distance = distance_to_destination(&fixture);
+        let mut advancing_frames = 0;
+        let mut postponed_frames = 0;
+        for _ in 0..64 {
+            let state_before = movement_element(&fixture).state;
+            frame(&mut fixture);
+            assert_eq!(
+                fixture.engine.human(fixture.owner).opponents.len(),
+                1,
+                "the initiating PC stays in the fight for the whole walk"
+            );
+            assert_eq!(
+                fixture.engine.human(enemy).opponents.len(),
+                1,
+                "the engaged enemy stays in the fight while the PC walks on"
+            );
+            let distance = distance_to_destination(&fixture);
+            assert!(
+                distance <= last_distance,
+                "the movement never backs away from its destination \
+                 ({last_distance} -> {distance})"
+            );
+            match state_before {
+                SequenceState::InProgress => {
+                    assert!(
+                        distance < last_distance,
+                        "an initiating PC's movement advances on every frame it is in \
+                         progress while the enemy is engaged ({last_distance} -> {distance})"
+                    );
+                    advancing_frames += 1;
+                }
+                SequenceState::Postponed => {
+                    // Nothing on the initiator's own owner queue competes with
+                    // its movement: the reciprocal `EnterSwordfight` this entry
+                    // launches belongs to the enemy.
+                    postponed_frames += 1;
+                }
+                other => {
+                    panic!("unexpected movement state {other:?} while walking through a fight")
+                }
+            }
+            last_distance = distance;
+            if distance == 0.0 {
+                break;
+            }
+        }
+
+        assert!(
+            advancing_frames >= 5,
+            "the movement must walk on for several frames, got {advancing_frames}"
+        );
+        assert_eq!(
+            postponed_frames, 0,
+            "an initiating PC's movement is never postponed by the fight it starts"
+        );
+        assert_eq!(
+            position(&fixture),
+            fixture.destination,
+            "the PC reaches the authored destination while still in the fight it started"
+        );
+        assert_eq!(
+            movement_element(&fixture).state,
+            SequenceState::Terminated,
+            "the movement ends by arriving, not by the fight"
         );
     }
 }
