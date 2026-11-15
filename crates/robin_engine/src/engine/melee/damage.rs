@@ -830,7 +830,7 @@ impl EngineInner {
             // Concussion handling closes its KO side effects inline,
             // before control returns to sword-damage translation: first
             // Leave swordfight, set up stars/healing, then apply the NPC response.
-            self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, false);
+            self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, attacker_id, false);
         }
         // PC hurt/death speech belongs to the life-point update
         // inside ReceiveSwordDamage. It uses the applied LP delta, before
@@ -2311,7 +2311,7 @@ impl EngineInner {
             })
             .unwrap_or(false);
         if went_unconscious {
-            self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, false);
+            self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, attacker_id, false);
 
             if let Some(atk_id) = attacker_id {
                 let same_camp_soldier = {
@@ -3594,7 +3594,7 @@ impl EngineInner {
         // was in a posture that doesn't map to one), fall back to
         // the original immediate-lying behavior so downstream code
         // that assumes Lying for unconscious humans still works.
-        self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, !falling_anim);
+        self.apply_knockout_side_effects(tcx, victim_id, attacker_is_pc, origin, !falling_anim);
     }
 
     fn queue_knockout_orders(
@@ -3645,6 +3645,7 @@ impl EngineInner {
         tcx: TickCtx<'_>,
         victim_id: EntityId,
         attacker_is_pc: bool,
+        looter: Option<EntityId>,
         set_lying_now: bool,
     ) {
         let healing_speed = concussion_healing_speed_for_entity(
@@ -3704,6 +3705,56 @@ impl EngineInner {
         if set_lying_now && !victim.element_data().posture().is_lying() {
             self.set_entity_posture(victim_id, Posture::Lying);
         }
+
+        self.apply_knockout_loot(tcx, victim_id, looter);
+    }
+
+    /// "Loot the knock-out" perk: the PC that put the victim down takes the
+    /// money the victim was carrying.
+    ///
+    /// Runs last in the knock-out tail and reads only the looter's flag and
+    /// the victim's carried money, so the transfer does not depend on which
+    /// other side effect ran first, and a second run of the tail for the same
+    /// victim finds the purse already empty and moves nothing.
+    ///
+    /// This is the one knock-out hook the perk family composes on: money is
+    /// the first item class; arrows and scrolls extend this function as
+    /// further perks rather than installing their own knock-out handlers.
+    ///
+    /// `complete_pc_search` is the engine's own "a hero takes what a body
+    /// carries" transfer: it empties the victim's `NpcData::money`, credits
+    /// `CampaignValue::Ransom` through `add_campaign_value` — the same counter
+    /// a walking PC's purse pickup reaches — pops the take counter and speaks
+    /// the find-money line.  The script-facing `ConfiscateMoney` native moves
+    /// the same money into the same pool but credits no actor and shows no
+    /// counter, so the search primitive is the one that keeps mission income
+    /// identical to a real pickup.
+    fn apply_knockout_loot(
+        &mut self,
+        tcx: TickCtx<'_>,
+        victim_id: EntityId,
+        looter: Option<EntityId>,
+    ) {
+        let Some(looter) = looter else {
+            return;
+        };
+        let looter_has_auto_loot = self
+            .get_entity(looter)
+            .and_then(Entity::pc_data)
+            .is_some_and(|pc| pc.auto_loot);
+        if !looter_has_auto_loot {
+            return;
+        }
+        // A knocked-out PC carries no purse; only an NPC victim has money to
+        // take, and an empty purse is nothing to transfer.
+        let victim_carries_money = self
+            .get_entity(victim_id)
+            .and_then(Entity::npc_data)
+            .is_some_and(|npc| npc.money > 0);
+        if !victim_carries_money {
+            return;
+        }
+        self.complete_pc_search(tcx.assets, looter, victim_id);
     }
 }
 
