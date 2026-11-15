@@ -448,6 +448,68 @@ fn keep_moving_in_combat_command_sets_and_clears_the_per_pc_flag() {
 }
 
 #[test]
+fn auto_loot_command_sets_and_clears_the_per_pc_flag() {
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let other = spawn_pc_at(&mut engine, 90.0, 10.0);
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .auto_loot,
+        "the perk is off until something grants it"
+    );
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(PlayerCommand::SetAutoLoot {
+            pcs: vec![actor, other],
+            enabled: true,
+        })],
+    );
+    for id in [actor, other] {
+        assert!(
+            engine
+                .ent(id)
+                .pc_data()
+                .expect("setup built a PC")
+                .auto_loot,
+            "the command addresses every listed PC"
+        );
+    }
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(PlayerCommand::SetAutoLoot {
+            pcs: vec![actor],
+            enabled: false,
+        })],
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .auto_loot,
+        "a perk that cannot be turned off is a rewrite, not a perk"
+    );
+    assert!(
+        engine
+            .ent(other)
+            .pc_data()
+            .expect("setup built a PC")
+            .auto_loot,
+        "clearing one PC must not clear the rest"
+    );
+}
+
+#[test]
 fn mixed_domain_dispatch_preserves_sequence_registration_order() {
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let target = spawn_pc_at(&mut engine, 90.0, 10.0);
