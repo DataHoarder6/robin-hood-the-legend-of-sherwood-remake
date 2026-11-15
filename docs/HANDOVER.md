@@ -60,7 +60,7 @@ header (costs ASLR, and any Velopack update overwrites the file).
 
 Written up in `docs/WINDOWS.md` in this fork.
 
-## 5. Defect 2 — every session dies at the first win or loss (fix written, not merged)
+## 5. Defect 2 — every session died at the first win or loss (fixed)
 
 Symptom: after a mission ends, the host shows "waiting for player", the client
 says "reconnected" and freezes; menus stop responding. The client queues a
@@ -85,9 +85,9 @@ is adopted with an `info` log line instead of being enforced. The regression
 test is `reconnect_rejects_identity_change_and_adopts_host_context`: it now
 refuses a changed seat or session and accepts the four context fields.
 
-Status: patch written in a worktree on the mini PC
-(`.worktrees/fix/reconnect-context`), **verification pending** (compile +
-that test). Nothing merged.
+Status: **fixed and merged** to the fork's `main` as `b471b1a12`. Both tests
+that pinned the old rule were rewritten (`reconnect_` suite passes locally and
+in CI), and CI now builds the Windows artifact from that commit.
 
 ## 6. Logging (the point of the exercise)
 
@@ -100,37 +100,43 @@ behind — which is exactly how the first sessions went.
 - Player B: `C:\Games\rh-src\run-robin.cmd` starts the game, rotates
   `last.log` → `prev.log`, and appends a start/end banner;
   `C:\Games\rh-src\collect-logs.cmd` writes `Desktop\robin-logs.zip`.
-  **Written but not yet installed** — his machine was off at the end of the
-  session. Install on next connect.
+  **Neither is installed yet** — his machine was off at the end of the
+  session. Install on next connect, before the next session.
 
 Keep two sessions of logs: the interesting failure is often reported one run
 later.
 
 ## 7. Next steps, in order
 
-1. Connect to player B's machine and install `run-robin.cmd`,
+1. Connect to player B's machine, install `run-robin.cmd` and
    `collect-logs.cmd`, and repoint the desktop shortcut at the `.cmd`.
-2. Finish verification of `fix/reconnect-context`:
-   `cargo check -p robin_rs --features desktop,multiplayer` and
-   `cargo test -p robin_rs reconnect_`.
-3. Merge `fix/reconnect-context` into `main` and push the fork. Hotfixes go to
-   `main`; gameplay features go to their own branch so `main` stays playable.
-4. Rebuild **both** sides to the same commit, ahead of the session, never
-   during it:
-   - A: `cd ~/Games/robin-hood/src && git pull`, then the cargo build inside
-     `nix-shell -p …` (see §9).
-   - B: pull and rebuild as a scheduled task, then relaunch; a 20-minute
-     rebuild must not collide with a running exe (Windows locks it).
-5. Play. Afterwards: `robin-logs` on A, `collect-logs.cmd` on B, send both.
+2. Install the current CI build on both machines — **the same commit**, since
+   multiplayer binds the engine commit and protocol version:
+   - B: `gh run download --repo DataHoarder6/… --name robin-windows-x86_64-exe`,
+     copy `robin.exe` over the existing one;
+   - A: either the Linux AppImage from the same release, or a local build of
+     the same commit (`~/Games/robin-hood/src`).
+3. Play. Afterwards `robin-logs` on A, `collect-logs.cmd` on B; send both.
+4. File what the logs show as a new entry in this document, then fix on the
+   mini PC and let CI produce the next artifact.
 
-## 8. Stop rebuilding on his machine (recommended next project)
+Nothing about a session should require compiling on either player's machine.
 
-A Linux cross-build to `x86_64-pc-windows-gnu` with
-`-C link-arg=-Wl,--disable-dynamicbase` avoids defect 1 without MSVC, turning
-every update into "push a 100 MB exe over the tunnel". The mini PC has the
-cores (12) but **no Rust toolchain** — it builds through a nix shell; adding
-`rustup` plus the mingw target there is the whole setup. Do this before the
-next gameplay feature lands, not during a session.
+## 8. Where the work happens, and how builds reach the players
+
+- **Development: the mini PC.** `~/git/robin-hood-remake` plus a worktree per
+  change under `.worktrees/`. It has no toolchain in the system profile; use
+  `nix-shell -p rustup …` (the pinned `nightly-2026-10-21` is installed under
+  `~/.rustup`) or let CI do the compiling. It also holds the GitHub CLI login
+  used to read CI.
+- **Builds: GitHub Actions on the fork**, both platforms, `windows-latest` for
+  Windows (MSVC) and `ubuntu-22.04` for Linux. The Windows job exists because
+  cross-building from Linux with MinGW produced defect 1.
+- **Laptop and B's PC: end devices.** They run artifacts, not `cargo`. The
+  laptop keeps a source tree only for the data directory and the launcher.
+- Branch discipline: hotfixes land on `main` so the play build stays current;
+  gameplay features go to their own branch and merge when they are ready to be
+  played.
 
 ## 9. Gotchas that cost time (do not re-learn these)
 

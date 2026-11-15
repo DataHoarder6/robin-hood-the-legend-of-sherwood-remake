@@ -1,10 +1,35 @@
 # Building and running on Windows
 
-Updated 2026-11-15, for `0efa52f57`.
+Updated 2026-11-15, for `b471b1a12`.
 
-## TL;DR
+## TL;DR — install the CI build, do not compile
 
-Build with the **MSVC** toolchain on Windows:
+CI builds Windows natively with **MSVC on a Windows runner** (`.github/workflows/
+native-release.yml`). Every push of the fork's `main` produces two things:
+
+- `robin-windows-x86_64-exe` — the bare `robin.exe`, for replacing an install in
+  one file copy;
+- `robin-windows-x86_64` — the Velopack `Setup.exe` and portable zip, for a
+  fresh install.
+
+```powershell
+gh run download --repo DataHoarder6/robin-hood-the-legend-of-sherwood-remake `
+  --name robin-windows-x86_64-exe -D .
+```
+
+Copy `robin.exe` next to the existing one, keep `ROBINHOOD_DATA_DIR` pointing at
+the GOG installation (the directory containing `DATA\`), and launch. The exe
+needs the **VC++ 2015-2022 x64 runtime** (`VCRUNTIME140.dll`, `MSVCP140.dll`);
+it is present on any machine that has ever built the game, and the Velopack
+installer adds it.
+
+Both players must run the **same commit**: multiplayer binds the engine commit
+and protocol version, and a mismatch refuses the join.
+
+## Building it yourself (development only)
+
+Only needed when the change cannot wait for CI. Build with the **MSVC**
+toolchain:
 
 ```powershell
 git clone https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake
@@ -14,9 +39,9 @@ $env:ROBINHOOD_DATA_DIR = 'C:\path\to\game'   # the GOG install dir, the one wit
 .\target\release\robin.exe
 ```
 
-The prebuilt `windows-gnu` artifact from CI **crashes on start on some machines**;
-see [The windows-gnu startup crash](#the-windows-gnu-startup-crash). The MSVC
-build of the same commit is unaffected.
+Do not use the `windows-gnu` cross-build: it **crashes on start**; see
+[The windows-gnu startup crash](#the-windows-gnu-startup-crash). MSVC is the only
+supported local toolchain, and it is what CI uses too.
 
 ## Prerequisites
 
@@ -76,9 +101,10 @@ Workarounds, best first:
    preferred base and no relocation is applied. This costs ASLR, and a Velopack
    update overwrites the patched file.
 
-A release gate would catch this: fail the build when `.text` holds any
-`HIGHLOW` relocation, and execute `robin.exe --version` on Windows before
-publishing. CI currently cross-builds the artifact and never runs it.
+CI no longer cross-builds, so this class of bug cannot reach an artifact. A gate
+is still worth having: fail the build when `.text` holds any `HIGHLOW`
+relocation, and execute `robin.exe --version` on the Windows runner before
+publishing. Neither is implemented yet.
 
 ## Version string
 
