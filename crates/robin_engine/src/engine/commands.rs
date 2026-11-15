@@ -292,6 +292,9 @@ impl EngineInner {
             SetNoFriendlyFireDamage { pcs, enabled } => {
                 self.set_no_friendly_fire_damage(pcs, *enabled)
             }
+            SetNoFriendlyFireKnockback { pcs, enabled } => {
+                self.set_no_friendly_fire_knockback(pcs, *enabled)
+            }
             CampaignPurchasePerk {
                 character_idx,
                 perk,
@@ -1571,6 +1574,28 @@ impl EngineInner {
         }
     }
 
+    /// Apply the "no friendly-fire knockback" perk to a set of PCs.
+    ///
+    /// The flag lives on `PcData` (serialised, state-hashed) and is read where
+    /// a push strike installs its flight: a flagged attacker whose victim is
+    /// not hostile by the mission's diplomacy matrix does not displace that
+    /// victim.  The hit itself still lands, so the reaction, the sound and the
+    /// knock-out path are untouched.  Unknown or non-PC ids are ignored rather
+    /// than panicking, for the same reason as `set_keep_moving_in_combat`: a
+    /// stale id must not kill the tick.
+    pub(crate) fn set_no_friendly_fire_knockback(&mut self, pcs: &[EntityId], enabled: bool) {
+        for &id in pcs {
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(id)
+                .and_then(|entity| entity.pc_data_mut())
+            {
+                pc.no_friendly_fire_knockback = enabled;
+            }
+        }
+    }
+
     /// Buy one permanent perk for a campaign character.
     ///
     /// The campaign record owns the purchase: it is paid for and recorded here,
@@ -1627,8 +1652,8 @@ impl EngineInner {
     /// mission team uses; character profiles are not identities because many
     /// peasants share one.  The effect is applied through the existing
     /// `set_keep_moving_in_combat` / `set_auto_loot` /
-    /// `set_no_friendly_fire_damage` bodies so the immediate path and the
-    /// command path cannot drift.
+    /// `set_no_friendly_fire_damage` / `set_no_friendly_fire_knockback` bodies
+    /// so the immediate path and the command path cannot drift.
     fn set_pc_perk(&mut self, character_idx: u16, perk: Perk) {
         let live: Vec<EntityId> = self
             .world
@@ -1641,6 +1666,7 @@ impl EngineInner {
             Perk::KeepMovingInCombat => self.set_keep_moving_in_combat(&live, true),
             Perk::AutoLoot => self.set_auto_loot(&live, true),
             Perk::NoFriendlyFireDamage => self.set_no_friendly_fire_damage(&live, true),
+            Perk::NoFriendlyFireKnockback => self.set_no_friendly_fire_knockback(&live, true),
         }
     }
 }

@@ -170,6 +170,7 @@ mod authored_roster_tests {
         status.keep_moving_in_combat = true;
         status.auto_loot = true;
         status.no_friendly_fire_damage = true;
+        status.no_friendly_fire_knockback = true;
         campaign.characters.push(crate::campaign::PcDescription {
             character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
             instanced: true,
@@ -204,6 +205,7 @@ mod authored_roster_tests {
         assert!(campaign.characters[0].status.keep_moving_in_combat);
         assert!(campaign.characters[0].status.auto_loot);
         assert!(campaign.characters[0].status.no_friendly_fire_damage);
+        assert!(campaign.characters[0].status.no_friendly_fire_knockback);
         assert!(
             campaign.characters[0].instanced,
             "spawn data still marks the reused character instanced"
