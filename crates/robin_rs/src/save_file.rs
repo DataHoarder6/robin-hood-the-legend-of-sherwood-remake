@@ -1399,7 +1399,35 @@ mod tests {
 
     #[test]
     fn supported_saves_load_without_additive_team_campaign_and_combat_fields() {
-        let (mut engine, _assets) = fresh_engine();
+        use robin_engine::campaign::{Campaign, PcDescription};
+        use robin_engine::engine::{Engine, LevelAssets};
+        use robin_engine::pc_status::{PcStatus, Perk, SkillName};
+        use robin_engine::player_profile::DifficultyLevel;
+        use robin_engine::profiles::{CharacterProfile, CharacterProfileIdx};
+
+        // A character carrying progression, ammo and two purchased perks: the
+        // two perk fields are newer than the save versions under test, so the
+        // load must default them while keeping everything that existed before.
+        let mut status =
+            PcStatus::from_profile(&CharacterProfile::default(), true, DifficultyLevel::Medium);
+        status.human_status.add_experience(SkillName::Bow, 250);
+        status.num_arrows = 9;
+        status.grant_perk(Perk::KeepMovingInCombat);
+        status.grant_perk(Perk::AutoLoot);
+        let mut campaign = Campaign::default();
+        campaign.characters.push(PcDescription {
+            character_profile_idx: Some(CharacterProfileIdx(0)),
+            instanced: true,
+            status: status.clone(),
+        });
+        let mut assets = LevelAssets::new();
+        let mut engine = Engine::new_for_test(800.0, 600.0, campaign, &mut assets)
+            .expect("construct scriptless test engine");
+        assert_eq!(
+            engine.campaign().characters.len(),
+            1,
+            "engine construction must keep the seeded campaign character"
+        );
         engine.test_set_frame_counter(12345);
         let host = Host::scratch(800.0, 600.0);
         let save = GameSaveFile::capture(&engine, &host, 7, "Existing campaign".into());
@@ -1409,6 +1437,10 @@ mod tests {
                 serde_json::Value::Object(map) => {
                     map.remove("prevent_victory_in_combat");
                     map.remove("cooperative_campaign");
+                    // The purchased-perk fields did not exist in the versions
+                    // below; they must load through `#[serde(default)]`.
+                    map.remove("keep_moving_in_combat");
+                    map.remove("auto_loot");
                     if let Some(coop) = map.get_mut("coop").and_then(|v| v.as_object_mut()) {
                         coop.remove("campaign");
                         coop.remove("team");
@@ -1438,6 +1470,16 @@ mod tests {
             assert!(!loaded.engine.sim_config().coop.campaign);
             assert!(loaded.engine.sim_config().prevent_victory_in_combat);
             assert_eq!(loaded.header.cooperative_campaign, None);
+            assert_eq!(
+                loaded.engine.campaign().characters[0].status,
+                PcStatus {
+                    keep_moving_in_combat: false,
+                    auto_loot: false,
+                    ..status.clone()
+                },
+                "a save written before the perk fields existed keeps its \
+                 progression and ammo and loads both perks as unowned"
+            );
         }
         assert_eq!(SAVE_FORMAT_VERSION, 97);
     }
