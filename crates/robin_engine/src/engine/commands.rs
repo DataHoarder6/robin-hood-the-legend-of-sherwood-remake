@@ -286,6 +286,7 @@ impl EngineInner {
             // (and later the skill tree) sets it, and the value rides the
             // command stream so replays and peers agree.
             SetKeepMovingInCombat { pcs, enabled } => self.set_keep_moving_in_combat(pcs, *enabled),
+            SetAutoLoot { pcs, enabled } => self.set_auto_loot(pcs, *enabled),
 
             // ── Sequence-based interactions ──────────────────────
             LaunchInteraction { .. } => self.apply_launch_interaction_command(tcx, cmd),
@@ -1516,6 +1517,26 @@ impl EngineInner {
                 .and_then(|entity| entity.pc_data_mut())
             {
                 pc.keep_moving_in_combat = enabled;
+            }
+        }
+    }
+
+    /// Apply the "loot the knock-out" perk to a set of PCs.
+    ///
+    /// The flag lives on `PcData` (serialised, state-hashed) and is read by the
+    /// knock-out tail when a PC puts a victim down: a flagged looter takes the
+    /// money the victim was carrying.  Unknown or non-PC ids are ignored rather
+    /// than panicking, for the same reason as `set_keep_moving_in_combat`: a
+    /// stale id must not kill the tick.
+    pub(crate) fn set_auto_loot(&mut self, pcs: &[EntityId], enabled: bool) {
+        for &id in pcs {
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(id)
+                .and_then(|entity| entity.pc_data_mut())
+            {
+                pc.auto_loot = enabled;
             }
         }
     }

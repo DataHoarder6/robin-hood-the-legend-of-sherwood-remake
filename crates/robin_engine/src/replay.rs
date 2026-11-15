@@ -179,7 +179,8 @@ pub struct ReplayHeader {
 /// Version 70 stores disconnected fragments of a shared sound emitter.
 /// Version 71 retains completed mission outcomes through speculative rollback.
 /// Version 72 adds the per-PC "fight through, don't stop" flag.
-pub const REPLAY_SCHEMA_VERSION: u32 = 72;
+/// Version 73 adds the per-PC auto-loot flag.
+pub const REPLAY_SCHEMA_VERSION: u32 = 73;
 
 /// Identity of the next lockstep/history transaction to be admitted.
 ///

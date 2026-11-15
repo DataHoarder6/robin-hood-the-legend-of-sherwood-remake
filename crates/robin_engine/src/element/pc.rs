@@ -228,6 +228,13 @@ pub struct PcData {
     /// set through `PlayerCommand::SetKeepMovingInCombat`.
     #[serde(default)]
     pub keep_moving_in_combat: bool,
+    /// "Loot the knock-out" perk: when this PC knocks a victim out it takes
+    /// the money the victim was carrying, instead of the player having to
+    /// order a search afterwards.  The money joins the party purse, the same
+    /// counter every other picked-up coin reaches.  Per-PC because it changes
+    /// what the character does; set through `PlayerCommand::SetAutoLoot`.
+    #[serde(default)]
+    pub auto_loot: bool,
     /// Shared AI runtime used by AI-controlled heroes. Ordinary directly
     /// controlled heroes intentionally have no AI owner.
     #[serde(default)]
@@ -358,6 +365,7 @@ impl Default for PcData {
             mission_role: MissionRole::PlayerParty,
             combat_stance: CombatStance::Aggressive,
             keep_moving_in_combat: false,
+            auto_loot: false,
             ai: None,
             interface_hidden: false,
             current_action: Action::default(),

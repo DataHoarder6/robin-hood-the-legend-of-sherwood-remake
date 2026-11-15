@@ -1453,6 +1453,12 @@ pub enum PlayerCommand {
         pcs: Vec<EntityId>,
         enabled: bool,
     },
+    /// Set the "loot the knock-out" perk on these PCs.  Appended to preserve
+    /// every current-main bitcode variant index.
+    SetAutoLoot {
+        pcs: Vec<EntityId>,
+        enabled: bool,
+    },
 }
 
 impl PlayerCommand {
@@ -1516,6 +1522,7 @@ impl PlayerCommand {
                 | Self::SetExcludeStartingDeadSoldiersFromPreservedLives { .. }
                 | Self::SetExcludeRequiredKillsFromPreservedLives { .. }
                 | Self::SetKeepMovingInCombat { .. }
+                | Self::SetAutoLoot { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }
