@@ -1811,3 +1811,27 @@ fn entity_persisted_projection_matches_json_round_trip_body() {
         );
     }
 }
+
+#[test]
+fn melee_combat_means_opponents_or_a_parry_not_a_drawn_sword() {
+    use crate::element_kinds::ActionState;
+    use crate::engine::test_support::actors::make_test_pc;
+
+    // Sword in hand, nobody engaged: this is the freed-peasant / armed-ally
+    // case the portrait overlay used to misread as a fight.
+    let mut actor = make_test_pc(crate::element::Posture::Upright);
+    actor.actor_data_mut().unwrap().action_state = ActionState::WaitingSword;
+    assert!(!actor.is_in_melee_combat());
+    actor.actor_data_mut().unwrap().action_state = ActionState::MovingSword;
+    assert!(!actor.is_in_melee_combat());
+
+    // Parrying is combat even before the opponent list is populated.
+    actor.actor_data_mut().unwrap().action_state = ActionState::ParryingSword;
+    assert!(actor.is_in_melee_combat());
+
+    // A live opponent list is combat whatever the animation is doing.
+    actor.actor_data_mut().unwrap().action_state = ActionState::WaitingSword;
+    let opponent = crate::entity_id::EntityId::Soldier(crate::entity_id::SoldierId(3));
+    actor.human_data_mut().unwrap().opponents = vec![opponent].into();
+    assert!(actor.is_in_melee_combat());
+}

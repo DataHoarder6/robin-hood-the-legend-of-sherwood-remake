@@ -133,12 +133,28 @@ impl EngineInner {
                         &[game_seconds as i32],
                         crate::natives::ScriptCallFrame::default(),
                     );
+                    // Party positions ride along with the verdict so a
+                    // replay shows where everyone was standing when the
+                    // scripted exit condition said no.
+                    let pc_positions: Vec<(crate::element::EntityId, (f32, f32))> = self
+                        .world
+                        .pc_ids
+                        .iter()
+                        .map(|&id| {
+                            let map = self
+                                .expect_entity(id, "victory debug pc")
+                                .element_data()
+                                .position_map();
+                            (id, (map.x, map.y))
+                        })
+                        .collect();
                     tracing::debug!(
                         target: "victory",
                         game_seconds,
                         result = ?victory_result,
                         mission_won = self.mission_domain.state.mission_won,
                         blocked_by_combat = self.victory_blocked_by_pc_combat(),
+                        pc_positions = ?pc_positions,
                         "CheckVictoryCondition"
                     );
                     match victory_result {

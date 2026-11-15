@@ -238,86 +238,16 @@ impl NativeContext<'_, '_> {
             IsInside => {
                 let loc = stack.pop_i32();
                 let actor = stack.pop_i32();
-                if actor == 0 || loc == 0 {
-                    return 0;
-                }
-                // Geometric polygon point-in-test recomputed
-                // every call so results stay correct immediately
-                // after teleport natives ("works also after
-                // teleports"). The authoritative occupant list
-                // is only refreshed on explicit
-                // script-zone membership natives or on the
-                // next-frame tick, so we recompute here when we
-                // have polygon geometry installed.
-                let zone_idx = Self::location_index(loc)
-                    .and_then(|idx| idx.checked_sub(self.bindings.script_point_count));
-                if let Some(zi) = zone_idx
-                    && let Some(&grid_idx) = self.bindings.script_zone_grid_indices.get(zi)
-                    && let Some(zone) = self.fast_grid.level.sectors.get(grid_idx as usize)
-                    && let Some(entity) = self.get_entity(actor)
-                {
-                    let script_zone =
-                        self.script_domains
-                            .zones
-                            .scripts
-                            .get(zi)
-                            .unwrap_or_else(|| {
-                                panic!("script location {zi} has geometry but no sector state")
-                            });
-                    let ed = entity.element_data();
-                    // Filter invisible objects.
-                    if !ed.active || ed.in_honolulu {
-                        return 0;
-                    }
-                    // Script-sector containment compares its authored layer
-                    // directly with the element layer. A
-                    // projectile or other unplaced element may legitimately
-                    // return the 0xffff sentinel; that simply differs from a
-                    // normal script-zone layer and is not an invalid read.
-                    let element_layer = ed
-                        .optional_layer()
-                        .map_or(u16::MAX, crate::position_interface::Layer::get);
-                    if zone.layer != element_layer {
-                        return 0;
-                    }
-                    if ed.sector().map(i16::from) != Some(script_zone.owning_motion_sector.get()) {
-                        return 0;
-                    }
-                    let pt = ed.position_map();
-                    if !zone.bounding_box.contains_point(pt) {
-                        return 0;
-                    }
-                    // Ray-casting point-in-polygon, identical to
-                    // `GridSector::contains_point` (the production
-                    // path used by the per-frame zone scan).
-                    if zone.points.len() < 3 {
-                        return 0;
-                    }
-                    let mut inside = false;
-                    let n = zone.points.len();
-                    let mut j = n - 1;
-                    for i in 0..n {
-                        let vi = zone.points[i];
-                        let vj = zone.points[j];
-                        if (vi.y > pt.y) != (vj.y > pt.y) {
-                            let x_intersect = (vj.x - vi.x) * (pt.y - vi.y) / (vj.y - vi.y) + vi.x;
-                            if pt.x < x_intersect {
-                                inside = !inside;
-                            }
-                        }
-                        j = i;
-                    }
-                    i32::from(inside)
-                } else {
-                    // Fall back to the cache when geometry isn't
-                    // available (handle out of zone range, or
-                    // pre-load test fixtures that never installed
-                    // polygons).
-                    i32::from(
-                        self.zone_occupant_handles(loc)
-                            .is_some_and(|occ| occ.contains(&actor)),
-                    )
-                }
+                let (value, reason) = self.is_inside_script_location(actor, loc);
+                tracing::debug!(
+                    target: "isinside",
+                    actor,
+                    loc,
+                    value,
+                    reason,
+                    "IsInside"
+                );
+                value
             }
             IsInsideBuilding => {
                 let bld = stack.pop_i32();
@@ -1113,6 +1043,106 @@ impl NativeContext<'_, '_> {
             }
 
             _ => self.dispatch_ai(native, stack),
+        }
+    }
+
+    /// `IsInside` body, returning the verdict together with the branch that
+    /// produced it.  The reason string exists so a failing scripted exit can be
+    /// diagnosed from a replay log instead of guessed at.
+    fn is_inside_script_location(&self, actor: i32, loc: i32) -> (i32, &'static str) {
+        if actor == 0 || loc == 0 {
+            return (0, "zero-handle");
+        }
+        // Geometric polygon point-in-test recomputed
+        // every call so results stay correct immediately
+        // after teleport natives ("works also after
+        // teleports"). The authoritative occupant list
+        // is only refreshed on explicit
+        // script-zone membership natives or on the
+        // next-frame tick, so we recompute here when we
+        // have polygon geometry installed.
+        let zone_idx = Self::location_index(loc)
+            .and_then(|idx| idx.checked_sub(self.bindings.script_point_count));
+        if let Some(zi) = zone_idx
+            && let Some(&grid_idx) = self.bindings.script_zone_grid_indices.get(zi)
+            && let Some(zone) = self.fast_grid.level.sectors.get(grid_idx as usize)
+            && let Some(entity) = self.get_entity(actor)
+        {
+            let script_zone = self
+                .script_domains
+                .zones
+                .scripts
+                .get(zi)
+                .unwrap_or_else(|| panic!("script location {zi} has geometry but no sector state"));
+            let ed = entity.element_data();
+            tracing::debug!(
+                target: "isinside",
+                actor,
+                zi,
+                grid_idx,
+                active = ed.active,
+                in_honolulu = ed.in_honolulu,
+                actor_layer = ed.optional_layer().map(crate::position_interface::Layer::get),
+                zone_layer = zone.layer,
+                actor_sector = ed.sector().map(i16::from),
+                zone_sector = script_zone.owning_motion_sector.get(),
+                pt = ?ed.position_map(),
+                bbox = ?zone.bounding_box,
+                points = zone.points.len(),
+                "IsInside geometry"
+            );
+            // Filter invisible objects.
+            if !ed.active || ed.in_honolulu {
+                return (0, "inactive");
+            }
+            // Script-sector containment compares its authored layer
+            // directly with the element layer. A
+            // projectile or other unplaced element may legitimately
+            // return the 0xffff sentinel; that simply differs from a
+            // normal script-zone layer and is not an invalid read.
+            let element_layer = ed
+                .optional_layer()
+                .map_or(u16::MAX, crate::position_interface::Layer::get);
+            if zone.layer != element_layer {
+                return (0, "layer");
+            }
+            if ed.sector().map(i16::from) != Some(script_zone.owning_motion_sector.get()) {
+                return (0, "sector");
+            }
+            let pt = ed.position_map();
+            if !zone.bounding_box.contains_point(pt) {
+                return (0, "bbox");
+            }
+            // Ray-casting point-in-polygon, identical to
+            // `GridSector::contains_point` (the production
+            // path used by the per-frame zone scan).
+            if zone.points.len() < 3 {
+                return (0, "degenerate");
+            }
+            let mut inside = false;
+            let n = zone.points.len();
+            let mut j = n - 1;
+            for i in 0..n {
+                let vi = zone.points[i];
+                let vj = zone.points[j];
+                if (vi.y > pt.y) != (vj.y > pt.y) {
+                    let x_intersect = (vj.x - vi.x) * (pt.y - vi.y) / (vj.y - vi.y) + vi.x;
+                    if pt.x < x_intersect {
+                        inside = !inside;
+                    }
+                }
+                j = i;
+            }
+            if inside { (1, "ok") } else { (0, "polygon") }
+        } else {
+            // Fall back to the cache when geometry isn't
+            // available (handle out of zone range, or
+            // pre-load test fixtures that never installed
+            // polygons).
+            let cached = self
+                .zone_occupant_handles(loc)
+                .is_some_and(|occ| occ.contains(&actor));
+            (i32::from(cached), "cache")
         }
     }
 }
