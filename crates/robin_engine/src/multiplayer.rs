@@ -103,7 +103,8 @@ pub const INPUT_DELAY_FRAMES: u32 = 2;
 /// Protocol 68 carries the per-PC "fight through, don't stop" flag.
 /// Protocol 69 carries the per-PC auto-loot flag.
 /// Protocol 70 carries the purchased-perk flags on campaign PC status.
-pub const NET_PROTOCOL_VERSION: u32 = 70;
+/// Protocol 71 carries the per-PC "no friendly-fire damage" flag.
+pub const NET_PROTOCOL_VERSION: u32 = 71;
 
 /// Maximum bytes in one resumable full-mod transfer chunk. The outer native
 /// transport frame has a larger bound for engine snapshots, so content must

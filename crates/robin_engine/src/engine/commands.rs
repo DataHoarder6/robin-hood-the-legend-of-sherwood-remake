@@ -289,6 +289,9 @@ impl EngineInner {
             // command stream so replays and peers agree.
             SetKeepMovingInCombat { pcs, enabled } => self.set_keep_moving_in_combat(pcs, *enabled),
             SetAutoLoot { pcs, enabled } => self.set_auto_loot(pcs, *enabled),
+            SetNoFriendlyFireDamage { pcs, enabled } => {
+                self.set_no_friendly_fire_damage(pcs, *enabled)
+            }
             CampaignPurchasePerk {
                 character_idx,
                 perk,
@@ -1547,6 +1550,27 @@ impl EngineInner {
         }
     }
 
+    /// Apply the "no friendly-fire damage" perk to a set of PCs.
+    ///
+    /// The flag lives on `PcData` (serialised, state-hashed) and is read where
+    /// a PC's strike commits life-point loss: a flagged attacker whose victim
+    /// is not hostile by the mission's diplomacy matrix takes no life points
+    /// off that victim.  Unknown or non-PC ids are ignored rather than
+    /// panicking, for the same reason as `set_keep_moving_in_combat`: a stale
+    /// id must not kill the tick.
+    pub(crate) fn set_no_friendly_fire_damage(&mut self, pcs: &[EntityId], enabled: bool) {
+        for &id in pcs {
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(id)
+                .and_then(|entity| entity.pc_data_mut())
+            {
+                pc.no_friendly_fire_damage = enabled;
+            }
+        }
+    }
+
     /// Buy one permanent perk for a campaign character.
     ///
     /// The campaign record owns the purchase: it is paid for and recorded here,
@@ -1602,8 +1626,9 @@ impl EngineInner {
     /// Identity is `PcData::campaign_description_index`, the same key the
     /// mission team uses; character profiles are not identities because many
     /// peasants share one.  The effect is applied through the existing
-    /// `set_keep_moving_in_combat` / `set_auto_loot` bodies so the immediate
-    /// path and the command path cannot drift.
+    /// `set_keep_moving_in_combat` / `set_auto_loot` /
+    /// `set_no_friendly_fire_damage` bodies so the immediate path and the
+    /// command path cannot drift.
     fn set_pc_perk(&mut self, character_idx: u16, perk: Perk) {
         let live: Vec<EntityId> = self
             .world
@@ -1615,6 +1640,7 @@ impl EngineInner {
         match perk {
             Perk::KeepMovingInCombat => self.set_keep_moving_in_combat(&live, true),
             Perk::AutoLoot => self.set_auto_loot(&live, true),
+            Perk::NoFriendlyFireDamage => self.set_no_friendly_fire_damage(&live, true),
         }
     }
 }

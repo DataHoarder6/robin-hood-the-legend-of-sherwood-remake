@@ -216,9 +216,10 @@ impl HumanStatus {
 ///
 /// A perk has two homes because it has two lifetimes.  The purchase is
 /// campaign state and lives on [`PcStatus`] (`keep_moving_in_combat` /
-/// `auto_loot`), so it survives every mission and every save.  The effect is
-/// mission state and lives on [`crate::element::PcData`] as the flag gameplay
-/// actually reads, copied across at spawn by `PcData::from_spawn_status`.
+/// `auto_loot` / `no_friendly_fire_damage`), so it survives every mission and
+/// every save.  The effect is mission state and lives on
+/// [`crate::element::PcData`] as the flag gameplay actually reads, copied
+/// across at spawn by `PcData::from_spawn_status`.
 /// `PlayerCommand::CampaignPurchasePerk` is the only way a perk is granted.
 #[repr(u8)]
 #[derive(
@@ -239,6 +240,9 @@ pub enum Perk {
     KeepMovingInCombat = 0,
     /// "Loot the knock-out": knocking a victim out takes their money.
     AutoLoot = 1,
+    /// "No friendly-fire damage": a strike this PC lands on a target the
+    /// mission does not treat as hostile costs that target no life points.
+    NoFriendlyFireDamage = 2,
 }
 
 /// Ransom price of [`Perk::KeepMovingInCombat`].
@@ -254,12 +258,17 @@ pub const PERK_PRICE_KEEP_MOVING_IN_COMBAT: i32 = 200;
 /// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
 pub const PERK_PRICE_AUTO_LOOT: i32 = 200;
 
+/// Ransom price of [`Perk::NoFriendlyFireDamage`].  PLACEHOLDER, see
+/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
+pub const PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE: i32 = 200;
+
 impl Perk {
     /// What the character must pay in ransom to buy this perk.
     pub const fn price(self) -> i32 {
         match self {
             Self::KeepMovingInCombat => PERK_PRICE_KEEP_MOVING_IN_COMBAT,
             Self::AutoLoot => PERK_PRICE_AUTO_LOOT,
+            Self::NoFriendlyFireDamage => PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE,
         }
     }
 }
@@ -318,6 +327,10 @@ pub struct PcStatus {
     /// `PcData::auto_loot` at every spawn.
     #[serde(default)]
     pub auto_loot: bool,
+    /// The character has bought [`Perk::NoFriendlyFireDamage`].  Copied into
+    /// `PcData::no_friendly_fire_damage` at every spawn.
+    #[serde(default)]
+    pub no_friendly_fire_damage: bool,
 
     // ── Sherwood map position (–1 = not placed) ──
     pub beam_me_index_in_sherwood: i16,
@@ -342,6 +355,7 @@ impl Default for PcStatus {
             name_override: None,
             keep_moving_in_combat: false,
             auto_loot: false,
+            no_friendly_fire_damage: false,
             beam_me_index_in_sherwood: -1,
         }
     }
@@ -554,6 +568,7 @@ impl PcStatus {
         match perk {
             Perk::KeepMovingInCombat => self.keep_moving_in_combat,
             Perk::AutoLoot => self.auto_loot,
+            Perk::NoFriendlyFireDamage => self.no_friendly_fire_damage,
         }
     }
 
@@ -565,6 +580,7 @@ impl PcStatus {
         match perk {
             Perk::KeepMovingInCombat => self.keep_moving_in_combat = true,
             Perk::AutoLoot => self.auto_loot = true,
+            Perk::NoFriendlyFireDamage => self.no_friendly_fire_damage = true,
         }
     }
 }

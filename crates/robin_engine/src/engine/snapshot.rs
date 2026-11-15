@@ -16,7 +16,8 @@ use super::{
 
 const NATIVE_SNAPSHOT_MAGIC: &[u8; 4] = b"RHNS";
 /// Version 14 adds the purchased-perk flags to campaign PC status.
-const NATIVE_SNAPSHOT_VERSION: u32 = 14;
+/// Version 15 adds the per-PC "no friendly-fire damage" flag.
+const NATIVE_SNAPSHOT_VERSION: u32 = 15;
 const NATIVE_SNAPSHOT_HEADER_BYTES: usize = 8;
 
 /// Native codec form of the current nested [`EngineInner`] snapshot.
