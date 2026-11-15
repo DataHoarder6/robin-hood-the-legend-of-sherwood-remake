@@ -51,6 +51,32 @@ mod spawn_status_tests {
         assert_eq!(pc.disabled_actions, [true, false, false]);
         assert_eq!(pc.disabled_actions_temp, [false; 3]);
     }
+
+    /// A purchased perk is campaign progression: spawn is the only place it
+    /// becomes mission state, and each bit must cross on its own — the two
+    /// perks are independent flags, not one "has any perk" switch.
+    #[test]
+    fn spawn_status_copies_each_purchased_perk_independently() {
+        let profile = CharacterProfile::default();
+        for (keep_moving_in_combat, auto_loot) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            let status = crate::pc_status::PcStatus {
+                keep_moving_in_combat,
+                auto_loot,
+                ..Default::default()
+            };
+            let pc = PcData::from_spawn_status(&status, &profile, 0);
+            assert_eq!(
+                pc.keep_moving_in_combat, keep_moving_in_combat,
+                "keep-moving-in-combat must cross spawn with its own bit"
+            );
+            assert_eq!(
+                pc.auto_loot, auto_loot,
+                "auto-loot must cross spawn with its own bit"
+            );
+        }
+    }
 }
 
 /// Ammo counters owned by a live PC entity.
@@ -439,6 +465,11 @@ impl PcData {
                 })
                 .collect(),
             disabled_actions_temp: vec![false; crate::profiles::NUMBER_OF_PC_ACTIONS],
+            // Purchased perks are campaign progression, so they arrive with the
+            // character rather than with the mission.  This is the single
+            // spawn-time application point; nothing restamps them per frame.
+            keep_moving_in_combat: status.keep_moving_in_combat,
+            auto_loot: status.auto_loot,
             ..Self::default()
         }
     }

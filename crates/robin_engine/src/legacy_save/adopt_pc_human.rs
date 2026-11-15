@@ -727,6 +727,9 @@ fn pc_status(saved: &LegacyPcStatus) -> PcStatus {
         num_purses: saved.number_of_purses,
         name: saved.name.clone(),
         name_override: None,
+        // The Original game has no perk line; adopted characters own none.
+        keep_moving_in_combat: false,
+        auto_loot: false,
         beam_me_index_in_sherwood: saved.beam_me_index_in_sherwood,
     }
 }

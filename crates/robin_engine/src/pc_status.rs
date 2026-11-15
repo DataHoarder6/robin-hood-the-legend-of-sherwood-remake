@@ -210,6 +210,60 @@ impl HumanStatus {
     }
 }
 
+// ─── Perks ──────────────────────────────────────────────────────
+
+/// A purchasable, permanent per-character perk.
+///
+/// A perk has two homes because it has two lifetimes.  The purchase is
+/// campaign state and lives on [`PcStatus`] (`keep_moving_in_combat` /
+/// `auto_loot`), so it survives every mission and every save.  The effect is
+/// mission state and lives on [`crate::element::PcData`] as the flag gameplay
+/// actually reads, copied across at spawn by `PcData::from_spawn_status`.
+/// `PlayerCommand::CampaignPurchasePerk` is the only way a perk is granted.
+#[repr(u8)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum Perk {
+    /// "Fight through, don't stop": move orders survive swordfight entry.
+    KeepMovingInCombat = 0,
+    /// "Loot the knock-out": knocking a victim out takes their money.
+    AutoLoot = 1,
+}
+
+/// Ransom price of [`Perk::KeepMovingInCombat`].
+///
+/// PLACEHOLDER.  The perk line's cost curve is not designed yet, so both perks
+/// cost the same flat round number; the price exists to make the purchase
+/// command and its affordability check provable.  A later change replaces
+/// these two constants with the designed curve and moves the purchase tests
+/// with them.  Nothing else may hardcode a perk price.
+pub const PERK_PRICE_KEEP_MOVING_IN_COMBAT: i32 = 200;
+
+/// Ransom price of [`Perk::AutoLoot`].  PLACEHOLDER, see
+/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
+pub const PERK_PRICE_AUTO_LOOT: i32 = 200;
+
+impl Perk {
+    /// What the character must pay in ransom to buy this perk.
+    pub const fn price(self) -> i32 {
+        match self {
+            Self::KeepMovingInCombat => PERK_PRICE_KEEP_MOVING_IN_COMBAT,
+            Self::AutoLoot => PERK_PRICE_AUTO_LOOT,
+        }
+    }
+}
+
 // ─── PcStatus ───────────────────────────────────────────────────
 
 /// Full dynamic state for a player character.
@@ -254,6 +308,17 @@ pub struct PcStatus {
     /// [`PcStatus::display_name`].
     pub name_override: Option<SpecialPeasantName>,
 
+    // ── Purchased perks ──
+    /// The character has bought [`Perk::KeepMovingInCombat`].  Campaign-owned
+    /// because a perk is progression, not mission loadout: it is copied into
+    /// `PcData::keep_moving_in_combat` at every spawn.
+    #[serde(default)]
+    pub keep_moving_in_combat: bool,
+    /// The character has bought [`Perk::AutoLoot`].  Copied into
+    /// `PcData::auto_loot` at every spawn.
+    #[serde(default)]
+    pub auto_loot: bool,
+
     // ── Sherwood map position (–1 = not placed) ──
     pub beam_me_index_in_sherwood: i16,
 }
@@ -275,6 +340,8 @@ impl Default for PcStatus {
             num_purses: 0,
             name: String::new(),
             name_override: None,
+            keep_moving_in_combat: false,
+            auto_loot: false,
             beam_me_index_in_sherwood: -1,
         }
     }
@@ -480,6 +547,25 @@ impl PcStatus {
         self.num_nets = 0;
         self.num_plants = 0;
         self.num_purses = 0;
+    }
+
+    /// Whether this character has bought `perk`.
+    pub fn has_perk(&self, perk: Perk) -> bool {
+        match perk {
+            Perk::KeepMovingInCombat => self.keep_moving_in_combat,
+            Perk::AutoLoot => self.auto_loot,
+        }
+    }
+
+    /// Record `perk` as bought.
+    ///
+    /// Idempotent at this layer: the purchase command is what refuses to
+    /// charge twice, and it checks [`Self::has_perk`] before calling this.
+    pub fn grant_perk(&mut self, perk: Perk) {
+        match perk {
+            Perk::KeepMovingInCombat => self.keep_moving_in_combat = true,
+            Perk::AutoLoot => self.auto_loot = true,
+        }
     }
 }
 
