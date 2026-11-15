@@ -902,14 +902,9 @@ impl HudDrawCtx<'_> {
     ) {
         let engine = self.engine;
         let is_sword_fighting = item.members().iter().any(|member| {
-            engine.get_entity(*member).is_some_and(|entity| {
-                entity
-                    .actor_data()
-                    .is_some_and(|actor| actor.action_state.is_sword())
-                    || entity
-                        .human_data()
-                        .is_some_and(|human| !human.opponents.is_empty())
-            })
+            engine
+                .get_entity(*member)
+                .is_some_and(|entity| entity.is_in_melee_combat())
         });
         let fighting_visible = selected || (engine.frame_counter() / 10).is_multiple_of(2);
         if is_sword_fighting

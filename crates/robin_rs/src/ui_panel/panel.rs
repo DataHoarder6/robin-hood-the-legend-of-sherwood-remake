@@ -112,7 +112,7 @@ impl<'e> PcSlot<'e> {
             Some(pc_entity @ Entity::Pc(pc)) => (
                 pc.pc.life_points <= 0,
                 is_pc_in_coma(engine, pc_entity),
-                pc.actor.action_state.is_sword(),
+                pc_entity.is_in_melee_combat(),
                 pc.pc.guard.is_some(),
                 pc.pc.trumpet_enabled,
             ),

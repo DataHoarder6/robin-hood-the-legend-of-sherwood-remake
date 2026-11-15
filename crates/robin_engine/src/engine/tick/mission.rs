@@ -133,6 +133,14 @@ impl EngineInner {
                         &[game_seconds as i32],
                         crate::natives::ScriptCallFrame::default(),
                     );
+                    tracing::debug!(
+                        target: "victory",
+                        game_seconds,
+                        result = ?victory_result,
+                        mission_won = self.mission_domain.state.mission_won,
+                        blocked_by_combat = self.victory_blocked_by_pc_combat(),
+                        "CheckVictoryCondition"
+                    );
                     match victory_result {
                         Ok(1) => {
                             // Mission won!
