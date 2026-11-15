@@ -509,6 +509,151 @@ fn auto_loot_command_sets_and_clears_the_per_pc_flag() {
     );
 }
 
+/// Drive one purchase command and return the engine, so the three purchase
+/// tests can assert on both the campaign record and the live PC copy.
+fn purchase_perk(
+    engine: &mut EngineInner,
+    assets: &LevelAssets,
+    character_idx: u16,
+    perk: crate::pc_status::Perk,
+) {
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        assets,
+        &[PlayerInput::host(PlayerCommand::CampaignPurchasePerk {
+            character_idx,
+            perk,
+        })],
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_charges_the_price_and_grants_the_perk() {
+    use crate::campaign::CampaignValue;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::AutoLoot;
+    let price = perk.price();
+    engine
+        .mission_domain
+        .campaign
+        .set_value(CampaignValue::Ransom, price + 40);
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        engine
+            .mission_domain
+            .campaign
+            .get_value(CampaignValue::Ransom),
+        price + 40 - price,
+        "the purchase deducts exactly the perk's price"
+    );
+    let status = &engine.mission_domain.campaign.characters[0].status;
+    assert!(
+        status.has_perk(perk),
+        "the purchase is recorded on the character"
+    );
+    assert!(
+        !status.has_perk(Perk::KeepMovingInCombat),
+        "buying one perk must not grant the other"
+    );
+    assert!(
+        engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .auto_loot,
+        "the perk takes effect in the session where it was bought"
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_without_money_changes_nothing() {
+    use crate::campaign::CampaignValue;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::KeepMovingInCombat;
+    let ransom = perk.price() - 1;
+    engine
+        .mission_domain
+        .campaign
+        .set_value(CampaignValue::Ransom, ransom);
+
+    // The handler logs the rejection with both numbers; the assertions below
+    // are the state half of that contract.
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        engine
+            .mission_domain
+            .campaign
+            .get_value(CampaignValue::Ransom),
+        ransom,
+        "an unaffordable purchase must not touch the purse"
+    );
+    assert!(
+        !engine.mission_domain.campaign.characters[0]
+            .status
+            .has_perk(perk),
+        "an unaffordable purchase must not grant the perk"
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .keep_moving_in_combat,
+        "an unaffordable purchase must not reach the live PC either"
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_out_of_range_changes_nothing() {
+    use crate::campaign::CampaignValue;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::AutoLoot;
+    let ransom = perk.price() * 10;
+    engine
+        .mission_domain
+        .campaign
+        .set_value(CampaignValue::Ransom, ransom);
+
+    purchase_perk(&mut engine, &assets, 7, perk);
+
+    assert_eq!(
+        engine
+            .mission_domain
+            .campaign
+            .get_value(CampaignValue::Ransom),
+        ransom,
+        "a purchase naming no campaign character must not charge anyone"
+    );
+    assert!(
+        engine
+            .mission_domain
+            .campaign
+            .characters
+            .iter()
+            .all(|description| !description.status.has_perk(perk)),
+        "a purchase naming no campaign character must not grant the perk"
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .auto_loot,
+        "a stray index must not reach the live PCs"
+    );
+}
+
 #[test]
 fn mixed_domain_dispatch_preserves_sequence_registration_order() {
     let (mut engine, assets, actor) = setup_pc_engine(&[]);

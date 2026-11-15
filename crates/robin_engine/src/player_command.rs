@@ -1459,6 +1459,17 @@ pub enum PlayerCommand {
         pcs: Vec<EntityId>,
         enabled: bool,
     },
+    /// Buy one permanent perk for a campaign character.
+    ///
+    /// `character_idx` addresses the campaign character table, not a live
+    /// entity: the purchase outlives the mission and must work while no PC is
+    /// spawned.  The authoritative handler owns the price and the affordability
+    /// check, so the buying screen can never disagree with the sim.  Appended
+    /// to preserve every current-main bitcode variant index.
+    CampaignPurchasePerk {
+        character_idx: u16,
+        perk: crate::pc_status::Perk,
+    },
 }
 
 impl PlayerCommand {
@@ -1523,6 +1534,7 @@ impl PlayerCommand {
                 | Self::SetExcludeRequiredKillsFromPreservedLives { .. }
                 | Self::SetKeepMovingInCombat { .. }
                 | Self::SetAutoLoot { .. }
+                | Self::CampaignPurchasePerk { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }
