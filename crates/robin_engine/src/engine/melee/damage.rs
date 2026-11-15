@@ -773,6 +773,13 @@ impl EngineInner {
             max_life_points: victim_max_hp,
         };
 
+        // "No friendly-fire damage" is decided before the mutable borrow and
+        // spent after the damage math below. Resolving it here keeps the perk
+        // off every other path: a non-PC attacker, an absent (scripted) one and
+        // a hostile victim all resolve to `false` and run unmodified.
+        let friendly_fire_damage_suppressed =
+            self.friendly_fire_damage_suppressed(attacker_id, victim_id);
+
         // Apply damage (requires mutable access to human_data + life_points)
         let victim = self.expect_entity_mut(victim_id, "apply_sword_damage victim");
         let (human, lp) = victim
@@ -781,11 +788,27 @@ impl EngineInner {
 
         let (result, cutting_inflicted) = combat::receive_sword_damage(tcx.sim, human, lp, &params);
 
+        // The perk gates the life-point assignment and nothing else.  The
+        // protection draws above already happened, so `result` still reports
+        // the strike as landed and the impact sound, hit-reaction animation,
+        // push, concussion and speech below run unchanged.
+        if friendly_fire_damage_suppressed {
+            *lp = life_points_before;
+        }
         let raw_life_points_after = *lp;
+        // A suppressed strike wounded nobody, so the two places that read what
+        // the strike inflicted — the wound-handling coma boundary, which would
+        // otherwise spend an ally's amulet on a coma save for damage that never
+        // landed, and the floating damage number — take zero.
+        let inflicted_damage = if friendly_fire_damage_suppressed {
+            0
+        } else {
+            cutting_inflicted
+        };
         let coma_saved = self.close_pc_wounded_coma_boundary(
             tcx,
             victim_id,
-            cutting_inflicted,
+            inflicted_damage,
             life_points_before,
             raw_life_points_after,
         );
@@ -846,8 +869,8 @@ impl EngineInner {
         // Use the attempted damage (not the clamped lp delta) so
         // overkill hits display the same number as a non-overkill hit
         // would have shown.
-        if cutting_inflicted > 0 {
-            self.add_damage_number(victim_id, cutting_inflicted);
+        if inflicted_damage > 0 {
+            self.add_damage_number(victim_id, inflicted_damage);
         }
 
         tracing::debug!(
@@ -3842,6 +3865,40 @@ mod provoke_tests {
 }
 
 impl EngineInner {
+    /// True when this strike must take no life points off the victim: the
+    /// attacker is a PC that bought [`crate::pc_status::Perk::NoFriendlyFireDamage`]
+    /// and the victim is friendly to it.
+    ///
+    /// "Friendly" is the mission's existing answer, not a second definition.
+    /// `DiplomacyState::is_hostile` is what every damage-side decision already
+    /// consults: `actors_may_damage` reduces to it whenever diplomacy is
+    /// enabled, sword strike selection refuses a strike whose arc contains a
+    /// non-hostile actor, and the projectile candidate scan skips one as a
+    /// "protected relationship".  Same camp is always allied, and a
+    /// mission-authored neutral is not hostile either, so neutral bystanders
+    /// count as friendly exactly where the rest of the engine already treats
+    /// them as off-limits.
+    ///
+    /// No attacker (scripted, environmental) and a vanished attacker are both
+    /// not a perk-carrying PC, so those paths stay exactly as they were.
+    fn friendly_fire_damage_suppressed(
+        &self,
+        attacker_id: Option<EntityId>,
+        victim_id: EntityId,
+    ) -> bool {
+        let Some(attacker) = attacker_id.and_then(|id| self.get_entity(id)) else {
+            return false;
+        };
+        let Some(pc) = attacker.pc_data() else {
+            return false;
+        };
+        if !pc.no_friendly_fire_damage {
+            return false;
+        }
+        let victim = self.expect_entity(victim_id, "friendly-fire damage victim");
+        !self.camps_are_hostile(attacker.camp(), victim.camp())
+    }
+
     /// Sample the pre-hit unconscious latch once: already unconscious victims
     /// do not re-enter the knock-out cascade after concussion is applied.
     fn damage_victim_snapshot(
