@@ -307,6 +307,7 @@ pub mod rollback_checker;
 pub mod save_file;
 pub mod save_recovery;
 pub mod savegame;
+pub mod scenario_spec;
 pub mod scroll_view;
 pub mod shadow_polygon;
 pub mod sherwood_hud;

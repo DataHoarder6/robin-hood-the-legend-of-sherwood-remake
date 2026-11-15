@@ -179,6 +179,20 @@ pub struct CliArgs {
     #[arg(long)]
     pub headless: bool,
 
+    /// Run a JSON scenario spec (L2) instead of interactive input: stage the
+    /// spec's player commands at their frames, then exit. Live single-player
+    /// missions only. See `crate::scenario_spec` and `docs/TESTING.md`,
+    /// "Scenario specs (L2)".
+    #[cfg_attr(target_arch = "wasm32", arg(skip))]
+    #[arg(
+        long,
+        value_name = "PATH",
+        requires = "headless",
+        conflicts_with_all = ["start_paused", "replay", "server", "connect", "join"]
+    )]
+    #[serde(skip)]
+    pub spec: Option<std::path::PathBuf>,
+
     /// Open the mission with the simulation paused — the engine tick is
     /// suspended until a `/step-forward` HTTP request (or any other
     /// path that flips `pause` off) drives it forward.  Rendering, HUD,
@@ -286,6 +300,7 @@ impl Default for CliArgs {
             },
             fast_forward: false,
             headless: false,
+            spec: None,
             start_paused: false,
             wait_for_command: false,
             server: false,

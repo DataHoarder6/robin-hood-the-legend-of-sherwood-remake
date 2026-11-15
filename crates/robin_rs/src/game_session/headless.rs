@@ -9,8 +9,9 @@ use super::runtime::{
 use super::session_policy::SessionModalScheduler;
 use super::{StepUiGates, drain_steps};
 use crate::multiplayer::current_epoch_ms;
+use crate::scenario_spec::ScenarioRun;
 use robin_engine::game_operation::GameCode;
-use robin_engine::player_command::PlayerCommand;
+use robin_engine::player_command::{PlayerCommand, PlayerInput};
 use serde::{Deserialize, Serialize};
 
 /// Frontend behavior which intentionally differs from interactive play.
@@ -37,6 +38,8 @@ pub(super) struct HeadlessMission {
     pub(super) runtime: MissionRuntime,
     pub(super) policy: HeadlessPolicy,
     pub(super) modals: SessionModalScheduler,
+    /// `--spec` scenario script; `None` for every other headless launch.
+    pub(super) scenario: Option<ScenarioRun>,
 }
 
 /// Why the headless driver requested an outer-session exit.
@@ -44,6 +47,8 @@ pub(super) struct HeadlessMission {
 pub(super) enum HeadlessFrameExit {
     Mission,
     ReplayComplete,
+    /// The `--spec` scenario finished its frame budget.
+    SpecComplete,
 }
 
 /// Result of one complete true-headless host iteration.
@@ -81,6 +86,19 @@ impl HeadlessMission {
             let frame_result = self.run_frame_with_capture(args, capture.as_mut())?;
             match frame_result.outcome {
                 FrameOutcome::Exit(code) => {
+                    // A spec that did not reach its frame budget has not proven
+                    // what it claims: report it instead of a clean exit.
+                    if frame_result.exit == Some(HeadlessFrameExit::Mission)
+                        && let Some(scenario) = self.scenario.as_ref()
+                        && !scenario.is_completed()
+                    {
+                        return Err(super::MissionError::launch(format!(
+                            "scenario spec ended after {} of {} frames: the mission exited with \
+                             {code:?}",
+                            scenario.current_frame(),
+                            scenario.total_frames()
+                        )));
+                    }
                     if let Some(capture) = capture.as_mut() {
                         if frame_result.exit != Some(HeadlessFrameExit::ReplayComplete) {
                             return Err(super::MissionError::replay(
@@ -153,6 +171,17 @@ impl HeadlessMission {
         // journaled inputs a second time.
         let mut frame = self.runtime.begin_frame(frame_started_at_ms);
         frame.stage_commands().commands.extend(net_inputs);
+        // L2 scenario specs are input to this frame's command stage, in file
+        // order. A paused tick consumes neither the spec frame nor its due
+        // commands.
+        if !tick_paused && let Some(scenario) = self.scenario.as_mut() {
+            while let Some(command) = scenario.take_due() {
+                frame
+                    .stage_commands()
+                    .commands
+                    .push(PlayerInput::host(command));
+            }
+        }
 
         let mut captured_boundary = None;
         if !tick_paused
@@ -270,6 +299,10 @@ impl HeadlessMission {
         self.runtime.run_post_initialize(&mut frame);
         let paused = tick_paused;
         let timeline_advances = frame.timeline_advances(!paused);
+        let scenario_finished = self
+            .scenario
+            .as_mut()
+            .is_some_and(|scenario| scenario.finish_frame(timeline_advances));
         self.commit_simulation_history(&mut frame, timeline_advances);
         self.finish_frame_recording(&mut frame);
         if let Some(player) = self.runtime.timeline.replay().playback() {
@@ -306,6 +339,13 @@ impl HeadlessMission {
             (
                 Some(GameCode::Quit),
                 Some(HeadlessFrameExit::ReplayComplete),
+            )
+        } else if scenario_finished {
+            // LevelInterrupted is the existing "we stopped on purpose"
+            // terminal; the spec's own result is the log line above.
+            (
+                Some(GameCode::LevelInterrupted),
+                Some(HeadlessFrameExit::SpecComplete),
             )
         } else {
             (None, None)
@@ -627,6 +667,7 @@ mod tests {
             runtime,
             policy: HeadlessPolicy::replay_runner(),
             modals: SessionModalScheduler::default(),
+            scenario: None,
         };
         for _ in 0..3 {
             assert_eq!(
@@ -718,6 +759,7 @@ mod tests {
             modals: SessionModalScheduler::default(),
             runtime,
             policy: HeadlessPolicy::replay_runner(),
+            scenario: None,
         };
 
         mission
@@ -797,6 +839,7 @@ mod tests {
             modals: SessionModalScheduler::default(),
             runtime,
             policy: HeadlessPolicy::replay_runner(),
+            scenario: None,
         };
         let mut frame = mission.runtime.begin_frame(0);
         mission.runtime.run_tick(
