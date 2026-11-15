@@ -53,28 +53,35 @@ mod spawn_status_tests {
     }
 
     /// A purchased perk is campaign progression: spawn is the only place it
-    /// becomes mission state, and each bit must cross on its own — the two
-    /// perks are independent flags, not one "has any perk" switch.
+    /// becomes mission state, and each bit must cross on its own — the perks
+    /// are independent flags, not one "has any perk" switch.
     #[test]
     fn spawn_status_copies_each_purchased_perk_independently() {
         let profile = CharacterProfile::default();
-        for (keep_moving_in_combat, auto_loot) in
-            [(false, false), (true, false), (false, true), (true, true)]
-        {
-            let status = crate::pc_status::PcStatus {
-                keep_moving_in_combat,
-                auto_loot,
-                ..Default::default()
-            };
-            let pc = PcData::from_spawn_status(&status, &profile, 0);
-            assert_eq!(
-                pc.keep_moving_in_combat, keep_moving_in_combat,
-                "keep-moving-in-combat must cross spawn with its own bit"
-            );
-            assert_eq!(
-                pc.auto_loot, auto_loot,
-                "auto-loot must cross spawn with its own bit"
-            );
+        for no_friendly_fire_damage in [false, true] {
+            for (keep_moving_in_combat, auto_loot) in
+                [(false, false), (true, false), (false, true), (true, true)]
+            {
+                let status = crate::pc_status::PcStatus {
+                    keep_moving_in_combat,
+                    auto_loot,
+                    no_friendly_fire_damage,
+                    ..Default::default()
+                };
+                let pc = PcData::from_spawn_status(&status, &profile, 0);
+                assert_eq!(
+                    pc.keep_moving_in_combat, keep_moving_in_combat,
+                    "keep-moving-in-combat must cross spawn with its own bit"
+                );
+                assert_eq!(
+                    pc.auto_loot, auto_loot,
+                    "auto-loot must cross spawn with its own bit"
+                );
+                assert_eq!(
+                    pc.no_friendly_fire_damage, no_friendly_fire_damage,
+                    "no-friendly-fire-damage must cross spawn with its own bit"
+                );
+            }
         }
     }
 }
@@ -261,6 +268,15 @@ pub struct PcData {
     /// what the character does; set through `PlayerCommand::SetAutoLoot`.
     #[serde(default)]
     pub auto_loot: bool,
+    /// "No friendly-fire damage" perk: a strike this PC lands on a target the
+    /// mission does not treat as hostile costs that target no life points.
+    /// The hit itself still lands — the protection rolls, the hit reaction,
+    /// the impact sound and any push are untouched — so the follow-up
+    /// friendly-fire knockback perk can act on the same hit.  Per-PC because
+    /// it changes what the character does; set through
+    /// `PlayerCommand::SetNoFriendlyFireDamage`.
+    #[serde(default)]
+    pub no_friendly_fire_damage: bool,
     /// Shared AI runtime used by AI-controlled heroes. Ordinary directly
     /// controlled heroes intentionally have no AI owner.
     #[serde(default)]
@@ -392,6 +408,7 @@ impl Default for PcData {
             combat_stance: CombatStance::Aggressive,
             keep_moving_in_combat: false,
             auto_loot: false,
+            no_friendly_fire_damage: false,
             ai: None,
             interface_hidden: false,
             current_action: Action::default(),
@@ -470,6 +487,7 @@ impl PcData {
             // spawn-time application point; nothing restamps them per frame.
             keep_moving_in_combat: status.keep_moving_in_combat,
             auto_loot: status.auto_loot,
+            no_friendly_fire_damage: status.no_friendly_fire_damage,
             ..Self::default()
         }
     }

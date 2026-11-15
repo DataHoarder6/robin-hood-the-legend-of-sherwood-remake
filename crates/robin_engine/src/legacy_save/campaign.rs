@@ -247,6 +247,7 @@ impl LegacyPcStatusAdoption for LegacyPcStatus {
             // The Original game has no perk line; adopted characters own none.
             keep_moving_in_combat: false,
             auto_loot: false,
+            no_friendly_fire_damage: false,
             beam_me_index_in_sherwood: self.beam_me_index_in_sherwood,
         }
     }

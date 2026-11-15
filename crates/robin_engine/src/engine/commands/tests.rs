@@ -509,8 +509,70 @@ fn auto_loot_command_sets_and_clears_the_per_pc_flag() {
     );
 }
 
-/// Drive one purchase command and return the engine, so the three purchase
-/// tests can assert on both the campaign record and the live PC copy.
+#[test]
+fn no_friendly_fire_damage_command_sets_and_clears_the_per_pc_flag() {
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let other = spawn_pc_at(&mut engine, 90.0, 10.0);
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "the perk is off until something grants it"
+    );
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(PlayerCommand::SetNoFriendlyFireDamage {
+            pcs: vec![actor, other],
+            enabled: true,
+        })],
+    );
+    for id in [actor, other] {
+        assert!(
+            engine
+                .ent(id)
+                .pc_data()
+                .expect("setup built a PC")
+                .no_friendly_fire_damage,
+            "the command addresses every listed PC"
+        );
+    }
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(PlayerCommand::SetNoFriendlyFireDamage {
+            pcs: vec![actor],
+            enabled: false,
+        })],
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "a perk that cannot be turned off is a rewrite, not a perk"
+    );
+    assert!(
+        engine
+            .ent(other)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "clearing one PC must not clear the rest"
+    );
+}
+
+/// Drive one purchase command and return the engine, so the purchase tests
+/// can assert on both the campaign record and the live PC copy.
 fn purchase_perk(
     engine: &mut EngineInner,
     assets: &LevelAssets,
@@ -651,6 +713,48 @@ fn campaign_perk_purchase_out_of_range_changes_nothing() {
             .expect("setup built a PC")
             .auto_loot,
         "a stray index must not reach the live PCs"
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_grants_no_friendly_fire_damage() {
+    use crate::campaign::CampaignValue;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::NoFriendlyFireDamage;
+    let price = perk.price();
+    engine
+        .mission_domain
+        .campaign
+        .set_value(CampaignValue::Ransom, price + 40);
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        engine
+            .mission_domain
+            .campaign
+            .get_value(CampaignValue::Ransom),
+        price + 40 - price,
+        "the purchase deducts exactly the perk's price"
+    );
+    let status = &engine.mission_domain.campaign.characters[0].status;
+    assert!(
+        status.has_perk(perk),
+        "the purchase is recorded on the character"
+    );
+    assert!(
+        !status.has_perk(Perk::AutoLoot) && !status.has_perk(Perk::KeepMovingInCombat),
+        "buying one perk must not grant the others"
+    );
+    assert!(
+        engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "the perk takes effect in the session where it was bought"
     );
 }
 
