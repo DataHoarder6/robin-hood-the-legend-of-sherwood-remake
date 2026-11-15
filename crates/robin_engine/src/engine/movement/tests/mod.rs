@@ -9,6 +9,7 @@ use super::*;
 mod aligned_transition_deviation;
 mod arrival_snap;
 mod compiled_navigation;
+mod forced_move_under_swordfight;
 mod line_jump;
 mod movement_transition_state;
 mod orphaned_sword_movement;
