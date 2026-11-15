@@ -285,9 +285,7 @@ impl EngineInner {
             // Per-PC gameplay policy, not a player gesture: the perk system
             // (and later the skill tree) sets it, and the value rides the
             // command stream so replays and peers agree.
-            SetKeepMovingInCombat { pcs, enabled } => {
-                self.set_keep_moving_in_combat(pcs, *enabled)
-            }
+            SetKeepMovingInCombat { pcs, enabled } => self.set_keep_moving_in_combat(pcs, *enabled),
 
             // ── Sequence-based interactions ──────────────────────
             LaunchInteraction { .. } => self.apply_launch_interaction_command(tcx, cmd),
