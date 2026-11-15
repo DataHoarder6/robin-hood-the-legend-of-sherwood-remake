@@ -28,7 +28,9 @@ not a source submodule or a prerequisite for ordinary Cargo builds. Corpus
 capture requires the exact recorder artifacts selected by its campaign;
 missing artifacts must be supplied explicitly, not replaced with a new build.
 
-Currently only tested on a Linux host. Bare builds use no optional client
+Linux is the primary development platform. Windows builds with MSVC (see
+[docs/WINDOWS.md](docs/WINDOWS.md) for the recipe, the ATL link dependency
+and the windows-gnu startup crash). Bare builds use no optional client
 features. Use `--features desktop` for the normal native game (audio, OS
 data-directory lookup/dialogs, gamepads, and hardware reporting). Large
 integrations are opt-in: `multiplayer` (iroh/DHT matchmaking), `video`
