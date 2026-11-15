@@ -304,6 +304,11 @@ fn knockback_perk_leaves_a_friendly_in_place_but_still_wounds_them() {
         "a flagged PC's push strike must not displace a friendly victim"
     );
     assert_eq!(
+        engine.ent(victim).position_iface().get_increment(),
+        crate::coordinates::WorldVec3D::default(),
+        "and the blow installs no flight velocity on that victim"
+    );
+    assert_eq!(
         life_points(&engine, victim),
         49,
         "the knockback perk must leave the damage of the same hit untouched"
