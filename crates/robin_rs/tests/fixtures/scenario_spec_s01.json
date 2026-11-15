@@ -1,0 +1,7 @@
+{
+  "frames": 60,
+  "commands": [
+    { "frame": 10, "command": "CrouchDown" },
+    { "frame": 20, "command": "StandUp" }
+  ]
+}

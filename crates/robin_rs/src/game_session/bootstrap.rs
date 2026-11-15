@@ -534,6 +534,7 @@ impl AudioPreparedBootstrap {
         args: &crate::main_entry::MissionRequest,
         policy: HeadlessPolicy,
         callbacks: &mut RustCallbacks,
+        scenario: Option<crate::scenario_spec::ScenarioRun>,
     ) -> Result<HeadlessMission, MissionOutcome> {
         let mut bootstrap = self.0;
         assert_eq!(bootstrap.spec.frontend, MissionFrontendKind::Headless);
@@ -562,6 +563,7 @@ impl AudioPreparedBootstrap {
                 callbacks,
             )?,
             policy,
+            scenario,
         })
     }
 
@@ -1361,6 +1363,20 @@ impl HeadlessMissionBuilder {
             args.config.cli.headless,
             "headless builder requires headless launch mode"
         );
+        let scenario = match args.config.cli.spec.as_deref() {
+            Some(path) => match crate::scenario_spec::MissionSpec::load(path) {
+                Ok(spec) => Some(spec.into_run()),
+                Err(error) => {
+                    return HeadlessBuildOutcome::Finished(MissionOutcome::new(
+                        campaign,
+                        rng_seed,
+                        sim_config,
+                        Err(MissionError::launch(format!("{error:#}"))),
+                    ));
+                }
+            },
+            None => None,
+        };
 
         let mission_id = campaign.missions[mission_idx]
             .profile(profiles)
@@ -1430,11 +1446,15 @@ impl HeadlessMissionBuilder {
                 ));
             }
         };
-        let mission =
-            match bootstrap.finish_headless(args, HeadlessPolicy::replay_runner(), callbacks) {
-                Ok(mission) => mission,
-                Err(outcome) => return HeadlessBuildOutcome::Finished(outcome),
-            };
+        let mission = match bootstrap.finish_headless(
+            args,
+            HeadlessPolicy::replay_runner(),
+            callbacks,
+            scenario,
+        ) {
+            Ok(mission) => mission,
+            Err(outcome) => return HeadlessBuildOutcome::Finished(outcome),
+        };
         HeadlessBuildOutcome::Ready(BuiltHeadlessMission { mission })
     }
 }

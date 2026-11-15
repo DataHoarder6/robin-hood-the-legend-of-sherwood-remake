@@ -1368,8 +1368,17 @@ async fn run_rust_game_headless_active(
         sim_config,
     )
     .await;
-    outcome.result?;
-    Ok(0)
+    let code = outcome.result?;
+    // A scenario spec reports its mission result as the process exit code
+    // (`LevelInterrupted` = the spec's frame budget completed). CI can then
+    // trust the exit status as well as the INFO report, which a redirected
+    // stderr does not always deliver. Every other headless launch keeps the
+    // 0 it has always returned.
+    Ok(if config.cli.spec.is_some() {
+        code as i32
+    } else {
+        0
+    })
 }
 
 /// Both launch forms (`--wait-for-command` and `ROBIN_WAIT_FOR_COMMAND`)

@@ -995,3 +995,20 @@ report against the background alone. Inspect the images: zero changed pixels
 can mean intentional occlusion or an invalid pose, and counts alone are not
 fidelity assertions. Scenery animation and patch fixtures are rejected. This
 static visual check does not execute movement or prove actor contact during a jump.
+
+## Scenario specs (L2)
+
+A headless mission can be driven by a JSON script of player commands, so a
+mod's behaviour is provable without a human:
+
+```sh
+robin --headless --mission <MISSION> --spec <PATH>
+```
+
+Each command is staged into its frame's command stage — the same path as live
+input and `POST /command` — and the run exits `GameCode::LevelInterrupted`
+(process status 3) when the spec's frame budget completes. A mission that ends
+early is an error, not a finished spec. Format and validation live in
+`crates/robin_rs/src/scenario_spec.rs`; the end-to-end check, including the
+licensed-data and display setup it needs, is
+`crates/robin_rs/tests/scenario_spec_run.rs`.
