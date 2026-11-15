@@ -138,49 +138,44 @@ impl SherwoodButtonEnable {
         self.quit_mission = !quit_disabled_temp;
     }
 
-    /// Refresh the `go_to_exit` gate based on the live portrait /
-    /// mission state.  Runs every frame, equivalent to the predicate:
+    /// Refresh the `go_to_exit` gate from the live selection.  Runs every
+    /// frame, equivalent to the predicate:
     ///
     /// ```text
-    /// go_to_exit =
-    ///     portrait_count != 0
-    ///     && has_next_mission
-    ///     && ( portrait_count <= number_of_beam_mes
-    ///          || men_to_blazon )
-    ///     && !selected_pc_in_mission_team
+    /// go_to_exit = selected_count != 0 && !selected_pc_in_mission_team
     /// ```
     ///
-    /// - `portrait_count` is the Sherwood portrait-bar size — the
-    ///   number of PC entities the HUD draws
-    ///   (`engine.pc_ids().len()`), priority-sorted at level load.
-    /// - `number_of_beam_mes` comes from the upcoming mission's
-    ///   profile (`CharacterProfile::number_of_beam_mes`).  The guard
-    ///   stops the player from exiting with more Merry Men than the
-    ///   mission can physically beam in.
-    /// - `selected_pc_in_mission_team` comes from
-    ///   [`EngineInner::are_selected_pc_in_mission_team`] — GoToExit
-    ///   goes dark once every selected PC is already committed to the
-    ///   upcoming mission, so the button only lights up when the
-    ///   player has something meaningful to exit with.
+    /// The button dispatches start-up message 1000, which the Sherwood
+    /// script answers with `SendToDeploymentZone` for every selected PC
+    /// (`GetSelectedPC(i)`), so the gate must track the *selection* and
+    /// nothing else.  An earlier version compared the whole portrait bar
+    /// (`engine.pc_ids().len()`) against the next mission's
+    /// `number_of_beam_mes`; in Sherwood the portrait bar holds every hero
+    /// and recruit in the gang, so any gang larger than the target
+    /// mission's beam slots left the button dark forever and the player had
+    /// to walk the men to the exit by hand.  Capacity is a mission-entry
+    /// concern — the beam-in limit and the men-to-blazon conversion are
+    /// enforced there — not a reason to refuse to send the selection.
     ///
-    /// Callers that still have no committed next mission (`post_commit`
-    /// hasn't run) keep `go_to_exit = false` from [`Self::pre_commit`];
-    /// this helper leaves the flag alone in that case so pre-commit
-    /// state is preserved.
-    pub fn apply_update_portraits_delayed(
+    /// `selected_pc_in_mission_team` comes from
+    /// [`EngineInner::are_selected_pc_in_mission_team`]: when every selected
+    /// PC is already committed to the upcoming mission the button stays
+    /// dark, because there is nothing left to send.
+    ///
+    /// Callers with no committed next mission (`post_commit` hasn't run)
+    /// keep `go_to_exit = false` from [`Self::pre_commit`]; this helper
+    /// leaves the flag alone in that case so pre-commit state is preserved.
+    pub fn apply_update_go_to_exit(
         &mut self,
         has_next_mission: bool,
-        portrait_count: usize,
-        number_of_beam_mes: u16,
-        men_to_blazon: bool,
+        selected_count: usize,
         selected_pc_in_mission_team: bool,
     ) {
         if !has_next_mission {
             // No refresh when the player hasn't picked a target yet.
             return;
         }
-        let fits_beam_slots = portrait_count <= usize::from(number_of_beam_mes) || men_to_blazon;
-        self.go_to_exit = portrait_count != 0 && fits_beam_slots && !selected_pc_in_mission_team;
+        self.go_to_exit = selected_count != 0 && !selected_pc_in_mission_team;
     }
 }
 
@@ -519,5 +514,30 @@ mod tests {
                 .hit_test(0, 0, SherwoodButtonEnable::post_commit())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn go_to_exit_tracks_the_selection_not_the_portrait_bar() {
+        // A full gang (more portraits than the target mission's beam slots)
+        // must not darken the button: the script sends only what is selected.
+        let mut enable = SherwoodButtonEnable::post_commit();
+        enable.apply_update_go_to_exit(true, 1, false);
+        assert!(
+            enable.go_to_exit,
+            "one selected recruit is enough to send to the deployment zone"
+        );
+
+        // Nothing selected: nothing to send.
+        enable.apply_update_go_to_exit(true, 0, true);
+        assert!(!enable.go_to_exit);
+
+        // Every selected PC already committed to the next mission.
+        enable.apply_update_go_to_exit(true, 3, true);
+        assert!(!enable.go_to_exit);
+
+        // No next mission committed yet: pre-commit state is preserved.
+        let mut pre = SherwoodButtonEnable::pre_commit();
+        pre.apply_update_go_to_exit(false, 2, false);
+        assert!(!pre.go_to_exit);
     }
 }

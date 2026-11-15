@@ -1963,7 +1963,7 @@ pub(super) fn handle_sherwood_hud_buttons(
         // Snapshot everything we need before we re-borrow the engine
         // for `are_selected_pc_in_mission_team`, which also walks the
         // campaign through `engine.campaign()`.
-        let (has_next_mission, requirements_met, can_convert_merry_men, next_beam_mes) = {
+        let (has_next_mission, requirements_met, can_convert_merry_men) = {
             let campaign = engine.campaign();
             let has_next = campaign.next_mission_idx.is_some();
             let requirements_met = campaign.mission_requirements_met(&assets.profile_manager);
@@ -1973,12 +1973,7 @@ pub(super) fn handle_sherwood_hud_buttons(
                 .next_mission_idx
                 .map(|idx| campaign.can_convert_merry_men_to_blazons(idx, &assets.profile_manager))
                 .unwrap_or(false);
-            let beam_mes = campaign
-                .next_mission_idx
-                .and_then(|idx| campaign.missions.get(idx))
-                .map(|m| m.profile(&assets.profile_manager).number_of_beam_mes)
-                .unwrap_or(0);
-            (has_next, requirements_met, can_convert, beam_mes)
+            (has_next, requirements_met, can_convert)
         };
         // The men-to-blazon arm runs unconditionally; the non-
         // men-to-blazon arm is gated on having a next mission armed.
@@ -2000,16 +1995,15 @@ pub(super) fn handle_sherwood_hud_buttons(
                 quit_disabled_temp,
             );
             // Sherwood branch of the delayed portraits refresh.
-            // Runs every frame so GoToExit tracks portrait-bar
-            // changes (reinforcements, deaths) and mission-team
-            // commits without waiting for a commit-level transition.
-            let portrait_count = engine.pc_ids().len();
+            // Runs every frame so GoToExit tracks the live selection
+            // (men recruited, selected, or already committed to the
+            // upcoming mission) without waiting for a commit-level
+            // transition.
+            let selected_count = engine.hero_selection(host.transport.local_seat()).len();
             let selected_pc_in_mission_team = engine.are_selected_pc_in_mission_team();
-            sherwood_enable.apply_update_portraits_delayed(
+            sherwood_enable.apply_update_go_to_exit(
                 has_next_mission,
-                portrait_count,
-                next_beam_mes,
-                men_to_blazon,
+                selected_count,
                 selected_pc_in_mission_team,
             );
         }

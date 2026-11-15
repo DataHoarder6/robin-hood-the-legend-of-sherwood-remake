@@ -524,7 +524,6 @@ struct EnvHoverCtx {
     shift_held: bool,
     is_swordfighting: bool,
     mouse_layer: u16,
-    pc_sector_idx: Option<engine_fast_find_grid::SectorIndex>,
 }
 
 /// Outcome of classifying one sector in the cross-sector fallback chain.
@@ -591,7 +590,6 @@ fn cursor_for_environment(
         shift_held,
         is_swordfighting,
         mouse_layer: mouse_sector_result.layer,
-        pc_sector_idx,
     };
 
     if mouse_sector_idx != pc_sector_idx {
@@ -759,20 +757,17 @@ fn motion_area_cursor(
             _ => RHMOUSE_CLIMBING,
         };
     }
-    // If either source or target motion area has 0 gates, the two areas
-    // can't possibly be connected by a door → show can't-go-there cursor.
-    // Lift sectors are handled above because wall/ladder traversal is
-    // authorized by lift type, not by door-gate adjacency.
-    let target_gates = sector.gate_indices.len();
-    let source_gates = ctx
-        .pc_sector_idx
-        .and_then(|i| engine.fast_grid().level.sectors.get(usize::from(i)))
-        .map(|s| s.gate_indices.len())
-        .unwrap_or(0);
-    if target_gates == 0 || source_gates == 0 {
-        return cant_go_cursor(ctx.shift_held);
-    }
-    // Non-lift motion area: normal traversal
+    // Non-lift motion area: normal traversal.
+    //
+    // Deliberately *not* guessing at reachability here.  The cursor used to
+    // show CANTGOTHERE whenever either end of the walk had no door gates, but
+    // the click still went through: group-move hands the destination to the
+    // pathfinder, which routes two motion areas through doors, stairs and
+    // gates the gate-count heuristic knows nothing about.  A cursor that says
+    // "no" for a place the unit then walks to is worse than no warning, so the
+    // cross-area case shows the walk cursor and leaves the verdict to the
+    // pathfinder.  CANTGOTHERE is reserved for geometry that carries no
+    // walkable sector at all (see the `mouse_sector_idx.is_none()` arm).
     walk_cursor(ctx.shift_held, ctx.is_swordfighting)
 }
 
