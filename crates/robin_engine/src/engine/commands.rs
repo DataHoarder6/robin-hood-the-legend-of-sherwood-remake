@@ -23,7 +23,9 @@ pub(super) use object_use::is_pc_takable;
 pub use object_use::{coin_pickup_target, object_pickup_command};
 
 use super::{CameraDisplayState, EngineInner, LevelAssets};
+use crate::campaign::CampaignValue;
 use crate::element::{Command, EntityId};
+use crate::pc_status::Perk;
 use crate::player_command::{PlayerCommand, PlayerId, PlayerInput};
 use crate::titbit::QuickAction;
 
@@ -287,6 +289,10 @@ impl EngineInner {
             // command stream so replays and peers agree.
             SetKeepMovingInCombat { pcs, enabled } => self.set_keep_moving_in_combat(pcs, *enabled),
             SetAutoLoot { pcs, enabled } => self.set_auto_loot(pcs, *enabled),
+            CampaignPurchasePerk {
+                character_idx,
+                perk,
+            } => self.campaign_purchase_perk(*character_idx, *perk),
 
             // ── Sequence-based interactions ──────────────────────
             LaunchInteraction { .. } => self.apply_launch_interaction_command(tcx, cmd),
@@ -1538,6 +1544,77 @@ impl EngineInner {
             {
                 pc.auto_loot = enabled;
             }
+        }
+    }
+
+    /// Buy one permanent perk for a campaign character.
+    ///
+    /// The campaign record owns the purchase: it is paid for and recorded here,
+    /// then stamped onto any live copy of that character so the perk works in
+    /// the mission where it was bought.  `character_idx` addresses the campaign
+    /// character table, not an entity, because the purchase must also work from
+    /// a screen with no PC spawned.
+    ///
+    /// Every refusal is logged with the numbers that produced it: the buying
+    /// screen asks the same affordability question before issuing the command,
+    /// so a refusal here means the two sides disagree and must be visible.
+    pub(crate) fn campaign_purchase_perk(&mut self, character_idx: u16, perk: Perk) {
+        let campaign = &mut self.mission_domain.campaign;
+        let index = usize::from(character_idx);
+        let character_count = campaign.characters.len();
+        let Some(description) = campaign.characters.get(index) else {
+            tracing::warn!(
+                character_idx,
+                character_count,
+                ?perk,
+                "perk purchase rejected: campaign has no such character"
+            );
+            return;
+        };
+        if description.status.has_perk(perk) {
+            tracing::warn!(
+                character_idx,
+                ?perk,
+                "perk purchase rejected: character already owns it"
+            );
+            return;
+        }
+        let price = perk.price();
+        let ransom = campaign.get_value(CampaignValue::Ransom);
+        if ransom < price {
+            tracing::warn!(
+                character_idx,
+                ?perk,
+                ransom,
+                price,
+                "perk purchase rejected: ransom does not cover the price"
+            );
+            return;
+        }
+        campaign.characters[index].status.grant_perk(perk);
+        campaign.subtract_value(CampaignValue::Ransom, price);
+        self.set_pc_perk(character_idx, perk);
+    }
+
+    /// Stamp an already-purchased perk onto every live copy of a campaign
+    /// character in the current mission.
+    ///
+    /// Identity is `PcData::campaign_description_index`, the same key the
+    /// mission team uses; character profiles are not identities because many
+    /// peasants share one.  The effect is applied through the existing
+    /// `set_keep_moving_in_combat` / `set_auto_loot` bodies so the immediate
+    /// path and the command path cannot drift.
+    fn set_pc_perk(&mut self, character_idx: u16, perk: Perk) {
+        let live: Vec<EntityId> = self
+            .world
+            .entities
+            .pcs()
+            .filter(|(_, pc)| pc.pc.campaign_description_index == Some(u32::from(character_idx)))
+            .map(|(id, _)| EntityId::from(id))
+            .collect();
+        match perk {
+            Perk::KeepMovingInCombat => self.set_keep_moving_in_combat(&live, true),
+            Perk::AutoLoot => self.set_auto_loot(&live, true),
         }
     }
 }
