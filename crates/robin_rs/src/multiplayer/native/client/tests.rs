@@ -282,7 +282,7 @@ fn native_gameplay_rejects_host_only_and_late_content_outbound() {
 }
 
 #[test]
-fn reconnect_rejects_wrong_session_mission_config_or_speech_locale() {
+fn reconnect_rejects_identity_change_and_adopts_host_context() {
     fn identity(
         seat: PlayerId,
         mission_id: &'static str,
@@ -300,51 +300,53 @@ fn reconnect_rejects_wrong_session_mission_config_or_speech_locale() {
         }
     }
     let expected = robin_engine::engine::SimConfig::default();
-    assert!(
-        validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
-            identity(PlayerId(1), "MissionB", expected, Some("en-US"), 1),
-        )
-        .is_err()
-    );
+    let admitted = || identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1);
 
-    let mut changed = expected;
-    changed.amount_of_speaking = 9;
+    // Identity: the seat and the session are what the host admitted this
+    // client to. A reconnect that changes either is a different admit.
     assert!(
         validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
-            identity(PlayerId(1), "MissionA", changed, Some("en-US"), 1),
-        )
-        .is_err()
-    );
-    assert!(
-        validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
+            admitted(),
             identity(PlayerId(2), "MissionA", expected, Some("en-US"), 1),
         )
         .is_err()
     );
     assert!(
         validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
-            identity(PlayerId(1), "MissionA", expected, Some("de-DE"), 1),
-        )
-        .is_err()
-    );
-    assert!(
-        validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
+            admitted(),
             identity(PlayerId(1), "MissionA", expected, Some("en-US"), 2),
         )
         .is_err()
     );
+
+    // Host-authored context: the host rewrites mission, seed, sim config and
+    // speech locale when a mission starts, and a reconnect that crosses that
+    // boundary must adopt them rather than die (that fatal is why every co-op
+    // session ended on the first win or loss).
     assert!(
         validate_reconnect_state(
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
-            identity(PlayerId(1), "MissionA", expected, Some("en-US"), 1),
+            admitted(),
+            identity(PlayerId(1), "MissionB", expected, Some("en-US"), 1),
         )
         .is_ok()
     );
+    let mut changed = expected;
+    changed.amount_of_speaking = 9;
+    assert!(
+        validate_reconnect_state(
+            admitted(),
+            identity(PlayerId(1), "MissionA", changed, Some("en-US"), 1),
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_reconnect_state(
+            admitted(),
+            identity(PlayerId(1), "MissionA", expected, Some("de-DE"), 1),
+        )
+        .is_ok()
+    );
+    assert!(validate_reconnect_state(admitted(), admitted()).is_ok());
 }
 
 #[test]

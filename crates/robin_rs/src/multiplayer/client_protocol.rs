@@ -258,7 +258,7 @@ mod tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn reconnect_rejects_each_authoritative_metadata_change() {
+    fn reconnect_rejects_identity_change_and_adopts_host_context() {
         let HandshakeAction::Welcome(expected) = ClientHandshake::new("endpoint-key".into(), None)
             .receive(Some(welcome()))
             .unwrap()
@@ -269,18 +269,29 @@ mod tests {
             validate_reconnect_state(expected.reconnect_identity(), actual.reconnect_identity())
         };
         assert!(check(&expected).is_ok());
-        for field in 0..6 {
+        // Identity: seat and session. A reconnect that changes either is a
+        // different admit and must be refused.
+        for field in [0, 5] {
             let mut actual = expected.clone();
             match field {
                 0 => actual.seat = PlayerId(2),
+                5 => actual.session_id = MultiplayerSessionId([3; 32]),
+                _ => unreachable!(),
+            }
+            assert!(check(&actual).is_err(), "identity field {field}");
+        }
+        // Host-authored context changes at a mission boundary (a real session
+        // died on every win/fail because of this) and is adopted.
+        for field in [1, 2, 3, 4] {
+            let mut actual = expected.clone();
+            match field {
                 1 => actual.mission_id.push('!'),
                 2 => actual.mission_seed += 1,
                 3 => actual.sim_config.fog_of_war = !actual.sim_config.fog_of_war,
                 4 => actual.speech_timing_locale = None,
-                5 => actual.session_id = MultiplayerSessionId([3; 32]),
                 _ => unreachable!(),
             }
-            assert!(check(&actual).is_err(), "metadata field {field}");
+            assert!(check(&actual).is_ok(), "host context field {field}");
         }
     }
 }
@@ -554,7 +565,10 @@ pub(super) fn validate_reconnect_content(
     Err(MultiplayerError::ContentMismatch(message.into()))
 }
 
-/// The authoritative Welcome identity a reconnect must reproduce exactly.
+/// The authoritative Welcome identity a reconnect must reproduce: the seat and
+/// session the host admitted this client to. Mission, seed, sim config and
+/// speech locale travel alongside but are host-authored context that changes
+/// at a mission boundary, so they are adopted rather than enforced.
 #[derive(Debug, Clone)]
 pub(super) struct ReconnectIdentity<'a> {
     pub(super) seat: PlayerId,
@@ -600,16 +614,27 @@ pub(super) fn validate_reconnect_state(
         speech_timing_locale,
         session_id,
     } = actual;
-    if seat != expected_seat
-        || mission_id != expected_mission_id
+    if seat != expected_seat || session_id != expected_session_id {
+        return Err(MultiplayerError::Handshake(format!(
+            "reconnect joined incompatible seat {seat:?} session {session_id:?}; expected seat {expected_seat:?} session {expected_session_id:?}"
+        ).into()));
+    }
+    // Mission, seed, sim config and speech locale are host-authored context,
+    // not client identity. The host rewrites all four when a mission starts,
+    // and a reconnect that crosses that boundary legitimately reports
+    // different values, so comparing them failed every session at the first
+    // win or loss. Adopt the host's context instead of rejecting it.
+    if mission_id != expected_mission_id
         || seed != expected_seed
         || config != expected_config
         || speech_timing_locale != expected_speech_timing_locale
-        || session_id != expected_session_id
     {
-        return Err(MultiplayerError::Handshake(format!(
-            "reconnect joined incompatible seat {seat:?} mission `{mission_id}` seed {seed} config {config:?} speech timing {speech_timing_locale:?} session {session_id:?}; expected seat {expected_seat:?} mission `{expected_mission_id}` seed {expected_seed} config {expected_config:?} speech timing {expected_speech_timing_locale:?} session {expected_session_id:?}"
-        ).into()));
+        tracing::info!(
+            mission = %mission_id,
+            seed,
+            expected_seed,
+            "multiplayer: host re-welcomed with new mission context; adopting it"
+        );
     }
     Ok(())
 }
