@@ -1,6 +1,6 @@
 # Rust port — agent notes
 
-## Rust port notes
+## Ground rules
 
 - Never defend against missing data by inventing a value: if an answer depends
   on an object that is not there, return an error, panic, or at least log a
@@ -32,41 +32,37 @@
   what `.cargo/config.toml` expects; without them every link warns and uses the
   slow system linker).
 - `scripts/check-quality.sh SUITE` is the only test entry point; `docs/TESTING.md`
-  maps every crate to its suite. Bare `cargo test` selects only the two default
-  members, which is a smoke check and never a gate.
-- Run `bash scripts/check-quality.sh format` before handing work over. The
-  `.githooks/pre-commit` hook formats the files a commit touches with the
-  toolchain pinned in `rust-toolchain.toml`.
+  maps every crate to its suite (`format` is the whole-tree formatting gate).
+  Bare `cargo test` selects only the two default members, never a gate. The
+  `.githooks/pre-commit` hook formats the files a commit touches.
 - Clippy belongs in batched cleanup sessions, never inside feature work.
-- Run cargo unfiltered: no `| head`, `| grep`, and no redirect to a shared log
-  path. A re-run to recover a hidden error costs more than the extra lines, and
-  parallel agents clobber fixed log names.
+- Run cargo unfiltered — no `| head`, no shared log path. Recovering a hidden
+  error costs more than the extra lines, and parallel agents clobber fixed
+  log names.
 - Build and run in separate steps: `cargo build -p robin_rs --bin robin` with no
   timeout, then `cargo run …` with one, so a running game cannot hang a build or
   a timeout cannot kill one.
 - `RUST_LOG=debug` (or `robin_rs=debug`, `trace`) drives the `env_logger` /
-  `tracing` output. `ROBINHOOD_DATA_DIR` points at game data — the development
-  default is the main repository's `datadirs/demo_leicester_ecoste`, the rest
-  are symlinks beside it. Game data is the one exception to staying inside a
-  worktree.
+  `tracing` output.
 
 ## Running the game and its tools
 
-- Main binary: `robin` (`crates/robin_rs/src/bin/robin.rs`).
-- Client developer tools are `robin_rs` examples, built on demand:
-  `cargo run -p robin_rs --example <name> -- <args>`; the set lives in
-  `crates/robin_rs/examples/`.
-- Offline modding tools are `robin_modding_tools` bins behind its `cli` feature:
-  `cargo run -p robin_modding_tools --features cli --bin <name> -- <args>`.
-- wasm/emscripten builds are served from `wasm-www/`; see `README.md` and the
-  `wasm-dev` / `wasm-release` profiles in `.cargo/config.toml`.
+- `README.md` has the binary, the dev game-data directory (`ROBINHOOD_DATA_DIR`)
+  and the wasm workflow. Developer tools are `robin_rs` examples, built on
+  demand with `cargo run -p robin_rs --example <name>`.
 
 ## Replays
 
 - Every session records to `~/.local/share/robin_hood/replays/*.rhrec.jsonl`;
-  the newest file is the most recent run.
-- `--replay <path>` replays a recording, which is the default way to debug a
-  gameplay defect.
+  `--replay <path>` replays one, which is the default way to debug a gameplay
+  defect.
+
+## Investigating
+
+- A read-only question that took real digging ("what exists for X", "which
+  natives can do Y") ends by writing its answer to `docs/slop/<topic>.md` and
+  linking the files it names. An answer that lives only in a reply is paid for
+  again by the next session.
 
 ## Searching
 
@@ -87,5 +83,5 @@
   that gates it.
 - `assets/`, `datadirs/`, `mods/` — icons and fonts, game-data symlinks, mods.
 - `docs/README.md` indexes the maintained guides; `docs/slop/` keeps subsystem
-  evidence docs (save format, Sherwood trading, campaign purchases).
+  evidence docs (natives, save/state constraints, trading, campaign purchases).
 - New player-visible features are recorded in `docs/NEW_FEATURES.md`.
