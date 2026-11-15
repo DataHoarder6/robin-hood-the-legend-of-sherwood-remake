@@ -3865,9 +3865,11 @@ mod provoke_tests {
 }
 
 impl EngineInner {
-    /// True when this strike must take no life points off the victim: the
-    /// attacker is a PC that bought [`crate::pc_status::Perk::NoFriendlyFireDamage`]
-    /// and the victim is friendly to it.
+    /// The attacker's perk view of a strike, when the strike is friendly fire:
+    /// a PC attacker and a victim the mission does not treat as hostile.
+    ///
+    /// The two friendly-fire perks differ only in which purchased flag they
+    /// read, so the notion of "friendly" exists once, here.
     ///
     /// "Friendly" is the mission's existing answer, not a second definition.
     /// `DiplomacyState::is_hostile` is what every damage-side decision already
@@ -3881,22 +3883,44 @@ impl EngineInner {
     ///
     /// No attacker (scripted, environmental) and a vanished attacker are both
     /// not a perk-carrying PC, so those paths stay exactly as they were.
+    fn friendly_fire_attacker(
+        &self,
+        attacker_id: Option<EntityId>,
+        victim_id: EntityId,
+    ) -> Option<&crate::element::PcData> {
+        let attacker = attacker_id.and_then(|id| self.get_entity(id))?;
+        let pc = attacker.pc_data()?;
+        let victim = self.expect_entity(victim_id, "friendly-fire victim");
+        (!self.camps_are_hostile(attacker.camp(), victim.camp())).then_some(pc)
+    }
+
+    /// True when this strike must take no life points off the victim: the
+    /// attacker is a PC that bought [`crate::pc_status::Perk::NoFriendlyFireDamage`]
+    /// and the victim is friendly to it.
     fn friendly_fire_damage_suppressed(
         &self,
         attacker_id: Option<EntityId>,
         victim_id: EntityId,
     ) -> bool {
-        let Some(attacker) = attacker_id.and_then(|id| self.get_entity(id)) else {
-            return false;
-        };
-        let Some(pc) = attacker.pc_data() else {
-            return false;
-        };
-        if !pc.no_friendly_fire_damage {
-            return false;
-        }
-        let victim = self.expect_entity(victim_id, "friendly-fire damage victim");
-        !self.camps_are_hostile(attacker.camp(), victim.camp())
+        self.friendly_fire_attacker(attacker_id, victim_id)
+            .is_some_and(|pc| pc.no_friendly_fire_damage)
+    }
+
+    /// True when this strike must not push the victim: the attacker is a PC
+    /// that bought [`crate::pc_status::Perk::NoFriendlyFireKnockback`] and the
+    /// victim is friendly to it.
+    ///
+    /// Read where a push strike installs the victim's flight, so only the
+    /// displacement is skipped.  The hit itself — its falling reaction, sound,
+    /// speech and knock-out cascade — is already authored by the time the
+    /// flight is prepared.
+    pub(super) fn friendly_fire_knockback_suppressed(
+        &self,
+        attacker_id: Option<EntityId>,
+        victim_id: EntityId,
+    ) -> bool {
+        self.friendly_fire_attacker(attacker_id, victim_id)
+            .is_some_and(|pc| pc.no_friendly_fire_knockback)
     }
 
     /// Sample the pre-hit unconscious latch once: already unconscious victims

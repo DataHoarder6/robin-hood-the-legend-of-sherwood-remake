@@ -1033,6 +1033,33 @@ impl EngineInner {
             )
         };
 
+        // "No friendly-fire knockback": a flagged PC's blow still lands — the
+        // falling reaction, its sound, the victim's speech and the knock-out
+        // cascade were authored by `apply_push_effect` and run untouched — but
+        // it does not displace a friendly victim.  Takeoff installs the
+        // victim's own point as its landing goal with a zero increment, so the
+        // flight resolves exactly where the victim stands: no push, no facing
+        // snap, no landing plane.  Only push-strike damage reaches this
+        // function, so arrows, stones and fists are untouched.
+        if self.friendly_fire_knockback_suppressed(Some(attacker_id), victim_id) {
+            let position = self
+                .get_entity_mut(victim_id)
+                .expect("falling-pushed victim vanished")
+                .position_iface_mut();
+            let takeoff = position.get_position();
+            position.set_layer_goal(
+                crate::position_interface::Layer::new(layer)
+                    .expect("falling-pushed victim layer cannot be the no-layer sentinel"),
+            );
+            position.set_flight_goal_and_increment(
+                takeoff,
+                crate::coordinates::WorldVec3D::ZERO,
+                sector,
+                sector.and_then(|sector| sector.arena_index()),
+            );
+            return;
+        }
+
         let direction = sector_to_vector_iso(attacker_dir as u16, ASPECT_RATIO);
         let (mut flight_x, mut flight_y) = if strike == SwordStrike::Charge {
             (
