@@ -214,6 +214,43 @@ jobs:
           cargo build --locked --release --no-default-features --features release -p robin_rs --bin robin --target ${{ matrix.target }}
           cargo build --locked --release -p robin_modding_tools --bins --target ${{ matrix.target }}
 
+      - name: Prove the Windows binary starts
+        if: matrix.runtime == 'win-x64'
+        shell: bash
+        run: |
+          # A shipped exe that faults before main is indistinguishable from a
+          # corrupt download, and cost a player an evening once. --version runs
+          # the runtime, the allocator and clap before any window exists.
+          "target/${{ matrix.target }}/release/robin.exe" --version
+
+      - name: Reject base relocations inside .text
+        if: matrix.runtime == 'win-x64'
+        shell: bash
+        run: |
+          # A MinGW link used to record Windows TLS SECREL32 offsets as
+          # IMAGE_REL_BASED_HIGHLOW entries inside .text; under DYNAMIC_BASE the
+          # loader added the image delta to them and the exe faulted before
+          # main (docs/WINDOWS.md). MSVC does not emit them, so any that appear
+          # mean the Windows build came from a cross-toolchain again.
+          ${{ matrix.python }} -m pip install --quiet pefile==2024.8.26
+          ${{ matrix.python }} - <<'PY'
+          import sys, pefile
+          pe = pefile.PE(r"target/${{ matrix.target }}/release/robin.exe")
+          text = next(s for s in pe.sections if s.Name.rstrip(b"\0") == b".text")
+          text_end = text.VirtualAddress + max(text.Misc_VirtualSize, text.SizeOfRawData)
+          bad = []
+          for base in pe.DIRECTORY_ENTRY_BASERELOC:
+              for entry in base.entries:
+                  if entry.type != 3:  # IMAGE_REL_BASED_HIGHLOW
+                      continue
+                  if base.struct.VirtualAddress + entry.rva < text_end:
+                      bad.append(entry.rva)
+          print(f"relocations inside .text: {len(bad)}")
+          if bad:
+              print(f"first offending rvas: {bad[:8]}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
       - name: Stage package input
         shell: bash
         run: |
