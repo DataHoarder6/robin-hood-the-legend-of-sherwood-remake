@@ -1476,6 +1476,12 @@ pub enum PlayerCommand {
         pcs: Vec<EntityId>,
         enabled: bool,
     },
+    /// Set the "no friendly-fire knockback" perk on these PCs.  Appended to
+    /// preserve every current-main bitcode variant index.
+    SetNoFriendlyFireKnockback {
+        pcs: Vec<EntityId>,
+        enabled: bool,
+    },
 }
 
 impl PlayerCommand {
@@ -1542,6 +1548,7 @@ impl PlayerCommand {
                 | Self::SetAutoLoot { .. }
                 | Self::CampaignPurchasePerk { .. }
                 | Self::SetNoFriendlyFireDamage { .. }
+                | Self::SetNoFriendlyFireKnockback { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }

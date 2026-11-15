@@ -1405,8 +1405,8 @@ mod tests {
         use robin_engine::player_profile::DifficultyLevel;
         use robin_engine::profiles::{CharacterProfile, CharacterProfileIdx};
 
-        // A character carrying progression, ammo and two purchased perks: the
-        // two perk fields are newer than the save versions under test, so the
+        // A character carrying progression, ammo and every purchased perk: the
+        // perk fields are newer than the save versions under test, so the
         // load must default them while keeping everything that existed before.
         let mut status =
             PcStatus::from_profile(&CharacterProfile::default(), true, DifficultyLevel::Medium);
@@ -1415,6 +1415,7 @@ mod tests {
         status.grant_perk(Perk::KeepMovingInCombat);
         status.grant_perk(Perk::AutoLoot);
         status.grant_perk(Perk::NoFriendlyFireDamage);
+        status.grant_perk(Perk::NoFriendlyFireKnockback);
         let mut campaign = Campaign::default();
         campaign.characters.push(PcDescription {
             character_profile_idx: Some(CharacterProfileIdx(0)),
@@ -1443,6 +1444,7 @@ mod tests {
                     map.remove("keep_moving_in_combat");
                     map.remove("auto_loot");
                     map.remove("no_friendly_fire_damage");
+                    map.remove("no_friendly_fire_knockback");
                     if let Some(coop) = map.get_mut("coop").and_then(|v| v.as_object_mut()) {
                         coop.remove("campaign");
                         coop.remove("team");
@@ -1478,6 +1480,7 @@ mod tests {
                     keep_moving_in_combat: false,
                     auto_loot: false,
                     no_friendly_fire_damage: false,
+                    no_friendly_fire_knockback: false,
                     ..status.clone()
                 },
                 "a save written before the perk fields existed keeps its \

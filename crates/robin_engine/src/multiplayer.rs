@@ -104,7 +104,8 @@ pub const INPUT_DELAY_FRAMES: u32 = 2;
 /// Protocol 69 carries the per-PC auto-loot flag.
 /// Protocol 70 carries the purchased-perk flags on campaign PC status.
 /// Protocol 71 carries the per-PC "no friendly-fire damage" flag.
-pub const NET_PROTOCOL_VERSION: u32 = 71;
+/// Protocol 72 carries the per-PC "no friendly-fire knockback" flag.
+pub const NET_PROTOCOL_VERSION: u32 = 72;
 
 /// Maximum bytes in one resumable full-mod transfer chunk. The outer native
 /// transport frame has a larger bound for engine snapshots, so content must

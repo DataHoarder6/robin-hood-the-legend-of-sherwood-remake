@@ -182,7 +182,8 @@ pub struct ReplayHeader {
 /// Version 73 adds the per-PC auto-loot flag.
 /// Version 74 adds the purchased-perk flags to campaign PC status.
 /// Version 75 adds the per-PC "no friendly-fire damage" flag.
-pub const REPLAY_SCHEMA_VERSION: u32 = 75;
+/// Version 76 adds the per-PC "no friendly-fire knockback" flag.
+pub const REPLAY_SCHEMA_VERSION: u32 = 76;
 
 /// Identity of the next lockstep/history transaction to be admitted.
 ///

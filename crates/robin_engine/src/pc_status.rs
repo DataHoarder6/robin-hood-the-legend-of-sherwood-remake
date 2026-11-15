@@ -216,8 +216,9 @@ impl HumanStatus {
 ///
 /// A perk has two homes because it has two lifetimes.  The purchase is
 /// campaign state and lives on [`PcStatus`] (`keep_moving_in_combat` /
-/// `auto_loot` / `no_friendly_fire_damage`), so it survives every mission and
-/// every save.  The effect is mission state and lives on
+/// `auto_loot` / `no_friendly_fire_damage` / `no_friendly_fire_knockback`), so
+/// it survives every mission and every save.  The effect is mission state and
+/// lives on
 /// [`crate::element::PcData`] as the flag gameplay actually reads, copied
 /// across at spawn by `PcData::from_spawn_status`.
 /// `PlayerCommand::CampaignPurchasePerk` is the only way a perk is granted.
@@ -243,14 +244,17 @@ pub enum Perk {
     /// "No friendly-fire damage": a strike this PC lands on a target the
     /// mission does not treat as hostile costs that target no life points.
     NoFriendlyFireDamage = 2,
+    /// "No friendly-fire knockback": a strike this PC lands on a target the
+    /// mission does not treat as hostile does not push that target.
+    NoFriendlyFireKnockback = 3,
 }
 
 /// Ransom price of [`Perk::KeepMovingInCombat`].
 ///
-/// PLACEHOLDER.  The perk line's cost curve is not designed yet, so both perks
-/// cost the same flat round number; the price exists to make the purchase
+/// PLACEHOLDER.  The perk line's cost curve is not designed yet, so every perk
+/// costs the same flat round number; the price exists to make the purchase
 /// command and its affordability check provable.  A later change replaces
-/// these two constants with the designed curve and moves the purchase tests
+/// these constants with the designed curve and moves the purchase tests
 /// with them.  Nothing else may hardcode a perk price.
 pub const PERK_PRICE_KEEP_MOVING_IN_COMBAT: i32 = 200;
 
@@ -262,6 +266,10 @@ pub const PERK_PRICE_AUTO_LOOT: i32 = 200;
 /// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
 pub const PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE: i32 = 200;
 
+/// Ransom price of [`Perk::NoFriendlyFireKnockback`].  PLACEHOLDER, see
+/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
+pub const PERK_PRICE_NO_FRIENDLY_FIRE_KNOCKBACK: i32 = 200;
+
 impl Perk {
     /// What the character must pay in ransom to buy this perk.
     pub const fn price(self) -> i32 {
@@ -269,6 +277,7 @@ impl Perk {
             Self::KeepMovingInCombat => PERK_PRICE_KEEP_MOVING_IN_COMBAT,
             Self::AutoLoot => PERK_PRICE_AUTO_LOOT,
             Self::NoFriendlyFireDamage => PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE,
+            Self::NoFriendlyFireKnockback => PERK_PRICE_NO_FRIENDLY_FIRE_KNOCKBACK,
         }
     }
 }
@@ -331,6 +340,10 @@ pub struct PcStatus {
     /// `PcData::no_friendly_fire_damage` at every spawn.
     #[serde(default)]
     pub no_friendly_fire_damage: bool,
+    /// The character has bought [`Perk::NoFriendlyFireKnockback`].  Copied into
+    /// `PcData::no_friendly_fire_knockback` at every spawn.
+    #[serde(default)]
+    pub no_friendly_fire_knockback: bool,
 
     // ── Sherwood map position (–1 = not placed) ──
     pub beam_me_index_in_sherwood: i16,
@@ -356,6 +369,7 @@ impl Default for PcStatus {
             keep_moving_in_combat: false,
             auto_loot: false,
             no_friendly_fire_damage: false,
+            no_friendly_fire_knockback: false,
             beam_me_index_in_sherwood: -1,
         }
     }
@@ -569,6 +583,7 @@ impl PcStatus {
             Perk::KeepMovingInCombat => self.keep_moving_in_combat,
             Perk::AutoLoot => self.auto_loot,
             Perk::NoFriendlyFireDamage => self.no_friendly_fire_damage,
+            Perk::NoFriendlyFireKnockback => self.no_friendly_fire_knockback,
         }
     }
 
@@ -581,6 +596,7 @@ impl PcStatus {
             Perk::KeepMovingInCombat => self.keep_moving_in_combat = true,
             Perk::AutoLoot => self.auto_loot = true,
             Perk::NoFriendlyFireDamage => self.no_friendly_fire_damage = true,
+            Perk::NoFriendlyFireKnockback => self.no_friendly_fire_knockback = true,
         }
     }
 }

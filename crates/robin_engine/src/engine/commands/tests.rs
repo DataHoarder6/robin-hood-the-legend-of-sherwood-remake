@@ -571,6 +571,65 @@ fn no_friendly_fire_damage_command_sets_and_clears_the_per_pc_flag() {
     );
 }
 
+#[test]
+fn no_friendly_fire_knockback_command_sets_and_clears_the_per_pc_flag() {
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let other = spawn_pc_at(&mut engine, 90.0, 10.0);
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(
+            PlayerCommand::SetNoFriendlyFireKnockback {
+                pcs: vec![actor, other],
+                enabled: true,
+            },
+        )],
+    );
+    for id in [actor, other] {
+        let pc = engine.ent(id).pc_data().expect("setup built a PC");
+        assert!(
+            pc.no_friendly_fire_knockback,
+            "the command addresses every listed PC"
+        );
+        assert!(
+            !pc.no_friendly_fire_damage,
+            "the knockback perk must not turn on the damage perk"
+        );
+    }
+
+    engine.apply_commands(
+        &crate::sim_rng::test_context(),
+        &mut HostDisplayState::default(),
+        &mut InputState::default(),
+        &assets,
+        &[PlayerInput::host(
+            PlayerCommand::SetNoFriendlyFireKnockback {
+                pcs: vec![actor],
+                enabled: false,
+            },
+        )],
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_knockback,
+        "a perk that cannot be turned off is a rewrite, not a perk"
+    );
+    assert!(
+        engine
+            .ent(other)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_knockback,
+        "clearing one PC must not clear the rest"
+    );
+}
+
 /// Drive one purchase command and return the engine, so the purchase tests
 /// can assert on both the campaign record and the live PC copy.
 fn purchase_perk(
@@ -755,6 +814,56 @@ fn campaign_perk_purchase_grants_no_friendly_fire_damage() {
             .expect("setup built a PC")
             .no_friendly_fire_damage,
         "the perk takes effect in the session where it was bought"
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_grants_no_friendly_fire_knockback() {
+    use crate::campaign::CampaignValue;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::NoFriendlyFireKnockback;
+    let price = perk.price();
+    engine
+        .mission_domain
+        .campaign
+        .set_value(CampaignValue::Ransom, price + 40);
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        engine
+            .mission_domain
+            .campaign
+            .get_value(CampaignValue::Ransom),
+        price + 40 - price,
+        "the purchase deducts exactly the perk's price"
+    );
+    let status = &engine.mission_domain.campaign.characters[0].status;
+    assert!(
+        status.has_perk(perk),
+        "the purchase is recorded on the character"
+    );
+    assert!(
+        !status.has_perk(Perk::NoFriendlyFireDamage),
+        "buying the knockback perk must not grant the damage perk"
+    );
+    assert!(
+        engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_knockback,
+        "the perk takes effect in the session where it was bought"
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "the live flag follows the purchased perk and nothing else"
     );
 }
 

@@ -731,6 +731,7 @@ fn pc_status(saved: &LegacyPcStatus) -> PcStatus {
         keep_moving_in_combat: false,
         auto_loot: false,
         no_friendly_fire_damage: false,
+        no_friendly_fire_knockback: false,
         beam_me_index_in_sherwood: saved.beam_me_index_in_sherwood,
     }
 }

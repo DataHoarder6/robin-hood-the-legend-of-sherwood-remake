@@ -58,29 +58,36 @@ mod spawn_status_tests {
     #[test]
     fn spawn_status_copies_each_purchased_perk_independently() {
         let profile = CharacterProfile::default();
-        for no_friendly_fire_damage in [false, true] {
-            for (keep_moving_in_combat, auto_loot) in
-                [(false, false), (true, false), (false, true), (true, true)]
-            {
-                let status = crate::pc_status::PcStatus {
-                    keep_moving_in_combat,
-                    auto_loot,
-                    no_friendly_fire_damage,
-                    ..Default::default()
-                };
-                let pc = PcData::from_spawn_status(&status, &profile, 0);
-                assert_eq!(
-                    pc.keep_moving_in_combat, keep_moving_in_combat,
-                    "keep-moving-in-combat must cross spawn with its own bit"
-                );
-                assert_eq!(
-                    pc.auto_loot, auto_loot,
-                    "auto-loot must cross spawn with its own bit"
-                );
-                assert_eq!(
-                    pc.no_friendly_fire_damage, no_friendly_fire_damage,
-                    "no-friendly-fire-damage must cross spawn with its own bit"
-                );
+        for no_friendly_fire_knockback in [false, true] {
+            for no_friendly_fire_damage in [false, true] {
+                for (keep_moving_in_combat, auto_loot) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    let status = crate::pc_status::PcStatus {
+                        keep_moving_in_combat,
+                        auto_loot,
+                        no_friendly_fire_damage,
+                        no_friendly_fire_knockback,
+                        ..Default::default()
+                    };
+                    let pc = PcData::from_spawn_status(&status, &profile, 0);
+                    assert_eq!(
+                        pc.keep_moving_in_combat, keep_moving_in_combat,
+                        "keep-moving-in-combat must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.auto_loot, auto_loot,
+                        "auto-loot must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.no_friendly_fire_damage, no_friendly_fire_damage,
+                        "no-friendly-fire-damage must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.no_friendly_fire_knockback, no_friendly_fire_knockback,
+                        "no-friendly-fire-knockback must cross spawn with its own bit"
+                    );
+                }
             }
         }
     }
@@ -277,6 +284,15 @@ pub struct PcData {
     /// `PlayerCommand::SetNoFriendlyFireDamage`.
     #[serde(default)]
     pub no_friendly_fire_damage: bool,
+    /// "No friendly-fire knockback" perk: a strike this PC lands on a target
+    /// the mission does not treat as hostile does not push or displace that
+    /// target.  The hit is otherwise untouched — the damage still lands unless
+    /// the damage perk suppressed it, and the hit reaction, its sound, the
+    /// victim's speech and the knock-out path all run — so the two friendly-fire
+    /// perks are independent flags.  Per-PC because it changes what the
+    /// character does; set through `PlayerCommand::SetNoFriendlyFireKnockback`.
+    #[serde(default)]
+    pub no_friendly_fire_knockback: bool,
     /// Shared AI runtime used by AI-controlled heroes. Ordinary directly
     /// controlled heroes intentionally have no AI owner.
     #[serde(default)]
@@ -409,6 +425,7 @@ impl Default for PcData {
             keep_moving_in_combat: false,
             auto_loot: false,
             no_friendly_fire_damage: false,
+            no_friendly_fire_knockback: false,
             ai: None,
             interface_hidden: false,
             current_action: Action::default(),
@@ -488,6 +505,7 @@ impl PcData {
             keep_moving_in_combat: status.keep_moving_in_combat,
             auto_loot: status.auto_loot,
             no_friendly_fire_damage: status.no_friendly_fire_damage,
+            no_friendly_fire_knockback: status.no_friendly_fire_knockback,
             ..Self::default()
         }
     }
