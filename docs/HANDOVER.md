@@ -110,17 +110,27 @@ later.
 
 1. Connect to player B's machine, install `run-robin.cmd` and
    `collect-logs.cmd`, and repoint the desktop shortcut at the `.cmd`.
-2. Install the current CI build on both machines — **the same commit**, since
-   multiplayer binds the engine commit and protocol version:
-   - B: `gh run download --repo DataHoarder6/… --name robin-windows-x86_64-exe`,
-     copy `robin.exe` over the existing one;
-   - A: either the Linux AppImage from the same release, or a local build of
-     the same commit (`~/Games/robin-hood/src`).
+2. Put **the same release** on both machines. The newest one is
+   `nightly-2026-11-15-2056-f3c63eff6074`:
+   - B: `gh release download nightly-2026-11-15-2056-f3c63eff6074 --repo
+     DataHoarder6/… --pattern robin.exe`, then copy it over
+     `C:\Games\rh-src\target\release\robin.exe`;
+   - A: already on the matching AppImage in `~/Games/robin-hood/appimage`,
+     started by `robin-hood` / the menu entry.
 3. Play. Afterwards `robin-logs` on A, `collect-logs.cmd` on B; send both.
-4. File what the logs show as a new entry in this document, then fix on the
-   mini PC and let CI produce the next artifact.
+4. Fix on the mini PC, push to `main`, CI rebuilds both platforms, then step 2
+   again.
 
-Nothing about a session should require compiling on either player's machine.
+Updating A's AppImage after a new release:
+
+```bash
+cd ~/Games/robin-hood
+curl -sSLo appimage.zip "https://github.com/DataHoarder6/…/releases/download/<tag>/robinhood-remake-linux.AppImage"
+rm -rf appimage && mkdir appimage
+./robinhood-remake-linux.AppImage --appimage-extract >/dev/null && mv squashfs-root/* appimage/
+```
+
+(The laptop has no FUSE, so the AppImage is always extracted, never mounted.)
 
 ## 8. Where the work happens, and how builds reach the players
 
@@ -137,6 +147,11 @@ Nothing about a session should require compiling on either player's machine.
 - Branch discipline: hotfixes land on `main` so the play build stays current;
   gameplay features go to their own branch and merge when they are ready to be
   played.
+- A CI-built Windows exe can be smoke-tested on the mini PC without Windows:
+  `WINEPREFIX=~/.cache/wine-rh wine robin.exe --version` prints the version and
+  would have caught the original startup crash.
+- The release workflow takes 30-50 minutes per platform on a cold cache; a
+  cache hit is far faster. Do not expect a dispatch to finish inside a session.
 
 ## 9. Gotchas that cost time (do not re-learn these)
 
