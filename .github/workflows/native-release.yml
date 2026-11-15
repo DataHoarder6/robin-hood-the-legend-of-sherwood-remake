@@ -223,6 +223,7 @@ jobs:
 
       - name: Verify Windows executable manifest
         if: matrix.runtime == 'win-x64'
+        shell: bash
         run: |
           ${{ matrix.python }} -m pip install pefile==2024.8.26
           ${{ matrix.python }} scripts/release/verify_windows_manifest.py "target/package-input/${{ matrix.pack_executable }}"
@@ -242,6 +243,7 @@ jobs:
 
       - name: Build Windows Velopack installers
         if: matrix.runtime == 'win-x64'
+        shell: bash
         run: |
           # TODO: Add Authenticode signing when repository signing credentials
           # are provisioned; unsigned public installers trigger OS warnings.
@@ -261,6 +263,7 @@ jobs:
 
       - name: Verify packaged Windows launcher manifests
         if: matrix.runtime == 'win-x64'
+        shell: bash
         run: |
           ${{ matrix.python }} scripts/release/verify_windows_manifest.py \
             target/velopack/io.github.phiresky.robinhood-win-Portable.zip \
@@ -268,6 +271,7 @@ jobs:
 
       - name: Build Linux Velopack AppImage
         if: matrix.runtime == 'linux-x64'
+        shell: bash
         run: |
           vpk pack \
             --packId io.github.phiresky.robinhood \
