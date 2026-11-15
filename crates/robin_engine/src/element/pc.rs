@@ -219,6 +219,15 @@ pub struct PcData {
     /// Engagement policy used by whichever controller owns combat decisions.
     #[serde(default)]
     pub combat_stance: CombatStance,
+    /// "Fight through, don't stop" perk: a move order issued by the player
+    /// survives swordfight entry and exit instead of being postponed into a
+    /// stand-and-fight.  Stamped onto the movement element as
+    /// `MoveFlags::FORCE_SWORD_MOVEMENT` when the order is built, so the
+    /// element keeps its destination and is not aborted when the last
+    /// opponent leaves.  Per-PC because it changes what the character does;
+    /// set through `PlayerCommand::SetKeepMovingInCombat`.
+    #[serde(default)]
+    pub keep_moving_in_combat: bool,
     /// Shared AI runtime used by AI-controlled heroes. Ordinary directly
     /// controlled heroes intentionally have no AI owner.
     #[serde(default)]
@@ -348,6 +357,7 @@ impl Default for PcData {
             command_interface: CommandInterface::HeroActions,
             mission_role: MissionRole::PlayerParty,
             combat_stance: CombatStance::Aggressive,
+            keep_moving_in_combat: false,
             ai: None,
             interface_hidden: false,
             current_action: Action::default(),

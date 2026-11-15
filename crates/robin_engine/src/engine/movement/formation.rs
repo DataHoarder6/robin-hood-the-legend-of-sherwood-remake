@@ -1211,6 +1211,24 @@ impl EngineInner {
                 *layer = pc_effective_layer;
             }
 
+            // "Fight through, don't stop": a flagged PC's order keeps its
+            // destination through swordfights. Stamping FORCE here is what
+            // `abort_orphaned_sword_movement` checks before retiring a
+            // sword-animated move once the last opponent leaves; without it a
+            // move that entered combat as WalkingWithSword is stopped when the
+            // fight ends, which is the cancellation the perk removes.
+            if self
+                .world
+                .entities
+                .get(*pc_id)
+                .and_then(|entity| entity.pc_data())
+                .is_some_and(|pc| pc.keep_moving_in_combat)
+                && let crate::sequence::SequenceElementData::Movement { flags, .. } =
+                    &mut move_elem.data
+            {
+                *flags |= crate::sequence::MoveFlags::FORCE_SWORD_MOVEMENT;
+            }
+
             // Append a `SpeakHeroReachDestination` element after
             // the move and cap the sequence with any
             // posture-cleanup sub-elements the PC needs (re-equip

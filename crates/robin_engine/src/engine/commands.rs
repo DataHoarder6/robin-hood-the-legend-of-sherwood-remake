@@ -282,6 +282,12 @@ impl EngineInner {
                 *pc_id,
                 crate::sequence::SequencePriority::Normal,
             ),
+            // Per-PC gameplay policy, not a player gesture: the perk system
+            // (and later the skill tree) sets it, and the value rides the
+            // command stream so replays and peers agree.
+            SetKeepMovingInCombat { pcs, enabled } => {
+                self.set_keep_moving_in_combat(pcs, *enabled)
+            }
 
             // ── Sequence-based interactions ──────────────────────
             LaunchInteraction { .. } => self.apply_launch_interaction_command(tcx, cmd),
@@ -1493,6 +1499,27 @@ impl EngineInner {
             unreachable!("apply_teleport_selected_to_point_command called for {cmd:?}")
         };
         self.manage_input_process_teleport(tcx, *dest, *layer, *sector);
+    }
+
+    /// Apply the "fight through, don't stop" perk to a set of PCs.
+    ///
+    /// The flag lives on `PcData` (serialised, state-hashed) and is read when a
+    /// player move order is built: a flagged PC's movement element carries
+    /// `MoveFlags::FORCE_SWORD_MOVEMENT`, which is exactly the condition
+    /// `abort_orphaned_sword_movement` tests before it retires a sword-animated
+    /// move.  Unknown or non-PC ids are ignored rather than panicking: the perk
+    /// system addresses PCs by entity id and a stale id must not kill the tick.
+    pub(crate) fn set_keep_moving_in_combat(&mut self, pcs: &[EntityId], enabled: bool) {
+        for &id in pcs {
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(id)
+                .and_then(|entity| entity.pc_data_mut())
+            {
+                pc.keep_moving_in_combat = enabled;
+            }
+        }
     }
 }
 

@@ -178,7 +178,8 @@ pub struct ReplayHeader {
 /// Version 69 stores the prepared passage availability bit on doors.
 /// Version 70 stores disconnected fragments of a shared sound emitter.
 /// Version 71 retains completed mission outcomes through speculative rollback.
-pub const REPLAY_SCHEMA_VERSION: u32 = 71;
+/// Version 72 adds the per-PC "fight through, don't stop" flag.
+pub const REPLAY_SCHEMA_VERSION: u32 = 72;
 
 /// Identity of the next lockstep/history transaction to be admitted.
 ///

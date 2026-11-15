@@ -1447,6 +1447,12 @@ pub enum PlayerCommand {
     SetExcludeRequiredKillsFromPreservedLives {
         enabled: bool,
     },
+    /// Set the "fight through, don't stop" perk on these PCs.  Appended to
+    /// preserve every current-main bitcode variant index.
+    SetKeepMovingInCombat {
+        pcs: Vec<EntityId>,
+        enabled: bool,
+    },
 }
 
 impl PlayerCommand {
@@ -1509,6 +1515,7 @@ impl PlayerCommand {
                 | Self::SetCleanHandsNpcKillsInvalidate { .. }
                 | Self::SetExcludeStartingDeadSoldiersFromPreservedLives { .. }
                 | Self::SetExcludeRequiredKillsFromPreservedLives { .. }
+                | Self::SetKeepMovingInCombat { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }
