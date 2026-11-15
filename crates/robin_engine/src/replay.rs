@@ -180,7 +180,8 @@ pub struct ReplayHeader {
 /// Version 71 retains completed mission outcomes through speculative rollback.
 /// Version 72 adds the per-PC "fight through, don't stop" flag.
 /// Version 73 adds the per-PC auto-loot flag.
-pub const REPLAY_SCHEMA_VERSION: u32 = 73;
+/// Version 74 adds the purchased-perk flags to campaign PC status.
+pub const REPLAY_SCHEMA_VERSION: u32 = 74;
 
 /// Identity of the next lockstep/history transaction to be admitted.
 ///

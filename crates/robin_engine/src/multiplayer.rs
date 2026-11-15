@@ -102,7 +102,8 @@ pub const INPUT_DELAY_FRAMES: u32 = 2;
 /// Protocol 67 carries cooperative campaign rules and shared Robin inventory.
 /// Protocol 68 carries the per-PC "fight through, don't stop" flag.
 /// Protocol 69 carries the per-PC auto-loot flag.
-pub const NET_PROTOCOL_VERSION: u32 = 69;
+/// Protocol 70 carries the purchased-perk flags on campaign PC status.
+pub const NET_PROTOCOL_VERSION: u32 = 70;
 
 /// Maximum bytes in one resumable full-mod transfer chunk. The outer native
 /// transport frame has a larger bound for engine snapshots, so content must
