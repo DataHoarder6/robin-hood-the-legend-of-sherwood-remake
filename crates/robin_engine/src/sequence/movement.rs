@@ -748,6 +748,11 @@ impl crate::engine::EngineInner {
             {
                 continue;
             }
+            let forced_sword_movement = matches!(
+                &elem.data,
+                SequenceElementData::Movement { flags, .. }
+                    if flags.contains(MoveFlags::FORCE_SWORD_MOVEMENT)
+            );
             // Without this priority gate, a weaker `Preference`-
             // priority stop would still rewrite the order of a
             // stronger `Script`-priority movement, causing a visual
@@ -757,6 +762,21 @@ impl crate::engine::EngineInner {
                 SequenceElementRef::new(seq_id, elem_idx),
                 resolver,
             ) < stop_priority
+            {
+                continue;
+            }
+            // "Fight through, don't stop": a forced sword movement outranks
+            // the fight-entry stop. Entering a swordfight prepares the
+            // opponent with `Stop(Preference)`; a movement stamped
+            // `FORCE_SWORD_MOVEMENT` keeps its order, destination and SEEK
+            // bit, so it walks on through the fight instead of being turned
+            // into a waiting transition or interrupted. Precedence is
+            // explicit and narrow: only the preference-level stop inside
+            // swordfight preparation is bypassed, so an injury, knockout or
+            // script stop still interrupts the movement.
+            if forced_sword_movement
+                && stop_priority == SequencePriority::Preference
+                && crate::engine::melee::in_swordfight_preparation(entity)
             {
                 continue;
             }
