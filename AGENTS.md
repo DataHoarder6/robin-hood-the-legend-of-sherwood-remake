@@ -25,9 +25,10 @@
 ## Building and testing
 
 - This workspace does not compile on every host. Build and test on the build
-  host: `scripts/remote-check.sh SUITE` copies this worktree there, runs the
-  suite inside the pinned devShell, and holds a per-copy lock so concurrent
-  agents queue instead of clobbering. `--list` and `--prune` manage the copies.
+  host: `scripts/remote-check.sh SUITE` copies this worktree there, wakes it
+  with `wake-host minipc` when it is off, runs the suite inside the pinned
+  devShell, and holds a per-copy lock so concurrent agents queue instead of
+  clobbering. `--list` and `--prune` manage the copies.
 - `nix develop` gives the same shell locally (it carries clang + wild, which is
   what `.cargo/config.toml` expects; without them every link warns and uses the
   slow system linker).
@@ -50,6 +51,10 @@
 - `README.md` has the binary, the dev game-data directory (`ROBINHOOD_DATA_DIR`)
   and the wasm workflow. Developer tools are `robin_rs` examples, built on
   demand with `cargo run -p robin_rs --example <name>`.
+- `docs/PLAY.md` is the map for playing: stable tag versus dev worktree, which
+  machine runs which, the minipc wake path, the laptop store-path copy, the
+  Windows reverse tunnel, and the version check before a shared session. Read it
+  before installing, shipping or playing a build.
 
 ## Replays
 

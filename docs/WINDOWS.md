@@ -5,7 +5,8 @@ Updated 2026-11-15, for `b471b1a12`.
 ## TL;DR — install the CI build, do not compile
 
 CI builds Windows natively with **MSVC on a Windows runner** (`.github/workflows/
-native-release.yml`). Every push of the fork's `main` produces two things:
+native-release.yml`). A `v*` tag, the nightly schedule, or a manual dispatch runs
+it — not every push. Each run publishes two things:
 
 - `robin-windows-x86_64-exe` — the bare `robin.exe`, for replacing an install in
   one file copy;
@@ -24,7 +25,8 @@ it is present on any machine that has ever built the game, and the Velopack
 installer adds it.
 
 Both players must run the **same commit**: multiplayer binds the engine commit
-and protocol version, and a mismatch refuses the join.
+and protocol version, and a mismatch refuses the join. [PLAY.md](PLAY.md) says
+which channel each machine should be on.
 
 ## Building it yourself (development only)
 

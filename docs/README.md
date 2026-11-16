@@ -4,6 +4,7 @@
 
 - [Project quick start and platform overview](../README.md)
 - [Testing and feature matrix](TESTING.md)
+- [Playing: stable and dev builds](PLAY.md) — the channel each machine runs, delivery, and the version check before a shared session
 - [Coordinates](COORDINATES.md), [rendering](RENDERING.md), and [gameplay profiling](GAMEPLAY_PROFILING.md)
 - [Game data distributions](DATADIRS.md)
 - [Multiplayer](MULTIPLAYER.md), [campaign history](CAMPAIGN_HISTORY.md), and [Spellforge](SPELLFORGE.md)
