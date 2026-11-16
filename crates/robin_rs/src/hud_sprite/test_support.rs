@@ -23,5 +23,5 @@ pub(crate) fn verify_gpu_ownership(renderer: &mut Renderer) {
     }
     verify::<crate::zoom_hud::ZoomButton, 2>(renderer);
     verify::<crate::stature_hud::StatureButton, 2>(renderer);
-    verify::<crate::sherwood_hud::SherwoodButton, 5>(renderer);
+    verify::<crate::sherwood_hud::SherwoodButton, 6>(renderer);
 }

@@ -299,6 +299,7 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
             host: &mut *host,
             callbacks: &mut *callbacks,
             assets,
+            portrait_cache: &presentation.sprites.portrait_cache,
             window: &mut *window,
             renderer: &mut presentation.renderer,
             menu_resources: &mut resources.menu,

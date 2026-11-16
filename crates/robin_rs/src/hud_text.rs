@@ -140,6 +140,33 @@ impl HudFonts {
 
 // ─── Entity name helpers ─────────────────────────────────────────
 
+/// Display label for a PC looked up by profile index.
+///
+/// Retail heroes resolve through [`engine_character_kind::CharacterKind`]: the
+/// portrait cache's localized name when loaded, else the profile's internal
+/// name.  Mod-added PCs have no `CharacterKind` and use the profile's own
+/// host-facing label.
+pub(crate) fn profile_character_display_name<'a>(
+    profiles: &'a profiles::ProfileManager,
+    portraits: &'a PortraitCache,
+    profile_index: profiles::CharacterProfileIdx,
+) -> Option<Cow<'a, str>> {
+    let profile = profiles.get_character(profile_index)?;
+    if let Some(kind) =
+        engine_character_kind::CharacterKind::from_profile(&profile.filename, &profile.profile_name)
+    {
+        if let Some(localized) = portraits.get_localized_name(kind) {
+            return Some(Cow::Borrowed(localized));
+        }
+        return Some(Cow::Borrowed(kind.profile_name()));
+    }
+    Some(if profile.display_name.is_empty() {
+        Cow::Borrowed(profile.profile_name.as_str())
+    } else {
+        Cow::Borrowed(profile.display_name.as_str())
+    })
+}
+
 /// Get the display name for an entity from host-side profile data.
 ///
 /// PCs and soldiers resolve through the campaign's profile tables

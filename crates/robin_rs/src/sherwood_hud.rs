@@ -1,5 +1,5 @@
 //! Sherwood-mission HUD buttons (DisplayCampaignMap, GoToExit,
-//! StartMission, QuitMission, SherwoodTrading).
+//! StartMission, QuitMission, SherwoodTrading, PerksPanel).
 //!
 //! Only the logical layout + hit-test + enabled-state machine is
 //! implemented here; visual polish (proper sprite backgrounds, tooltips,
@@ -26,7 +26,7 @@ use crate::gfx_types::{Point, Rect as ScreenRect};
 use crate::ingame_menu::layout::{BTN_STATE_HOVER, BTN_STATE_NORMAL, button_sprite_state};
 use crate::renderer::Renderer;
 use robin_engine::resource_ids::{
-    RHID_CONVERT_MONEY_TO_BLAZONS, RHID_DISPLAY_CAMPAIGN_MAP, RHID_FLOATING_CANCEL,
+    RHID_CLOVER, RHID_CONVERT_MONEY_TO_BLAZONS, RHID_DISPLAY_CAMPAIGN_MAP, RHID_FLOATING_CANCEL,
     RHID_FLOATING_OK, RHID_GO_TO_EXIT,
 };
 
@@ -43,6 +43,8 @@ pub enum SherwoodButton {
     QuitMission,
     /// Open the post-port Sherwood inventory-trading panel.
     SherwoodTrading,
+    /// Open the permanent-perk purchase panel.
+    PerksPanel,
 }
 
 /// Which Sherwood buttons are interactable this frame.
@@ -58,6 +60,7 @@ pub struct SherwoodButtonEnable {
     pub start_mission: bool,
     pub quit_mission: bool,
     pub sherwood_trading: bool,
+    pub perks_panel: bool,
 }
 
 impl SherwoodButtonEnable {
@@ -68,6 +71,7 @@ impl SherwoodButtonEnable {
             start_mission: enabled,
             quit_mission: false,
             sherwood_trading: false,
+            perks_panel: false,
         }
     }
 
@@ -82,6 +86,7 @@ impl SherwoodButtonEnable {
             start_mission: false,
             quit_mission: false,
             sherwood_trading: false,
+            perks_panel: true,
         }
     }
 
@@ -98,6 +103,7 @@ impl SherwoodButtonEnable {
             start_mission: false,
             quit_mission: true,
             sherwood_trading: false,
+            perks_panel: true,
         }
     }
 
@@ -179,7 +185,7 @@ impl SherwoodButtonEnable {
     }
 }
 
-/// Screen-space bounding boxes for the four Sherwood HUD buttons.
+/// Screen-space bounding boxes for the Sherwood HUD buttons.
 #[derive(Debug, Clone, Copy)]
 pub struct SherwoodHudLayout {
     pub display_campaign_map: ScreenRect,
@@ -187,6 +193,7 @@ pub struct SherwoodHudLayout {
     pub start_mission: ScreenRect,
     pub quit_mission: ScreenRect,
     pub sherwood_trading: ScreenRect,
+    pub perks_panel: ScreenRect,
 }
 
 impl SherwoodHudLayout {
@@ -219,6 +226,7 @@ impl SherwoodHudLayout {
         let start_y = 105;
         let quit_y = 150;
         let trading_y = 195;
+        let perks_y = 240;
 
         let (dcm_w, dcm_h) = sprites
             .size(SherwoodButton::DisplayCampaignMap)
@@ -235,6 +243,9 @@ impl SherwoodHudLayout {
         let (trade_w, trade_h) = sprites
             .size(SherwoodButton::SherwoodTrading)
             .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
+        let (perks_w, perks_h) = sprites
+            .size(SherwoodButton::PerksPanel)
+            .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
 
         Self {
             display_campaign_map: ScreenRect::new(wide_x, wide_y, dcm_w as u32, dcm_h as u32),
@@ -242,6 +253,7 @@ impl SherwoodHudLayout {
             start_mission: ScreenRect::new(tall_x, start_y, sm_w as u32, sm_h as u32),
             quit_mission: ScreenRect::new(tall_x, quit_y, qm_w as u32, qm_h as u32),
             sherwood_trading: ScreenRect::new(tall_x, trading_y, trade_w as u32, trade_h as u32),
+            perks_panel: ScreenRect::new(tall_x, perks_y, perks_w as u32, perks_h as u32),
         }
     }
 
@@ -266,6 +278,9 @@ impl SherwoodHudLayout {
         if enable.sherwood_trading && self.sherwood_trading.contains_point(pt) {
             return Some(SherwoodButton::SherwoodTrading);
         }
+        if enable.perks_panel && self.perks_panel.contains_point(pt) {
+            return Some(SherwoodButton::PerksPanel);
+        }
         None
     }
 
@@ -287,16 +302,17 @@ impl SherwoodHudLayout {
     }
 }
 
-pub type SherwoodButtonSprites = crate::hud_sprite::ButtonSprites<SherwoodButton, 5>;
+pub type SherwoodButtonSprites = crate::hud_sprite::ButtonSprites<SherwoodButton, 6>;
 pub type SherwoodHoverState = crate::hud_sprite::HoverState<SherwoodButton>;
 
-impl crate::hud_sprite::HudButton<5> for SherwoodButton {
-    const ALL: [Self; 5] = [
+impl crate::hud_sprite::HudButton<6> for SherwoodButton {
+    const ALL: [Self; 6] = [
         Self::DisplayCampaignMap,
         Self::GoToExit,
         Self::StartMission,
         Self::QuitMission,
         Self::SherwoodTrading,
+        Self::PerksPanel,
     ];
     fn index(self) -> usize {
         self as usize
@@ -308,6 +324,7 @@ impl crate::hud_sprite::HudButton<5> for SherwoodButton {
             Self::StartMission => (RHID_FLOATING_OK, "StartMission"),
             Self::QuitMission => (RHID_FLOATING_CANCEL, "QuitMission"),
             Self::SherwoodTrading => (RHID_CONVERT_MONEY_TO_BLAZONS, "SherwoodTrading"),
+            Self::PerksPanel => (RHID_CLOVER, "PerksPanel"),
         }
     }
     fn frame_state(self, state: usize, frame_counter: u32) -> usize {
@@ -323,7 +340,7 @@ impl crate::hud_sprite::HudButton<5> for SherwoodButton {
     fn shadow(self) -> bool {
         matches!(
             self,
-            Self::StartMission | Self::QuitMission | Self::SherwoodTrading
+            Self::StartMission | Self::QuitMission | Self::SherwoodTrading | Self::PerksPanel
         )
     }
 }
@@ -361,6 +378,11 @@ pub fn draw_with_sprites(
             &layout.sherwood_trading,
             enable.sherwood_trading,
             SherwoodButton::SherwoodTrading,
+        ),
+        (
+            &layout.perks_panel,
+            enable.perks_panel,
+            SherwoodButton::PerksPanel,
         ),
     ];
 
@@ -417,6 +439,9 @@ pub fn sherwood_button_tooltip_mt_id(
         SherwoodButton::SherwoodTrading => {
             Some(crate::ingame_menu::resources::MT_TTL_SHERWOOD_TRADING)
         }
+        SherwoodButton::PerksPanel => {
+            Some(crate::ingame_menu::resources::MT_INFOBULLE_BUTTON_PERKS)
+        }
         // DisplayCampaignMap / GoToExit use their own fixed menu-text
         // IDs (`MT_INFOBULLE_QG_SELECT_MISSION` = 299 and
         // `MT_INFOBULLE_QG_DEPLOY` = 296), set once at initialization.
@@ -451,6 +476,7 @@ mod tests {
                 && !enable.go_to_exit
                 && !enable.display_campaign_map
                 && !enable.sherwood_trading
+                && !enable.perks_panel
         );
     }
 
@@ -470,6 +496,7 @@ mod tests {
         assert_eq!(layout.start_mission.y(), 105);
         assert_eq!(layout.quit_mission.y(), 150);
         assert_eq!(layout.sherwood_trading.y(), 195);
+        assert_eq!(layout.perks_panel.y(), 240);
     }
 
     #[test]
@@ -502,6 +529,28 @@ mod tests {
         assert_eq!(
             layout.hit_test(pt_trade.0, pt_trade.1, trading),
             Some(SherwoodButton::SherwoodTrading)
+        );
+    }
+
+    #[test]
+    fn perks_panel_is_a_sherwood_only_live_button() {
+        let sprites = SherwoodButtonSprites::default();
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
+        let point = (layout.perks_panel.x() + 1, layout.perks_panel.y() + 1);
+
+        assert!(SherwoodButtonEnable::pre_commit().perks_panel);
+        assert!(SherwoodButtonEnable::post_commit().perks_panel);
+        assert_eq!(
+            layout.hit_test(point.0, point.1, SherwoodButtonEnable::pre_commit()),
+            Some(SherwoodButton::PerksPanel)
+        );
+
+        // The non-Sherwood (won mission) enable mask never exposes the perks
+        // panel, so it cannot be opened outside Sherwood.
+        assert!(!SherwoodButtonEnable::won_mission(true).perks_panel);
+        assert_eq!(
+            layout.hit_test(point.0, point.1, SherwoodButtonEnable::won_mission(true)),
+            None
         );
     }
 

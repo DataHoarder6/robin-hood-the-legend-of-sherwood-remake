@@ -20,6 +20,7 @@
 //! - [`dialogue`] — character dialogues with per-sentence audio, mouth
 //!   animation and auto-advance timer.
 //! - [`options`] — the in-mission options hub.
+//! - [`perks_panel`] — the Sherwood permanent-perk purchase panel.
 //! - [`graphics`] — resolution + visual toggles.
 //! - [`sounds`] — stereo/EAX radios and volume sliders.
 //! - [`shortcuts`] — keyboard binding editor with click-to-rebind mode.
@@ -41,6 +42,7 @@ pub mod modal_net;
 pub mod multiplayer_privacy;
 pub mod options;
 pub mod pause;
+pub mod perks_panel;
 pub mod popup_scroll;
 pub mod resources;
 pub mod save_load;
@@ -65,6 +67,7 @@ pub use mission_state::MissionStatePopupState;
 pub use modal_net::ModalNet;
 pub use options::{OptionsOutcome, OptionsTargets, show_options};
 pub use pause::{PauseMenu, PauseMenuOutcome};
+pub use perks_panel::{PerksPanelModalState, PerksPanelOutcome, campaign_rows};
 pub(crate) use popup_scroll::show_popup_scroll;
 pub use popup_scroll::{PopupScrollItem, PopupScrollModalState};
 pub use resources::{IngameMenuResources, MenuSurface};

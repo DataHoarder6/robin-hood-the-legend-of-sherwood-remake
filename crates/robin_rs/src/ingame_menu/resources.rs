@@ -314,6 +314,21 @@ pub const MT_STR_TRADE_REASON_ITEM: usize = 1_023;
 pub const MT_STR_TRADE_REASON_STOCK: usize = 1_024;
 pub const MT_STR_TRADE_REASON_OVERFLOW: usize = 1_025;
 
+// Sherwood perks-panel extension strings, in the same extension range as the
+// trading strings above.  English fallbacks are the complete text when no
+// extended locale pack supplies these ids.
+pub const MT_TTL_SHERWOOD_PERKS: usize = 1_026;
+pub const MT_INFOBULLE_BUTTON_PERKS: usize = 1_027;
+pub const MT_STR_PERK_ROW: usize = 1_028;
+pub const MT_STR_PERK_OWNED: usize = 1_029;
+pub const MT_STR_PERK_AFFORDABLE: usize = 1_030;
+pub const MT_STR_PERK_UNAFFORDABLE: usize = 1_031;
+pub const MT_STR_PERK_KEEP_MOVING_IN_COMBAT: usize = 1_032;
+pub const MT_STR_PERK_AUTO_LOOT: usize = 1_033;
+pub const MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE: usize = 1_034;
+pub const MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK: usize = 1_035;
+pub const MT_STR_PERK_HINT: usize = 1_036;
+
 // Per-button tooltip menu-text ids.
 pub const MT_INFOBULLE_BUTTON_PLAY_MISSION: usize = 323;
 pub const MT_INFOBULLE_BUTTON_FARMERS_TO_BLAZON: usize = 325;
@@ -706,6 +721,26 @@ static DEFAULT_FALLBACKS: &[(usize, &str)] = &[
     (
         MT_STR_TRADE_REASON_OVERFLOW,
         "the ransom total cannot hold the proceeds",
+    ),
+    (MT_TTL_SHERWOOD_PERKS, "Sherwood perks"),
+    (MT_INFOBULLE_BUTTON_PERKS, "Buy permanent perks"),
+    (MT_STR_PERK_ROW, "%s — %s — £%u — %s"),
+    (MT_STR_PERK_OWNED, "owned"),
+    (MT_STR_PERK_AFFORDABLE, "available"),
+    (MT_STR_PERK_UNAFFORDABLE, "not enough ransom"),
+    (MT_STR_PERK_KEEP_MOVING_IN_COMBAT, "Keep moving in combat"),
+    (MT_STR_PERK_AUTO_LOOT, "Loot the knocked-out"),
+    (
+        MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
+        "No friendly-fire damage",
+    ),
+    (
+        MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK,
+        "No friendly-fire knockback",
+    ),
+    (
+        MT_STR_PERK_HINT,
+        "Choose with Up/Down, buy with Enter, close with Escape.",
     ),
     (MT_STR_DB_S06, "You collected %u gold pieces."),
     (MT_STR_DB_S07, "%u of %u enemy soldiers still alive."),
@@ -2271,7 +2306,7 @@ mod tests {
         for (key, text) in DEFAULT_FALLBACKS {
             assert_eq!(map.get(key), Some(text));
         }
-        assert_eq!(DEFAULT_FALLBACKS.len(), 229);
+        assert_eq!(DEFAULT_FALLBACKS.len(), 239);
         assert_eq!(map.get(&MT_BTN_START_GAME), Some(&"Start Game"));
         assert_eq!(map.get(&MT_BTN_SHOW_CREDITS), Some(&"Show Credits"));
         assert_eq!(map.get(&MT_STR_KEY_PAUSE), Some(&"Pause"));
