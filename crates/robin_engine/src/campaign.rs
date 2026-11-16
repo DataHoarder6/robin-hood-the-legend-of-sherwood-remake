@@ -21,7 +21,7 @@ use crate::campaign_history::{
     MissionAttemptKind, MissionAttemptOutcome,
 };
 use crate::mission::{Mission, MissionStatus};
-use crate::pc_status::{LIFEPOINTS_PC, PcStatus, SkillName};
+use crate::pc_status::{LIFEPOINTS_PC, PcStatus, Perk, SkillName};
 use crate::player_profile::DifficultyLevel;
 use crate::profiles::{CharacterProfileIdx, MissionType, ProfileManager};
 
@@ -162,6 +162,69 @@ pub struct PcDescription {
     pub instanced: bool,
     /// Dynamic status: HP, skills, inventory.
     pub status: PcStatus,
+}
+
+// ─── Perk purchase rows ─────────────────────────────────────────
+
+/// One purchasable perk on one campaign character.
+///
+/// This is presentation-neutral: the client turns `perk` into a localized
+/// label and `character_name` is the campaign record's display name.  The
+/// fields exist so the panel's enablement and row states can be asserted
+/// without a renderer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerkPurchaseRow {
+    /// Index into [`Campaign::characters`], the identity the purchase
+    /// command takes.
+    pub character_idx: u16,
+    /// Campaign character name at the time the rows were built.
+    pub character_name: String,
+    pub perk: Perk,
+    /// Ransom price from the single price table, [`Perk::price`].
+    pub price: i32,
+    /// The current ransom covers this price.  Independent of `owned`; the
+    /// panel treats owned rows as unavailable regardless.
+    pub affordable: bool,
+    /// The character's campaign `PcStatus` already records this perk.
+    pub owned: bool,
+}
+
+/// Build the perk panel's rows from campaign characters and the current
+/// ransom.
+///
+/// `character_names` runs parallel to `characters` and is the host-resolved
+/// display name for each entry: `PcStatus::name` is empty for characters that
+/// never spawned, while the label belongs to the profile the host loaded.
+///
+/// Pure so the "button enabled" and "row affordable" questions can be tested
+/// without a campaign, a renderer or a window.
+pub fn perk_purchase_rows(
+    characters: &[PcDescription],
+    character_names: &[String],
+    ransom: i32,
+) -> Vec<PerkPurchaseRow> {
+    assert_eq!(
+        characters.len(),
+        character_names.len(),
+        "perk purchase rows need one name per campaign character"
+    );
+    let mut rows = Vec::with_capacity(characters.len() * Perk::ALL.len());
+    for (index, (character, name)) in characters.iter().zip(character_names).enumerate() {
+        let character_idx = u16::try_from(index)
+            .expect("campaign character index does not fit the purchase command's u16");
+        for perk in Perk::ALL {
+            let price = perk.price();
+            rows.push(PerkPurchaseRow {
+                character_idx,
+                character_name: name.clone(),
+                perk,
+                price,
+                affordable: ransom >= price,
+                owned: character.status.has_perk(perk),
+            });
+        }
+    }
+    rows
 }
 
 // ─── Campaign ────────────────────────────────────────────────────
@@ -2520,6 +2583,22 @@ impl Campaign {
         (m.get_blazon_price() as i32) <= ransom && current_blazons < needed
     }
 
+    /// Every perk purchase a player can see in the Sherwood perks panel.
+    ///
+    /// One row per `(campaign character, perk)`, in character table order and
+    /// [`Perk::ALL`] order.  `character_names` comes from the host's profile
+    /// table (see [`perk_purchase_rows`]); prices come from [`Perk::price`] and
+    /// the current ransom decides affordability.  `owned` is the `PcStatus` bit
+    /// the authoritative purchase command reads, so the panel and the command
+    /// cannot disagree about what has been bought.
+    pub fn perk_purchase_rows(&self, character_names: &[String]) -> Vec<PerkPurchaseRow> {
+        perk_purchase_rows(
+            &self.characters,
+            character_names,
+            self.get_value(CampaignValue::Ransom),
+        )
+    }
+
     // ── find_character ───────────────────────────────────────────────
 
     /// Check if a character (by profile index) is present in a team.
@@ -4266,5 +4345,94 @@ mod tests {
         // When min == max, always returns that value regardless of ratio
         let count = calculate_warcrime_recruitment(10, 0, DifficultyLevel::Medium, 3, 3);
         assert_eq!(count, 3);
+    }
+
+    fn perk_row_character(owned: &[Perk]) -> PcDescription {
+        let mut description = PcDescription::default();
+        for perk in owned {
+            description.status.grant_perk(*perk);
+        }
+        description
+    }
+
+    #[test]
+    fn perk_rows_cover_every_character_and_perk_in_order() {
+        let characters = [perk_row_character(&[]), perk_row_character(&[])];
+        let names = ["Robin".to_owned(), "Little John".to_owned()];
+        let rows = perk_purchase_rows(&characters, &names, 200);
+
+        assert_eq!(rows.len(), 2 * Perk::ALL.len());
+        for (index, row) in rows.iter().enumerate() {
+            assert_eq!(row.character_idx, (index / Perk::ALL.len()) as u16);
+            assert_eq!(row.perk, Perk::ALL[index % Perk::ALL.len()]);
+            assert_eq!(row.price, row.perk.price());
+        }
+        assert_eq!(rows[0].character_name, "Robin");
+        assert_eq!(rows[Perk::ALL.len()].character_name, "Little John");
+    }
+
+    #[test]
+    fn perk_rows_report_affordability_against_the_current_ransom() {
+        let characters = [perk_row_character(&[])];
+        let names = ["Robin".to_owned()];
+        let affordable = perk_purchase_rows(&characters, &names, 200);
+        assert!(affordable.iter().all(|row| row.affordable));
+
+        let short = perk_purchase_rows(&characters, &names, 199);
+        assert!(short.iter().all(|row| !row.affordable && !row.owned));
+    }
+
+    #[test]
+    fn perk_rows_report_owned_perks_for_the_character_that_bought_them() {
+        let characters = [
+            perk_row_character(&[Perk::KeepMovingInCombat]),
+            perk_row_character(&[Perk::AutoLoot, Perk::NoFriendlyFireDamage]),
+        ];
+        let names = ["Robin".to_owned(), "Little John".to_owned()];
+        let rows = perk_purchase_rows(&characters, &names, 10_000);
+
+        let robin = rows
+            .iter()
+            .find(|row| row.character_idx == 0 && row.perk == Perk::KeepMovingInCombat)
+            .expect("Robin's keep-moving row");
+        assert!(robin.owned && robin.affordable);
+
+        let john_auto = rows
+            .iter()
+            .find(|row| row.character_idx == 1 && row.perk == Perk::AutoLoot)
+            .expect("Little John's auto-loot row");
+        assert!(john_auto.owned);
+
+        let john_knockback = rows
+            .iter()
+            .find(|row| row.character_idx == 1 && row.perk == Perk::NoFriendlyFireKnockback)
+            .expect("Little John's knockback row");
+        assert!(!john_knockback.owned);
+        assert_eq!(
+            rows.iter().filter(|row| row.owned).count(),
+            3,
+            "only the three explicitly granted perks are owned"
+        );
+    }
+
+    #[test]
+    fn campaign_perk_rows_read_the_live_ransom() {
+        let mut campaign = Campaign::default();
+        campaign.characters.push(perk_row_character(&[]));
+        let names = ["Robin".to_owned()];
+        campaign.set_value(CampaignValue::Ransom, 200);
+        assert!(
+            campaign
+                .perk_purchase_rows(&names)
+                .iter()
+                .all(|row| row.affordable)
+        );
+        campaign.set_value(CampaignValue::Ransom, 0);
+        assert!(
+            campaign
+                .perk_purchase_rows(&names)
+                .iter()
+                .all(|row| !row.affordable)
+        );
     }
 }
