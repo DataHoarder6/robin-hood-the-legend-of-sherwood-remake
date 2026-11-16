@@ -1,41 +1,67 @@
 {
-  description = "Robin Hood: The Legend of Sherwood — Rust port development shell";
+  description = "Robin Hood: The Legend of Sherwood — Rust port development shell and package";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # `rust-toolchain.toml` pins a nightly, which nixpkgs does not package.
+    # rust-overlay resolves that same pinned nightly from its official dist
+    # manifest; it adds no second toolchain, only a source for the pinned one.
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, rust-overlay }:
     let
       lib = nixpkgs.lib;
       systems = [
         "x86_64-linux"
         "aarch64-linux"
       ];
-      forAllSystems = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+
+      # One package set for every output: the devShell and the package then see
+      # the same nixpkgs pin and the same overlays.
+      forAllSystems =
+        f:
+        lib.genAttrs systems (
+          system:
+          f (import nixpkgs {
+            inherit system;
+            overlays = [ (import rust-overlay) ];
+          })
+        );
+
+      # Single source for the compiler: `rust-toolchain.toml` is what rustup
+      # honours in the devShell, and the package asks rust-overlay for the same
+      # channel instead of compiling with the nixpkgs default.
+      pinnedChannel = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain.channel;
+      pinnedNightly = lib.removePrefix "nightly-" pinnedChannel;
+
+      # `build-support/robin_build.rs` stamps the commit into the binary so the
+      # replay format and multiplayer ticket carry it. A Nix build has no
+      # `.git`, so the commit is supplied from the flake's own git metadata and
+      # never guessed.
+      gitHash =
+        if self ? rev then
+          self.rev
+        else if self ? dirtyRev then
+          lib.removeSuffix "-dirty" self.dirtyRev
+        else
+          throw ''
+            packages.robin needs the source commit for build identity: build from a
+            git checkout or a git flake ref so `self.rev` exists, not a plain path.'';
     in
     {
       devShells = forAllSystems (
         pkgs:
         let
-          # The binary dlopens Xlib/wayland/pulse at startup, and mkShell only
+          # `robin` dlopens Xlib/wayland/pulse at startup, and mkShell only
           # puts packages on PATH, so their libraries need an explicit
           # LD_LIBRARY_PATH. Without it winit dies with "Failed to load one of
           # xlib's shared libraries" the moment a window opens.
-          runtimeLibs = with pkgs; [
-            libx11
-            libxcursor
-            libxi
-            libxrandr
-            libxcb
-            libxkbcommon
-            wayland
-            alsa-lib
-            dbus
-            libpulseaudio
-            systemd
-            mesa
-            vulkan-loader
-          ];
+          runtimeLibs = import ./nix/runtime-libs.nix pkgs;
         in
         {
           default = pkgs.mkShell {
@@ -69,5 +95,28 @@
           };
         }
       );
+
+      packages = forAllSystems (pkgs: {
+        robin = pkgs.callPackage ./nix/robin.nix {
+          # The pinned nightly, not nixpkgs' stable rustc: Cargo.toml uses
+          # `cargo-features` and `[unstable]`, which stable cargo rejects.
+          rustPlatform = pkgs.makeRustPlatform {
+            rustc = pkgs.rust-bin.nightly.${pinnedNightly}.minimal;
+            cargo = pkgs.rust-bin.nightly.${pinnedNightly}.minimal;
+          };
+          runtimeLibs = import ./nix/runtime-libs.nix pkgs;
+          inherit gitHash;
+        };
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.robin;
+      });
+
+      apps = forAllSystems (pkgs: {
+        robin = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.robin}/bin/robin";
+          meta.description = "Robin Hood: The Legend of Sherwood (Rust port)";
+        };
+        default = self.apps.${pkgs.stdenv.hostPlatform.system}.robin;
+      });
     };
 }
