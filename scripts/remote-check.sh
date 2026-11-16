@@ -64,7 +64,8 @@ name=$(copy_name "${2:-}")
 
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
-suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 | sed -n 's/^suites: //p')
+suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
+suites=${suites#*suites: }
 case " $suites " in
     *" $suite "*) ;;
     *)
@@ -80,10 +81,44 @@ lock="$remote_dir.lock"
 printf 'remote-check: %s %s -> %s:%s\n' "$suite" "$repository" "$host" "$remote_dir" >&2
 
 # --delete keeps a copy faithful to this worktree; the Cargo target directory
-# is excluded so the copy keeps its build cache across runs.
+# is excluded so the copy keeps its build cache across runs. The `.git` on the
+# build host is the copy's own (see below); a worktree's is a file naming a
+# gitdir that only exists here, so it must not travel.
 rsync -a --delete \
     --exclude target \
     --exclude .worktrees \
+    --exclude .git \
     "$repository/" "$host:$remote_dir/"
 
-ssh "$host" "mkdir -p ~/$remote_root && cd $remote_dir && exec systemd-inhibit --what=idle:sleep --why='check-quality $suite' flock -w 7200 $lock nix develop --command bash scripts/check-quality.sh $suite"
+ssh "$host" bash -s <<EOF
+set -euo pipefail
+mkdir -p ~/$remote_root
+cd $remote_dir
+# build-support/robin_build.rs stamps ROBIN_GIT_HASH from "git rev-parse HEAD",
+# and the replay format rejects anything that is not 12 lowercase hex. A copy
+# with no usable repository stamps "unknown", and the replay and leaderboard
+# suites then fail version validation (27 tests, 2026-11-15). The copy needs a
+# real repository rather than a stub ref, because "nix develop" resolves this
+# directory as a git flake and hashes its tree.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    rm -rf .git
+    git init -q -b main .
+fi
+EOF
+
+# Send this checkout's objects, incrementally, and point the copy's HEAD at
+# them. The rsync'd working tree stays untouched, so uncommitted changes are
+# still what the suite compiles.
+git -C "$repository" push -q --force "$host:$remote_dir/.git" HEAD:refs/robin/check
+
+ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+git update-ref refs/heads/main refs/robin/check
+git symbolic-ref HEAD refs/heads/main
+git reset -q
+git rev-parse HEAD
+exec systemd-inhibit --what=idle --why='check-quality $suite' \
+    flock -w 7200 $lock \
+    nix develop --command bash scripts/check-quality.sh $suite
+EOF
