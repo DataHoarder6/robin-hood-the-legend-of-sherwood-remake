@@ -1,6 +1,6 @@
 # Building and running on Windows
 
-Updated 2026-11-15, for `b471b1a12`.
+Updated 2026-11-16, for `b471b1a12`.
 
 ## TL;DR — install the CI build, do not compile
 
@@ -148,8 +148,9 @@ array.
 
 ## Linux and NixOS
 
-- Build inside `nix-shell -p ...`, not `nix shell ...`: only the former
-  populates `PKG_CONFIG_PATH`, and `libdbus-sys` panics without `dbus-1.pc`.
-- The built binary needs an FHS library set: winit `dlopen`s libwayland, so a
-  plain `nix-shell --run` fails with `The wayland library could not be loaded`.
-  Run it through `nix run --impure nixpkgs#steam-run -- ./target/release/robin`.
+- Build and run from the packaged output instead of a hand-built shell; see
+  [NIX.md](NIX.md) for the package contents, build identity and the `nix copy` install
+  path. The package wrapper supplies the X11/Wayland/GL/Vulkan library set that winit
+  and wgpu `dlopen`, so `steam-run` is no longer part of running the game on NixOS.
+- `nix develop` (not `nix shell`) is the build shell: only a full devShell populates
+  `PKG_CONFIG_PATH`, and `libdbus-sys` panics without `dbus-1.pc`.
