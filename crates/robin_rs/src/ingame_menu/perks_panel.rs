@@ -534,7 +534,6 @@ mod tests {
 
     #[test]
     fn escape_closes_without_a_command() {
-        let resources = IngameMenuResources::stub();
         let mut state = panel(1_000);
         let outcome = state.handle_events(
             &key(crate::gfx_types::Keycode::Escape),
