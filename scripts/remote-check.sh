@@ -36,10 +36,27 @@ copy_name() {
 }
 
 require_host() {
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
-        printf 'remote-check: %s is unreachable. Wake it with `wake-host build-host` and retry.\n' "$host" >&2
-        exit 1
+    if ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
+        return 0
     fi
+    if [ "$host" = build-host ]; then
+        if ! command -v wake-host >/dev/null; then
+            printf 'remote-check: %s is unreachable and wake-host is not on PATH.\n' "$host" >&2
+            exit 1
+        fi
+        printf 'remote-check: %s is off; waking it with `wake-host build-host`.\n' "$host" >&2
+        wake-host build-host || true
+        # WOL is fire-and-forget, so poll the ssh port for the boot budget.
+        for _ in $(seq 60); do
+            if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
+                printf 'remote-check: %s is up.\n' "$host" >&2
+                return 0
+            fi
+            sleep 2
+        done
+    fi
+    printf 'remote-check: %s is unreachable. Wake it with `wake-host %s` and retry.\n' "$host" "$host" >&2
+    exit 1
 }
 
 case "${1:-}" in
