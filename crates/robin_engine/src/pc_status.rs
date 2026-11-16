@@ -249,26 +249,14 @@ pub enum Perk {
     NoFriendlyFireKnockback = 3,
 }
 
-/// Ransom price of [`Perk::KeepMovingInCombat`].
+/// Clover cost of one perk, uniform for every perk.
 ///
-/// PLACEHOLDER.  The perk line's cost curve is not designed yet, so every perk
-/// costs the same flat round number; the price exists to make the purchase
-/// command and its affordability check provable.  A later change replaces
-/// these constants with the designed curve and moves the purchase tests
-/// with them.  Nothing else may hardcode a perk price.
-pub const PERK_PRICE_KEEP_MOVING_IN_COMBAT: i32 = 200;
-
-/// Ransom price of [`Perk::AutoLoot`].  PLACEHOLDER, see
-/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
-pub const PERK_PRICE_AUTO_LOOT: i32 = 200;
-
-/// Ransom price of [`Perk::NoFriendlyFireDamage`].  PLACEHOLDER, see
-/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
-pub const PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE: i32 = 200;
-
-/// Ransom price of [`Perk::NoFriendlyFireKnockback`].  PLACEHOLDER, see
-/// [`PERK_PRICE_KEEP_MOVING_IN_COMBAT`].
-pub const PERK_PRICE_NO_FRIENDLY_FIRE_KNOCKBACK: i32 = 200;
+/// PLACEHOLDER.  The skill tree's tiers are not designed yet, so every perk in
+/// the line costs the same flat one clover; the cost exists to make the
+/// purchase command and its affordability check provable.  A later change
+/// replaces this constant with the designed tiers and moves the purchase tests
+/// with it.  Nothing else may hardcode a perk cost.
+pub const PERK_CLOVER_COST: i32 = 1;
 
 impl Perk {
     /// Every perk a character can buy, in panel order.
@@ -279,14 +267,10 @@ impl Perk {
         Self::NoFriendlyFireKnockback,
     ];
 
-    /// What the character must pay in ransom to buy this perk.
-    pub const fn price(self) -> i32 {
-        match self {
-            Self::KeepMovingInCombat => PERK_PRICE_KEEP_MOVING_IN_COMBAT,
-            Self::AutoLoot => PERK_PRICE_AUTO_LOOT,
-            Self::NoFriendlyFireDamage => PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE,
-            Self::NoFriendlyFireKnockback => PERK_PRICE_NO_FRIENDLY_FIRE_KNOCKBACK,
-        }
+    /// What the character must pay, in clovers ([`crate::campaign::CampaignValue::Amulets`]),
+    /// to buy this perk.
+    pub const fn cost(self) -> i32 {
+        PERK_CLOVER_COST
     }
 }
 

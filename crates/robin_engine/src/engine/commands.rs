@@ -23,7 +23,10 @@ pub(super) use object_use::is_pc_takable;
 pub use object_use::{coin_pickup_target, object_pickup_command};
 
 use super::{CameraDisplayState, EngineInner, LevelAssets};
-use crate::campaign::CampaignValue;
+use crate::campaign::{
+    CampaignValue, MAXIMUM_AMULETS_NUMBER, MINIMUM_CLOVERS_AFTER_PURCHASE, PerkPurchaseState,
+    perk_purchase_state,
+};
 use crate::element::{Command, EntityId};
 use crate::pc_status::Perk;
 use crate::player_command::{PlayerCommand, PlayerId, PlayerInput};
@@ -1598,15 +1601,19 @@ impl EngineInner {
 
     /// Buy one permanent perk for a campaign character.
     ///
-    /// The campaign record owns the purchase: it is paid for and recorded here,
-    /// then stamped onto any live copy of that character so the perk works in
-    /// the mission where it was bought.  `character_idx` addresses the campaign
-    /// character table, not an entity, because the purchase must also work from
-    /// a screen with no PC spawned.
+    /// The campaign record owns the purchase: it is paid for in clovers
+    /// ([`CampaignValue::Amulets`]) and recorded here, then stamped onto any
+    /// live copy of that character so the perk works in the mission where it
+    /// was bought.  `character_idx` addresses the campaign character table, not
+    /// an entity, because the purchase must also work from a screen with no PC
+    /// spawned.
+    ///
+    /// Affordability is [`perk_purchase_state`], the same rule the panel's row
+    /// model uses, so a row the panel offers is exactly a row this accepts.
     ///
     /// Every refusal is logged with the numbers that produced it: the buying
-    /// screen asks the same affordability question before issuing the command,
-    /// so a refusal here means the two sides disagree and must be visible.
+    /// screen asks the same question before issuing the command, so a refusal
+    /// here means the two sides disagree and must be visible.
     pub(crate) fn campaign_purchase_perk(&mut self, character_idx: u16, perk: Perk) {
         let campaign = &mut self.mission_domain.campaign;
         let index = usize::from(character_idx);
@@ -1620,28 +1627,47 @@ impl EngineInner {
             );
             return;
         };
-        if description.status.has_perk(perk) {
-            tracing::warn!(
-                character_idx,
-                ?perk,
-                "perk purchase rejected: character already owns it"
-            );
-            return;
-        }
-        let price = perk.price();
-        let ransom = campaign.get_value(CampaignValue::Ransom);
-        if ransom < price {
-            tracing::warn!(
-                character_idx,
-                ?perk,
-                ransom,
-                price,
-                "perk purchase rejected: ransom does not cover the price"
-            );
-            return;
+        let owned = description.status.has_perk(perk);
+        let cost = perk.cost();
+        let clovers = campaign.get_value(CampaignValue::Amulets);
+        match perk_purchase_state(perk, clovers, owned) {
+            PerkPurchaseState::Affordable => {}
+            PerkPurchaseState::Owned => {
+                tracing::warn!(
+                    character_idx,
+                    ?perk,
+                    "perk purchase rejected: character already owns it"
+                );
+                return;
+            }
+            PerkPurchaseState::Unaffordable => {
+                tracing::warn!(
+                    character_idx,
+                    ?perk,
+                    clovers,
+                    cost,
+                    "perk purchase rejected: clovers do not cover the cost"
+                );
+                return;
+            }
+            PerkPurchaseState::WouldSpendLastClover => {
+                tracing::warn!(
+                    character_idx,
+                    ?perk,
+                    clovers,
+                    cost,
+                    minimum_after_purchase = MINIMUM_CLOVERS_AFTER_PURCHASE,
+                    "perk purchase rejected: it would spend the last clover"
+                );
+                return;
+            }
         }
         campaign.characters[index].status.grant_perk(perk);
-        campaign.subtract_value(CampaignValue::Ransom, price);
+        campaign.subtract_value(CampaignValue::Amulets, cost);
+        debug_assert!(
+            (0..=MAXIMUM_AMULETS_NUMBER).contains(&campaign.get_value(CampaignValue::Amulets)),
+            "a purchase left the clover counter outside the range its cap documents"
+        );
         self.set_pc_perk(character_idx, perk);
     }
 

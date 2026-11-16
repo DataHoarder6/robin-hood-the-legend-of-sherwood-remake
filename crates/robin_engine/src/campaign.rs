@@ -166,6 +166,59 @@ pub struct PcDescription {
 
 // ─── Perk purchase rows ─────────────────────────────────────────
 
+/// Whether a perk row can be bought, and when it cannot, what stops it.
+///
+/// The authoritative purchase command derives the same state from the same
+/// rule ([`perk_purchase_state`]), so the panel cannot explain a refusal the
+/// engine would not make, or offer a row the engine would reject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerkPurchaseState {
+    /// Not owned, and the purse covers the cost without spending the clover
+    /// the death save needs.
+    Affordable,
+    /// The character's campaign `PcStatus` already records this perk.
+    Owned,
+    /// The purse holds fewer clovers than the perk costs.
+    Unaffordable,
+    /// Paying would empty the purse.  A clover is what saves a VIP from a
+    /// lethal blow, so a purchase never spends the last one.
+    WouldSpendLastClover,
+}
+
+impl PerkPurchaseState {
+    /// This row can be bought as it stands.
+    pub const fn purchasable(self) -> bool {
+        matches!(self, Self::Affordable)
+    }
+}
+
+/// Clovers a purchase must leave in the purse.
+///
+/// The campaign's clover counter is the death save: a VIP PC survives a lethal
+/// blow only while `CampaignValue::Amulets` is at least one.  Spending it would
+/// trade the save for a perk, so every purchase keeps this many clovers back.
+pub const MINIMUM_CLOVERS_AFTER_PURCHASE: i32 = 1;
+
+/// The single purchase rule: what buying `perk` with `clovers` in the purse
+/// would do, given whether the character already owns it.
+///
+/// Both [`perk_purchase_rows`] and the authoritative
+/// [`campaign_purchase_perk`](crate::engine::EngineInner::campaign_purchase_perk)
+/// ask this, so the row state and the refusal cannot drift apart.
+pub const fn perk_purchase_state(perk: Perk, clovers: i32, owned: bool) -> PerkPurchaseState {
+    if owned {
+        return PerkPurchaseState::Owned;
+    }
+    let cost = perk.cost();
+    if clovers < cost {
+        return PerkPurchaseState::Unaffordable;
+    }
+    if clovers - cost < MINIMUM_CLOVERS_AFTER_PURCHASE {
+        return PerkPurchaseState::WouldSpendLastClover;
+    }
+    PerkPurchaseState::Affordable
+}
+
 /// One purchasable perk on one campaign character.
 ///
 /// This is presentation-neutral: the client turns `perk` into a localized
@@ -180,28 +233,27 @@ pub struct PerkPurchaseRow {
     /// Campaign character name at the time the rows were built.
     pub character_name: String,
     pub perk: Perk,
-    /// Ransom price from the single price table, [`Perk::price`].
-    pub price: i32,
-    /// The current ransom covers this price.  Independent of `owned`; the
-    /// panel treats owned rows as unavailable regardless.
-    pub affordable: bool,
-    /// The character's campaign `PcStatus` already records this perk.
-    pub owned: bool,
+    /// Clover cost from the single cost table, [`Perk::cost`].
+    pub cost: i32,
+    /// Buyable, or the reason it is not.
+    pub state: PerkPurchaseState,
 }
 
 /// Build the perk panel's rows from campaign characters and the current
-/// ransom.
+/// clover balance.
 ///
 /// `character_names` runs parallel to `characters` and is the host-resolved
 /// display name for each entry: `PcStatus::name` is empty for characters that
 /// never spawned, while the label belongs to the profile the host loaded.
+/// `clovers` is `CampaignValue::Amulets`, the same counter the purchase
+/// command spends.
 ///
-/// Pure so the "button enabled" and "row affordable" questions can be tested
+/// Pure so the "button enabled" and "row state" questions can be tested
 /// without a campaign, a renderer or a window.
 pub fn perk_purchase_rows(
     characters: &[PcDescription],
     character_names: &[String],
-    ransom: i32,
+    clovers: i32,
 ) -> Vec<PerkPurchaseRow> {
     assert_eq!(
         characters.len(),
@@ -213,14 +265,12 @@ pub fn perk_purchase_rows(
         let character_idx = u16::try_from(index)
             .expect("campaign character index does not fit the purchase command's u16");
         for perk in Perk::ALL {
-            let price = perk.price();
             rows.push(PerkPurchaseRow {
                 character_idx,
                 character_name: name.clone(),
                 perk,
-                price,
-                affordable: ransom >= price,
-                owned: character.status.has_perk(perk),
+                cost: perk.cost(),
+                state: perk_purchase_state(perk, clovers, character.status.has_perk(perk)),
             });
         }
     }
@@ -2587,15 +2637,16 @@ impl Campaign {
     ///
     /// One row per `(campaign character, perk)`, in character table order and
     /// [`Perk::ALL`] order.  `character_names` comes from the host's profile
-    /// table (see [`perk_purchase_rows`]); prices come from [`Perk::price`] and
-    /// the current ransom decides affordability.  `owned` is the `PcStatus` bit
-    /// the authoritative purchase command reads, so the panel and the command
+    /// table (see [`perk_purchase_rows`]); costs come from [`Perk::cost`] and
+    /// the current clover balance ([`CampaignValue::Amulets`]) decides whether
+    /// a row can be bought and why not.  Ownership is the `PcStatus` bit the
+    /// authoritative purchase command reads, so the panel and the command
     /// cannot disagree about what has been bought.
     pub fn perk_purchase_rows(&self, character_names: &[String]) -> Vec<PerkPurchaseRow> {
         perk_purchase_rows(
             &self.characters,
             character_names,
-            self.get_value(CampaignValue::Ransom),
+            self.get_value(CampaignValue::Amulets),
         )
     }
 
@@ -4355,31 +4406,49 @@ mod tests {
         description
     }
 
+    /// The smallest purse that can pay for a perk and still keep a clover
+    /// back for the death save.
+    const PURSE_FOR_ONE_PERK: i32 =
+        crate::pc_status::PERK_CLOVER_COST + MINIMUM_CLOVERS_AFTER_PURCHASE;
+
     #[test]
     fn perk_rows_cover_every_character_and_perk_in_order() {
         let characters = [perk_row_character(&[]), perk_row_character(&[])];
         let names = ["Robin".to_owned(), "Little John".to_owned()];
-        let rows = perk_purchase_rows(&characters, &names, 200);
+        let rows = perk_purchase_rows(&characters, &names, PURSE_FOR_ONE_PERK);
 
         assert_eq!(rows.len(), 2 * Perk::ALL.len());
         for (index, row) in rows.iter().enumerate() {
             assert_eq!(row.character_idx, (index / Perk::ALL.len()) as u16);
             assert_eq!(row.perk, Perk::ALL[index % Perk::ALL.len()]);
-            assert_eq!(row.price, row.perk.price());
+            assert_eq!(row.cost, row.perk.cost());
+            assert_eq!(
+                row.state,
+                PerkPurchaseState::Affordable,
+                "the row state comes from the same cost the row shows"
+            );
         }
         assert_eq!(rows[0].character_name, "Robin");
         assert_eq!(rows[Perk::ALL.len()].character_name, "Little John");
     }
 
     #[test]
-    fn perk_rows_report_affordability_against_the_current_ransom() {
+    fn perk_rows_name_the_reason_a_row_cannot_be_bought() {
         let characters = [perk_row_character(&[])];
         let names = ["Robin".to_owned()];
-        let affordable = perk_purchase_rows(&characters, &names, 200);
-        assert!(affordable.iter().all(|row| row.affordable));
+        let state = |clovers| perk_purchase_rows(&characters, &names, clovers)[0].state;
 
-        let short = perk_purchase_rows(&characters, &names, 199);
-        assert!(short.iter().all(|row| !row.affordable && !row.owned));
+        assert_eq!(state(PURSE_FOR_ONE_PERK), PerkPurchaseState::Affordable);
+        assert_eq!(
+            state(crate::pc_status::PERK_CLOVER_COST),
+            PerkPurchaseState::WouldSpendLastClover,
+            "a purse holding exactly the cost would be emptied, losing the death save"
+        );
+        assert_eq!(
+            state(crate::pc_status::PERK_CLOVER_COST - 1),
+            PerkPurchaseState::Unaffordable
+        );
+        assert_eq!(state(0), PerkPurchaseState::Unaffordable);
     }
 
     #[test]
@@ -4389,50 +4458,78 @@ mod tests {
             perk_row_character(&[Perk::AutoLoot, Perk::NoFriendlyFireDamage]),
         ];
         let names = ["Robin".to_owned(), "Little John".to_owned()];
-        let rows = perk_purchase_rows(&characters, &names, 10_000);
+        let rows = perk_purchase_rows(&characters, &names, PURSE_FOR_ONE_PERK);
 
         let robin = rows
             .iter()
             .find(|row| row.character_idx == 0 && row.perk == Perk::KeepMovingInCombat)
             .expect("Robin's keep-moving row");
-        assert!(robin.owned && robin.affordable);
+        assert_eq!(robin.state, PerkPurchaseState::Owned);
 
         let john_auto = rows
             .iter()
             .find(|row| row.character_idx == 1 && row.perk == Perk::AutoLoot)
             .expect("Little John's auto-loot row");
-        assert!(john_auto.owned);
+        assert_eq!(john_auto.state, PerkPurchaseState::Owned);
 
         let john_knockback = rows
             .iter()
             .find(|row| row.character_idx == 1 && row.perk == Perk::NoFriendlyFireKnockback)
             .expect("Little John's knockback row");
-        assert!(!john_knockback.owned);
+        assert_eq!(john_knockback.state, PerkPurchaseState::Affordable);
         assert_eq!(
-            rows.iter().filter(|row| row.owned).count(),
+            rows.iter()
+                .filter(|row| row.state == PerkPurchaseState::Owned)
+                .count(),
             3,
             "only the three explicitly granted perks are owned"
         );
     }
 
     #[test]
-    fn campaign_perk_rows_read_the_live_ransom() {
+    fn an_owned_row_says_owned_even_with_no_clovers_in_the_purse() {
+        let characters = [perk_row_character(&[Perk::KeepMovingInCombat])];
+        let names = ["Robin".to_owned()];
+        let row = perk_purchase_rows(&characters, &names, 0)
+            .into_iter()
+            .find(|row| row.perk == Perk::KeepMovingInCombat)
+            .expect("Robin's keep-moving row");
+        assert_eq!(
+            row.state,
+            PerkPurchaseState::Owned,
+            "ownership is the more useful fact to show than an empty purse"
+        );
+    }
+
+    #[test]
+    fn campaign_perk_rows_read_the_live_clover_balance() {
         let mut campaign = Campaign::default();
         campaign.characters.push(perk_row_character(&[]));
         let names = ["Robin".to_owned()];
-        campaign.set_value(CampaignValue::Ransom, 200);
-        assert!(
-            campaign
-                .perk_purchase_rows(&names)
-                .iter()
-                .all(|row| row.affordable)
-        );
-        campaign.set_value(CampaignValue::Ransom, 0);
-        assert!(
-            campaign
-                .perk_purchase_rows(&names)
-                .iter()
-                .all(|row| !row.affordable)
+        let state = |campaign: &Campaign| campaign.perk_purchase_rows(&names)[0].state;
+
+        campaign.set_value(CampaignValue::Amulets, PURSE_FOR_ONE_PERK);
+        assert_eq!(state(&campaign), PerkPurchaseState::Affordable);
+
+        campaign.set_value(CampaignValue::Amulets, crate::pc_status::PERK_CLOVER_COST);
+        assert_eq!(state(&campaign), PerkPurchaseState::WouldSpendLastClover);
+
+        campaign.set_value(CampaignValue::Amulets, 0);
+        assert_eq!(state(&campaign), PerkPurchaseState::Unaffordable);
+    }
+
+    #[test]
+    fn campaign_perk_rows_ignore_the_ransom() {
+        let mut campaign = Campaign::default();
+        campaign.characters.push(perk_row_character(&[]));
+        let names = ["Robin".to_owned()];
+
+        campaign.set_value(CampaignValue::Ransom, 100_000);
+        campaign.set_value(CampaignValue::Amulets, 0);
+        assert_eq!(
+            campaign.perk_purchase_rows(&names)[0].state,
+            PerkPurchaseState::Unaffordable,
+            "perks are paid for in clovers, so a full purse must not buy one"
         );
     }
 }

@@ -650,29 +650,53 @@ fn purchase_perk(
     );
 }
 
+/// The campaign's clover balance: the only currency a perk is paid for in.
+fn clovers(engine: &EngineInner) -> i32 {
+    engine
+        .mission_domain
+        .campaign
+        .get_value(crate::campaign::CampaignValue::Amulets)
+}
+
+/// Put `clovers` in the campaign purse.
+fn set_clovers(engine: &mut EngineInner, amount: i32) {
+    engine
+        .mission_domain
+        .campaign
+        .set_value(crate::campaign::CampaignValue::Amulets, amount);
+}
+
+/// The campaign's ransom, which a perk purchase must never touch.
+fn ransom(engine: &EngineInner) -> i32 {
+    engine
+        .mission_domain
+        .campaign
+        .get_value(crate::campaign::CampaignValue::Ransom)
+}
+
 #[test]
-fn campaign_perk_purchase_charges_the_price_and_grants_the_perk() {
-    use crate::campaign::CampaignValue;
+fn campaign_perk_purchase_charges_the_cost_in_clovers_and_grants_the_perk() {
+    use crate::campaign::MINIMUM_CLOVERS_AFTER_PURCHASE;
     use crate::pc_status::Perk;
 
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let perk = Perk::AutoLoot;
-    let price = perk.price();
+    let cost = perk.cost();
+    let purse = cost + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    set_clovers(&mut engine, purse);
     engine
         .mission_domain
         .campaign
-        .set_value(CampaignValue::Ransom, price + 40);
+        .set_value(crate::campaign::CampaignValue::Ransom, 40);
 
     purchase_perk(&mut engine, &assets, 0, perk);
 
     assert_eq!(
-        engine
-            .mission_domain
-            .campaign
-            .get_value(CampaignValue::Ransom),
-        price + 40 - price,
-        "the purchase deducts exactly the perk's price"
+        clovers(&engine),
+        purse - cost,
+        "the purchase deducts exactly the perk's clover cost"
     );
+    assert_eq!(ransom(&engine), 40, "a perk is not paid for in ransom");
     let status = &engine.mission_domain.campaign.characters[0].status;
     assert!(
         status.has_perk(perk),
@@ -693,29 +717,22 @@ fn campaign_perk_purchase_charges_the_price_and_grants_the_perk() {
 }
 
 #[test]
-fn campaign_perk_purchase_without_money_changes_nothing() {
-    use crate::campaign::CampaignValue;
+fn campaign_perk_purchase_without_enough_clovers_changes_nothing() {
     use crate::pc_status::Perk;
 
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let perk = Perk::KeepMovingInCombat;
-    let ransom = perk.price() - 1;
-    engine
-        .mission_domain
-        .campaign
-        .set_value(CampaignValue::Ransom, ransom);
+    let purse = perk.cost() - 1;
+    set_clovers(&mut engine, purse);
 
     // The handler logs the rejection with both numbers; the assertions below
     // are the state half of that contract.
     purchase_perk(&mut engine, &assets, 0, perk);
 
     assert_eq!(
-        engine
-            .mission_domain
-            .campaign
-            .get_value(CampaignValue::Ransom),
-        ransom,
-        "an unaffordable purchase must not touch the purse"
+        clovers(&engine),
+        purse,
+        "an unaffordable purchase must not touch the clover balance"
     );
     assert!(
         !engine.mission_domain.campaign.characters[0]
@@ -734,26 +751,79 @@ fn campaign_perk_purchase_without_money_changes_nothing() {
 }
 
 #[test]
+fn campaign_perk_purchase_that_would_spend_the_last_clover_is_refused() {
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, actor) = setup_pc_engine(&[]);
+    let perk = Perk::NoFriendlyFireDamage;
+    let purse = perk.cost();
+    set_clovers(&mut engine, purse);
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        clovers(&engine),
+        purse,
+        "the last clover is the death save and must stay in the purse"
+    );
+    assert!(
+        !engine.mission_domain.campaign.characters[0]
+            .status
+            .has_perk(perk),
+        "a refused purchase must not grant the perk"
+    );
+    assert!(
+        !engine
+            .ent(actor)
+            .pc_data()
+            .expect("setup built a PC")
+            .no_friendly_fire_damage,
+        "a refused purchase must not reach the live PC either"
+    );
+}
+
+#[test]
+fn campaign_perk_purchase_of_an_owned_perk_is_uncharged() {
+    use crate::campaign::MINIMUM_CLOVERS_AFTER_PURCHASE;
+    use crate::pc_status::Perk;
+
+    let (mut engine, assets, _actor) = setup_pc_engine(&[]);
+    let perk = Perk::AutoLoot;
+    let purse = perk.cost() + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    set_clovers(&mut engine, purse);
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+    assert_eq!(clovers(&engine), purse - perk.cost());
+    assert!(
+        engine.mission_domain.campaign.characters[0]
+            .status
+            .has_perk(perk)
+    );
+
+    purchase_perk(&mut engine, &assets, 0, perk);
+
+    assert_eq!(
+        clovers(&engine),
+        purse - perk.cost(),
+        "buying an owned perk again must not charge a second time"
+    );
+}
+
+#[test]
 fn campaign_perk_purchase_out_of_range_changes_nothing() {
-    use crate::campaign::CampaignValue;
+    use crate::campaign::MINIMUM_CLOVERS_AFTER_PURCHASE;
     use crate::pc_status::Perk;
 
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let perk = Perk::AutoLoot;
-    let ransom = perk.price() * 10;
-    engine
-        .mission_domain
-        .campaign
-        .set_value(CampaignValue::Ransom, ransom);
+    let purse = perk.cost() + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    set_clovers(&mut engine, purse);
 
     purchase_perk(&mut engine, &assets, 7, perk);
 
     assert_eq!(
-        engine
-            .mission_domain
-            .campaign
-            .get_value(CampaignValue::Ransom),
-        ransom,
+        clovers(&engine),
+        purse,
         "a purchase naming no campaign character must not charge anyone"
     );
     assert!(
@@ -777,26 +847,21 @@ fn campaign_perk_purchase_out_of_range_changes_nothing() {
 
 #[test]
 fn campaign_perk_purchase_grants_no_friendly_fire_damage() {
-    use crate::campaign::CampaignValue;
+    use crate::campaign::MINIMUM_CLOVERS_AFTER_PURCHASE;
     use crate::pc_status::Perk;
 
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let perk = Perk::NoFriendlyFireDamage;
-    let price = perk.price();
-    engine
-        .mission_domain
-        .campaign
-        .set_value(CampaignValue::Ransom, price + 40);
+    let cost = perk.cost();
+    let purse = cost + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    set_clovers(&mut engine, purse);
 
     purchase_perk(&mut engine, &assets, 0, perk);
 
     assert_eq!(
-        engine
-            .mission_domain
-            .campaign
-            .get_value(CampaignValue::Ransom),
-        price + 40 - price,
-        "the purchase deducts exactly the perk's price"
+        clovers(&engine),
+        purse - cost,
+        "the purchase deducts exactly the perk's clover cost"
     );
     let status = &engine.mission_domain.campaign.characters[0].status;
     assert!(
@@ -819,26 +884,21 @@ fn campaign_perk_purchase_grants_no_friendly_fire_damage() {
 
 #[test]
 fn campaign_perk_purchase_grants_no_friendly_fire_knockback() {
-    use crate::campaign::CampaignValue;
+    use crate::campaign::MINIMUM_CLOVERS_AFTER_PURCHASE;
     use crate::pc_status::Perk;
 
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let perk = Perk::NoFriendlyFireKnockback;
-    let price = perk.price();
-    engine
-        .mission_domain
-        .campaign
-        .set_value(CampaignValue::Ransom, price + 40);
+    let cost = perk.cost();
+    let purse = cost + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    set_clovers(&mut engine, purse);
 
     purchase_perk(&mut engine, &assets, 0, perk);
 
     assert_eq!(
-        engine
-            .mission_domain
-            .campaign
-            .get_value(CampaignValue::Ransom),
-        price + 40 - price,
-        "the purchase deducts exactly the perk's price"
+        clovers(&engine),
+        purse - cost,
+        "the purchase deducts exactly the perk's clover cost"
     );
     let status = &engine.mission_domain.campaign.characters[0].status;
     assert!(
