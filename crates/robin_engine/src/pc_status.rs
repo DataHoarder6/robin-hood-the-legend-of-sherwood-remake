@@ -271,6 +271,14 @@ pub const PERK_PRICE_NO_FRIENDLY_FIRE_DAMAGE: i32 = 200;
 pub const PERK_PRICE_NO_FRIENDLY_FIRE_KNOCKBACK: i32 = 200;
 
 impl Perk {
+    /// Every perk a character can buy, in panel order.
+    pub const ALL: [Self; 4] = [
+        Self::KeepMovingInCombat,
+        Self::AutoLoot,
+        Self::NoFriendlyFireDamage,
+        Self::NoFriendlyFireKnockback,
+    ];
+
     /// What the character must pay in ransom to buy this perk.
     pub const fn price(self) -> i32 {
         match self {
