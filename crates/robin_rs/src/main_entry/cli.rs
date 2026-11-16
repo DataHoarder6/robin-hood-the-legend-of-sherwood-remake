@@ -31,7 +31,7 @@ fn parse_replay_spec(s: &str) -> Result<String, String> {
 
 /// Robin Hood — The Legend of Sherwood (Rust port)
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-#[command(version, about)]
+#[command(version = crate::version::CLI_VERSION, about)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct CliArgs {
     /// Disable audio playback.
@@ -1429,5 +1429,16 @@ mod tests {
 
         prepared.validate_slot(&manager).unwrap();
         assert_eq!(prepared.save().engine.frame_counter(), 111);
+    }
+
+    #[test]
+    fn version_flag_reports_the_stamped_commit() {
+        use clap::CommandFactory as _;
+
+        let rendered = super::CliArgs::command().render_version();
+        assert!(
+            rendered.contains(env!("ROBIN_GIT_HASH")),
+            "--version must identify the built commit, got {rendered}"
+        );
     }
 }

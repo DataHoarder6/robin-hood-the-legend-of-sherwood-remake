@@ -10,6 +10,14 @@ pub const PACKAGE_VERSION: &str = match option_env!("ROBIN_PACKAGE_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+/// Identity `--version` prints: the package version plus the engine commit the
+/// build script stamped into every binary.
+///
+/// `PACKAGE_VERSION` is the same for every build of a release tag, so on its
+/// own it cannot say which commit produced the binary. `ROBIN_GIT_HASH` is the
+/// 12-hex prefix the replay format and multiplayer tickets already use.
+pub const CLI_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("ROBIN_GIT_HASH"));
+
 /// Format the embedded version for display in the game UI.
 pub fn version_label() -> String {
     format!("v{PACKAGE_VERSION}")
