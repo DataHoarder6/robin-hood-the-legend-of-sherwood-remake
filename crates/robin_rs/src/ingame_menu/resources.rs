@@ -328,6 +328,7 @@ pub const MT_STR_PERK_AUTO_LOOT: usize = 1_033;
 pub const MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE: usize = 1_034;
 pub const MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK: usize = 1_035;
 pub const MT_STR_PERK_HINT: usize = 1_036;
+pub const MT_STR_PERK_LAST_CLOVER: usize = 1_037;
 
 // Per-button tooltip menu-text ids.
 pub const MT_INFOBULLE_BUTTON_PLAY_MISSION: usize = 323;
@@ -724,10 +725,11 @@ static DEFAULT_FALLBACKS: &[(usize, &str)] = &[
     ),
     (MT_TTL_SHERWOOD_PERKS, "Sherwood perks"),
     (MT_INFOBULLE_BUTTON_PERKS, "Buy permanent perks"),
-    (MT_STR_PERK_ROW, "%s — %s — £%u — %s"),
+    (MT_STR_PERK_ROW, "%s — %s — %s — %s"),
     (MT_STR_PERK_OWNED, "owned"),
     (MT_STR_PERK_AFFORDABLE, "available"),
-    (MT_STR_PERK_UNAFFORDABLE, "not enough ransom"),
+    (MT_STR_PERK_UNAFFORDABLE, "not enough clovers"),
+    (MT_STR_PERK_LAST_CLOVER, "the last clover must stay"),
     (MT_STR_PERK_KEEP_MOVING_IN_COMBAT, "Keep moving in combat"),
     (MT_STR_PERK_AUTO_LOOT, "Loot the knocked-out"),
     (
@@ -2306,7 +2308,7 @@ mod tests {
         for (key, text) in DEFAULT_FALLBACKS {
             assert_eq!(map.get(key), Some(text));
         }
-        assert_eq!(DEFAULT_FALLBACKS.len(), 240);
+        assert_eq!(DEFAULT_FALLBACKS.len(), 241);
         assert_eq!(map.get(&MT_BTN_START_GAME), Some(&"Start Game"));
         assert_eq!(map.get(&MT_BTN_SHOW_CREDITS), Some(&"Show Credits"));
         assert_eq!(map.get(&MT_STR_KEY_PAUSE), Some(&"Pause"));
