@@ -307,7 +307,7 @@ mod tests {
     fn sparse_owned_frames_keep_fallback_and_diagnostics_are_inert() {
         sparse_bank_contract::<crate::zoom_hud::ZoomButton, 2>();
         sparse_bank_contract::<crate::stature_hud::StatureButton, 2>();
-        sparse_bank_contract::<crate::sherwood_hud::SherwoodButton, 5>();
+        sparse_bank_contract::<crate::sherwood_hud::SherwoodButton, 6>();
     }
 
     #[test]
@@ -337,6 +337,7 @@ mod tests {
         assert!(Button::StartMission.shadow());
         assert!(Button::QuitMission.shadow());
         assert!(Button::SherwoodTrading.shadow());
+        assert!(Button::PerksPanel.shadow());
     }
 
     #[test]
