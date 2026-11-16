@@ -34,3 +34,25 @@ impl RuntimeContract {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeContract;
+
+    #[test]
+    fn checked_in_runtime_contract_matches_compiled_versions() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../wasm-www/runtime-contract.json"
+        );
+        let bytes = std::fs::read(path).expect("read wasm-www/runtime-contract.json");
+        let checked_in: RuntimeContract =
+            serde_json::from_slice(&bytes).expect("parse wasm-www/runtime-contract.json");
+        assert_eq!(
+            checked_in,
+            RuntimeContract::current(),
+            "wasm-www/runtime-contract.json is stale; run \
+             `export_runtime_contract --write wasm-www/runtime-contract.json`",
+        );
+    }
+}
