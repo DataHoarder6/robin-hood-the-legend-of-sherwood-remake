@@ -2049,6 +2049,16 @@ mod tests {
             23
         );
         assert!(matches!(lost.restart_save, RestartSaveState::Absent));
+        // The Sherwood entry path must be able to build the perks panel's row
+        // model without a renderer or a spawned character.  The scratch
+        // campaign has no characters, so the model is empty but must not panic.
+        assert!(
+            lost.loaded
+                .engine
+                .campaign()
+                .perk_purchase_rows(&[])
+                .is_empty()
+        );
     }
 
     #[test]

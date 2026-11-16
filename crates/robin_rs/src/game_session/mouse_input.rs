@@ -1900,6 +1900,7 @@ pub(super) fn handle_sherwood_hud_buttons(
         host,
         callbacks,
         assets,
+        portrait_cache,
         window: event_pump,
         renderer,
         menu_resources,
@@ -1948,6 +1949,7 @@ pub(super) fn handle_sherwood_hud_buttons(
         && sherwood_trading_access(host, engine, &assets.profile_manager)
             .validate()
             .is_ok();
+    sherwood_enable.perks_panel = game.is_sherwood;
     // ── Sherwood HUD buttons ──
     //
     // Hit-test the Sherwood-only DisplayCampaignMap / GoToExit /
@@ -2154,6 +2156,24 @@ pub(super) fn handle_sherwood_hud_buttons(
                     }
                     return HandlerAction::Continue;
                 }
+                SherwoodButton::PerksPanel => {
+                    let Some(resources) = menu_resources.as_ref() else {
+                        tracing::warn!("Sherwood perks: menu resources unavailable — skipped");
+                        return HandlerAction::Continue;
+                    };
+                    let (rows, ransom) = ingame_menu::campaign_rows(
+                        engine.campaign(),
+                        &assets.profile_manager,
+                        portrait_cache,
+                        &resources.menu_text,
+                    );
+                    *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel {
+                        state: ingame_menu::PerksPanelModalState::new(
+                            event_pump, renderer, resources, rows, ransom,
+                        ),
+                    });
+                    return HandlerAction::Continue;
+                }
             }
         }
     }
@@ -2169,6 +2189,7 @@ pub(super) struct SherwoodCtx<'a> {
     pub(super) host: &'a mut Host,
     pub(super) callbacks: &'a mut RustCallbacks,
     pub(super) assets: &'a engine_api::LevelAssets,
+    pub(super) portrait_cache: &'a PortraitCache,
     pub(super) window: &'a mut GameWindow,
     pub(super) renderer: &'a mut Renderer,
     pub(super) menu_resources: &'a mut Option<IngameMenuResources>,
@@ -2201,6 +2222,7 @@ impl SherwoodCtx<'_> {
         let host = &mut *self.host;
         let callbacks = &mut *self.callbacks;
         let assets = self.assets;
+        let portrait_cache = self.portrait_cache;
         let event_pump = &mut *self.window;
         let renderer = &mut *self.renderer;
         let menu_resources = &mut *self.menu_resources;
@@ -2389,6 +2411,53 @@ impl SherwoodCtx<'_> {
                             }
                             callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
                             return Ok(HandlerAction::Exit(GameCode::LevelInterrupted));
+                        }
+                    }
+                }
+                SherwoodCampaignFlow::PerksPanel { mut state } => {
+                    if !game.is_sherwood {
+                        // The panel is Sherwood-only.  A flow that somehow
+                        // outlives the camp is dropped rather than drawn over
+                        // another mission.
+                        return Ok(HandlerAction::Proceed);
+                    }
+                    let Some(resources) = menu_resources.as_ref() else {
+                        tracing::warn!("Sherwood perks: menu resources unavailable — closing");
+                        return Ok(HandlerAction::Proceed);
+                    };
+                    let campaign = engine.campaign();
+                    let (rows, ransom) = ingame_menu::campaign_rows(
+                        campaign,
+                        &assets.profile_manager,
+                        portrait_cache,
+                        &resources.menu_text,
+                    );
+                    state.set_rows(rows, ransom);
+                    let cursor = default_modal_cursor(cursor_renderer, cursor_res, renderer);
+                    let outcome = state.tick(&mut ModalScreenIo {
+                        window: event_pump,
+                        renderer,
+                        resources,
+                        cursor: Some(&cursor),
+                    });
+                    match outcome {
+                        None => {
+                            *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel { state });
+                            return Ok(HandlerAction::Proceed);
+                        }
+                        Some(ingame_menu::PerksPanelOutcome::Close) => {
+                            return Ok(HandlerAction::Proceed);
+                        }
+                        Some(outcome) => {
+                            if let Some(command) = outcome.player_command() {
+                                dispatch_local_command(
+                                    &host.transport,
+                                    &mut frame.stage_commands(),
+                                    &command,
+                                );
+                            }
+                            *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel { state });
+                            return Ok(HandlerAction::Proceed);
                         }
                     }
                 }

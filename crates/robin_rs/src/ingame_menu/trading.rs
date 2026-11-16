@@ -516,7 +516,7 @@ impl TradingModalState {
 }
 
 /// Substitute trading tokens without interpreting replacement values as templates.
-fn substitute(mut template: &str, values: &[&str]) -> String {
+pub(crate) fn substitute(mut template: &str, values: &[&str]) -> String {
     let mut output = String::with_capacity(template.len());
     for value in values {
         let Some(position) = ["%u", "%d", "%s"]

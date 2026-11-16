@@ -6,7 +6,8 @@
 
 use crate::campaign_map::CampaignMapModalState;
 use crate::ingame_menu::{
-    DebriefingModalState, YesNoModalState, mission_description::MissionDescriptionModalState,
+    DebriefingModalState, PerksPanelModalState, YesNoModalState,
+    mission_description::MissionDescriptionModalState,
 };
 use robin_engine::engine::ExternalAction;
 
@@ -23,6 +24,9 @@ pub(super) enum SherwoodCampaignFlow {
     Confirmation {
         state: YesNoModalState,
         action: SherwoodConfirmationAction,
+    },
+    PerksPanel {
+        state: PerksPanelModalState,
     },
 }
 
