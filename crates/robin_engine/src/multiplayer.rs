@@ -52,60 +52,7 @@ pub fn new_frame_cursor() -> FrameCursor {
 /// GGPO-style netcode.
 pub const INPUT_DELAY_FRAMES: u32 = 2;
 
-/// Wire-format protocol version. Bump on any breaking change to [`NetMsg`] or
-/// an engine snapshot carried by it. Both sides exchange this in the
-/// handshake; mismatches abort the connection. Version 35 adds completed
-/// planned quick-action payloads, per-seat shield prompts, and deterministic
-/// tactical queue formations to the authoritative version-34 state. Version
-/// 36 adds shared-vision fog state and its host-owned runtime command.
-/// Protocol 37 carries save/replay state with the mandatory mission-asset
-/// descriptor introduced by save 70 / replay 28. Protocol 38 added the
-/// (since removed) leaderboard co-sign and ranked-session messages.
-/// Protocol 40 adds reversible background-patch configuration and activation
-/// targets to the engine snapshots exchanged by peers.
-/// Protocol 42 replaces four pending AI detectable queues with an ordered FIFO
-/// in authoritative snapshots and state hashes (save 76 / replay 34).
-/// Protocol 43 uses one canonical script-global vector in authoritative
-/// snapshots and state hashes (save 77 / replay 35).
-/// Protocol 44 carries one game-owned PostInitialize latch and no unused
-/// imported Messenger copies in native snapshots (save 78 / replay 36).
-/// Protocol 45 removes unused imported sound and same-frame AI target-claim
-/// snapshot state (save 79 / replay 37).
-/// Protocol 46 stores the optional recording session directly instead of a
-/// recorder wrapper with a write-only sequence ID (save 80 / replay 38).
-/// Protocol 47 removes unused computed-location dummy, object repulsive-point,
-/// and engine-camera scratch fields (save 81 / replay 39). Removing hash-skipped
-/// fields also removes their markers from the state-hash stream.
-/// Protocol 48 removes duplicate AI soldier-presence flags from snapshots and
-/// hashes, retaining the initial soldier-camp set (save 82 / replay 40).
-/// Protocol 49 carries synchronous AI execution state and a versioned native
-/// snapshot envelope (save 83 / replay 41).
-/// Protocol 52 removes deferred gameplay and message queues from authoritative
-/// state as their producers now execute synchronously (save 85 / replay 44).
-/// Protocol 53 removes retained instruction handoff fields from authoritative
-/// state (save 86 / replay 45).
-/// Protocol 54 carries actor execution without duplicated movement, shot, and
-/// ability trackers (save 87 / replay 46).
-/// Protocol 55 removes the ranked multiplayer session, named-seat attestation
-/// and leaderboard co-sign messages.
-/// Protocol 56 carries canonical sequence links and ordinary door-route orders
-/// in authoritative snapshots (save 88 / replay 48).
-/// Protocol 57 removes the retired fog-sprite bypass from snapshot configuration.
-/// Protocol 59 carries ordered pathfinder state and canonical action payloads.
-/// Protocol 60 carries canonical order ownership, sequence links, and host effects.
-/// Protocol 61 carries unified host output and canonical human opponent records.
-/// Protocol 62 removes inferred corpse-posture and special-strike tracking state.
-/// Protocol 63 adds authenticated co-op chat.
-/// Protocol 64 carries direct movement commands and actor input ownership.
-/// Protocol 65 carries exact cooperative mission teams.
-/// Protocol 66 adds the combat gate to deterministic simulation configuration.
-/// Protocol 67 carries cooperative campaign rules and shared Robin inventory.
-/// Protocol 68 carries the per-PC "fight through, don't stop" flag.
-/// Protocol 69 carries the per-PC auto-loot flag.
-/// Protocol 70 carries the purchased-perk flags on campaign PC status.
-/// Protocol 71 carries the per-PC "no friendly-fire damage" flag.
-/// Protocol 72 carries the per-PC "no friendly-fire knockback" flag.
-pub const NET_PROTOCOL_VERSION: u32 = 72;
+pub use robin_run_types::NET_PROTOCOL_VERSION;
 
 /// Maximum bytes in one resumable full-mod transfer chunk. The outer native
 /// transport frame has a larger bound for engine snapshots, so content must
