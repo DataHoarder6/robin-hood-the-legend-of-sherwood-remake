@@ -2161,7 +2161,7 @@ pub(super) fn handle_sherwood_hud_buttons(
                         tracing::warn!("Sherwood perks: menu resources unavailable — skipped");
                         return HandlerAction::Continue;
                     };
-                    let (rows, ransom) = ingame_menu::campaign_rows(
+                    let (rows, clovers) = ingame_menu::campaign_rows(
                         engine.campaign(),
                         &assets.profile_manager,
                         portrait_cache,
@@ -2169,7 +2169,7 @@ pub(super) fn handle_sherwood_hud_buttons(
                     );
                     *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel {
                         state: ingame_menu::PerksPanelModalState::new(
-                            event_pump, renderer, resources, rows, ransom,
+                            event_pump, renderer, resources, rows, clovers,
                         ),
                     });
                     return HandlerAction::Continue;
@@ -2426,13 +2426,13 @@ impl SherwoodCtx<'_> {
                         return Ok(HandlerAction::Proceed);
                     };
                     let campaign = engine.campaign();
-                    let (rows, ransom) = ingame_menu::campaign_rows(
+                    let (rows, clovers) = ingame_menu::campaign_rows(
                         campaign,
                         &assets.profile_manager,
                         portrait_cache,
                         &resources.menu_text,
                     );
-                    state.set_rows(rows, ransom);
+                    state.set_rows(rows, clovers);
                     let cursor = default_modal_cursor(cursor_renderer, cursor_res, renderer);
                     let outcome = state.tick(&mut ModalScreenIo {
                         window: event_pump,

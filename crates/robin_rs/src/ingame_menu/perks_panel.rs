@@ -10,7 +10,7 @@
 //! under the cursor, and Escape or the Cancel button closes the panel.
 
 use crate::gfx_types::{GameEvent, Keycode};
-use robin_engine::campaign::{Campaign, CampaignValue, PerkPurchaseRow};
+use robin_engine::campaign::{Campaign, CampaignValue, PerkPurchaseRow, PerkPurchaseState};
 use robin_engine::pc_status::Perk;
 use robin_engine::player_command::PlayerCommand;
 use robin_engine::profiles::ProfileManager;
@@ -18,10 +18,11 @@ use robin_engine::sherwood_stat::MenuTextLookup;
 
 use super::layout::{MENU_W, MenuTransform, draw_screen_background, render_text_virt_font};
 use super::resources::{
-    IngameMenuResources, MT_BTN_CANCEL, MT_STR_PERK_AFFORDABLE, MT_STR_PERK_AUTO_LOOT,
-    MT_STR_PERK_HINT, MT_STR_PERK_KEEP_MOVING_IN_COMBAT, MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
+    IngameMenuResources, MT_BTN_CANCEL, MT_STR_AMULETS, MT_STR_PERK_AFFORDABLE,
+    MT_STR_PERK_AUTO_LOOT, MT_STR_PERK_HINT, MT_STR_PERK_KEEP_MOVING_IN_COMBAT,
+    MT_STR_PERK_LAST_CLOVER, MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
     MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK, MT_STR_PERK_OWNED, MT_STR_PERK_ROW,
-    MT_STR_PERK_UNAFFORDABLE, MT_STR_TRADE_RANSOM, MT_TTL_SHERWOOD_PERKS,
+    MT_STR_PERK_UNAFFORDABLE, MT_TTL_SHERWOOD_PERKS,
 };
 use super::trading::substitute;
 use super::widget_bridge::{self, ModalInputState, ModalScreenIo, ScreenFrame, ScreenKey};
@@ -31,7 +32,7 @@ const ROW_X: i32 = 72;
 const ROW_Y: i32 = 82;
 const ROW_W: i32 = 496;
 const ROW_H: i32 = 28;
-/// Rows that fit between the ransom line and the hint/button area.
+/// Rows that fit between the clover line and the hint/button area.
 const VISIBLE_ROWS: usize = 10;
 const HINT_Y: i32 = 374;
 const BUTTON_Y: i32 = 414;
@@ -94,7 +95,11 @@ pub fn character_names(
         .collect()
 }
 
-/// The rows and live ransom the perks panel renders.
+/// The rows and live clover balance the perks panel renders.
+///
+/// Perks are paid for in clovers, so the balance the panel shows and judges
+/// rows against is `CampaignValue::Amulets` — the same counter the
+/// authoritative purchase spends.
 pub fn campaign_rows(
     campaign: &Campaign,
     profiles: &ProfileManager,
@@ -104,13 +109,13 @@ pub fn campaign_rows(
     let names = character_names(campaign, profiles, portraits, menu_text);
     (
         campaign.perk_purchase_rows(&names),
-        campaign.get_value(CampaignValue::Ransom),
+        campaign.get_value(CampaignValue::Amulets),
     )
 }
 
 pub struct PerksPanelModalState {
     rows: Vec<PerkPurchaseRow>,
-    ransom: i32,
+    clovers: i32,
     selected: usize,
     scroll_top: usize,
     input: ModalInputState,
@@ -127,12 +132,12 @@ impl PerksPanelModalState {
         renderer: &crate::renderer::Renderer,
         resources: &IngameMenuResources,
         rows: Vec<PerkPurchaseRow>,
-        ransom: i32,
+        clovers: i32,
     ) -> Self {
         Self::build(
             resources,
             rows,
-            ransom,
+            clovers,
             ModalInputState::for_screen(window, renderer),
         )
     }
@@ -140,7 +145,7 @@ impl PerksPanelModalState {
     fn build(
         resources: &IngameMenuResources,
         rows: Vec<PerkPurchaseRow>,
-        ransom: i32,
+        clovers: i32,
         input: ModalInputState,
     ) -> Self {
         let (button_w, button_h) = resources.button_dimensions();
@@ -156,7 +161,7 @@ impl PerksPanelModalState {
         ));
         let mut state = Self {
             rows,
-            ransom,
+            clovers,
             selected: 0,
             scroll_top: 0,
             input,
@@ -170,13 +175,13 @@ impl PerksPanelModalState {
         state
     }
 
-    /// Replace the rows and ransom from the current campaign state.
+    /// Replace the rows and clover balance from the current campaign state.
     ///
     /// Called each tick by the driver so a purchase lands on the next frame
-    /// without the panel caching a stale affordability or owned bit.
-    pub fn set_rows(&mut self, rows: Vec<PerkPurchaseRow>, ransom: i32) {
+    /// without the panel caching a stale row state.
+    pub fn set_rows(&mut self, rows: Vec<PerkPurchaseRow>, clovers: i32) {
         self.rows = rows;
-        self.ransom = ransom;
+        self.clovers = clovers;
         self.clamp_selection();
     }
 
@@ -249,7 +254,7 @@ impl PerksPanelModalState {
 
     fn activate_selected(&self) -> Option<PerksPanelOutcome> {
         let row = self.rows.get(self.selected)?;
-        if row.owned || !row.affordable {
+        if !row.state.purchasable() {
             return None;
         }
         Some(PerksPanelOutcome::Purchase {
@@ -326,11 +331,11 @@ impl PerksPanelModalState {
             );
         }
         if let Some(font) = resources.label_font_any() {
-            let ransom = substitute(
-                &resources.menu_text.get(MT_STR_TRADE_RANSOM),
-                &[&self.ransom.to_string()],
+            let balance = substitute(
+                &resources.menu_text.get(MT_STR_AMULETS),
+                &[&self.clovers.to_string()],
             );
-            render_text_virt_font(renderer, font, transform, &ransom, ROW_X, 57);
+            render_text_virt_font(renderer, font, transform, &balance, ROW_X, 57);
             for index in self.visible_range() {
                 let row = &self.rows[index];
                 let y = ROW_Y + (index - self.scroll_top) as i32 * ROW_H;
@@ -346,13 +351,20 @@ impl PerksPanelModalState {
                         crate::renderer::Renderer::create_color_16(55, 74, 45),
                     );
                 }
+                // The row's cost is priced in the same vocabulary the HUD's
+                // clover counter uses, so the panel and the HUD agree on the
+                // unit without a second word for it.
+                let cost = substitute(
+                    &resources.menu_text.get(MT_STR_AMULETS),
+                    &[&row.cost.to_string()],
+                );
                 let line = substitute(
                     &resources.menu_text.get(MT_STR_PERK_ROW),
                     &[
                         &row.character_name,
                         &resources.menu_text.get(perk_label_key(row.perk)),
-                        &row.price.to_string(),
-                        &resources.menu_text.get(perk_state_key(row)),
+                        &cost,
+                        &resources.menu_text.get(perk_state_key(row.state)),
                     ],
                 );
                 render_text_virt_font(renderer, font, transform, &line, ROW_X, y);
@@ -382,25 +394,33 @@ fn perk_label_key(perk: Perk) -> usize {
     }
 }
 
-fn perk_state_key(row: &PerkPurchaseRow) -> usize {
-    if row.owned {
-        MT_STR_PERK_OWNED
-    } else if row.affordable {
-        MT_STR_PERK_AFFORDABLE
-    } else {
-        MT_STR_PERK_UNAFFORDABLE
+fn perk_state_key(state: PerkPurchaseState) -> usize {
+    match state {
+        PerkPurchaseState::Owned => MT_STR_PERK_OWNED,
+        PerkPurchaseState::Affordable => MT_STR_PERK_AFFORDABLE,
+        PerkPurchaseState::Unaffordable => MT_STR_PERK_UNAFFORDABLE,
+        PerkPurchaseState::WouldSpendLastClover => MT_STR_PERK_LAST_CLOVER,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PerksPanelModalState, PerksPanelOutcome, ROW_H, ROW_X, ROW_Y};
+    use super::{PerksPanelModalState, PerksPanelOutcome, ROW_H, ROW_X, ROW_Y, perk_state_key};
     use crate::gfx_types::GameEvent;
     use crate::ingame_menu::IngameMenuResources;
     use crate::ingame_menu::layout::MenuTransform;
+    use crate::ingame_menu::resources::{
+        MT_STR_PERK_AFFORDABLE, MT_STR_PERK_LAST_CLOVER, MT_STR_PERK_OWNED,
+        MT_STR_PERK_UNAFFORDABLE,
+    };
     use crate::ingame_menu::widget_bridge::ModalInputState;
-    use robin_engine::campaign::{PcDescription, perk_purchase_rows};
-    use robin_engine::pc_status::{PcStatus, Perk};
+    use robin_engine::campaign::{
+        MINIMUM_CLOVERS_AFTER_PURCHASE, PcDescription, PerkPurchaseState, perk_purchase_rows,
+    };
+    use robin_engine::pc_status::{PERK_CLOVER_COST, PcStatus, Perk};
+
+    /// The smallest purse that can buy a perk and still keep a clover back.
+    const PURSE: i32 = PERK_CLOVER_COST + MINIMUM_CLOVERS_AFTER_PURCHASE;
 
     fn character(name: &str, owned: &[Perk]) -> PcDescription {
         let mut description = PcDescription {
@@ -416,7 +436,7 @@ mod tests {
         description
     }
 
-    fn panel(ransom: i32) -> PerksPanelModalState {
+    fn panel(clovers: i32) -> PerksPanelModalState {
         let resources = IngameMenuResources::stub();
         let rows = perk_purchase_rows(
             &[
@@ -424,9 +444,9 @@ mod tests {
                 character("Little John", &[]),
             ],
             &["Robin".to_owned(), "Little John".to_owned()],
-            ransom,
+            clovers,
         );
-        PerksPanelModalState::build(&resources, rows, ransom, ModalInputState::new())
+        PerksPanelModalState::build(&resources, rows, clovers, ModalInputState::new())
     }
 
     fn key(keycode: crate::gfx_types::Keycode) -> Vec<GameEvent> {
@@ -451,7 +471,7 @@ mod tests {
 
     #[test]
     fn return_buys_the_selected_characters_row_exactly_once() {
-        let mut state = panel(1_000);
+        let mut state = panel(PURSE);
         // Row 5 is Little John's AutoLoot row (4 perks per character).
         state.move_selection(5);
         let outcome = state.handle_events(
@@ -486,7 +506,7 @@ mod tests {
 
     #[test]
     fn a_pointer_click_buys_the_row_under_the_cursor() {
-        let mut state = panel(1_000);
+        let mut state = panel(PURSE);
         let row = 5;
         let y = ROW_Y + row as i32 * ROW_H + ROW_H / 2;
         let x = ROW_X + 20;
@@ -501,15 +521,15 @@ mod tests {
     }
 
     #[test]
-    fn owned_and_unaffordable_rows_do_not_emit_a_purchase() {
+    fn owned_unaffordable_and_last_clover_rows_do_not_emit_a_purchase() {
         let resources = IngameMenuResources::stub();
         let ownable = perk_purchase_rows(
             &[character("Robin", &[Perk::KeepMovingInCombat])],
             &["Robin".to_owned()],
-            1_000,
+            PURSE,
         );
         let mut owned =
-            PerksPanelModalState::build(&resources, ownable, 1_000, ModalInputState::new());
+            PerksPanelModalState::build(&resources, ownable, PURSE, ModalInputState::new());
         assert_eq!(
             owned.handle_events(
                 &key(crate::gfx_types::Keycode::Return),
@@ -530,11 +550,64 @@ mod tests {
             None,
             "an unaffordable perk is not purchasable"
         );
+
+        let last_clover = perk_purchase_rows(
+            &[character("Robin", &[])],
+            &["Robin".to_owned()],
+            PERK_CLOVER_COST,
+        );
+        let mut saving = PerksPanelModalState::build(
+            &resources,
+            last_clover,
+            PERK_CLOVER_COST,
+            ModalInputState::new(),
+        );
+        assert_eq!(
+            saving.handle_events(
+                &key(crate::gfx_types::Keycode::Return),
+                MenuTransform::centered(640, 480),
+            ),
+            None,
+            "a purchase that would spend the last clover is not purchasable"
+        );
+    }
+
+    #[test]
+    fn every_refusal_state_has_its_own_row_text() {
+        assert_eq!(perk_state_key(PerkPurchaseState::Owned), MT_STR_PERK_OWNED);
+        assert_eq!(
+            perk_state_key(PerkPurchaseState::Affordable),
+            MT_STR_PERK_AFFORDABLE
+        );
+        assert_eq!(
+            perk_state_key(PerkPurchaseState::Unaffordable),
+            MT_STR_PERK_UNAFFORDABLE
+        );
+        assert_eq!(
+            perk_state_key(PerkPurchaseState::WouldSpendLastClover),
+            MT_STR_PERK_LAST_CLOVER,
+            "an empty and a last-clover refusal must not share the same words"
+        );
+
+        // The two refusals a full-enough purse can produce are distinct rows in
+        // the model the panel renders, so the panel explains rather than greys.
+        let empty = perk_purchase_rows(&[character("Robin", &[])], &["Robin".to_owned()], 0);
+        let last = perk_purchase_rows(
+            &[character("Robin", &[])],
+            &["Robin".to_owned()],
+            PERK_CLOVER_COST,
+        );
+        assert_eq!(empty[0].state, PerkPurchaseState::Unaffordable);
+        assert_eq!(last[0].state, PerkPurchaseState::WouldSpendLastClover);
+        assert_ne!(
+            perk_state_key(empty[0].state),
+            perk_state_key(last[0].state)
+        );
     }
 
     #[test]
     fn escape_closes_without_a_command() {
-        let mut state = panel(1_000);
+        let mut state = panel(PURSE);
         let outcome = state.handle_events(
             &key(crate::gfx_types::Keycode::Escape),
             MenuTransform::centered(640, 480),
