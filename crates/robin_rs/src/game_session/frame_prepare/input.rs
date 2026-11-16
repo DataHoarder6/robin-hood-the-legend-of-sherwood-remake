@@ -451,6 +451,7 @@ pub(super) async fn collect_input_and_menus(
             host: &mut *host,
             callbacks: &mut *callbacks,
             assets,
+            portrait_cache: &presentation.sprites.portrait_cache,
             window: &mut *window,
             renderer: &mut presentation.renderer,
             menu_resources: &mut resources.menu,
