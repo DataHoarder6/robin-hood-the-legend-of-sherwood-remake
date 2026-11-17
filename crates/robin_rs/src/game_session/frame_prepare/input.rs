@@ -288,7 +288,7 @@ fn touch_point_is_world(
     }
 
     let point = crate::gfx_types::Point::new(point.x as i32, point.y as i32);
-    let reserved = [
+    let mut reserved = vec![
         hud.zoom_layout.zoom_up,
         hud.zoom_layout.zoom_down,
         hud.corner_layout.clock,
@@ -296,12 +296,14 @@ fn touch_point_is_world(
         hud.corner_layout.quickstart,
         hud.stature_layout.up,
         hud.stature_layout.down,
-        hud.sherwood_layout.display_campaign_map,
-        hud.sherwood_layout.go_to_exit,
-        hud.sherwood_layout.start_mission,
-        hud.sherwood_layout.quit_mission,
     ];
+    // Every control the rail offers claims its rect, gate open or closed: an
+    // absent button must not swallow a world click, and a greyed one must not
+    // pass one through to the world behind it.
     !reserved.iter().any(|rect| rect.contains_point(point))
+        && !hud
+            .sherwood_layout
+            .claims_point(hud.sherwood_rail, point.x, point.y)
 }
 
 /// The empty input batch of a frame whose mission UI owns input.
@@ -457,6 +459,7 @@ pub(super) async fn collect_input_and_menus(
             menu_resources: &mut resources.menu,
             flow: &mut ui.sherwood_campaign_flow,
             enable: &mut hud.sherwood_enable,
+            rail: &mut hud.sherwood_rail,
         },
         &mut frame,
         SherwoodModalResources {

@@ -28,7 +28,8 @@ use crate::input_translator::InputTranslator;
 use crate::menu::CampaignMapState;
 use crate::renderer::Renderer;
 use crate::sherwood_hud::{
-    SherwoodButtonEnable, SherwoodButtonSprites, SherwoodHudLayout, SherwoodTooltipTracker,
+    SherwoodButtonEnable, SherwoodButtonSprites, SherwoodHudLayout, SherwoodRail,
+    SherwoodTooltipTracker,
 };
 use crate::stature_hud::{StatureHudLayout, StatureSprites, StatureTooltipTracker};
 use crate::ui_panel::{BlazonTooltipTracker, PcActionTooltipTracker, RequirementsTooltipTracker};
@@ -226,6 +227,7 @@ impl MissionUi {
 /// HUD textures, layouts, enable state, and hover trackers.
 pub(super) struct MissionHud {
     pub(super) sherwood_enable: SherwoodButtonEnable,
+    pub(super) sherwood_rail: SherwoodRail,
     pub(super) sherwood_sprites: SherwoodButtonSprites,
     pub(super) sherwood_layout: SherwoodHudLayout,
     pub(super) zoom_sprites: ZoomButtonSprites,
@@ -830,6 +832,9 @@ impl InteractiveFrontendAssembly {
             ui,
             hud: MissionHud {
                 sherwood_enable: SherwoodButtonEnable::pre_commit(),
+                // The first frame's handler derives the real rail from campaign
+                // state; this only has to be a sane pre-asset default.
+                sherwood_rail: SherwoodRail::PreCommit,
                 sherwood_sprites,
                 sherwood_layout,
                 zoom_sprites,
@@ -970,6 +975,7 @@ impl MissionPresentation {
             game,
             pause_menu: ui.pause_menu.as_ref(),
             sherwood_enable: hud.sherwood_enable,
+            sherwood_rail: hud.sherwood_rail,
             shift_held: state.shift_held,
             rewind_active: state.rewind_active,
             display_info_elapsed_secs: state.display_info_elapsed_secs,
