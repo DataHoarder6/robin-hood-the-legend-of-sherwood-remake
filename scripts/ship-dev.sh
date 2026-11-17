@@ -14,7 +14,7 @@ repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 host=${ROBIN_BUILD_HOST:-build-host}
 target=${SHIP_DEV_TARGET:-laptop}
 
-remote_dir=$(bash "$repository/scripts/remote-check.sh" --sync | tail -n 1)
+remote_dir=$(bash "$repository/scripts/remote-check.sh" --sync)
 
 printf 'ship-dev: building on %s\n' "$host" >&2
 out=$(ssh "$host" bash -s <<EOF
