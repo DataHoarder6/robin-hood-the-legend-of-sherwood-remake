@@ -305,6 +305,7 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
             menu_resources: &mut resources.menu,
             flow: &mut ui.sherwood_campaign_flow,
             enable: &mut hud.sherwood_enable,
+            rail: &mut hud.sherwood_rail,
         },
         &mut frame.stage_commands(),
         &events,

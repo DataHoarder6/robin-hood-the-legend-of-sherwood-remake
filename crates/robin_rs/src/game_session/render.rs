@@ -22,7 +22,7 @@ use crate::level_loading_host::draw_background;
 use crate::presentation::{PresentationFrameId, ZoomPresentationUpdate};
 use crate::renderer::Renderer;
 use crate::save_file::{THUMB_HEIGHT, THUMB_WIDTH, Thumbnail};
-use crate::sherwood_hud::{self, SherwoodButtonEnable, SherwoodTooltipTracker};
+use crate::sherwood_hud::{self, SherwoodButtonEnable, SherwoodRail, SherwoodTooltipTracker};
 use crate::sound::MusicMode;
 use crate::stature_hud::{self, StatureEnable, StatureHoverState, StatureTooltipTracker};
 use crate::ui_panel::{PortraitHit, PortraitHitArea, PortraitTarget, hit_test_portrait_detailed};
@@ -225,11 +225,10 @@ pub(super) fn prepare_fixed_tick_hud(
             }
         }
     }
-    if game.is_sherwood {
-        tooltip_update.sherwood =
-            hud.sherwood_layout
-                .hit_test_geometric(mp.x as i32, mp.y as i32, hud.sherwood_enable);
-    } else {
+    tooltip_update.sherwood =
+        hud.sherwood_layout
+            .hover_test(mp.x as i32, mp.y as i32, hud.sherwood_rail);
+    if !game.is_sherwood {
         tooltip_update.stature = hud
             .stature_layout
             .hit_test_geometric(mp.x as i32, mp.y as i32);
@@ -881,6 +880,7 @@ fn begin_wide_map_rgba(
         game: ctx.game,
         pause_menu: ctx.pause_menu,
         sherwood_enable: ctx.sherwood_enable,
+        sherwood_rail: ctx.sherwood_rail,
         shift_held: ctx.shift_held,
         rewind_active: ctx.rewind_active,
         display_info_elapsed_secs: ctx.display_info_elapsed_secs,
@@ -1300,6 +1300,7 @@ pub struct RenderContext<'a> {
 
     // Copy values threaded through from the outer loop.
     pub sherwood_enable: SherwoodButtonEnable,
+    pub sherwood_rail: SherwoodRail,
     pub shift_held: bool,
     pub rewind_active: bool,
     pub display_info_elapsed_secs: u32,
@@ -1745,6 +1746,7 @@ struct OverlayHudInputs<'a> {
     threaded_input: &'a crate::input::ThreadedInput,
     sherwood_layout: &'a sherwood_hud::SherwoodHudLayout,
     sherwood_enable: SherwoodButtonEnable,
+    sherwood_rail: SherwoodRail,
     sherwood_sprites: &'a sherwood_hud::SherwoodButtonSprites,
     zoom_layout: &'a zoom_hud::ZoomHudLayout,
     zoom_sprites: &'a zoom_hud::ZoomButtonSprites,
@@ -1791,6 +1793,7 @@ fn render_overlay_pass(
         threaded_input,
         sherwood_layout: ctx.sherwood_layout,
         sherwood_enable: ctx.sherwood_enable,
+        sherwood_rail: ctx.sherwood_rail,
         sherwood_sprites: ctx.sherwood_sprites,
         zoom_layout: ctx.zoom_layout,
         zoom_sprites: ctx.zoom_sprites,
@@ -2186,20 +2189,26 @@ impl OverlayHudInputs<'_> {
             threaded_input,
             sherwood_layout,
             sherwood_enable,
+            sherwood_rail,
             sherwood_sprites,
             game,
             ..
         } = *self;
+        let sherwood_rail = if game.is_sherwood {
+            sherwood_rail
+        } else {
+            SherwoodRail::InMission
+        };
         let sherwood_enable = if game.is_sherwood {
             sherwood_enable
         } else {
-            sherwood_hud::SherwoodButtonEnable::won_mission(
+            sherwood_hud::SherwoodButtonEnable::in_mission(
                 engine.mission_won() && game.is_start_mission_effectively_enabled(),
             )
         };
         let mp = threaded_input.position();
         let hovered_btn =
-            sherwood_layout.hit_test_geometric(mp.x as i32, mp.y as i32, sherwood_enable);
+            sherwood_layout.hit_test(mp.x as i32, mp.y as i32, sherwood_rail, sherwood_enable);
         let hover = sherwood_hud::SherwoodHoverState {
             hovered: hovered_btn,
             mouse_pressed: host.frontend.input.left_mouse_down(),
@@ -2207,6 +2216,7 @@ impl OverlayHudInputs<'_> {
         sherwood_hud::draw_with_sprites(
             renderer,
             sherwood_layout,
+            sherwood_rail,
             sherwood_enable,
             hover,
             sherwood_sprites,
