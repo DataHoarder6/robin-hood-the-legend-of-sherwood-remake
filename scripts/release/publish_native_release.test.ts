@@ -336,10 +336,12 @@ test('normal release packages contain every modding binary on both platforms', a
     const packaged = runtime === 'win-x64' ? 'Robin Hood - The Legend of Sherwood.exe' : 'robin';
     await mkdir(join(root, 'target', target, 'release'), { recursive: true });
     await mkdir(join(root, 'assets/core-datadir'), { recursive: true });
-    await mkdir(join(root, 'docs'));
+    await mkdir(join(root, 'docs', 'slop'), { recursive: true });
     await writeFile(join(root, 'README.md'), 'readme');
+    // The script packages the authored docs from `docs/slop/`; the fixture must
+    // live where the script reads, or the test measures its own typo.
     for (const name of ['MODDING_TOOLS.md', 'JSON_PATCH_MODS.md']) {
-      await writeFile(join(root, 'docs', name), name);
+      await writeFile(join(root, 'docs', 'slop', name), name);
     }
     for (const name of [executable, ...binaries.map(name => name + suffix)]) {
       await writeFile(join(root, 'target', target, 'release', name), name, { mode: 0o755 });
