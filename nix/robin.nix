@@ -8,6 +8,7 @@
   rustPlatform,
   runtimeLibs,
   gitHash,
+  robinVersion,
   # Build-only tools, mirroring the devShell.
   pkg-config,
   cmake,
@@ -29,7 +30,7 @@ assert lib.assertMsg (builtins.match "[0-9a-f]{40}|[0-9a-f]{64}" gitHash != null
   "gitHash must be a full git object ID, got ${gitHash}";
 rustPlatform.buildRustPackage {
   pname = "robin";
-  version = "0.0.0";
+  version = robinVersion;
 
   src = ../.;
   # `Cargo.lock` pins two packages named `bitcode-0.6.9` (one from crates.io,
@@ -38,7 +39,7 @@ rustPlatform.buildRustPackage {
   # keys vendored sources by source, so it can.
   cargoDeps = rustPlatform.fetchCargoVendor {
     pname = "robin";
-    version = "0.0.0";
+    version = robinVersion;
     src = ../.;
     hash = "sha256-yyp0zf4C1oW+NDDkEwFDBHRB0f9j8BTIEzQ+MEAUVpc=";
   };

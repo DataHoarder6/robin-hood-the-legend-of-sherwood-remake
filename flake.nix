@@ -39,6 +39,10 @@
       pinnedChannel = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain.channel;
       pinnedNightly = lib.removePrefix "nightly-" pinnedChannel;
 
+      # The client crate's version is the one `--version` prints and the one the
+      # release workflow tags; the workspace's 0.0.0 is a placeholder.
+      robinVersion = (builtins.fromTOML (builtins.readFile ./crates/robin_rs/Cargo.toml)).package.version;
+
       # `build-support/robin_build.rs` stamps the commit into the binary so the
       # replay format and multiplayer ticket carry it. A Nix build has no
       # `.git`, so the commit is supplied from the flake's own git metadata
@@ -106,7 +110,7 @@
             cargo = pkgs.rust-bin.nightly.${pinnedNightly}.minimal;
           };
           runtimeLibs = import ./nix/runtime-libs.nix pkgs;
-          inherit gitHash;
+          inherit gitHash robinVersion;
         };
         default = self.packages.${pkgs.stdenv.hostPlatform.system}.robin;
       });
