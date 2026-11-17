@@ -48,10 +48,6 @@ pub const LOCATION_POSITIONS: [(u16, u16); 10] = [
 pub struct CampaignMapLocation {
     /// Index into the campaign's mission list, if a mission is assigned.
     pub mission_idx: Option<usize>,
-    /// Whether the location button is enabled (has an available mission).
-    pub enabled: bool,
-    /// Whether the location button is blinking (mission about to expire).
-    pub blinking: bool,
     /// Whether the blazon icon is shown at this location.
     pub show_blazon: bool,
     /// Whether a friendly flag is shown at this location.
@@ -97,8 +93,6 @@ impl CampaignMapState {
     /// Reset all locations to disabled with no missions.
     pub fn init_locations_and_arrows(&mut self) {
         for loc in &mut self.locations {
-            loc.enabled = false;
-            loc.blinking = false;
             loc.show_blazon = false;
             loc.show_flag = false;
             loc.mission_idx = None;
@@ -121,8 +115,6 @@ impl CampaignMapState {
                 if loc_idx < self.locations.len() {
                     let loc = &mut self.locations[loc_idx];
                     loc.mission_idx = Some(idx);
-                    loc.enabled = true;
-                    loc.blinking = mission.age == profile.life_time.saturating_sub(1);
                     loc.show_blazon = mission.produces_blazons(profiles);
                 }
             }
@@ -241,18 +233,6 @@ impl CampaignMapState {
 
         self.status_text =
             format!("{ransom_str} -  {score_label} : {score}  -  {preserved_label} : {preserved}%");
-    }
-
-    // ── Campaign interaction ───────────────────────────────────────
-
-    /// Handle the player clicking on a map location.
-    ///
-    /// Validates that the location has an enabled mission and returns
-    /// the mission index if valid.
-    pub fn on_location_clicked(&self, location: MissionLocation) -> Option<usize> {
-        let loc_idx = location as usize;
-        let loc = self.locations.get(loc_idx)?;
-        if loc.enabled { loc.mission_idx } else { None }
     }
 }
 
@@ -411,13 +391,11 @@ mod tests {
     #[test]
     fn init_locations_resets() {
         let mut map = CampaignMapState::new();
-        map.locations[1].enabled = true;
         map.locations[1].mission_idx = Some(5);
         map.attack_arrows_visible[3] = true;
 
         map.init_locations_and_arrows();
 
-        assert!(!map.locations[1].enabled);
         assert!(map.locations[1].mission_idx.is_none());
         assert!(!map.attack_arrows_visible[3]);
     }
@@ -467,34 +445,6 @@ mod tests {
             assert_eq!(mission_location_from_index(i), Some(loc));
         }
         assert_eq!(mission_location_from_index(99), None);
-    }
-
-    // ── Campaign interaction tests ─────────────────────────────────
-
-    #[test]
-    fn on_location_clicked_enabled() {
-        let mut map = CampaignMapState::new();
-        let loc_idx = MissionLocation::Derby as usize;
-        map.locations[loc_idx].enabled = true;
-        map.locations[loc_idx].mission_idx = Some(3);
-
-        assert_eq!(map.on_location_clicked(MissionLocation::Derby), Some(3));
-    }
-
-    #[test]
-    fn on_location_clicked_disabled() {
-        let mut map = CampaignMapState::new();
-        let loc_idx = MissionLocation::Derby as usize;
-        map.locations[loc_idx].enabled = false;
-        map.locations[loc_idx].mission_idx = Some(3);
-
-        assert_eq!(map.on_location_clicked(MissionLocation::Derby), None);
-    }
-
-    #[test]
-    fn on_location_clicked_no_mission() {
-        let map = CampaignMapState::new();
-        assert_eq!(map.on_location_clicked(MissionLocation::Derby), None);
     }
 
     #[test]

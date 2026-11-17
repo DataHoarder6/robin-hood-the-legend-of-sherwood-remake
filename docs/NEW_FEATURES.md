@@ -1,5 +1,16 @@
 # Post-port Features
 
+- **Campaign map mission availability.** Every map pin now carries the
+  campaign's own answer for its mission: a filled gold corner marks a mission
+  that can start now, a hollow pale-blue corner marks a completed mission that
+  can be replayed, and a dimmed pin with a dark corner marks a locked one. The
+  state comes once from `accessible_mission_indices` plus the attempt record
+  (`Campaign::is_mission_accessible` / `is_mission_replayable`), so no pin can
+  offer a commit the engine would reject. Clicking or pressing Return on a
+  locked pin starts nothing; the tooltip and the description window name the
+  unmet condition instead of offering the start action. The map opens on the
+  first ready pin.
+
 - **Sherwood perk purchases.** A sixth Sherwood HUD button opens a perks panel
   with one row per campaign character and perk; Return/Space or a click on an
   affordable row buys it through the host-authority

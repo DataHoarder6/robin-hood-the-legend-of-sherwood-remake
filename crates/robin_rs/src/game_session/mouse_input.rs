@@ -2652,7 +2652,6 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
                 game,
                 engine.campaign(),
                 &assets.profile_manager,
-                sherwood_campaign_map,
                 menu_resources.as_ref(),
                 cursor,
             ),
