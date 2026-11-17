@@ -6,6 +6,7 @@
 use robin_assets::scb;
 use robin_engine::natives::{NativeContext, ScriptState};
 use robin_engine::script_manager::{ScriptManager, ScriptProgram};
+use robin_engine::vm::Opcode;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -194,6 +195,10 @@ mod tests {
 
     // Minimal real SCB encoding exercises the same directory/parser/program
     // path as the command-line tool; this is not a replacement interpreter.
+    // Callers pass an `Opcode` discriminant rather than a retail byte: the
+    // parser rejects opcodes the interpreter has no instruction for (58, 107,
+    // 208 and 229 among them), so a literal from the retail numbering would
+    // make this fixture malformed instead of runnable.
     fn script_bytes(opcode: u8, initialize: bool) -> Vec<u8> {
         let mut bytes = scb::SCB_MAGIC.to_vec();
         bytes.extend_from_slice(&scb::SCB_VERSION.to_le_bytes());
@@ -232,7 +237,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         for (name, bytes) in [
             ("a-corrupt.scb", script_bytes(255, false)),
-            ("b-valid.scb", script_bytes(58, true)),
+            ("b-valid.scb", script_bytes(Opcode::Empty as u8, true)),
             ("c-parse.scb", b"not a script".to_vec()),
         ] {
             std::fs::write(directory.path().join(name), bytes).unwrap();
@@ -256,7 +261,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
             directory.path().join("no-init.scb"),
-            script_bytes(58, false),
+            script_bytes(Opcode::Empty as u8, false),
         )
         .unwrap();
         let report = run_directory(directory.path()).unwrap();
