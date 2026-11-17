@@ -2286,6 +2286,25 @@ impl Campaign {
         current
     }
 
+    // ── mission availability ─────────────────────────────────────────
+
+    /// Whether the campaign currently offers `mission_idx` for selection.
+    pub fn is_mission_accessible(&self, mission_idx: usize) -> bool {
+        self.accessible_mission_indices.contains(&mission_idx)
+    }
+
+    /// Whether [`Self::select_next_mission`] accepts `mission_idx` as a history
+    /// replay: it is no longer offered, but a successful record exists.
+    pub fn is_mission_replayable(&self, mission_idx: usize) -> bool {
+        let mission = self.missions.get(mission_idx).unwrap_or_else(|| {
+            panic!(
+                "is_mission_replayable: mission index {mission_idx} out of range (campaign has {})",
+                self.missions.len()
+            )
+        });
+        mission.attempt_history.has_success() || mission.status == MissionStatus::Won
+    }
+
     // ── select_next_mission ──────────────────────────────────────────
 
     /// Select a mission from the accessible list as the next to play.
@@ -2301,7 +2320,7 @@ impl Campaign {
             "select_next_mission: mission index {target_idx} out of range"
         );
 
-        if !self.accessible_mission_indices.contains(&target_idx) {
+        if !self.is_mission_accessible(target_idx) {
             // Committing removed this mission from the accessible list, so
             // asking for it again (back out to the map, pick the same mission
             // again — or replay a command recorded by a build that dispatched
@@ -2311,10 +2330,8 @@ impl Campaign {
             if self.next_mission_idx == Some(target_idx) {
                 return;
             }
-            let replayable = self.missions[target_idx].attempt_history.has_success()
-                || self.missions[target_idx].status == MissionStatus::Won;
             assert!(
-                replayable,
+                self.is_mission_replayable(target_idx),
                 "select_next_mission: locked mission {target_idx} is neither accessible nor completed"
             );
             assert_ne!(
@@ -3565,6 +3582,21 @@ mod tests {
         let mut campaign = achievement_test_campaign(&profiles);
         campaign.accessible_mission_indices = vec![1];
         campaign.select_next_mission(Some(2), &profiles);
+    }
+
+    #[test]
+    fn mission_availability_predicates_match_commit_admission() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        assert!(campaign.is_mission_accessible(1));
+        assert!(!campaign.is_mission_accessible(2));
+
+        // Neither accessible nor completed: exactly the pair the commit
+        // assertion rejects.
+        assert!(!campaign.is_mission_replayable(2));
+        campaign.missions[2].status = MissionStatus::Won;
+        assert!(campaign.is_mission_replayable(2));
     }
 
     #[test]
