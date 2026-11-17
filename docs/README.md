@@ -9,6 +9,7 @@
 - [Game data distributions](DATADIRS.md)
 - [Multiplayer](MULTIPLAYER.md), [campaign history](CAMPAIGN_HISTORY.md), and [Spellforge](SPELLFORGE.md)
 - [Multiplayer harness decisions](multiplayer/HARNESS.md) — coverage matrix, scenario format, layer rules, isolation and bootstrap for the e2e gate
+- [Presentation decisions](PRESENTATION.md) — the zoom ladder and what a viewport larger than the level shows
 - [New features and remaining product work](NEW_FEATURES.md)
 - [Argument bundling candidates](SIGNATURE_BUNDLING_CANDIDATES.md)
 - [Nix package and cross-host install](NIX.md)

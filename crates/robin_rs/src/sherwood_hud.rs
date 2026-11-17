@@ -314,12 +314,26 @@ pub struct SherwoodHudLayout {
 }
 
 impl SherwoodHudLayout {
-    /// Derive button rects from the current screen resolution.
-    ///
-    /// Sizes are rough estimates matching the sprite dimensions from
-    /// DEFAULT.RES (confirmed by eye — proper sprite-driven sizing
-    /// lands with the widget port).
+    /// Derive button rects from the current screen resolution and the loaded
+    /// DEFAULT.RES artwork. A button whose frames are absent falls back to a
+    /// development size so the rail stays hit-testable; [`Self::for_sizes`]
+    /// names that fallback so a test can prove the rail with the real art.
     pub fn for_resolution(screen_w: u32, screen_h: u32, sprites: &SherwoodButtonSprites) -> Self {
+        Self::for_sizes(screen_w, screen_h, |button| sprites.size(button))
+    }
+
+    /// The layout for an explicit artwork table.
+    ///
+    /// Production passes the loaded DEFAULT.RES sizes; a caller with no
+    /// renderer passes the sizes the artwork ships. Keeping the geometry a
+    /// function of sizes alone is what lets a test prove the rail places no
+    /// two visible controls over each other with the real artwork rather than
+    /// with the development fallbacks.
+    pub fn for_sizes(
+        screen_w: u32,
+        screen_h: u32,
+        size: impl Fn(SherwoodButton) -> Option<(u16, u16)>,
+    ) -> Self {
         // Fallback sizes for missing sprites (keeps the hit-rect
         // usable during development against incomplete DEFAULT.RES).
         const FALLBACK_WIDE_W: u16 = 80;
@@ -338,24 +352,18 @@ impl SherwoodHudLayout {
         let wide_y = 0;
         let tall_x = sw - TALL_COLUMN_X_OFFSET;
 
-        let (dcm_w, dcm_h) = sprites
-            .size(SherwoodButton::DisplayCampaignMap)
-            .unwrap_or((FALLBACK_WIDE_W, FALLBACK_WIDE_H));
-        let (gte_w, gte_h) = sprites
-            .size(SherwoodButton::GoToExit)
-            .unwrap_or((FALLBACK_WIDE_W, FALLBACK_WIDE_H));
-        let (sm_w, sm_h) = sprites
-            .size(SherwoodButton::StartMission)
-            .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
-        let (qm_w, qm_h) = sprites
-            .size(SherwoodButton::QuitMission)
-            .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
-        let (trade_w, trade_h) = sprites
-            .size(SherwoodButton::SherwoodTrading)
-            .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
-        let (perks_w, perks_h) = sprites
-            .size(SherwoodButton::PerksPanel)
-            .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
+        let (dcm_w, dcm_h) =
+            size(SherwoodButton::DisplayCampaignMap).unwrap_or((FALLBACK_WIDE_W, FALLBACK_WIDE_H));
+        let (gte_w, gte_h) =
+            size(SherwoodButton::GoToExit).unwrap_or((FALLBACK_WIDE_W, FALLBACK_WIDE_H));
+        let (sm_w, sm_h) =
+            size(SherwoodButton::StartMission).unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
+        let (qm_w, qm_h) =
+            size(SherwoodButton::QuitMission).unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
+        let (trade_w, trade_h) =
+            size(SherwoodButton::SherwoodTrading).unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
+        let (perks_w, perks_h) =
+            size(SherwoodButton::PerksPanel).unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
 
         // The parchment scroll hosts the wide slot at the top-right; the tall
         // column lives on the lower panel, whose first slot is at 105 with a
@@ -954,5 +962,63 @@ mod tests {
         let mut pre = SherwoodButtonEnable::pre_commit();
         pre.apply_update_go_to_exit(false, 2, false);
         assert!(!pre.go_to_exit);
+    }
+
+    /// The sizes DEFAULT.RES ships: the two wide slots and the tall column.
+    fn shipped_button_sizes(button: SherwoodButton) -> Option<(u16, u16)> {
+        use SherwoodButton::*;
+        match button {
+            DisplayCampaignMap => Some((74, 53)),
+            GoToExit => Some((74, 60)),
+            StartMission | QuitMission | SherwoodTrading | PerksPanel => Some((41, 41)),
+        }
+    }
+
+    #[test]
+    fn artwork_sizes_define_the_rail_not_the_fallbacks() {
+        let layout = SherwoodHudLayout::for_sizes(800, 600, shipped_button_sizes);
+        for (button, (width, height)) in [
+            (SherwoodButton::DisplayCampaignMap, (74u16, 53u16)),
+            (SherwoodButton::GoToExit, (74, 60)),
+            (SherwoodButton::StartMission, (41, 41)),
+            (SherwoodButton::QuitMission, (41, 41)),
+            (SherwoodButton::SherwoodTrading, (41, 41)),
+            (SherwoodButton::PerksPanel, (41, 41)),
+        ] {
+            let rect = layout.rect(button);
+            assert_eq!(
+                (rect.width(), rect.height()),
+                (u32::from(width), u32::from(height)),
+                "{button:?} must take its size from the artwork, not a fallback"
+            );
+        }
+    }
+
+    #[test]
+    fn visible_rects_never_intersect_with_the_shipped_artwork() {
+        let every_rail = [
+            SherwoodRail::from_campaign(true, false),
+            SherwoodRail::from_campaign(true, true),
+            SherwoodRail::from_campaign(false, false),
+        ];
+
+        for (width, height) in [(800, 600), (1024, 768), (2259, 1271)] {
+            let layout = SherwoodHudLayout::for_sizes(width, height, shipped_button_sizes);
+            for rail in every_rail {
+                let rects: Vec<_> = rail
+                    .visible()
+                    .map(|button| (button, layout.rect(button)))
+                    .collect();
+                for (index, (left_button, left)) in rects.iter().enumerate() {
+                    for (right_button, right) in &rects[index + 1..] {
+                        assert!(
+                            !intersects(left, right),
+                            "{left_button:?} at {left:?} intersects {right_button:?} at {right:?} \
+                             on {width}x{height}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
