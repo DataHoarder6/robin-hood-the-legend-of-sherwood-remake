@@ -10,6 +10,7 @@ pub fn main() {
     println!("cargo:rerun-if-changed=../../build-support/robin_build.rs");
     println!("cargo:rerun-if-env-changed=ROBIN_PACKAGE_VERSION");
     println!("cargo:rerun-if-env-changed=ROBIN_REQUIRE_BUILD_IDENTITY");
+    println!("cargo:rerun-if-env-changed=ROBIN_GIT_COMMIT");
     emit_git_hash();
     emit_build_identity();
 }
@@ -28,6 +29,37 @@ fn missing_identity(reason: &str) -> String {
 /// reference it via `env!("ROBIN_GIT_HASH")`. Used by the replay format
 /// to tag recordings with the engine version they were produced on.
 fn emit_git_hash() {
+    let full_hash = explicit_commit().unwrap_or_else(discover_git_hash);
+    let short_hash = full_hash.get(..12).unwrap_or(&full_hash);
+    println!("cargo:rustc-env=ROBIN_GIT_HASH={short_hash}");
+    println!("cargo:rustc-env=ROBIN_GIT_COMMIT={full_hash}");
+}
+
+/// A packager's explicit commit, for builds that have no `.git` to ask.
+///
+/// A Nix build is a copy of the tracked tree in the store: `git rev-parse HEAD`
+/// has nothing to read, so the flake that packages this workspace passes the
+/// revision it resolved (`self.rev`) here. The value is provenance, not a
+/// guess, so a malformed one panics instead of falling back to discovery.
+///
+/// Lowercase is required: `ROBIN_GIT_HASH` is the first 12 bytes of this value
+/// and the replay format accepts only lowercase hex.
+fn explicit_commit() -> Option<String> {
+    let commit = std::env::var("ROBIN_GIT_COMMIT").ok()?;
+    if !matches!(commit.len(), 40 | 64)
+        || !commit
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        panic!(
+            "ROBIN_GIT_COMMIT must be a full 40- or 64-character lowercase hex commit ID, got {commit:?}"
+        );
+    }
+    Some(commit)
+}
+
+/// The commit of the checkout containing this manifest directory.
+fn discover_git_hash() -> String {
     // Read this at build-script execution time. Cargo can legitimately reuse
     // one compiled build-script executable across worktrees that share a
     // target directory; compile-time `env!` would permanently bake the first
@@ -48,7 +80,7 @@ fn emit_git_hash() {
             None => break None,
         }
     };
-    let full_hash = if let Some(git_meta) = git_meta {
+    if let Some(git_meta) = git_meta {
         let actual_git = if git_meta.is_file() {
             println!("cargo:rerun-if-changed={}", git_meta.display());
             match std::fs::read_to_string(&git_meta) {
@@ -131,10 +163,7 @@ fn emit_git_hash() {
         }
     } else {
         missing_identity("no Git metadata found (source archive)")
-    };
-    let short_hash = full_hash.get(..12).unwrap_or(&full_hash);
-    println!("cargo:rustc-env=ROBIN_GIT_HASH={short_hash}");
-    println!("cargo:rustc-env=ROBIN_GIT_COMMIT={full_hash}");
+    }
 }
 
 fn emit_build_identity() {

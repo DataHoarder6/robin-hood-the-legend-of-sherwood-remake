@@ -16,7 +16,6 @@
   gcc,
   python3,
   curl,
-  git,
   openssl,
   alsa-lib,
   dbus,
@@ -59,16 +58,12 @@ rustPlatform.buildRustPackage {
   # game data; a package build only has to produce the binary.
   doCheck = false;
 
-  # `build-support/robin_build.rs` shells out to `git rev-parse HEAD` and the
-  # replay format rejects anything that is not 12 lowercase hex. A Nix build
-  # has no `.git`, so give the build script the ref it reads: the commit comes
-  # from the flake, not from whatever `git` might discover.
-  preBuild = ''
-    # `git rev-parse HEAD` needs a repository, not just a ref file, so make a
-    # throwaway one whose only branch is the commit the flake supplied.
-    git init -q --template= -b main .
-    printf '%s\n' ${gitHash} > .git/refs/heads/main
-  '';
+  # `build-support/robin_build.rs` derives the engine commit from
+  # `git rev-parse HEAD` and the replay format rejects anything that is not 12
+  # lowercase hex. A Nix build has no `.git`, so hand the build script the
+  # commit the flake resolved; it is the only way `ROBIN_GIT_HASH` can be right
+  # here, and a malformed value panics instead of falling back.
+  ROBIN_GIT_COMMIT = gitHash;
 
   # Fail the build instead of stamping "unknown" when the identity above stops
   # working (a cargo behaviour change, a moved build script).
@@ -82,7 +77,6 @@ rustPlatform.buildRustPackage {
     gcc
     python3
     curl
-    git
     makeWrapper
   ];
   # System libraries the crates probe or link: zstd-sys and libudev-sys go
