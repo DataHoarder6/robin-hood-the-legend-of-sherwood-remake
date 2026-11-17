@@ -1696,6 +1696,7 @@ impl InteractiveFrameSimulation {
             manual_pause,
             StepUiGates {
                 active_modal: &mut ui.active_modal,
+                pending_terminal_debriefing: Some(&mut ui.pending_terminal_debriefing),
                 terminal_debriefing: ui.terminal_debriefing.as_mut(),
                 terminal_save_manager: Some(save_manager),
                 mission_ui_block_reason,

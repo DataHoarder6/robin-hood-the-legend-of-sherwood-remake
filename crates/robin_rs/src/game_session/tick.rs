@@ -240,6 +240,11 @@ pub(super) fn sync_render_camera(frontend: &mut crate::host::HostFrontend) {
 /// Local UI state that can refuse, or answer, a scripted step request.
 pub(super) struct StepUiGates<'a> {
     pub(super) active_modal: &'a mut Option<ActiveModal>,
+    /// Where a step that ends the mission hands the mission-end page. A step can
+    /// produce a terminal tick, and the frame that follows presents it from here;
+    /// without a sink (headless) the step only reports the code.
+    pub(super) pending_terminal_debriefing:
+        Option<&'a mut Option<super::terminal_debriefing::PendingTerminalDebriefing>>,
     pub(super) terminal_debriefing:
         Option<&'a mut super::terminal_debriefing::TerminalDebriefingState>,
     pub(super) terminal_save_manager: Option<&'a crate::savegame::SaveGameManager>,
@@ -287,11 +292,13 @@ pub(super) fn drain_steps(
 ) {
     let StepUiGates {
         active_modal,
+        pending_terminal_debriefing,
         mut terminal_debriefing,
         terminal_save_manager,
         mission_ui_block_reason,
         mut session_modals,
     } = gates;
+    let mut pending_terminal_debriefing = pending_terminal_debriefing;
     if steps.is_empty() {
         return;
     }
@@ -307,6 +314,20 @@ pub(super) fn drain_steps(
         // Keep the response handle intact: every branch below consumes the
         // complete PendingStep when it replies.
         let kind = step.kind.clone();
+        // The page is settled by the next frame. Until it exists a step must not
+        // advance behind it; once it does, its typed dismissal path below owns
+        // the request.
+        if pending_terminal_debriefing
+            .as_deref()
+            .is_some_and(Option::is_some)
+            && terminal_debriefing.is_none()
+        {
+            step.respond_err(RpcError::unavailable_capability(
+                "mission ended; the mission-end page owns the session until it is dismissed"
+                    .to_owned(),
+            ));
+            continue;
+        }
         let mut modal_policy = match &kind {
             crate::http_server::StepKind::Forward { modal_policy, .. }
             | crate::http_server::StepKind::Back { modal_policy, .. }
@@ -405,9 +426,10 @@ pub(super) fn drain_steps(
                         .as_mut()
                         .expect("forward steps always carry a modal policy"),
                     session_modals.as_deref_mut(),
+                    pending_terminal_debriefing.as_deref_mut(),
                 );
                 match result {
-                    Ok((advanced, dismissed_during)) => {
+                    Ok((advanced, dismissed_during, _)) => {
                         accepted_dismissals.extend(dismissed_during);
                         if let Err(error) =
                             begin_synchronized_step_resync(host, timeline, &manager.engine)
@@ -513,8 +535,9 @@ pub(super) fn drain_steps(
                                 .as_mut()
                                 .expect("go-to-frame steps always carry a modal policy"),
                             session_modals.as_deref_mut(),
+                            pending_terminal_debriefing.as_deref_mut(),
                         ) {
-                            Ok((advanced, dismissed_during)) => {
+                            Ok((advanced, dismissed_during, _)) => {
                                 accepted_dismissals.extend(dismissed_during);
                                 if advanced < delta {
                                     Err(RpcError::unavailable_capability(format!(
@@ -650,7 +673,8 @@ fn seek_replay_step(
             return Ok(());
         }
         if target > current {
-            let (_, dismissed) = run_forward_ticks_with_session_modals(
+            // A replay seek never produces a live terminal tick.
+            let (_, dismissed, _) = run_forward_ticks_with_session_modals(
                 StepWorld {
                     manager: &mut *manager,
                     host: &mut *host,
@@ -662,6 +686,7 @@ fn seek_replay_step(
                 target - current,
                 modal_policy.as_mut().expect("seek modal policy"),
                 session_modals.as_deref_mut(),
+                None,
             )?;
             accepted_dismissals.extend(dismissed);
         }
@@ -824,7 +849,8 @@ pub(super) fn run_forward_ticks(
     n: u32,
     modal_policy: &mut crate::http_server::StepModalPolicy,
 ) -> Result<(u32, Vec<crate::http_server::HttpModalDismissal>), String> {
-    run_forward_ticks_with_session_modals(world, timeline, n, modal_policy, None)
+    run_forward_ticks_with_session_modals(world, timeline, n, modal_policy, None, None)
+        .map(|(advanced, dismissed, _)| (advanced, dismissed))
         .map_err(|error| error.to_string())
 }
 
@@ -885,7 +911,17 @@ pub(super) fn run_forward_ticks_with_session_modals(
     n: u32,
     modal_policy: &mut crate::http_server::StepModalPolicy,
     mut session_modals: Option<&mut super::session_policy::SessionModalScheduler>,
-) -> Result<(u32, Vec<crate::http_server::HttpModalDismissal>), RpcError> {
+    mut terminal_handoff: Option<
+        &mut Option<super::terminal_debriefing::PendingTerminalDebriefing>,
+    >,
+) -> Result<
+    (
+        u32,
+        Vec<crate::http_server::HttpModalDismissal>,
+        Option<robin_engine::game_operation::GameCode>,
+    ),
+    RpcError,
+> {
     let StepWorld {
         manager,
         host,
@@ -895,6 +931,7 @@ pub(super) fn run_forward_ticks_with_session_modals(
     } = world;
     let mut advanced = 0;
     let mut dismissed = Vec::new();
+    let mut terminal_exit = None;
     for _ in 0..n {
         // Stepping into a save-marker / load-back frame must pin or swap
         // state exactly like the normal playback admission path.
@@ -1058,6 +1095,40 @@ pub(super) fn run_forward_ticks_with_session_modals(
             game.operation
                 .set(robin_engine::game_operation::GameCode::LevelInProgress);
         }
+        // A live step can end the mission. Stage the completion and hand the
+        // mission-end page to the frame that follows, exactly as a live tick
+        // does: otherwise the operation stays terminal, no frame presents the
+        // page, and the session closes behind a paused timeline.
+        if replay_timeline_after.is_none()
+            && let Some(code) = tick_exit_code
+        {
+            terminal_exit = Some(code);
+            if let Some(handoff) = terminal_handoff.as_deref_mut() {
+                let terminal_mission_id = crate::main_entry::current_mission_id(
+                    engine.campaign(),
+                    &assets.profile_manager,
+                );
+                let previous_attempt_sequence =
+                    super::terminal_debriefing::stage_terminal_campaign_update(
+                        false,
+                        &host.transport,
+                        &mut transaction,
+                        code,
+                        engine.sim_config().difficulty,
+                        engine.campaign().mission_attempt_sequence,
+                    );
+                let popup_title =
+                    crate::ingame_menu::mission_state_text(code).map(|(title, _)| title.to_owned());
+                *handoff = Some(super::terminal_debriefing::PendingTerminalDebriefing::new(
+                    code,
+                    terminal_mission_id,
+                    previous_attempt_sequence,
+                    popup_title,
+                ));
+                game.operation
+                    .set(robin_engine::game_operation::GameCode::LevelInProgress);
+            }
+        }
 
         let after = replay_timeline_after.unwrap_or_else(|| timeline.current_frame().next());
         if append_history && after.number() > frame {
@@ -1129,8 +1200,11 @@ pub(super) fn run_forward_ticks_with_session_modals(
         {
             scheduler.checkpoint(player.current_frame(), &host.effects);
         }
+        if terminal_exit.is_some() {
+            break;
+        }
     }
-    Ok((advanced, dismissed))
+    Ok((advanced, dismissed, terminal_exit))
 }
 
 /// Rewind to `target`, restoring rollback state from the rewind
@@ -2010,6 +2084,7 @@ mod tests {
             1,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(stationary.0, 0);
@@ -2023,6 +2098,7 @@ mod tests {
             1,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(forward.0, 1);
@@ -2074,6 +2150,7 @@ mod tests {
             2,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(repeated.0, 1);
@@ -2542,6 +2619,7 @@ mod tests {
             &mut timeline,
             1,
             &mut modal_policy,
+            None,
             None,
         )
         .expect_err("replay EOF must refuse a synthetic live frame");
