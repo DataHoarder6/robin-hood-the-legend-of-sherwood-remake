@@ -1,9 +1,9 @@
 # Multiplayer architecture
 
-Updated 2026-08-30. Multiplayer uses a server-ordered input stream with a
+Updated 2026-11-17. Multiplayer uses a server-ordered input stream with a
 small scheduling delay, predictive simulation, rollback for late inputs,
 periodic state-hash verification, and authoritative snapshots for joins. The
-wire protocol is version 53; older protocol compatibility is unsupported.
+wire protocol is version 71; older protocol compatibility is unsupported.
 
 ## Seat model
 
@@ -121,36 +121,28 @@ boards. Co-op mission-end screens explain this restriction and allow browsing
 the mission's general board without offering an upload. Non-host clients never
 prepare submission evidence from their local prediction/reconnect journals.
 
-## Protocol 53
+## Protocol 71
 
 Messages are bitcode-encoded binary frames, class-tagged and length-prefixed
 on a single bidirectional iroh stream per peer. The handshake rejects a
 different protocol version.
 
-| Direction | Message | Purpose |
-| --- | --- | --- |
-| client → server | `Hello { protocol_version, nickname, browser_auth }` | open or resume a session; browser auth carries the signed ticket and durable seat proof |
-| server → client | `ContentOffer { offer }` | disclose the exact bounded full-mod/package identity before assigning a gameplay seat |
-| client → server | `ContentRequest { full_mod_sha256, resume_offset }` | consent to and resume the exact immutable content transfer |
-| client → server | `ContentReject { full_mod_sha256, reason }` | explicitly refuse content without falling back to mismatched local assets |
-| server → client | `ContentChunk { full_mod_sha256, offset, total_bytes, bytes }` | transfer one bounded sequential segment of the canonical package |
-| client → server | `ContentReady { full_mod_sha256 }` | confirm that exact content was verified, admitted, and mounted before `Welcome` |
-| client → server | `ContentPrepared { full_mod_sha256 }` | cache verified content during lobby preflight without claiming a gameplay seat |
-| server → client | `Welcome { your_seat, session_id, mission_id, mission_seed, sim_config, speech_timing_locale, host_nickname }` | authoritative session identity, mission construction, speech timing, and seat assignment |
-| server → client | `Reject { reason }` | typed fail-loud admission rejection |
-| client → server | `Input { origin_frame, command }` | propose a local command |
-| server → peers | `BroadcastInput { server_frame, origin_frame, target_frame, input }` | globally ordered, scheduled input |
-| server → peers | `StateHash { frame, hash, clock_frame, ms_until_next_frame }` | desync detection and pacing sample |
-| server → joining peer | `InitialSnapshot { frame, engine_bytes }` | authoritative mid-mission state |
-| client → server | `ReadyToSim { frame }` | peer loaded and adopted the snapshot |
-| server → peers | `BeginSim { frame, start_epoch_ms }` | release the start barrier |
-| client → server | `ModalProposal { instance, kind, result, requested_frame }` | present a non-authoritative client request to the host |
-| server → clients | `ModalProgress { instance, kind, accepted, player_names }` | announce a story and retain its acknowledgement state for reconnect |
-| server → clients | `ModalDecision { instance, kind, result, decision_frame }` | commit the host's sole authoritative result for one exact modal occurrence |
-| server → client | `ReconnectRequired { reason }` | discard the prediction future and perform a complete handshake/snapshot admission |
-| server → clients | `PrepareSnapshotTransition { id, payload }` | distribute exact host-authored save or campaign-exit bytes for validation and retention |
-| client → server | `SnapshotTransitionReady { id }` | acknowledge the exact prepared transition bytes |
-| server → clients | `CommitSnapshotTransition { id }` | release the transition only after every current peer is ready |
+The authoritative shapes are the `NetMsg` enum in
+`crates/robin_engine/src/multiplayer.rs`. This section groups the messages by
+purpose; it deliberately does not restate their fields, because a field list
+kept in prose drifts from the enum the moment the enum changes.
+
+- **Admission** — `Hello`, `Welcome`, `Reject`.
+- **Content** — `ContentOffer`, `ContentRequest`, `ContentReject`,
+  `ContentChunk`, `ContentReady`, `ContentPrepared`.
+- **Simulation** — `Input`, `BroadcastInput`, `StateHash`, `InitialSnapshot`,
+  `ReadyToSim`, `BeginSim`, `Latency`, `Note`.
+- **Modals** — `ModalProposal`, `ModalProgress`, `ModalDecision`.
+- **Transitions** — `PrepareSnapshotTransition`, `SnapshotTransitionReady`,
+  `CommitSnapshotTransition`.
+- **Recovery** — `ReconnectRequired`.
+- **Chat** — `ChatSend` (client → server, identity supplied by the server) and
+  `Chat` (server → peers). Chat text is never interpreted as a command.
 
 Client `Input` frames can contain only seat-authored gameplay commands. Shared
 settings, campaign mutations, modal decisions, and seat connect/disconnect
@@ -297,18 +289,19 @@ authoritative load input.
 - `--server` hosts a game transport on the install's persistent iroh
   identity; the endpoint id to share is logged at startup.
 - `--connect ENDPOINT_ID` joins a host by its endpoint id.
-- `--mp-expected-players N` configures the start barrier for direct launches.
+- `--mp-expected-players N` is an internal matchmaking handoff (hidden from
+  `--help`): the host uses it as the ready-barrier player count.
 - `--mp-nickname NAME` supplies the display/overlay label, not reconnect authority.
 - `--mp-browser-join-links true|false` overrides the saved browser-link
   publication preference for this hosted game.
-- `--join RHMP3_TICKET` consumes a canonical host-signed invitation. The web
+- `--join RHMP2_TICKET` consumes a canonical host-signed invitation. The web
   shell installs it internally after authenticating and scrubbing it.
 
 Only the host records the canonical server-ordered multiplayer replay. A
 connecting peer cannot select `--record`, and the browser peer's replay RPC
 fails with `no active replay recording` instead of publishing a competing
 history. Native diagnostic recordings preserve snapshot adoption and late-input
-reconstruction as explicit exact-state boundaries. Replay schema 66 distinguishes
+reconstruction as explicit exact-state boundaries. Replay schema 75 distinguishes
 these network corrections from saved-game loads, verifies their state hashes,
 and excludes them from ranked submission. Playback adopts the recorded engine
 state without applying saved-game load fixups.
