@@ -399,3 +399,23 @@ to be deployed.
   admission already recomputes the package hash, journal usage/digest, and
   combined snapshot budget before state hashing or VM attachment. The bounded
   persistent journal participates in snapshot adoption and desync detection.
+
+## What each seat records
+
+Every seat records, into its own install directory (see the harness doc's
+isolation rule):
+
+- a local mission replay of every mission it plays (`replays/`), produced by the
+  same recorder single-player uses — a peer is not a spectator, it owns a
+  timeline;
+- its own log stream, with the multiplayer events (seat, session, transition
+  ids, admission phase, evictions);
+
+and, when a session fails, a pinned bundle under `robin_hood/diagnostics/` that
+names the reason, the phase, the seat, the session and the newest replay.
+
+The **host's** replay is the shared record: it carries every seat's input and the
+authoritative hash chain, and a bug report is reproduced from it. A peer's replay
+is a local witness: comparing the two per-25-frame hash chains is the desync
+oracle. No seat ever writes another seat's files, and no peer records on behalf of
+the host.
