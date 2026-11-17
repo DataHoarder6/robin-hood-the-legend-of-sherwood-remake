@@ -2913,3 +2913,10 @@ perform the exact component decoding and normalized Number arithmetic, and
 retain all identity, topology, morph, and mutation checks. GLB, manifest, and
 parser inputs are owned before asynchronous hashing to prevent caller aliases
 from changing verification authority.
+
+The Sherwood/mission rail now offers only the controls the current situation
+has: the campaign-map button before a mission is committed, the deploy/start/
+cancel column after, and finish/abandon while a mission plays. Presence is
+derived from campaign state every frame (host, client and mid-Sherwood load
+alike), while a control whose gate is closed — mission requirements unmet, the
+hourglass transient, trading unavailable — stays on the rail drawn disabled.

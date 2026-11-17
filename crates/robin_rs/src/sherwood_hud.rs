@@ -23,6 +23,7 @@
 
 use crate::gfx_types::{Point, Rect as ScreenRect};
 
+use crate::hud_sprite::HudButton;
 use crate::ingame_menu::layout::{BTN_STATE_HOVER, BTN_STATE_NORMAL, button_sprite_state};
 use crate::renderer::Renderer;
 use robin_engine::resource_ids::{
@@ -47,6 +48,53 @@ pub enum SherwoodButton {
     PerksPanel,
 }
 
+/// Which controls the rail offers.
+///
+/// Presence is a property of the situation, derived from campaign state every
+/// frame — not a hand-maintained mirror of it. Clickability stays in
+/// [`SherwoodButtonEnable`]: an offered control whose gate is closed is drawn
+/// disabled, it does not vanish and it does not stop answering its tooltip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SherwoodRail {
+    /// Sherwood, no next mission committed.
+    PreCommit,
+    /// Sherwood, next mission committed.
+    PostCommit,
+    /// A mission being played.
+    InMission,
+}
+
+impl SherwoodRail {
+    /// Derive the rail from campaign state. `has_next_mission` is
+    /// `campaign.next_mission_idx.is_some()`.
+    pub fn from_campaign(is_sherwood: bool, has_next_mission: bool) -> Self {
+        match (is_sherwood, has_next_mission) {
+            (false, _) => Self::InMission,
+            (true, false) => Self::PreCommit,
+            (true, true) => Self::PostCommit,
+        }
+    }
+
+    /// Whether the rail offers `button` in this situation.
+    pub fn present(self, button: SherwoodButton) -> bool {
+        use SherwoodButton::*;
+        match (self, button) {
+            (Self::InMission, StartMission | QuitMission) => true,
+            (Self::PreCommit, DisplayCampaignMap | PerksPanel) => true,
+            (Self::PostCommit, GoToExit | StartMission | QuitMission | PerksPanel) => true,
+            (Self::PreCommit | Self::PostCommit, SherwoodTrading) => true,
+            _ => false,
+        }
+    }
+
+    /// The offered buttons, in draw and hit-test order.
+    pub fn visible(self) -> impl Iterator<Item = SherwoodButton> {
+        SherwoodButton::ALL
+            .into_iter()
+            .filter(move |button| self.present(*button))
+    }
+}
+
 /// Which Sherwood buttons are interactable this frame.
 ///
 /// The enable toggles are derived from initialization (GoToExit
@@ -64,12 +112,31 @@ pub struct SherwoodButtonEnable {
 }
 
 impl SherwoodButtonEnable {
-    pub fn won_mission(enabled: bool) -> Self {
+    /// Whether `button` can be clicked this frame.
+    ///
+    /// This is the click gate, not presence: a button the rail offers but
+    /// whose gate is closed is drawn disabled (greyed), and its tooltip still
+    /// explains why.
+    pub fn is_enabled(self, button: SherwoodButton) -> bool {
+        match button {
+            SherwoodButton::DisplayCampaignMap => self.display_campaign_map,
+            SherwoodButton::GoToExit => self.go_to_exit,
+            SherwoodButton::StartMission => self.start_mission,
+            SherwoodButton::QuitMission => self.quit_mission,
+            SherwoodButton::SherwoodTrading => self.sherwood_trading,
+            SherwoodButton::PerksPanel => self.perks_panel,
+        }
+    }
+
+    /// The rail while a mission is being played: finish it once the win
+    /// condition is met, and abandon it at any time. Abandoning is always
+    /// allowed, so its gate is open from the first frame.
+    pub fn in_mission(can_finish: bool) -> Self {
         Self {
             display_campaign_map: false,
             go_to_exit: false,
-            start_mission: enabled,
-            quit_mission: false,
+            start_mission: can_finish,
+            quit_mission: true,
             sherwood_trading: false,
             perks_panel: false,
         }
@@ -121,12 +188,9 @@ impl SherwoodButtonEnable {
     ///
     /// `start_disabled_temp` / `quit_disabled_temp` are the transient
     /// disable flags driven by the hourglass tick at
-    /// `Game::perform_hourglass_inner`.  Without them the PC-guarded
-    /// transient suppression does not visually disable the Sherwood
-    /// buttons.  We fold the temp flags directly into the Sherwood
-    /// enable mask rather than maintaining a parallel
-    /// `enable_quit_mission` flag for Sherwood — the persistent
-    /// post-commit state is tracked by [`Self::post_commit`].
+    /// `Game::perform_hourglass_inner`. They close the click gate for that
+    /// frame: the button greys out and stops answering clicks, but stays on
+    /// the rail. Presence is [`SherwoodRail`]'s job, not this mask's.
     pub fn apply_update_mission_team(
         &mut self,
         men_to_blazon: bool,
@@ -185,6 +249,31 @@ impl SherwoodButtonEnable {
     }
 }
 
+/// Horizontal offset of the tall column from the right screen edge — the lower
+/// panel's slot column in the original layout.
+const TALL_COLUMN_X_OFFSET: i32 = 45;
+/// Panel coordinates of the column: first slot, and the pitch between slots.
+const COLUMN_TOP: i32 = 105;
+const COLUMN_PITCH: i32 = 45;
+/// Clearance between a sprite's bottom edge and the next slot: the shipped
+/// 41 px tall buttons plus this reproduce the panel's 45 px pitch exactly.
+const RAIL_GAP: i32 = 4;
+
+/// Vertical tops of the tall column: start mission, quit mission, trading,
+/// perks.
+///
+/// The panel anchors hold whatever the artwork is, and a sprite taller than its
+/// slot pushes the following ones down instead of overlapping them. Pure so
+/// tests can cover the artwork cases: absent frames (fallback sizes), a wide
+/// slot taller than the panel, and buttons taller than the pitch.
+fn column_tops(wide_h: u16, tall: [u16; 3]) -> [i32; 4] {
+    let mut tops = [COLUMN_TOP.max(wide_h as i32 + RAIL_GAP); 4];
+    for (index, height) in tall.into_iter().enumerate() {
+        tops[index + 1] = tops[index] + COLUMN_PITCH.max(height as i32 + RAIL_GAP);
+    }
+    tops
+}
+
 /// Screen-space bounding boxes for the Sherwood HUD buttons.
 #[derive(Debug, Clone, Copy)]
 pub struct SherwoodHudLayout {
@@ -202,7 +291,7 @@ impl SherwoodHudLayout {
     /// Sizes are rough estimates matching the sprite dimensions from
     /// DEFAULT.RES (confirmed by eye — proper sprite-driven sizing
     /// lands with the widget port).
-    pub fn for_resolution(screen_w: u32, _screen_h: u32, sprites: &SherwoodButtonSprites) -> Self {
+    pub fn for_resolution(screen_w: u32, screen_h: u32, sprites: &SherwoodButtonSprites) -> Self {
         // Fallback sizes for missing sprites (keeps the hit-rect
         // usable during development against incomplete DEFAULT.RES).
         const FALLBACK_WIDE_W: u16 = 80;
@@ -219,14 +308,7 @@ impl SherwoodHudLayout {
         // would show Sight instead at the same coordinates.
         let wide_x = sw - 100;
         let wide_y = 0;
-
-        // StartMission / QuitMission live at absolute (sw-45, 105) and
-        // (sw-45, 150) — see derivation in the parent module.
-        let tall_x = sw - 45;
-        let start_y = 105;
-        let quit_y = 150;
-        let trading_y = 195;
-        let perks_y = 240;
+        let tall_x = sw - TALL_COLUMN_X_OFFSET;
 
         let (dcm_w, dcm_h) = sprites
             .size(SherwoodButton::DisplayCampaignMap)
@@ -247,6 +329,23 @@ impl SherwoodHudLayout {
             .size(SherwoodButton::PerksPanel)
             .unwrap_or((FALLBACK_TALL_W, FALLBACK_TALL_H));
 
+        // The parchment scroll hosts the wide slot at the top-right; the tall
+        // column lives on the lower panel, whose first slot is at 105 with a
+        // 45 px pitch in the original layout. Those anchors are the artwork's
+        // coordinates — deriving the column from the wide sprite put the
+        // drafting checkmark at y=37 whenever that sprite's frames were absent.
+        // The anchors still yield to the sprite: a wide slot taller than the
+        // panel pushes the column down instead of overlapping it.
+        let [start_y, quit_y, trading_y, perks_y] =
+            column_tops(dcm_h.max(gte_h), [sm_h, qm_h, trade_h]);
+        // The column is anchored to drawn artwork; artwork that does not fit
+        // is a broken layout, not an off-position one.
+        assert!(
+            perks_y + perks_h as i32 <= screen_h as i32,
+            "Sherwood rail does not fit {screen_w}x{screen_h}: column ends at {}",
+            perks_y + perks_h as i32
+        );
+
         Self {
             display_campaign_map: ScreenRect::new(wide_x, wide_y, dcm_w as u32, dcm_h as u32),
             go_to_exit: ScreenRect::new(wide_x, wide_y, gte_w as u32, gte_h as u32),
@@ -257,48 +356,56 @@ impl SherwoodHudLayout {
         }
     }
 
-    /// Hit-test a screen-space click.  Returns the first matching
-    /// button that is currently enabled, or `None`.  Respects the
-    /// layout where `DisplayCampaignMap` and `GoToExit` overlap —
-    /// whichever is enabled wins.
-    pub fn hit_test(&self, x: i32, y: i32, enable: SherwoodButtonEnable) -> Option<SherwoodButton> {
-        let pt = Point::new(x, y);
-        if enable.display_campaign_map && self.display_campaign_map.contains_point(pt) {
-            return Some(SherwoodButton::DisplayCampaignMap);
+    /// Screen rect of `button`. The single source for both drawing and
+    /// hit-testing.
+    pub fn rect(&self, button: SherwoodButton) -> ScreenRect {
+        match button {
+            SherwoodButton::DisplayCampaignMap => self.display_campaign_map,
+            SherwoodButton::GoToExit => self.go_to_exit,
+            SherwoodButton::StartMission => self.start_mission,
+            SherwoodButton::QuitMission => self.quit_mission,
+            SherwoodButton::SherwoodTrading => self.sherwood_trading,
+            SherwoodButton::PerksPanel => self.perks_panel,
         }
-        if enable.go_to_exit && self.go_to_exit.contains_point(pt) {
-            return Some(SherwoodButton::GoToExit);
-        }
-        if enable.start_mission && self.start_mission.contains_point(pt) {
-            return Some(SherwoodButton::StartMission);
-        }
-        if enable.quit_mission && self.quit_mission.contains_point(pt) {
-            return Some(SherwoodButton::QuitMission);
-        }
-        if enable.sherwood_trading && self.sherwood_trading.contains_point(pt) {
-            return Some(SherwoodButton::SherwoodTrading);
-        }
-        if enable.perks_panel && self.perks_panel.contains_point(pt) {
-            return Some(SherwoodButton::PerksPanel);
-        }
-        None
     }
 
-    /// Purely geometric hit-test — reports which visible button the
-    /// cursor is over, filtered only by the `enable` mask so the
-    /// DisplayCampaignMap / GoToExit overlap still resolves
-    /// consistently (disabled widgets don't claim hover, but
-    /// overlapping-enabled ones do).  Used to drive the tooltip hover
-    /// tracker, which needs to know when the cursor is over a specific
-    /// live button (Start/Quit tooltip text depends on mode and
-    /// switches with it).
-    pub fn hit_test_geometric(
+    /// Hit-test a screen-space click: the first offered, enabled button whose
+    /// rect contains the point. Callers consume the click whenever
+    /// [`Self::claims_point`] is true, so a greyed control never acts on the
+    /// world behind it and never answers a click either.
+    pub fn hit_test(
         &self,
         x: i32,
         y: i32,
+        rail: SherwoodRail,
         enable: SherwoodButtonEnable,
     ) -> Option<SherwoodButton> {
-        self.hit_test(x, y, enable)
+        let pt = Point::new(x, y);
+        rail.visible()
+            .find(|button| enable.is_enabled(*button) && self.rect(*button).contains_point(pt))
+    }
+
+    /// Hit-test a hover: the first offered button under the point, gate open or
+    /// not. Disabled controls still explain themselves through their tooltip.
+    pub fn hover_test(&self, x: i32, y: i32, rail: SherwoodRail) -> Option<SherwoodButton> {
+        let pt = Point::new(x, y);
+        rail.visible()
+            .find(|button| self.rect(*button).contains_point(pt))
+    }
+
+    /// The rect of every offered button, whether or not its gate is open.
+    /// Input capture uses this: a disabled control still owns its pixels.
+    pub fn occupied(&self, rail: SherwoodRail) -> Vec<ScreenRect> {
+        rail.visible().map(|button| self.rect(button)).collect()
+    }
+
+    /// Whether the rail owns the point at all — the click belongs to the HUD
+    /// and must not reach the world, whatever the button's gate says.
+    pub fn claims_point(&self, rail: SherwoodRail, x: i32, y: i32) -> bool {
+        let pt = Point::new(x, y);
+        self.occupied(rail)
+            .into_iter()
+            .any(|rect| rect.contains_point(pt))
     }
 }
 
@@ -348,49 +455,18 @@ impl crate::hud_sprite::HudButton<6> for SherwoodButton {
 pub fn draw_with_sprites(
     renderer: &mut Renderer,
     layout: &SherwoodHudLayout,
+    rail: SherwoodRail,
     enable: SherwoodButtonEnable,
     hover: SherwoodHoverState,
     sprites: &SherwoodButtonSprites,
     frame_counter: u32,
 ) {
-    let buttons = [
-        (
-            &layout.display_campaign_map,
-            enable.display_campaign_map,
-            SherwoodButton::DisplayCampaignMap,
-        ),
-        (
-            &layout.go_to_exit,
-            enable.go_to_exit,
-            SherwoodButton::GoToExit,
-        ),
-        (
-            &layout.start_mission,
-            enable.start_mission,
-            SherwoodButton::StartMission,
-        ),
-        (
-            &layout.quit_mission,
-            enable.quit_mission,
-            SherwoodButton::QuitMission,
-        ),
-        (
-            &layout.sherwood_trading,
-            enable.sherwood_trading,
-            SherwoodButton::SherwoodTrading,
-        ),
-        (
-            &layout.perks_panel,
-            enable.perks_panel,
-            SherwoodButton::PerksPanel,
-        ),
-    ];
-
-    for (rect, enabled, btn) in buttons {
-        let is_hovered = hover.hovered == Some(btn);
-        let pressed = is_hovered && hover.mouse_pressed && enabled;
+    for button in rail.visible() {
+        let enabled = enable.is_enabled(button);
+        let is_hovered = enabled && hover.hovered == Some(button);
+        let pressed = is_hovered && hover.mouse_pressed;
         let state = button_sprite_state(enabled, is_hovered, pressed);
-        sprites.draw(renderer, btn, *rect, state, frame_counter);
+        sprites.draw(renderer, button, layout.rect(button), state, frame_counter);
     }
 }
 
@@ -459,25 +535,257 @@ mod tests {
     use super::*;
 
     #[test]
-    fn won_mission_only_exposes_the_exit_checkmark() {
+    fn a_mission_offers_finish_and_abandon() {
         let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
         let point = (layout.start_mission.x() + 1, layout.start_mission.y() + 1);
+        let rail = SherwoodRail::InMission;
         assert_eq!(
-            layout.hit_test(point.0, point.1, SherwoodButtonEnable::won_mission(true)),
+            layout.hit_test(
+                point.0,
+                point.1,
+                rail,
+                SherwoodButtonEnable::in_mission(true)
+            ),
             Some(SherwoodButton::StartMission)
         );
         assert_eq!(
-            layout.hit_test(point.0, point.1, SherwoodButtonEnable::won_mission(false)),
+            layout.hit_test(
+                point.0,
+                point.1,
+                rail,
+                SherwoodButtonEnable::in_mission(false)
+            ),
             None
         );
-        let enable = SherwoodButtonEnable::won_mission(true);
+        // Abandoning is always available; finishing is gated on the win.
+        assert!(SherwoodButtonEnable::in_mission(false).quit_mission);
+        assert!(SherwoodButtonEnable::in_mission(true).quit_mission);
+        let enable = SherwoodButtonEnable::in_mission(true);
         assert!(
-            !enable.quit_mission
-                && !enable.go_to_exit
+            !enable.go_to_exit
                 && !enable.display_campaign_map
                 && !enable.sherwood_trading
                 && !enable.perks_panel
         );
+    }
+
+    #[test]
+    fn a_closed_gate_still_answers_hover_and_claims_the_point() {
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
+        let rail = SherwoodRail::from_campaign(true, true);
+        let enable = SherwoodButtonEnable::in_mission(false);
+        let rect = layout.rect(SherwoodButton::StartMission);
+        let point = (rect.x() + 2, rect.y() + 2);
+
+        // The click gate is closed...
+        assert_eq!(layout.hit_test(point.0, point.1, rail, enable), None);
+        // ...but the control is still offered: it explains itself and owns its
+        // pixels, so the click cannot reach the world behind it.
+        assert_eq!(
+            layout.hover_test(point.0, point.1, rail),
+            Some(SherwoodButton::StartMission)
+        );
+        assert!(layout.claims_point(rail, point.0, point.1));
+        assert!(!layout.claims_point(rail, 0, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "Sherwood rail does not fit")]
+    fn a_screen_too_short_for_the_rail_fails_loudly() {
+        let _ = SherwoodHudLayout::for_resolution(800, 200, &SherwoodButtonSprites::default());
+    }
+
+    #[test]
+    fn presence_follows_campaign_state() {
+        use SherwoodButton::*;
+
+        let pre = SherwoodRail::from_campaign(true, false);
+        assert_eq!(
+            pre.visible().collect::<Vec<_>>(),
+            vec![DisplayCampaignMap, SherwoodTrading, PerksPanel]
+        );
+
+        let post = SherwoodRail::from_campaign(true, true);
+        assert_eq!(
+            post.visible().collect::<Vec<_>>(),
+            vec![
+                GoToExit,
+                StartMission,
+                QuitMission,
+                SherwoodTrading,
+                PerksPanel
+            ]
+        );
+
+        let mission = SherwoodRail::from_campaign(false, false);
+        assert_eq!(
+            mission.visible().collect::<Vec<_>>(),
+            vec![StartMission, QuitMission]
+        );
+        // A committed campaign while a mission plays is still a mission.
+        assert_eq!(SherwoodRail::from_campaign(false, true), mission);
+
+        // The two controls that share the wide slot are never both present:
+        // the draft column must not hide the map button, and the map button
+        // must not survive the commit.
+        for rail in [pre, post, mission] {
+            assert!(
+                !(rail.present(DisplayCampaignMap) && rail.present(GoToExit)),
+                "the wide slot offers exactly one control per state"
+            );
+            assert!(
+                !(rail.present(DisplayCampaignMap) && rail.present(StartMission)),
+                "campaign-map and drafting controls must never share a state"
+            );
+        }
+    }
+
+    #[test]
+    fn a_closed_gate_greys_but_does_not_remove_a_button() {
+        let sprites = SherwoodButtonSprites::default();
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
+        let rail = SherwoodRail::from_campaign(true, true);
+        let mut enable = SherwoodButtonEnable::post_commit();
+        enable.start_mission = false;
+        enable.quit_mission = false;
+
+        // Present but closed: still occupies its pixels, claims no click, and
+        // the tooltip path still sees it through `present`.
+        let rect = layout.rect(SherwoodButton::StartMission);
+        let centre = (rect.x() + 2, rect.y() + 2);
+        assert!(rail.present(SherwoodButton::StartMission));
+        assert_eq!(layout.hit_test(centre.0, centre.1, rail, enable), None);
+        assert!(
+            layout
+                .occupied(rail)
+                .into_iter()
+                .any(|r| r.contains_point(Point::new(centre.0, centre.1)))
+        );
+    }
+
+    fn intersects(a: &ScreenRect, b: &ScreenRect) -> bool {
+        a.x() < b.x() + b.width() as i32
+            && b.x() < a.x() + a.width() as i32
+            && a.y() < b.y() + b.height() as i32
+            && b.y() < a.y() + a.height() as i32
+    }
+
+    #[test]
+    fn visible_rects_never_intersect() {
+        let sprites = SherwoodButtonSprites::default();
+        let every_rail = [
+            SherwoodRail::from_campaign(true, false),
+            SherwoodRail::from_campaign(true, true),
+            SherwoodRail::from_campaign(false, false),
+        ];
+
+        for (width, height) in [(800, 600), (2259, 1271)] {
+            let layout = SherwoodHudLayout::for_resolution(width, height, &sprites);
+            for rail in every_rail {
+                let rects: Vec<_> = rail
+                    .visible()
+                    .map(|button| (button, layout.rect(button)))
+                    .collect();
+                for (index, (left_button, left)) in rects.iter().enumerate() {
+                    for (right_button, right) in &rects[index + 1..] {
+                        assert!(
+                            !intersects(left, right),
+                            "{left_button:?} at {left:?} intersects {right_button:?} at {right:?} \
+                             on {width}x{height}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn column_tops_hold_the_panel_anchors_when_artwork_is_absent() {
+        // Fallback sizes: the state that put the checkmark at y=37.
+        assert_eq!(column_tops(32, [40, 40, 40]), [105, 150, 195, 240]);
+        // An absent bank yields `size() == None` and the fallback above; a
+        // zero-sized frame cannot reach here, so the arithmetic is only
+        // required to stay monotone (`column_tops(0, …) == anchors`).
+        assert_eq!(column_tops(0, [0, 0, 0]), [105, 150, 195, 240]);
+        // A wide slot that exactly meets the panel still leaves the anchor.
+        assert_eq!(column_tops(100, [40, 40, 40]), [105, 150, 195, 240]);
+        // The artwork this data set ships: DisplayCampaignMap 74x53,
+        // GoToExit 74x60, the tall buttons 41x41.
+        assert_eq!(column_tops(60, [41, 41, 41]), [105, 150, 195, 240]);
+        assert_eq!(column_tops(53, [41, 41, 41]), [105, 150, 195, 240]);
+    }
+
+    #[test]
+    fn column_tops_yield_to_a_wide_slot_taller_than_the_panel() {
+        assert_eq!(column_tops(102, [40, 40, 40]), [106, 151, 196, 241]);
+        assert_eq!(column_tops(120, [40, 40, 40]), [124, 169, 214, 259]);
+    }
+
+    #[test]
+    fn column_tops_grow_the_pitch_for_tall_buttons() {
+        assert_eq!(column_tops(32, [60, 60, 60]), [105, 169, 233, 297]);
+        assert_eq!(column_tops(32, [40, 60, 60]), [105, 150, 214, 278]);
+    }
+
+    #[test]
+    fn every_offered_button_answers_for_its_own_centre_when_enabled() {
+        let sprites = SherwoodButtonSprites::default();
+        let layout = SherwoodHudLayout::for_resolution(2259, 1271, &sprites);
+        let all_gates_open = SherwoodButtonEnable {
+            display_campaign_map: true,
+            go_to_exit: true,
+            start_mission: true,
+            quit_mission: true,
+            sherwood_trading: true,
+            perks_panel: true,
+        };
+
+        for rail in [
+            SherwoodRail::from_campaign(true, false),
+            SherwoodRail::from_campaign(true, true),
+            SherwoodRail::from_campaign(false, false),
+        ] {
+            for button in rail.visible() {
+                let rect = layout.rect(button);
+                let centre = (
+                    rect.x() + rect.width() as i32 / 2,
+                    rect.y() + rect.height() as i32 / 2,
+                );
+                assert_eq!(
+                    layout.hit_test(centre.0, centre.1, rail, all_gates_open),
+                    Some(button),
+                    "{button:?} must claim its own centre on {rail:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_buttons_do_not_claim_clicks() {
+        let sprites = SherwoodButtonSprites::default();
+        let layout = SherwoodHudLayout::for_resolution(2259, 1271, &sprites);
+        let pre = SherwoodRail::from_campaign(true, false);
+        let all_gates_open = SherwoodButtonEnable {
+            display_campaign_map: true,
+            go_to_exit: true,
+            start_mission: true,
+            quit_mission: true,
+            sherwood_trading: true,
+            perks_panel: true,
+        };
+        for button in SherwoodButton::ALL {
+            if pre.present(button) {
+                continue;
+            }
+            let rect = layout.rect(button);
+            let point = (rect.x() + 1, rect.y() + 1);
+            assert_ne!(
+                layout.hit_test(point.0, point.1, pre, all_gates_open),
+                Some(button),
+                "{button:?} is not offered before a mission is committed"
+            );
+            assert!(!pre.present(button));
+        }
     }
 
     #[test]
@@ -491,16 +799,18 @@ mod tests {
         assert!(
             layout.display_campaign_map.x() + layout.display_campaign_map.width() as i32 <= 800
         );
-        // Start / Quit near the top-right.
-        assert_eq!(layout.start_mission.x(), 800 - 45);
+        // The tall column holds the panel's anchors: 105, then a 45 px pitch.
+        // Missing sprite frames must not move it (the drafting checkmark at
+        // y=37 was exactly that defect).
         assert_eq!(layout.start_mission.y(), 105);
         assert_eq!(layout.quit_mission.y(), 150);
         assert_eq!(layout.sherwood_trading.y(), 195);
         assert_eq!(layout.perks_panel.y(), 240);
+        assert_eq!(layout.start_mission.x(), 800 - 45);
     }
 
     #[test]
-    fn hit_test_prefers_enabled() {
+    fn the_wide_slot_resolves_to_the_offered_button() {
         let sprites = SherwoodButtonSprites::default();
         let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
         let pt_map = (
@@ -509,14 +819,22 @@ mod tests {
         );
         // DisplayCampaignMap and GoToExit overlap; enabling only
         // GoToExit should return GoToExit.
-        let post = SherwoodButtonEnable::post_commit();
         assert_eq!(
-            layout.hit_test(pt_map.0, pt_map.1, post),
+            layout.hit_test(
+                pt_map.0,
+                pt_map.1,
+                SherwoodRail::from_campaign(true, true),
+                SherwoodButtonEnable::post_commit()
+            ),
             Some(SherwoodButton::GoToExit)
         );
-        let pre = SherwoodButtonEnable::pre_commit();
         assert_eq!(
-            layout.hit_test(pt_map.0, pt_map.1, pre),
+            layout.hit_test(
+                pt_map.0,
+                pt_map.1,
+                SherwoodRail::from_campaign(true, false),
+                SherwoodButtonEnable::pre_commit()
+            ),
             Some(SherwoodButton::DisplayCampaignMap)
         );
 
@@ -527,7 +845,12 @@ mod tests {
             layout.sherwood_trading.y() + 1,
         );
         assert_eq!(
-            layout.hit_test(pt_trade.0, pt_trade.1, trading),
+            layout.hit_test(
+                pt_trade.0,
+                pt_trade.1,
+                SherwoodRail::from_campaign(true, false),
+                trading
+            ),
             Some(SherwoodButton::SherwoodTrading)
         );
     }
@@ -541,15 +864,25 @@ mod tests {
         assert!(SherwoodButtonEnable::pre_commit().perks_panel);
         assert!(SherwoodButtonEnable::post_commit().perks_panel);
         assert_eq!(
-            layout.hit_test(point.0, point.1, SherwoodButtonEnable::pre_commit()),
+            layout.hit_test(
+                point.0,
+                point.1,
+                SherwoodRail::from_campaign(true, false),
+                SherwoodButtonEnable::pre_commit()
+            ),
             Some(SherwoodButton::PerksPanel)
         );
 
         // The non-Sherwood (won mission) enable mask never exposes the perks
         // panel, so it cannot be opened outside Sherwood.
-        assert!(!SherwoodButtonEnable::won_mission(true).perks_panel);
+        assert!(!SherwoodButtonEnable::in_mission(true).perks_panel);
         assert_eq!(
-            layout.hit_test(point.0, point.1, SherwoodButtonEnable::won_mission(true)),
+            layout.hit_test(
+                point.0,
+                point.1,
+                SherwoodRail::from_campaign(false, false),
+                SherwoodButtonEnable::in_mission(true)
+            ),
             None
         );
     }
@@ -560,7 +893,12 @@ mod tests {
         let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
         assert!(
             layout
-                .hit_test(0, 0, SherwoodButtonEnable::post_commit())
+                .hit_test(
+                    0,
+                    0,
+                    SherwoodRail::from_campaign(true, true),
+                    SherwoodButtonEnable::post_commit()
+                )
                 .is_none()
         );
     }
