@@ -28,6 +28,9 @@ pub const MAX_MULTIPLAYER_PLAYERS: u32 = 5;
 // The one feature gate of the transport: `enabled.rs` mounts the iroh
 // server/client (native) or relay client (browser); `disabled.rs` provides the
 // same names as inert stand-ins.
+/// Durable evidence for a session that stopped: see [`diagnostics`].
+#[path = "multiplayer/diagnostics.rs"]
+pub(crate) mod diagnostics;
 #[cfg(feature = "multiplayer")]
 #[path = "multiplayer/enabled.rs"]
 mod transport;

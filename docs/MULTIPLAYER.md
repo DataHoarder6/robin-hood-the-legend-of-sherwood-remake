@@ -243,7 +243,10 @@ must not be repaired by silently adopting a new default Engine.
   `BeginSim`; a peer waits for successful snapshot adoption, then `BeginSim`;
   both wait for `start_epoch_ms` before simulation advances. A peer never
   announces `ReadyToSim` after a decode/adoption failure, and `BeginSim` before
-  its snapshot is a fatal ordering error.
+  its snapshot is a fatal ordering error. Each admission phase has its own
+  180 s budget: when it expires the session ends with a fatal error instead of a
+  loaded but frozen mission, and a pinned JSON bundle naming the phase, seat,
+  session and newest replay is written under `robin_hood/diagnostics/`.
 - True-headless hosts perform the same local-seat bootstrap and frame-zero
   snapshot publication as interactive hosts, then keep the reconnect snapshot
   and host clock samples current while running.

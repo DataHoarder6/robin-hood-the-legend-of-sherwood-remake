@@ -20,6 +20,20 @@ pub(crate) enum MultiplayerAdmission {
 }
 
 impl MultiplayerAdmission {
+    /// Stable wording for logs and fatal diagnostics; `Debug` also carries the
+    /// frame that the phase is waiting on.
+    pub(in crate::game_session) fn label(&self) -> &'static str {
+        match self {
+            Self::NotRequired => "not required",
+            Self::HostWaitingForBegin => "host waiting for BeginSim",
+            Self::HostWaitingForResyncBegin { .. } => "host waiting for resync BeginSim",
+            Self::PeerWaitingForSnapshot => "peer waiting for an initial snapshot",
+            Self::PeerWaitingForBegin { .. } => "peer waiting for BeginSim",
+            Self::WaitingForStart { .. } => "waiting for the synchronized start gate",
+            Self::Running => "running",
+        }
+    }
+
     pub(super) fn apply(
         &mut self,
         event: MultiplayerAdmissionEvent,

@@ -715,7 +715,8 @@ mod tests {
         assert!(
             timeline
                 .multiplayer_mut()
-                .admission_paused(current_epoch_ms())
+                .admission_paused(current_epoch_ms(), crate::window::process_uptime_ms())
+                .unwrap()
         );
         host.transport
             .net()
