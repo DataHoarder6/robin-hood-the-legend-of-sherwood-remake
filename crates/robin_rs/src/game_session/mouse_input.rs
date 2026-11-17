@@ -32,7 +32,9 @@ use crate::input_translator::InputTranslator;
 use crate::main_entry::{RustCallbacks, SaveLoadRequest, current_mission_id};
 use crate::menu::CampaignMapState;
 use crate::renderer::Renderer;
-use crate::sherwood_hud::{SherwoodButton, SherwoodButtonEnable, SherwoodHudLayout, SherwoodRail};
+use crate::sherwood_hud::{
+    SherwoodButton, SherwoodButtonEnable, SherwoodHudClick, SherwoodHudLayout, SherwoodRail,
+};
 use crate::ui_panel::{self, PortraitCache, PortraitHitArea, PortraitTarget};
 use crate::ui_screens::MissionChoice;
 use crate::window::GameWindow;
@@ -1880,6 +1882,69 @@ fn defer_multiplayer_campaign_exit(host: &mut Host, mission_id: u32) -> bool {
     true
 }
 
+/// Start-up message the Sherwood `GoToExit` control sends the script on a
+/// single press. The script's `ProcessMessage` answers 1000 with
+/// `SendToDeploymentZone` for every selected PC.
+const GO_TO_EXIT_STARTUP_MESSAGE: i32 = 1000;
+
+/// What the frame's press did to the Sherwood rail.
+enum SherwoodRailPress {
+    /// A live control was pressed, together with its multi-click count.
+    Button(SherwoodHudClick),
+    /// A control owns these pixels but its gate is closed: the press is
+    /// consumed instead of walking the men behind the rail.
+    Claimed,
+    /// The press belongs to the world or another surface.
+    Missed,
+}
+
+/// Match the frame's first left press against the Sherwood rail.
+fn sherwood_rail_press(
+    events: &[GameEvent],
+    layout: &SherwoodHudLayout,
+    rail: SherwoodRail,
+    enable: SherwoodButtonEnable,
+) -> SherwoodRailPress {
+    for event in events {
+        let GameEvent::MouseDown(mx, my, 1 /* left */, count) = *event else {
+            continue;
+        };
+        if let Some(button) = layout.hit_test(mx, my, rail, enable) {
+            return SherwoodRailPress::Button(SherwoodHudClick::new(button, count));
+        }
+        if layout.claims_point(rail, mx, my) {
+            return SherwoodRailPress::Claimed;
+        }
+    }
+    SherwoodRailPress::Missed
+}
+
+/// Commands one press on the Sherwood `GoToExit` control issues.
+///
+/// A single press walks the selection: the script records one walking order
+/// per selected PC. The double press keeps that recorded destination and
+/// accelerates it with [`PlayerCommand::MakePcFast`], the same run variant the
+/// world double-click dispatches — no second message and no second timer.
+fn go_to_exit_commands(
+    click: SherwoodHudClick,
+    selection: &[engine_element::EntityId],
+) -> Vec<PlayerCommand> {
+    if click.button != SherwoodButton::GoToExit {
+        panic!("go_to_exit_commands received a {:?} press", click.button);
+    }
+    if click.is_double() {
+        return selection
+            .iter()
+            .map(|&pc_id| PlayerCommand::MakePcFast { pc_id })
+            .collect();
+    }
+    vec![PlayerCommand::DispatchStartupMessage {
+        msg: GO_TO_EXIT_STARTUP_MESSAGE,
+        arg1: 0,
+        arg2: 0,
+    }]
+}
+
 /// Handle the Sherwood-only HUD buttons
 /// (DisplayCampaignMap / GoToExit / StartMission / QuitMission).
 ///
@@ -2038,167 +2103,159 @@ pub(super) fn handle_sherwood_hud_buttons(
     }
 
     if game.is_sherwood && !game.persistent.campaign_map_active {
-        let mut sherwood_btn_hit = None;
-        for event in events {
-            let GameEvent::MouseDown(mx, my, 1 /* left */, _) = *event else {
-                continue;
+        let click =
+            match sherwood_rail_press(events, sherwood_layout, *sherwood_rail, *sherwood_enable) {
+                SherwoodRailPress::Button(click) => click,
+                SherwoodRailPress::Claimed => return HandlerAction::Continue,
+                SherwoodRailPress::Missed => return HandlerAction::Proceed,
             };
-            if let Some(btn) = sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable) {
-                sherwood_btn_hit = Some(btn);
-                break;
-            }
-            if sherwood_layout.claims_point(*sherwood_rail, mx, my) {
+        match click.button {
+            SherwoodButton::DisplayCampaignMap => {
+                // Raise the map again so the player can change
+                // their selection.  Only set `campaign_map_active`
+                // here; `campaign_map_displayed` flips when the
+                // overlay actually opens (see
+                // `handle_sherwood_campaign_map_overlay`).
+                game.show_campaign_map();
                 return HandlerAction::Continue;
             }
-        }
-        if let Some(btn) = sherwood_btn_hit {
-            match btn {
-                SherwoodButton::DisplayCampaignMap => {
-                    // Raise the map again so the player can change
-                    // their selection.  Only set `campaign_map_active`
-                    // here; `campaign_map_displayed` flips when the
-                    // overlay actually opens (see
-                    // `handle_sherwood_campaign_map_overlay`).
-                    game.show_campaign_map();
-                    return HandlerAction::Continue;
-                }
-                SherwoodButton::QuitMission => {
-                    // QuitMission in Sherwood mode prompts
-                    // REALLY_RETURN_TO_MAP, then on Yes re-raises the
-                    // campaign map without leaving Sherwood. The committed
-                    // mission stays committed: cancelling re-opens the map so
-                    // another mission can be picked, it does not un-select.
-                    if let Some(resources) = menu_resources.as_ref() {
-                        let msg = resources
-                            .menu_text
-                            .get(resources::MT_MSG_REALLY_RETURN_TO_MAP);
-                        *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
-                            state: ingame_menu::YesNoModalState::new(
-                                event_pump, renderer, resources, msg,
-                            ),
-                            action: SherwoodConfirmationAction::ReturnToMap,
-                        });
-                        return HandlerAction::Continue;
-                    }
-                    game.show_campaign_map();
-                    return HandlerAction::Continue;
-                }
-                SherwoodButton::StartMission => {
-                    // StartMission in Sherwood mode prompts
-                    // REALLY_START_MISSION (or REALLY_CONVERT_PEASANTS
-                    // in men-to-blazon mode), then serializes Sherwood
-                    // and exits to the picked mission.
-                    let prompt_id = if game.is_men_to_blazon_conversion() {
-                        resources::MT_MSG_REALLY_CONVERT_PEASANTS
-                    } else {
-                        resources::MT_MSG_REALLY_START_MISSION
-                    };
-                    if let Some(resources) = menu_resources.as_ref() {
-                        let msg = resources.menu_text.get(prompt_id);
-                        *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
-                            state: ingame_menu::YesNoModalState::new(
-                                event_pump, renderer, resources, msg,
-                            ),
-                            action: SherwoodConfirmationAction::StartMission {
-                                men_to_blazon: game.is_men_to_blazon_conversion(),
-                            },
-                        });
-                        return HandlerAction::Continue;
-                    }
-                    if game.is_men_to_blazon_conversion() {
-                        // Men-to-blazon branch: unselect everyone, run
-                        // the peasants-to-blazons conversion, then
-                        // re-open the campaign map and stay in
-                        // Sherwood (no mission launch, no Sherwood
-                        // serialise).
-                        dispatch_local_command(
-                            &host.transport,
-                            frame_cmds,
-                            &PlayerCommand::UnselectAllPcs,
-                        );
-                        dispatch_local_command(
-                            &host.transport,
-                            frame_cmds,
-                            &PlayerCommand::CampaignConvertSelectedPeasantsToBlazons,
-                        );
-                        // The next frame re-opens the Sherwood
-                        // campaign map overlay so the player can pick
-                        // another mission or exit.
-                        game.persistent.campaign_map_active = true;
-                        game.persistent.campaign_map_displayed = true;
-                        // Clear the conversion flag.  Our persistent
-                        // flag survives the overlay round-trip; reset
-                        // so a follow-up StartMission click launches a
-                        // real mission instead of attempting another
-                        // (now empty) conversion pass.
-                        game.set_men_to_blazon_conversion(false);
-                        dispatch_local_command(
-                            &host.transport,
-                            frame_cmds,
-                            &PlayerCommand::SetMenToBlazonConversionMode { on: false },
-                        );
-                        return HandlerAction::Continue;
-                    }
-                    let mission_id = current_mission_id(engine.campaign(), &assets.profile_manager);
-                    // Harvest Sherwood's production-sector state into
-                    // the campaign before exiting.  Executed with the
-                    // Sherwood engine still live so current bonus
-                    // counts + PC occupants are captured.
-                    dispatch_local_command(
-                        &host.transport,
-                        frame_cmds,
-                        &PlayerCommand::CampaignHarvestProductionSectorState,
-                    );
-                    if defer_multiplayer_campaign_exit(host, mission_id) {
-                        return HandlerAction::Proceed;
-                    }
-                    callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
-                    return HandlerAction::Exit(GameCode::LevelInterrupted);
-                }
-                SherwoodButton::GoToExit => {
-                    // GoToExit dispatches engine message 1000 to the
-                    // StartUp script.  The Sherwood StartUp handler
-                    // centres the camera on the exit gate tied to the
-                    // selected next mission, so the cross-mission
-                    // element lookup lives script-side and no Rust-
-                    // side registry is needed.
-                    dispatch_local_command(
-                        &host.transport,
-                        frame_cmds,
-                        &PlayerCommand::DispatchStartupMessage {
-                            msg: 1000,
-                            arg1: 0,
-                            arg2: 0,
-                        },
-                    );
-                    return HandlerAction::Continue;
-                }
-                SherwoodButton::SherwoodTrading => {
-                    if let Err(reason) =
-                        request_sherwood_trading_panel(host, engine, &assets.profile_manager)
-                    {
-                        tracing::warn!(?reason, "live Sherwood trading button request rejected");
-                    }
-                    return HandlerAction::Continue;
-                }
-                SherwoodButton::PerksPanel => {
-                    let Some(resources) = menu_resources.as_ref() else {
-                        tracing::warn!("Sherwood perks: menu resources unavailable — skipped");
-                        return HandlerAction::Continue;
-                    };
-                    let (rows, clovers) = ingame_menu::campaign_rows(
-                        engine.campaign(),
-                        &assets.profile_manager,
-                        portrait_cache,
-                        &resources.menu_text,
-                    );
-                    *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel {
-                        state: ingame_menu::PerksPanelModalState::new(
-                            event_pump, renderer, resources, rows, clovers,
+            SherwoodButton::QuitMission => {
+                // QuitMission in Sherwood mode prompts
+                // REALLY_RETURN_TO_MAP, then on Yes re-raises the
+                // campaign map without leaving Sherwood. The committed
+                // mission stays committed: cancelling re-opens the map so
+                // another mission can be picked, it does not un-select.
+                if let Some(resources) = menu_resources.as_ref() {
+                    let msg = resources
+                        .menu_text
+                        .get(resources::MT_MSG_REALLY_RETURN_TO_MAP);
+                    *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
+                        state: ingame_menu::YesNoModalState::new(
+                            event_pump, renderer, resources, msg,
                         ),
+                        action: SherwoodConfirmationAction::ReturnToMap,
                     });
                     return HandlerAction::Continue;
                 }
+                game.show_campaign_map();
+                return HandlerAction::Continue;
+            }
+            SherwoodButton::StartMission => {
+                // StartMission in Sherwood mode prompts
+                // REALLY_START_MISSION (or REALLY_CONVERT_PEASANTS
+                // in men-to-blazon mode), then serializes Sherwood
+                // and exits to the picked mission.
+                let prompt_id = if game.is_men_to_blazon_conversion() {
+                    resources::MT_MSG_REALLY_CONVERT_PEASANTS
+                } else {
+                    resources::MT_MSG_REALLY_START_MISSION
+                };
+                if let Some(resources) = menu_resources.as_ref() {
+                    let msg = resources.menu_text.get(prompt_id);
+                    *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
+                        state: ingame_menu::YesNoModalState::new(
+                            event_pump, renderer, resources, msg,
+                        ),
+                        action: SherwoodConfirmationAction::StartMission {
+                            men_to_blazon: game.is_men_to_blazon_conversion(),
+                        },
+                    });
+                    return HandlerAction::Continue;
+                }
+                if game.is_men_to_blazon_conversion() {
+                    // Men-to-blazon branch: unselect everyone, run
+                    // the peasants-to-blazons conversion, then
+                    // re-open the campaign map and stay in
+                    // Sherwood (no mission launch, no Sherwood
+                    // serialise).
+                    dispatch_local_command(
+                        &host.transport,
+                        frame_cmds,
+                        &PlayerCommand::UnselectAllPcs,
+                    );
+                    dispatch_local_command(
+                        &host.transport,
+                        frame_cmds,
+                        &PlayerCommand::CampaignConvertSelectedPeasantsToBlazons,
+                    );
+                    // The next frame re-opens the Sherwood
+                    // campaign map overlay so the player can pick
+                    // another mission or exit.
+                    game.persistent.campaign_map_active = true;
+                    game.persistent.campaign_map_displayed = true;
+                    // Clear the conversion flag.  Our persistent
+                    // flag survives the overlay round-trip; reset
+                    // so a follow-up StartMission click launches a
+                    // real mission instead of attempting another
+                    // (now empty) conversion pass.
+                    game.set_men_to_blazon_conversion(false);
+                    dispatch_local_command(
+                        &host.transport,
+                        frame_cmds,
+                        &PlayerCommand::SetMenToBlazonConversionMode { on: false },
+                    );
+                    return HandlerAction::Continue;
+                }
+                let mission_id = current_mission_id(engine.campaign(), &assets.profile_manager);
+                // Harvest Sherwood's production-sector state into
+                // the campaign before exiting.  Executed with the
+                // Sherwood engine still live so current bonus
+                // counts + PC occupants are captured.
+                dispatch_local_command(
+                    &host.transport,
+                    frame_cmds,
+                    &PlayerCommand::CampaignHarvestProductionSectorState,
+                );
+                if defer_multiplayer_campaign_exit(host, mission_id) {
+                    return HandlerAction::Proceed;
+                }
+                callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
+                return HandlerAction::Exit(GameCode::LevelInterrupted);
+            }
+            SherwoodButton::GoToExit => {
+                // The single press dispatches engine message 1000 to
+                // the StartUp script; the Sherwood StartUp handler
+                // walks every selected PC to the deployment zone tied
+                // to the selected next mission, so the cross-mission
+                // element lookup lives script-side and no Rust-side
+                // registry is needed.
+                //
+                // The second press of the pair keeps that destination
+                // and accelerates it with the same `MakePcFast` the
+                // world double-click uses: the script records a single
+                // walking order per press, so re-dispatching 1000 would
+                // roll a fresh random deployment point instead of
+                // running to the one the first press already chose.
+                let local_seat = host.transport.local_seat();
+                let cmds = go_to_exit_commands(click, engine.hero_selection(local_seat));
+                dispatch_local_commands(&host.transport, frame_cmds, &cmds);
+                return HandlerAction::Continue;
+            }
+            SherwoodButton::SherwoodTrading => {
+                if let Err(reason) =
+                    request_sherwood_trading_panel(host, engine, &assets.profile_manager)
+                {
+                    tracing::warn!(?reason, "live Sherwood trading button request rejected");
+                }
+                return HandlerAction::Continue;
+            }
+            SherwoodButton::PerksPanel => {
+                let Some(resources) = menu_resources.as_ref() else {
+                    tracing::warn!("Sherwood perks: menu resources unavailable — skipped");
+                    return HandlerAction::Continue;
+                };
+                let (rows, clovers) = ingame_menu::campaign_rows(
+                    engine.campaign(),
+                    &assets.profile_manager,
+                    portrait_cache,
+                    &resources.menu_text,
+                );
+                *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel {
+                    state: ingame_menu::PerksPanelModalState::new(
+                        event_pump, renderer, resources, rows, clovers,
+                    ),
+                });
+                return HandlerAction::Continue;
             }
         }
     }
@@ -3123,4 +3180,87 @@ pub(super) fn center_on_reselected_allied_portrait(
     };
     host.frontend.viewport.center_on_point(center);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sherwood_hud::SherwoodButtonSprites;
+    use robin_engine::element::EntityIdKind;
+
+    fn pc(index: u32) -> engine_element::EntityId {
+        engine_element::EntityId::new(index, EntityIdKind::Pc)
+    }
+
+    /// The Sherwood rail with a committed mission and two selected recruits.
+    fn post_commit_rail() -> (SherwoodHudLayout, SherwoodButtonEnable) {
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
+        let mut enable = SherwoodButtonEnable::post_commit();
+        enable.apply_update_go_to_exit(true, 2, false);
+        (layout, enable)
+    }
+
+    /// Feed one press on the GoToExit control and derive its commands, exactly
+    /// as the HUD dispatcher does.
+    fn press_go_to_exit(count: u8, selection: &[engine_element::EntityId]) -> Vec<PlayerCommand> {
+        let (layout, enable) = post_commit_rail();
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        let events = [GameEvent::MouseDown(rect.x() + 2, rect.y() + 2, 1, count)];
+        match sherwood_rail_press(&events, &layout, SherwoodRail::PostCommit, enable) {
+            SherwoodRailPress::Button(click) => go_to_exit_commands(click, selection),
+            SherwoodRailPress::Claimed => panic!("the GoToExit gate is open in this fixture"),
+            SherwoodRailPress::Missed => panic!("the press missed the GoToExit rect"),
+        }
+    }
+
+    /// Same input pair, two outcomes: the single press dispatches the walk
+    /// message the script turns into walking orders, the second press of the
+    /// pair runs those orders instead.
+    #[test]
+    fn the_goto_exit_press_pair_walks_then_runs() {
+        let selection = [pc(3), pc(7)];
+
+        let walk = press_go_to_exit(1, &selection);
+        assert!(
+            matches!(
+                walk.as_slice(),
+                [PlayerCommand::DispatchStartupMessage {
+                    msg: GO_TO_EXIT_STARTUP_MESSAGE,
+                    arg1: 0,
+                    arg2: 0,
+                }]
+            ),
+            "a single press dispatches only the deployment message: {walk:?}"
+        );
+
+        let run = press_go_to_exit(2, &selection);
+        assert!(
+            matches!(
+                run.as_slice(),
+                [PlayerCommand::MakePcFast { pc_id: first }, PlayerCommand::MakePcFast { pc_id: second }]
+                    if *first == selection[0] && *second == selection[1]
+            ),
+            "a double press runs the selection: {run:?}"
+        );
+    }
+
+    /// The single press must not run: no `MakePcFast` rides along with the
+    /// deployment message, whether or not anybody is selected.
+    #[test]
+    fn a_single_goto_exit_press_never_accelerates_the_selection() {
+        for selection in [vec![pc(3)], vec![pc(3), pc(7)]] {
+            let walk = press_go_to_exit(1, &selection);
+            assert_eq!(
+                walk.len(),
+                1,
+                "a single press issues exactly the walk command: {walk:?}"
+            );
+            assert!(
+                !walk
+                    .iter()
+                    .any(|cmd| matches!(cmd, PlayerCommand::MakePcFast { .. })),
+                "a single press must not accelerate the walk: {walk:?}"
+            );
+        }
+    }
 }
