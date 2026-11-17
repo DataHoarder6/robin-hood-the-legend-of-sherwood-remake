@@ -128,12 +128,15 @@ impl SherwoodButtonEnable {
         }
     }
 
-    pub fn won_mission(enabled: bool) -> Self {
+    /// The rail while a mission is being played: finish it once the win
+    /// condition is met, and abandon it at any time. Abandoning is always
+    /// allowed, so its gate is open from the first frame.
+    pub fn in_mission(can_finish: bool) -> Self {
         Self {
             display_campaign_map: false,
             go_to_exit: false,
-            start_mission: enabled,
-            quit_mission: false,
+            start_mission: can_finish,
+            quit_mission: true,
             sherwood_trading: false,
             perks_panel: false,
         }
@@ -366,9 +369,9 @@ impl SherwoodHudLayout {
     }
 
     /// Hit-test a screen-space click: the first offered, enabled button whose
-    /// rect contains the point. An offered button whose gate is closed is
-    /// greyed but still swallows the click, so a disabled control never acts
-    /// on the world behind it.
+    /// rect contains the point. Callers consume the click whenever
+    /// [`Self::claims_point`] is true, so a greyed control never acts on the
+    /// world behind it and never answers a click either.
     pub fn hit_test(
         &self,
         x: i32,
@@ -393,6 +396,15 @@ impl SherwoodHudLayout {
     /// Input capture uses this: a disabled control still owns its pixels.
     pub fn occupied(&self, rail: SherwoodRail) -> Vec<ScreenRect> {
         rail.visible().map(|button| self.rect(button)).collect()
+    }
+
+    /// Whether the rail owns the point at all — the click belongs to the HUD
+    /// and must not reach the world, whatever the button's gate says.
+    pub fn claims_point(&self, rail: SherwoodRail, x: i32, y: i32) -> bool {
+        let pt = Point::new(x, y);
+        self.occupied(rail)
+            .into_iter()
+            .any(|rect| rect.contains_point(pt))
     }
 }
 
@@ -522,7 +534,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn won_mission_only_exposes_the_exit_checkmark() {
+    fn a_mission_offers_finish_and_abandon() {
         let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
         let point = (layout.start_mission.x() + 1, layout.start_mission.y() + 1);
         let rail = SherwoodRail::InMission;
@@ -531,7 +543,7 @@ mod tests {
                 point.0,
                 point.1,
                 rail,
-                SherwoodButtonEnable::won_mission(true)
+                SherwoodButtonEnable::in_mission(true)
             ),
             Some(SherwoodButton::StartMission)
         );
@@ -540,18 +552,46 @@ mod tests {
                 point.0,
                 point.1,
                 rail,
-                SherwoodButtonEnable::won_mission(false)
+                SherwoodButtonEnable::in_mission(false)
             ),
             None
         );
-        let enable = SherwoodButtonEnable::won_mission(true);
+        // Abandoning is always available; finishing is gated on the win.
+        assert!(SherwoodButtonEnable::in_mission(false).quit_mission);
+        assert!(SherwoodButtonEnable::in_mission(true).quit_mission);
+        let enable = SherwoodButtonEnable::in_mission(true);
         assert!(
-            !enable.quit_mission
-                && !enable.go_to_exit
+            !enable.go_to_exit
                 && !enable.display_campaign_map
                 && !enable.sherwood_trading
                 && !enable.perks_panel
         );
+    }
+
+    #[test]
+    fn a_closed_gate_still_answers_hover_and_claims_the_point() {
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
+        let rail = SherwoodRail::from_campaign(true, true);
+        let enable = SherwoodButtonEnable::in_mission(false);
+        let rect = layout.rect(SherwoodButton::StartMission);
+        let point = (rect.x() + 2, rect.y() + 2);
+
+        // The click gate is closed...
+        assert_eq!(layout.hit_test(point.0, point.1, rail, enable), None);
+        // ...but the control is still offered: it explains itself and owns its
+        // pixels, so the click cannot reach the world behind it.
+        assert_eq!(
+            layout.hover_test(point.0, point.1, rail),
+            Some(SherwoodButton::StartMission)
+        );
+        assert!(layout.claims_point(rail, point.0, point.1));
+        assert!(!layout.claims_point(rail, 0, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "Sherwood rail does not fit")]
+    fn a_screen_too_short_for_the_rail_fails_loudly() {
+        let _ = SherwoodHudLayout::for_resolution(800, 200, &SherwoodButtonSprites::default());
     }
 
     #[test]
@@ -765,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn hit_test_prefers_enabled() {
+    fn the_wide_slot_resolves_to_the_offered_button() {
         let sprites = SherwoodButtonSprites::default();
         let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
         let pt_map = (
@@ -830,13 +870,13 @@ mod tests {
 
         // The non-Sherwood (won mission) enable mask never exposes the perks
         // panel, so it cannot be opened outside Sherwood.
-        assert!(!SherwoodButtonEnable::won_mission(true).perks_panel);
+        assert!(!SherwoodButtonEnable::in_mission(true).perks_panel);
         assert_eq!(
             layout.hit_test(
                 point.0,
                 point.1,
                 SherwoodRail::from_campaign(false, false),
-                SherwoodButtonEnable::won_mission(true)
+                SherwoodButtonEnable::in_mission(true)
             ),
             None
         );
