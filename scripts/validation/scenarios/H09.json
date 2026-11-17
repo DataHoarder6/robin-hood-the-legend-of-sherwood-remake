@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "H09",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    {
+      "at": { "barrier": "modal-ack", "after": 0 },
+      "peer": 0,
+      "fault": "duplicate",
+      "message": "ModalProgress"
+    },
+    {
+      "at": { "barrier": "modal-ack", "after": 0 },
+      "peer": 0,
+      "fault": "duplicate",
+      "message": "ModalDecision"
+    }
+  ],
+  "expect": [
+    { "assert": "modal", "count": 1 },
+    { "assert": "barrier", "barrier": "modal-ack", "state": "released" }
+  ]
+}

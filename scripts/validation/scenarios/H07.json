@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H07",
+  "extends": "H01",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "frame": 40 }, "peer": 1, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" }
+  ]
+}

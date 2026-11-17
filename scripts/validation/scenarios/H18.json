@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "H18",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "barrier": "content-ready", "after": 0 }, "peer": 1, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "barrier", "barrier": "content-ready", "state": "reached" }
+  ]
+}

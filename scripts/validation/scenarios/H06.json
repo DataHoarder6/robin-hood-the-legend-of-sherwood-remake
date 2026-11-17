@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H06",
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host",
+      "timeline": [ { "at": { "frame": 40 }, "command": "QuitMissionRequested" } ]
+    },
+    { "seat": 1, "role": "client" }
+  ],
+  "expect": [
+    { "assert": "final-operation", "operation": "Quit" }
+  ]
+}

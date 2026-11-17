@@ -91,6 +91,7 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p lifecycle_gate_test.py
         python3 -m unittest discover -s scripts/validation -p namespace_x11_test.py
         python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py
+        python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
         bash scripts/test_parity_orchestration.sh
         bash scripts/test_release.sh
         bash scripts/test_doctor.sh

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "H01",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "expect": [
+    { "assert": "hash-equal", "peers": [0, 1], "every": 25 },
+    { "assert": "barrier", "barrier": "begin-sim", "state": "released" }
+  ]
+}

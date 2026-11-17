@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "H02",
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host",
+      "timeline": [ { "at": { "frame": 40 }, "command": "SelectPc" } ]
+    },
+    {
+      "seat": 1,
+      "role": "client",
+      "timeline": [ { "at": { "frame": 40 }, "command": "SelectPc" } ]
+    }
+  ],
+  "expect": [
+    { "assert": "hash-equal", "peers": [0, 1], "every": 25 }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "H14",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "frame": 40 }, "peer": 1, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "log", "contains": "Reject", "count": 1 }
+  ]
+}

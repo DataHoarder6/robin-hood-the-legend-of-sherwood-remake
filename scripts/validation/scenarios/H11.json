@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H11",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client", "start": { "join_at_frame": 0 } }
+  ],
+  "faults": [
+    { "at": { "frame": 0 }, "peer": 1, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "log", "contains": "handshake error", "count": 1 },
+    { "assert": "log", "absent": "Welcome", "count": 0 }
+  ]
+}

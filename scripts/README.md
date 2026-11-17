@@ -104,6 +104,9 @@ proof of dead code. Most require external game data or Python imaging packages.
 - `replay_history_fixture.py`: replay-history fixture generation.
 - `runtime_evidence.py`: runtime evidence capture/verification.
 - `save_load_live.py`: save/load scenarios.
+- `scenario_corpus.py`: validates the transition scenario corpus in
+  `validation/scenarios/` against `docs/multiplayer/HARNESS.md`; `--print ID`
+  expands one scenario through its `extends` chain.
 - `*_test.py`: isolated harness regressions for the corresponding modules.
 
 ## Agent launcher

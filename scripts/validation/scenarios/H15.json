@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "H15",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "expect": [
+    { "assert": "barrier", "barrier": "modal-ack", "state": "released" },
+    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" }
+  ]
+}

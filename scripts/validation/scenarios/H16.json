@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H16",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "barrier": "snapshot-adopt", "after": 0 }, "peer": 1, "fault": "diverge" }
+  ],
+  "expect": [
+    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" },
+    { "assert": "hash-equal", "peers": [0, 1], "every": 25 }
+  ]
+}

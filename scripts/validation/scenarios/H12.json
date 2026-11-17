@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H12",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client", "start": { "join_at_frame": 0 } }
+  ],
+  "faults": [
+    { "at": { "frame": 0 }, "peer": 0, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "log", "contains": "Fatal", "count": 1 },
+    { "assert": "barrier", "barrier": "content-ready", "state": "absent" }
+  ]
+}

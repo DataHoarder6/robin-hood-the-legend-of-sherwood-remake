@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "H13",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    {
+      "at": { "barrier": "transition-commit", "after": 0 },
+      "peer": 1,
+      "fault": "drop",
+      "message": "CommitSnapshotTransition"
+    }
+  ],
+  "expect": [
+    { "assert": "transition", "payload": "CampaignExit", "acked": [0, 1], "committed": false },
+    { "assert": "transition-id-equal", "peers": [0, 1] }
+  ]
+}

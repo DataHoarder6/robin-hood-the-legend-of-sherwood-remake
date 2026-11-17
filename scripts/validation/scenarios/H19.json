@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "H19",
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "barrier": "content-ready", "after": 0 }, "peer": 0, "fault": "kill" }
+  ],
+  "expect": [
+    { "assert": "log", "contains": "handshake error", "count": 1 },
+    { "assert": "exit", "peers": [1], "status": "nonzero" }
+  ]
+}
