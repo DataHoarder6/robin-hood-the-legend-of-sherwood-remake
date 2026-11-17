@@ -110,11 +110,18 @@ publishing. Neither is implemented yet.
 
 ## Version string
 
+`robin --version` prints `crate::version::CLI_VERSION` —
+`<package version>+<12-hex commit>` — so the engine commit a build was made from
+is visible without opening the game, and two seats can be compared before a
+shared session. The commit half is `ROBIN_GIT_HASH`, stamped by
+`build-support/robin_build.rs` from `git rev-parse HEAD`; it is the same prefix
+replays and multiplayer tickets carry. Build from a checkout with `.git` present,
+or the stamp is the literal `unknown` and the engine rejects it.
+
 The main menu and loading screen show `crate::version::version_label()` —
-`v<ROBIN_PACKAGE_VERSION>`, falling back to `CARGO_PKG_VERSION`. `robin --version`
-prints clap's `CARGO_PKG_VERSION` instead, so the two can disagree. Set
-`ROBIN_PACKAGE_VERSION` at build time to stamp both players' menus with the same
-commit:
+`v<ROBIN_PACKAGE_VERSION>`, falling back to `CARGO_PKG_VERSION`. `ROBIN_PACKAGE_VERSION`
+is still what a packaged release sets, so a release can label the menu with its
+tag while both binaries agree on the commit:
 
     $env:ROBIN_PACKAGE_VERSION = '0efa52f57'
     cargo build --release --features desktop,multiplayer -p robin_rs --bin robin
