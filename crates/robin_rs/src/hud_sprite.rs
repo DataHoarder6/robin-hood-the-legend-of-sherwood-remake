@@ -214,30 +214,44 @@ pub(crate) fn load_bank(
     resource_id: i32,
     label: &str,
 ) -> SpriteBank {
-    std::array::from_fn(|sub| match resources.get_picture(resource_id, sub) {
-        Ok(picture) => {
-            let width = picture.width;
-            let height = picture.height;
-            let surface = crate::ui_panel::pic_to_surface(renderer, picture);
-            tracing::debug!(
-                label,
-                resource_id,
-                sub,
-                width,
-                height,
-                ?surface,
-                "Loaded HUD sprite frame"
-            );
-            Some((surface, width, height))
-        }
-        Err(error) => {
-            tracing::debug!(
-                label, resource_id, sub, %error,
-                "Optional HUD sprite frame unavailable"
-            );
-            None
-        }
-    })
+    let bank: SpriteBank =
+        std::array::from_fn(|sub| match resources.get_picture(resource_id, sub) {
+            Ok(picture) => {
+                let width = picture.width;
+                let height = picture.height;
+                let surface = crate::ui_panel::pic_to_surface(renderer, picture);
+                tracing::trace!(
+                    label,
+                    resource_id,
+                    sub,
+                    width,
+                    height,
+                    ?surface,
+                    "Loaded HUD sprite frame"
+                );
+                Some((surface, width, height))
+            }
+            Err(error) => {
+                // A wide button's sub-id 0 is the sentinel, not a missing frame;
+                // only an empty bank means the rail has no art for this control.
+                tracing::trace!(
+                    label, resource_id, sub, %error,
+                    "HUD sprite frame absent"
+                );
+                None
+            }
+        });
+    let loaded = bank.iter().filter(|frame| frame.is_some()).count();
+    if loaded == 0 {
+        tracing::warn!(
+            label,
+            resource_id,
+            "HUD sprite bank is empty; the rail falls back to invented geometry"
+        );
+    } else {
+        tracing::debug!(label, resource_id, loaded, "Loaded HUD sprite bank");
+    }
+    bank
 }
 
 pub(crate) fn frame(bank: &SpriteBank, state: usize) -> Option<(SurfaceHandle, u16, u16)> {
