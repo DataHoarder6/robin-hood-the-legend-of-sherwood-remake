@@ -1183,7 +1183,8 @@ pub enum PlayerCommand {
     },
     /// `UNBLIP` console cheat — reveal all blipped entities.
     RevealAllBlips,
-    /// Select (or clear with `None`) the next mission to play.
+    /// Commit a mission as the next one to play. `None` re-commits the
+    /// already-committed mission, which is a no-op.
     /// Invoked from campaign-map / Sherwood HUD button handlers.
     CampaignSelectNextMission {
         mission_idx: Option<usize>,
