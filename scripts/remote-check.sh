@@ -84,6 +84,11 @@ printf 'remote-check: %s %s -> %s:%s\n' "$suite" "$repository" "$host" "$remote_
 # is excluded so the copy keeps its build cache across runs. The `.git` on the
 # build host is the copy's own (see below); a worktree's is a file naming a
 # gitdir that only exists here, so it must not travel.
+ssh "$host" bash -s <<EOF
+set -euo pipefail
+mkdir -p ~/$remote_root
+EOF
+
 rsync -a --delete \
     --exclude target \
     --exclude .worktrees \
@@ -92,7 +97,6 @@ rsync -a --delete \
 
 ssh "$host" bash -s <<EOF
 set -euo pipefail
-mkdir -p ~/$remote_root
 cd $remote_dir
 # build-support/robin_build.rs stamps ROBIN_GIT_HASH from "git rev-parse HEAD",
 # and the replay format rejects anything that is not 12 lowercase hex. A copy
@@ -108,7 +112,9 @@ EOF
 
 # Send this checkout's objects, incrementally, and point the copy's HEAD at
 # them. The rsync'd working tree stays untouched, so uncommitted changes are
-# still what the suite compiles.
+# still what the suite compiles. `read-tree` refreshes the index from the new
+# HEAD: without it every file would look deleted and the flake would hash an
+# empty tree.
 git -C "$repository" push -q --force "$host:$remote_dir/.git" HEAD:refs/robin/check
 
 ssh "$host" bash -s <<EOF
@@ -116,7 +122,7 @@ set -euo pipefail
 cd $remote_dir
 git update-ref refs/heads/main refs/robin/check
 git symbolic-ref HEAD refs/heads/main
-git reset -q
+git read-tree HEAD
 git rev-parse HEAD
 exec systemd-inhibit --what=idle --why='check-quality $suite' \
     flock -w 7200 $lock \
