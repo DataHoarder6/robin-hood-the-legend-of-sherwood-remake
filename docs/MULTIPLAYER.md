@@ -249,7 +249,10 @@ must not be repaired by silently adopting a new default Engine.
   and host clock samples current while running.
 - Native clients reconnect with exponential backoff and reclaim their parked
   owner generation. Browser clients reconnect with the same ephemeral iroh
-  endpoint and durable session/host/transport proof. Disconnect immediately
+  endpoint and durable session/host/transport proof. Reconnection is bounded:
+  after a drop the client retries for 60 s, then publishes a fatal timeout that
+  returns the game to the menu instead of leaving it on a frozen frame.
+  Disconnect immediately
   returns admission to the snapshot-wait
   state; simulation and headless HTTP timeline steps remain held until the
   replacement snapshot and `BeginSim` are accepted. A replacement snapshot

@@ -231,6 +231,7 @@ impl ClientTransport for NativeClientTransport<'_> {
         handshake_frame: Some(HANDSHAKE_FRAME_TIMEOUT),
         initial_attempt: HANDSHAKE_FRAME_TIMEOUT,
         reconnect_attempt: Some(HANDSHAKE_FRAME_TIMEOUT),
+        reconnect_budget: client_session::RECONNECT_BUDGET,
         post_content_welcome: HANDSHAKE_FRAME_TIMEOUT,
         content_write: Some(CONTENT_TRANSFER_IDLE_TIMEOUT),
         content_chunk_idle: CONTENT_TRANSFER_IDLE_TIMEOUT,
