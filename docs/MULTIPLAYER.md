@@ -101,6 +101,12 @@ and true-headless drivers use the same network drain and timeline admission
 state; the headless path does not construct renderer, native-input, UI, or
 audio substitutes.
 
+Each wait a participant can block on has one home: the snapshot-transition and
+ready barriers in `robin_rs::multiplayer::native::server_protocol` (driven by
+`native::server`), the reconnect loop in `robin_rs::multiplayer::client_session`,
+the modal acknowledgement gate in `robin_engine::multiplayer::modal_session`, and
+the admission phases in `robin_rs::game_session::runtime::admission`.
+
 The Engine owns deterministic seats and the shared script/director camera. The
 interactive host owns its one local `ViewportState`; rendering projects the
 world through that host viewport while HUD/input query the Engine selection for

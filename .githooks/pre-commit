@@ -13,4 +13,12 @@ cd -- "$repository"
 mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
 (( ${#files[@]} == 0 )) && exit 0
 
-exec rustfmt --check --edition 2024 -- "${files[@]}"
+# Resolve rustfmt through rustup, which honours rust-toolchain.toml: PATH may
+# hold an unrelated rustfmt (a profile package, another toolchain) that formats
+# differently from the gate.
+if ! rustfmt=$(rustup which rustfmt); then
+    printf 'pre-commit: rustup cannot resolve rustfmt for the pinned toolchain\n' >&2
+    exit 1
+fi
+
+exec "$rustfmt" --check --edition 2024 -- "${files[@]}"

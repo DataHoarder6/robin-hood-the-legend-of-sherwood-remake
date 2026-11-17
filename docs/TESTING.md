@@ -71,6 +71,19 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 Feature choices are deliberate. Do not substitute `--all-features`; video,
 Android, browser threads, and shader tooling have distinct dependencies.
 
+`client` builds `robin_rs` with its `default = []`, so every module behind
+`multiplayer` — the native transport, the session barriers, the admission loop —
+is absent from that suite. A netcode change is gated by `client-release`, whose
+`release` feature includes `multiplayer`. Iterate on one test in the gate's own
+copy, then run the whole suite once:
+
+```sh
+copy=$(scripts/remote-check.sh --sync)   # prints the build host's copy path
+ssh build-host "cd $copy && nix develop --command cargo test --locked -p robin_rs \
+  --lib --no-default-features --features release -- <test-name>"
+scripts/remote-check.sh client-release
+```
+
 CPU parity replay needs engine-owned timing separately from licensed game data:
 `original_parity_replay --core-datadir /path/to/assets/core-datadir TRACE`.
 The development default is `assets/core-datadir` relative to the invocation

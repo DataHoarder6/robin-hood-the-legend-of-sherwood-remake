@@ -37,7 +37,7 @@ copy_name() {
 }
 
 require_host() {
-    if ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
+    if ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
         return 0
     fi
     if [ "$host" = build-host ]; then
@@ -49,7 +49,7 @@ require_host() {
         wake-host build-host || true
         # WOL is fire-and-forget, so poll the ssh port for the boot budget.
         for _ in $(seq 60); do
-            if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
+            if ssh -n -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
                 printf 'remote-check: %s is up.\n' "$host" >&2
                 return 0
             fi
@@ -117,13 +117,13 @@ case "${1:-}" in
         ;;
     --list)
         require_host
-        ssh "$host" "du -sh ~/$remote_root/*/ 2>/dev/null | sort -k2"
+        ssh -n "$host" "du -sh ~/$remote_root/*/ 2>/dev/null | sort -k2"
         exit 0
         ;;
     --prune)
         require_host
         keep=$(copy_name "${2:-}")
-        ssh "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] || rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
+        ssh -n "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] || rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
         exit 0
         ;;
     --sync)
