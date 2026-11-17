@@ -48,6 +48,34 @@ pub enum SherwoodButton {
     PerksPanel,
 }
 
+/// A press that landed on a rail control, with the multi-click count the
+/// window handler derived from press timing.
+///
+/// The count arrives in `GameEvent::MouseDown`'s fourth field, produced by
+/// `window::AppHandler::handle_mouse_input` from
+/// `window::DOUBLE_CLICK_INTERVAL_MS`; there is no second timing
+/// mechanism here. Every HUD command whose original has a walk/run pair picks
+/// its run variant from [`Self::is_double`], the same rule the world path
+/// applies to the identical count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SherwoodHudClick {
+    pub button: SherwoodButton,
+    /// 1 for a single press; 2 when the window recognised a double click.
+    pub count: u8,
+}
+
+impl SherwoodHudClick {
+    pub fn new(button: SherwoodButton, count: u8) -> Self {
+        Self { button, count }
+    }
+
+    /// Mirrors `InputState::press_left_pointer`'s rule: everything from the
+    /// second press of the pair is the double-click press.
+    pub fn is_double(self) -> bool {
+        self.count >= 2
+    }
+}
+
 /// Which controls the rail offers.
 ///
 /// Presence is a property of the situation, derived from campaign state every
