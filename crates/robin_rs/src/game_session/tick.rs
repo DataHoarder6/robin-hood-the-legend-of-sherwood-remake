@@ -321,11 +321,26 @@ pub(super) fn drain_steps(
         // step never advances frames behind it.
         if modal_policy.is_some()
             && let Some(terminal) = terminal_debriefing.as_deref_mut()
-            && terminal.current_kind().is_some()
         {
             let policy = modal_policy.as_mut().expect("checked above");
-            dismiss_terminal_modal_for_step(step, policy, terminal, host, terminal_save_manager);
-            continue;
+            match queue_terminal_modal_dismissal(policy, terminal, host, terminal_save_manager) {
+                Err(error) => {
+                    step.respond_err(error);
+                    continue;
+                }
+                Ok(()) if host.transport.local_seat() != PlayerId::HOST => {
+                    // The client's modal tick publishes the acknowledgement;
+                    // a client may never advance the host's timeline.
+                    step.respond_ok(serde_json::json!({
+                        "direction": "terminal-modal-dismissal",
+                        "queued": true,
+                    }));
+                    continue;
+                }
+                // The host advances the frame that applies and publishes the
+                // queued decision; the step continues below.
+                Ok(()) => {}
+            }
         }
         if let Err(error) =
             validate_multiplayer_step_request(host, timeline.multiplayer().admission(), &kind)
@@ -685,60 +700,52 @@ fn seek_replay_step(
 
 /// A step request arrived while the terminal debriefing owns the mission:
 /// queue its typed dismissal (explicit or auto) and reply, never stepping.
-fn dismiss_terminal_modal_for_step(
-    step: crate::http_server::PendingStep,
+/// Queue the step's typed dismissal for the terminal page that owns the mission.
+///
+/// The queued result is applied by the frame that follows, so a host step must
+/// advance that frame while a client -- which may not step -- only reports the
+/// queued acknowledgement. Every rejection is returned with the reply text so
+/// the caller answers the request exactly once.
+fn queue_terminal_modal_dismissal(
     policy: &mut crate::http_server::StepModalPolicy,
     terminal: &mut super::terminal_debriefing::TerminalDebriefingState,
     host: &mut Host,
     terminal_save_manager: Option<&crate::savegame::SaveGameManager>,
-) {
+) -> Result<(), RpcError> {
     let Some(modal_kind) = terminal.current_kind() else {
-        step.respond_err(RpcError::unavailable_capability(
+        return Err(RpcError::unavailable_capability(
             "blocked by mission-end leaderboard; dismiss it in the game before stepping".to_owned(),
         ));
-        return;
     };
     let explicit = policy
         .dismissals
         .iter()
         .position(|dismissal| dismissal.kind == modal_kind)
         .map(|index| policy.dismissals.remove(index).result);
-    let result = match explicit.or_else(|| {
-        policy
-            .auto_dismiss
-            .then(|| default_http_modal_result(&modal_kind))
-    }) {
-        Some(result) => result,
-        None => {
-            step.respond_err(RpcError::unavailable_capability(format!(
+    let result = explicit
+        .or_else(|| {
+            policy
+                .auto_dismiss
+                .then(|| default_http_modal_result(&modal_kind))
+        })
+        .ok_or_else(|| {
+            RpcError::unavailable_capability(format!(
                 "blocked by modal {}; retry with auto_dismiss=true or a matching typed dismissal",
                 serde_json::to_string(&modal_kind).expect("ModalKind serializes")
-            )));
-            return;
-        }
-    };
+            ))
+        })?;
     let terminal_dismissal = crate::http_server::HttpModalDismissal {
         kind: modal_kind.clone(),
         result,
     };
-    if let Err(error) = validate_http_modal_result(&modal_kind, result)
+    validate_http_modal_result(&modal_kind, result)
         .map_err(RpcError::invalid_request)
         .and_then(|()| authorize_terminal_http_dismissal(host, &terminal_dismissal))
         .and_then(|()| {
             terminal
-                .queue_http_result(modal_kind.clone(), result, terminal_save_manager)
+                .queue_http_result(modal_kind, result, terminal_save_manager)
                 .map_err(RpcError::unavailable_capability)
         })
-    {
-        step.respond_err(error);
-        return;
-    }
-    step.respond_ok(serde_json::json!({
-        "direction": "terminal-modal-dismissal",
-        "modal": modal_kind,
-        "queued": true,
-        "note": "the dismissal is queued; step again after the outer frame applies it",
-    }));
 }
 
 fn validate_multiplayer_step_request(
