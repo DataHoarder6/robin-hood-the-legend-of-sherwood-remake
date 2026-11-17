@@ -95,13 +95,17 @@ export async function inventory(root: string): Promise<Assets> {
 }
 
 export function releaseTag(event: string, ref: string, timestamp: string, commit: string) {
+  // A v* ref is a stable release however the run was started. A tag push does
+  // not reliably reach Actions here (measured 2026-11-17: no push-triggered
+  // run in the repository's history), so a dispatch against the tag ref is the
+  // path that works; the tag still names the release.
+  if (ref.startsWith('v')) return { tag: ref, prerelease: false };
   if (event === 'schedule' || event === 'workflow_dispatch') {
     // Keep the numeric timestamp for SemVer packages; format the release tag for readability.
     const date = timestamp.replace(/^(\d{4})(\d{2})(\d{2})(\d{4})$/, '$1-$2-$3-$4');
     return { tag: `nightly-${date}-${commit.slice(0, 12)}`, prerelease: true };
   }
-  if (!ref.startsWith('v')) throw new Error('stable releases require a version tag');
-  return { tag: ref, prerelease: false };
+  throw new Error('stable releases require a version tag');
 }
 
 export async function runTimestamp(github: GitHub, repo: Repo, runId: number): Promise<string> {
