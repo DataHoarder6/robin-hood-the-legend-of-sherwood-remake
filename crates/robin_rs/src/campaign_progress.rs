@@ -57,7 +57,7 @@ pub enum MissionKind {
 }
 
 impl MissionKind {
-    fn for_profile(profile: &MissionProfile) -> Self {
+    pub(crate) fn for_profile(profile: &MissionProfile) -> Self {
         if profile
             .mission_filename
             .eq_ignore_ascii_case("SherwoodOutro")
@@ -105,8 +105,50 @@ impl MissionKind {
     }
 }
 
+/// Whether a campaign mission can be started right now.
+///
+/// Derived from the engine's own campaign facts — the accessible list and the
+/// attempt record — so the campaign map pin, its description window and the
+/// engine's `select_next_mission` gate never disagree about a mission.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MissionAvailability {
+    /// Offered by the campaign right now; starting it commits it.
+    Ready,
+    /// Not offered, but a successful record exists; starting it replays.
+    Completed,
+    /// Neither offered nor completed; starting it would violate the engine
+    /// invariant, so no presentation may offer the start action.
+    #[default]
+    Locked,
+}
+
+impl MissionAvailability {
+    pub fn derive(campaign: &Campaign, mission_idx: usize) -> Self {
+        if campaign.is_mission_accessible(mission_idx) {
+            Self::Ready
+        } else if campaign.is_mission_replayable(mission_idx) {
+            Self::Completed
+        } else {
+            Self::Locked
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready to start",
+            Self::Completed => "Completed - replay",
+            Self::Locked => "Locked",
+        }
+    }
+
+    /// Whether any presentation may offer a start/commit action for it.
+    pub fn starts_mission(self) -> bool {
+        !matches!(self, Self::Locked)
+    }
+}
+
 /// Explain unmet conditions with the same values used by mission accessibility.
-fn availability_notes(
+pub(crate) fn availability_notes(
     campaign: &Campaign,
     profiles: &ProfileManager,
     mission_idx: usize,
@@ -114,6 +156,10 @@ fn availability_notes(
     let mission = &campaign.missions[mission_idx];
     let profile = mission.profile(profiles);
     let mut notes = Vec::new();
+    if campaign.next_mission_idx == Some(mission_idx) {
+        notes.push("Already committed; this mission starts when you leave Sherwood.".into());
+        return notes;
+    }
     match MissionKind::for_profile(profile) {
         MissionKind::Epilogue => notes.push("Ending scene after The Sheriff of Nottingham.".into()),
         MissionKind::CampaignEvent => notes.push(
@@ -399,11 +445,8 @@ impl CampaignProgressGraph {
             if kind == MissionKind::Unavailable && attempts.is_empty() && !mission.is_done() {
                 continue;
             }
-            let current_has_win = attempts
-                .iter()
-                .any(|attempt| attempt.outcome() == MissionAttemptOutcome::Won)
-                || mission.status == MissionStatus::Won;
-            let accessible = campaign.accessible_mission_indices.contains(&mission_idx);
+            let current_has_win = campaign.is_mission_replayable(mission_idx);
+            let accessible = campaign.is_mission_accessible(mission_idx);
             let expired = mission.age >= profile.life_time;
             let state = if current_has_win {
                 MissionProgressState::Completed

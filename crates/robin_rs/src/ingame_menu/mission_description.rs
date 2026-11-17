@@ -19,6 +19,7 @@
 //! and per-slot tooltips are delayed the same ~750 ms the button
 //! tooltips use.
 
+use crate::campaign_progress::MissionAvailability;
 use crate::ingame_menu::resources::SealButton;
 use crate::ingame_menu::widget_bridge::ModalScreenIo;
 use robin_engine::campaign::CampaignValue;
@@ -291,6 +292,20 @@ impl MissionDescriptionModalState {
                 .screen
                 .closed
                 .then_some((self.screen.user_choice, self.screen.men_to_blazon_mode));
+        }
+
+        // Campaign state can move while the dialog stays open (a blazon
+        // purchase can close by cascade). Refresh the engine-derived
+        // availability first so no frame can offer a start the engine's
+        // `select_next_mission` invariant would reject.
+        let availability = MissionAvailability::derive(engine.campaign(), self.mission_index);
+        if availability != self.screen.availability {
+            self.screen.update_availability(availability);
+        }
+        if let Some(widget) = self.frame.widget_mut(ID_START_MISSION) {
+            widget.base_mut().enabled = self
+                .screen
+                .is_enabled(MissionDescriptionButton::StartMission);
         }
 
         let screen = ScreenFrame::begin(io, &mut self.input_state);

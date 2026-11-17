@@ -4,7 +4,8 @@
 //! the outer event loop while these views wait for a selection.
 
 use crate::campaign_progress::{
-    CampaignProgressGraph, ExhibitGridNavigator, MissionKind, MissionProgressState,
+    CampaignProgressGraph, ExhibitGridNavigator, MissionAvailability, MissionKind,
+    MissionProgressState, availability_notes,
 };
 use crate::gfx_types::{GameEvent, Keycode};
 use crate::host::ApplicationContext;
@@ -130,6 +131,11 @@ struct CampaignMapItem {
     remaining_lifetime: u32,
     show_blazons: bool,
     achievement_badges: Vec<crate::achievement_hud::AchievementBadgePresentation>,
+    /// Whether this pin's mission can be started, replayed or not at all.
+    /// Derived once from campaign state; every start path reads it.
+    availability: MissionAvailability,
+    /// Whether the mission's availability window is about to expire.
+    blinking: bool,
 }
 
 #[derive(Default)]
@@ -256,22 +262,30 @@ impl CampaignMapModalState {
         show_achievement_badges: bool,
         lifetime_history: &robin_engine::campaign_history::ProfileCampaignHistory,
     ) -> Self {
-        let items = campaign_map_items(
-            application_context,
-            campaign,
-            profiles,
-            Some(lifetime_history),
-            campaign_map,
-            text_resources,
-            shipping,
-        );
+        let items = campaign_map_items(campaign, profiles, Some(lifetime_history), |profile| {
+            let name =
+                application_context.localized_mission_name(profile.id, &profile.mission_name);
+            let descriptors = crate::mission_descriptors::for_presentation(
+                application_context,
+                shipping,
+                profile.id,
+            );
+            let description =
+                MissionDescriptionScreen::get_mission_text(descriptors.as_ref(), text_resources, 1);
+            (name, description)
+        });
         if items.is_empty() {
             tracing::warn!("No missions on campaign map — this shouldn't happen");
         }
 
         tracing::info!("Campaign map open ({} missions)", items.len());
         for (i, item) in items.iter().enumerate() {
-            tracing::info!("  [{i}] {:?}: {}", item.location, item.name);
+            tracing::info!(
+                "  [{i}] {:?}: {} ({})",
+                item.location,
+                item.name,
+                item.availability.label()
+            );
         }
 
         let assets = CampaignMapAssets::load(
@@ -296,6 +310,10 @@ impl CampaignMapModalState {
             tracing::warn!("Cannot refresh recording index: {error}");
         }
         let selected_progress = graph.first_selectable().unwrap_or(0);
+        let selected_classic = items
+            .iter()
+            .position(|item| item.availability == MissionAvailability::Ready)
+            .unwrap_or(0);
         let exhibit_grid = ExhibitGridNavigator::new(graph.nodes.len(), selected_progress);
         let pseudo_debrief_started_at_ms =
             pseudo_debrief_pending.then(crate::window::process_uptime_ms);
@@ -309,7 +327,7 @@ impl CampaignMapModalState {
             exhibit_grid,
             input: ModalInputState::new(),
             pseudo_debrief_started_at_ms,
-            selected_classic: 0,
+            selected_classic,
             selected_progress,
             show_achievement_badges,
             achievement_overview: false,
@@ -481,7 +499,6 @@ impl CampaignMapModalState {
         game: &mut crate::game::Game,
         campaign: &Campaign,
         profiles: &engine_profiles::ProfileManager,
-        campaign_map: &CampaignMapState,
         menu_resources: Option<&IngameMenuResources>,
         cursor: Option<ModalCursor<'_>>,
     ) -> Option<CampaignMapChoice> {
@@ -519,7 +536,6 @@ impl CampaignMapModalState {
                 transform,
                 campaign,
                 profiles,
-                campaign_map,
                 menu_resources,
                 self,
             ),
@@ -1195,9 +1211,15 @@ impl CampaignMapModalState {
                 if self.presentation == CampaignPresentationMode::ClassicMap
                     && !self.items.is_empty() =>
             {
-                return EventFlow::Finish(CampaignMapChoice::SelectMission(
-                    self.items[self.selected_classic].mission_idx,
-                ));
+                let item = &self.items[self.selected_classic];
+                if item.availability.starts_mission() {
+                    return EventFlow::Finish(CampaignMapChoice::SelectMission(item.mission_idx));
+                }
+                tracing::info!(
+                    "campaign map: mission {} is {}; start refused",
+                    item.mission_idx,
+                    item.availability.label()
+                );
             }
             Keycode::Return | Keycode::KpEnter | Keycode::Space
                 if self.presentation == CampaignPresentationMode::ClassicMap
@@ -1403,7 +1425,14 @@ impl CampaignMapModalState {
                     return Some(CampaignMapChoice::Quit);
                 }
                 if let Some(item) = self.items.iter().find(|item| item.loc_idx as u32 == id) {
-                    return Some(CampaignMapChoice::SelectMission(item.mission_idx));
+                    if item.availability.starts_mission() {
+                        return Some(CampaignMapChoice::SelectMission(item.mission_idx));
+                    }
+                    tracing::info!(
+                        "campaign map: pin for mission {} is {}; start refused",
+                        item.mission_idx,
+                        item.availability.label()
+                    );
                 }
             }
         }
@@ -2766,66 +2795,98 @@ fn render_mission_details(
     );
 }
 
+/// Pin priority for one location: an offered mission outranks a replayable
+/// one, which outranks a locked one. Earlier missions win ties.
+fn availability_rank(availability: MissionAvailability) -> u8 {
+    match availability {
+        MissionAvailability::Ready => 0,
+        MissionAvailability::Completed => 1,
+        MissionAvailability::Locked => 2,
+    }
+}
+
+/// Choose the mission a map pin stands for: the campaign's own answer for
+/// this location, preferring what the player can do with it now.
+fn campaign_map_pin(
+    campaign: &Campaign,
+    profiles: &engine_profiles::ProfileManager,
+    location: MissionLocation,
+) -> Option<(usize, MissionAvailability)> {
+    let mut pin: Option<(usize, MissionAvailability)> = None;
+    for (mission_idx, mission) in campaign.missions.iter().enumerate() {
+        let profile = mission.profile(profiles);
+        if profile.location != location {
+            continue;
+        }
+        // Descriptor slots with no playable map stay off the map exactly like
+        // they stay out of the progress tree; only recorded results keep them.
+        if MissionKind::for_profile(profile) == MissionKind::Unavailable
+            && mission.attempt_history().attempts().is_empty()
+            && !mission.is_done()
+        {
+            continue;
+        }
+        let availability = MissionAvailability::derive(campaign, mission_idx);
+        let better = pin.is_none_or(|(_, current)| {
+            availability_rank(availability) < availability_rank(current)
+        });
+        if better {
+            pin = Some((mission_idx, availability));
+        }
+    }
+    pin
+}
+
 fn campaign_map_items(
-    application_context: &ApplicationContext,
     campaign: &Campaign,
     profiles: &engine_profiles::ProfileManager,
     lifetime: Option<&robin_engine::campaign_history::ProfileCampaignHistory>,
-    campaign_map: &CampaignMapState,
-    text_resources: &mut ResourceManager,
-    shipping: Option<&assets_shipping_datadir::ShippingDatadir>,
+    mut presentation: impl FnMut(&engine_profiles::MissionProfile) -> (String, String),
 ) -> Vec<CampaignMapItem> {
-    campaign_map
-        .locations
-        .iter()
-        .enumerate()
-        .filter_map(|(loc_idx, loc)| {
-            if !loc.enabled {
-                return None;
-            }
-            let mission_idx = loc.mission_idx?;
-            let mission = campaign.missions.get(mission_idx)?;
-            let profile = mission.profile(profiles);
-            let name =
-                application_context.localized_mission_name(profile.id, &profile.mission_name);
-            let location = mission_location_from_index(loc_idx).unwrap_or(MissionLocation::Nowhere);
-            if matches!(
-                location,
-                MissionLocation::Nowhere | MissionLocation::Sherwood
-            ) {
-                return None;
-            }
-            let descriptors = crate::mission_descriptors::for_presentation(
-                application_context,
-                shipping,
-                profile.id,
-            );
-            let description =
-                MissionDescriptionScreen::get_mission_text(descriptors.as_ref(), text_resources, 1);
-            let remaining_lifetime = u32::from(profile.life_time)
-                .saturating_sub(u32::from(mission.age))
-                .saturating_sub(1);
-            Some(CampaignMapItem {
-                loc_idx,
-                mission_idx,
-                location,
-                name,
-                description,
-                remaining_lifetime,
-                show_blazons: mission.requires_blazons(profiles),
-                achievement_badges: crate::achievement_hud::mission_badge_presentations(
-                    crate::campaign_progress::combined_mission_badges(
-                        mission.achievement_badges(),
-                        profile.id,
-                        lifetime,
-                    ),
-                    robin_engine::achievement::available_mission_badges(profile, profiles),
-                    |_| None,
-                )
-                .collect(),
-            })
-        })
-        .collect()
+    let mut items = Vec::new();
+    for loc_idx in 0..LOCATION_POSITIONS.len() {
+        let Some(location) = mission_location_from_index(loc_idx) else {
+            continue;
+        };
+        if matches!(
+            location,
+            MissionLocation::Nowhere | MissionLocation::Sherwood
+        ) {
+            continue;
+        }
+        let Some((mission_idx, availability)) = campaign_map_pin(campaign, profiles, location)
+        else {
+            continue;
+        };
+        let mission = &campaign.missions[mission_idx];
+        let profile = mission.profile(profiles);
+        let (name, description) = presentation(profile);
+        let remaining_lifetime = u32::from(profile.life_time)
+            .saturating_sub(u32::from(mission.age))
+            .saturating_sub(1);
+        items.push(CampaignMapItem {
+            loc_idx,
+            mission_idx,
+            location,
+            name,
+            description,
+            remaining_lifetime,
+            show_blazons: mission.requires_blazons(profiles),
+            achievement_badges: crate::achievement_hud::mission_badge_presentations(
+                crate::campaign_progress::combined_mission_badges(
+                    mission.achievement_badges(),
+                    profile.id,
+                    lifetime,
+                ),
+                robin_engine::achievement::available_mission_badges(profile, profiles),
+                |_| None,
+            )
+            .collect(),
+            availability,
+            blinking: mission.age == profile.life_time.saturating_sub(1),
+        });
+    }
+    items
 }
 
 fn build_campaign_frame(
@@ -2957,7 +3018,6 @@ fn render_campaign_map(
     transform: MenuTransform,
     campaign: &Campaign,
     profiles: &engine_profiles::ProfileManager,
-    campaign_map: &CampaignMapState,
     resources: Option<&IngameMenuResources>,
     state: &CampaignMapModalState,
 ) {
@@ -2991,41 +3051,57 @@ fn render_campaign_map(
     });
 
     let blink_visible = marker_blink_on(crate::window::process_uptime_us());
-    for (loc_idx, loc) in campaign_map.locations.iter().enumerate() {
-        if loc.enabled {
-            let (x, y) = LOCATION_POSITIONS[loc_idx];
-            if let Some(surface) = assets.locations[loc_idx] {
-                let focused = frame
-                    .widget(loc_idx as u32)
-                    .is_some_and(|w| w.base().state != UiState::Default);
-                if focused {
-                    renderer.draw_rect_outline_screen(
-                        transform.origin_x + x as i32 - 4,
-                        transform.origin_y + y as i32 - 4,
-                        transform.origin_x + x as i32 + surface.width + 4,
-                        transform.origin_y + y as i32 + surface.height + 4,
-                        Renderer::create_color_16(255, 230, 90),
-                    );
-                }
-                if loc.blinking && blink_visible {
-                    renderer.draw_rect_outline_screen(
-                        transform.origin_x + x as i32 - 3,
-                        transform.origin_y + y as i32 - 3,
-                        transform.origin_x + x as i32 + surface.width + 3,
-                        transform.origin_y + y as i32 + surface.height + 3,
-                        Renderer::create_color_16(255, 240, 120),
-                    );
-                }
-            } else {
-                draw_marker(
-                    renderer,
-                    transform,
-                    x as i32,
-                    y as i32,
-                    loc.blinking,
-                    blink_visible,
+    for item in items {
+        let (x, y) = LOCATION_POSITIONS[item.loc_idx];
+        let focused = frame
+            .widget(item.loc_idx as u32)
+            .is_some_and(|w| w.base().state != UiState::Default);
+        if let Some(surface) = assets.locations[item.loc_idx] {
+            if focused {
+                renderer.draw_rect_outline_screen(
+                    transform.origin_x + x as i32 - 4,
+                    transform.origin_y + y as i32 - 4,
+                    transform.origin_x + x as i32 + surface.width + 4,
+                    transform.origin_y + y as i32 + surface.height + 4,
+                    Renderer::create_color_16(255, 230, 90),
                 );
             }
+            if item.blinking && blink_visible {
+                renderer.draw_rect_outline_screen(
+                    transform.origin_x + x as i32 - 3,
+                    transform.origin_y + y as i32 - 3,
+                    transform.origin_x + x as i32 + surface.width + 3,
+                    transform.origin_y + y as i32 + surface.height + 3,
+                    Renderer::create_color_16(255, 240, 120),
+                );
+            }
+            draw_availability_marker(
+                renderer,
+                transform,
+                x as i32,
+                y as i32,
+                surface.width,
+                surface.height,
+                item.availability,
+            );
+        } else {
+            draw_marker(
+                renderer,
+                transform,
+                x as i32,
+                y as i32,
+                item.blinking,
+                blink_visible,
+            );
+            draw_availability_marker(
+                renderer,
+                transform,
+                x as i32,
+                y as i32,
+                24,
+                24,
+                item.availability,
+            );
         }
     }
 
@@ -3191,6 +3267,27 @@ fn render_tooltip(renderer: &mut Renderer, transform: MenuTransform, view: Toolt
     }
 }
 
+/// The tooltip body: availability first, then — for a locked pin — the reason
+/// it cannot start, then the mission blurb.
+fn short_description(
+    campaign: &Campaign,
+    profiles: &engine_profiles::ProfileManager,
+    item: &CampaignMapItem,
+) -> String {
+    match item.availability {
+        MissionAvailability::Locked => {
+            let reasons = availability_notes(campaign, profiles, item.mission_idx).join(" ");
+            format!(
+                "{} - {}\n{}",
+                item.availability.label(),
+                reasons,
+                item.description
+            )
+        }
+        _ => format!("{}\n{}", item.availability.label(), item.description),
+    }
+}
+
 impl ShortMissionDescriptionWindow {
     fn new(
         campaign: &Campaign,
@@ -3234,7 +3331,7 @@ impl ShortMissionDescriptionWindow {
         ));
         frame.add_widget_absolute(widget_bridge::make_label(
             SHORT_DESC_TEXT_WIDGET_ID,
-            &item.description,
+            &short_description(campaign, profiles, item),
             x + 48,
             y + 5,
             167,
@@ -3361,6 +3458,51 @@ fn draw_selection(
 
 fn marker_blink_on(now_us: u64) -> bool {
     (now_us / 350_000).is_multiple_of(2)
+}
+
+/// Draw the pin's availability state: a filled gold square for a mission that
+/// can start now, a hollow pale-blue square for a completed mission that can be
+/// replayed, and a small dark square with a dimming veil for a locked one.
+fn draw_availability_marker(
+    renderer: &mut Renderer,
+    transform: MenuTransform,
+    x: i32,
+    y: i32,
+    surface_w: i32,
+    surface_h: i32,
+    availability: MissionAvailability,
+) {
+    let left = transform.origin_x + x + surface_w - 8;
+    let top = transform.origin_y + y - 4;
+    let outline = Renderer::create_color_16(24, 18, 8);
+    match availability {
+        MissionAvailability::Ready => {
+            renderer.render_gpu_rect(left, top, 8, 8, [255, 226, 96, 255]);
+            renderer.draw_rect_outline_screen(left - 1, top - 1, left + 9, top + 9, outline);
+        }
+        MissionAvailability::Completed => {
+            renderer.draw_rect_outline_screen(left, top, left + 8, top + 8, outline);
+            renderer.draw_rect_outline_screen(
+                left + 1,
+                top + 1,
+                left + 7,
+                top + 7,
+                Renderer::create_color_16(120, 200, 255),
+            );
+        }
+        MissionAvailability::Locked => {
+            // Dim the pin so a locked mission never reads as startable.
+            renderer.render_gpu_rect(
+                transform.origin_x + x,
+                transform.origin_y + y,
+                surface_w,
+                surface_h,
+                [12, 10, 8, 150],
+            );
+            renderer.render_gpu_rect(left, top, 8, 8, [96, 88, 74, 255]);
+            renderer.draw_rect_outline_screen(left - 1, top - 1, left + 9, top + 9, outline);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4194,6 +4336,249 @@ mod browser_tests {
         );
         assert!(state.registration.is_none());
         assert_eq!(state.selected_progress, 0);
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    use robin_engine::campaign_history::ProfileCampaignHistory;
+    use robin_engine::mission::{Mission, MissionStatus};
+    use robin_engine::profiles::{MissionProfile, MissionType};
+    use std::sync::Arc;
+
+    use crate::ui_screens::MissionDescriptionButton;
+
+    /// One campaign holding an offered, a completed and a locked mission, at
+    /// three separate map locations.
+    fn availability_fixture() -> (Campaign, engine_profiles::ProfileManager) {
+        let mut profiles = engine_profiles::ProfileManager::new();
+        profiles.missions.push(MissionProfile {
+            id: 1,
+            mission_name: "Sherwood".into(),
+            location: MissionLocation::Sherwood,
+            life_time: 10,
+            ..Default::default()
+        });
+        for (id, name, location) in [
+            (2, "Ready Ambush", MissionLocation::Cross1),
+            (3, "Completed Castle", MissionLocation::Derby),
+            (4, "Locked Castle", MissionLocation::York),
+        ] {
+            profiles.missions.push(MissionProfile {
+                id,
+                mission_name: name.into(),
+                location,
+                mission_type: MissionType::Historical,
+                max_ransom: 200_000,
+                life_time: 10,
+                ..Default::default()
+            });
+        }
+        let mut campaign = Campaign::default();
+        for profile_idx in 0..4 {
+            campaign.missions.push(Mission {
+                profile_idx: Some(profile_idx),
+                ..Mission::new()
+            });
+        }
+        campaign.accessible_mission_indices.push(1);
+        campaign.missions[2].status = MissionStatus::Won;
+        (campaign, profiles)
+    }
+
+    fn items(
+        campaign: &Campaign,
+        profiles: &engine_profiles::ProfileManager,
+    ) -> Vec<CampaignMapItem> {
+        campaign_map_items(campaign, profiles, None, |profile| {
+            (profile.mission_name.clone(), String::new())
+        })
+    }
+
+    fn classic_state(
+        items: Vec<CampaignMapItem>,
+        campaign: &Campaign,
+        profiles: &engine_profiles::ProfileManager,
+    ) -> CampaignMapModalState {
+        let graph = CampaignProgressGraph::build(campaign, profiles, None);
+        let history = ProfileCampaignHistory::default();
+        let assets = CampaignMapAssets::default();
+        let frame = build_campaign_frame(&items, &CampaignMapState::default(), &assets);
+        CampaignMapModalState {
+            items,
+            scroll_views: campaign_scroll_views(&assets),
+            frame,
+            exhibit_grid: ExhibitGridNavigator::new(graph.nodes.len(), 0),
+            graph,
+            presentation: CampaignPresentationMode::ClassicMap,
+            input: ModalInputState::new(),
+            pseudo_debrief_started_at_ms: None,
+            selected_classic: 0,
+            selected_progress: 0,
+            show_achievement_badges: false,
+            achievement_overview: false,
+            details_open: false,
+            selected_play: 0,
+            replay_status: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            registration: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            application: ApplicationContext::default(),
+            mission_basenames: profiles
+                .missions
+                .iter()
+                .map(|profile| (profile.id, profile.mission_filename.clone()))
+                .collect(),
+            recording_index: Arc::new(crate::mission_replays::RecordingIndex::disabled()),
+            lifetime_totals: history.totals(),
+            lifetime_achievements: history.achievement_aggregation(),
+            assets,
+        }
+    }
+
+    #[test]
+    fn campaign_map_items_carry_ready_completed_and_locked_states() {
+        let (campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        assert_eq!(items.len(), 3, "one pin per occupied map location");
+        let state_at = |location| {
+            items
+                .iter()
+                .find(|item| item.location == location)
+                .map(|item| item.availability)
+        };
+        assert_eq!(
+            state_at(MissionLocation::Cross1),
+            Some(MissionAvailability::Ready)
+        );
+        assert_eq!(
+            state_at(MissionLocation::Derby),
+            Some(MissionAvailability::Completed)
+        );
+        assert_eq!(
+            state_at(MissionLocation::York),
+            Some(MissionAvailability::Locked)
+        );
+
+        let locked = items
+            .iter()
+            .find(|item| item.location == MissionLocation::York)
+            .expect("locked pin");
+        let mut text_resources = ResourceManager::new();
+        let screen = MissionDescriptionScreen::create(
+            locked.mission_idx,
+            &campaign.missions[locked.mission_idx],
+            &campaign,
+            &profiles,
+            None,
+            &mut text_resources,
+        );
+        assert!(
+            !screen.show_start_mission,
+            "a locked mission must not offer the start action"
+        );
+        assert!(!screen.is_enabled(MissionDescriptionButton::StartMission));
+        assert!(
+            !screen
+                .buttons()
+                .contains(&MissionDescriptionButton::StartMission),
+            "the locked dialog must not build a start button"
+        );
+        let reasons = availability_notes(&campaign, &profiles, locked.mission_idx).join(" ");
+        assert!(
+            !reasons.is_empty(),
+            "a locked mission must have a reason to show"
+        );
+        assert!(
+            screen.description.ends_with(&reasons),
+            "the locked dialog must explain why: {}",
+            screen.description
+        );
+
+        let ready = items
+            .iter()
+            .find(|item| item.location == MissionLocation::Cross1)
+            .expect("ready pin");
+        assert!(
+            MissionDescriptionScreen::create(
+                ready.mission_idx,
+                &campaign.missions[ready.mission_idx],
+                &campaign,
+                &profiles,
+                None,
+                &mut text_resources,
+            )
+            .show_start_mission
+        );
+    }
+
+    #[test]
+    fn locked_pin_cannot_dispatch_a_commit() {
+        let (campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        let locked = items
+            .iter()
+            .position(|item| item.availability == MissionAvailability::Locked)
+            .expect("locked pin");
+        let ready = items
+            .iter()
+            .position(|item| item.availability == MissionAvailability::Ready)
+            .expect("ready pin");
+        let mut state = classic_state(items.clone(), &campaign, &profiles);
+        let transform = MenuTransform::centered(640, 480);
+
+        // Every classic-map start path refuses the locked pin.
+        state.selected_classic = locked;
+        for code in [Keycode::Return, Keycode::KpEnter, Keycode::Space] {
+            assert_eq!(
+                state.handle_events(
+                    vec![GameEvent::KeyDown {
+                        keycode: code,
+                        physical_key: None
+                    }],
+                    transform,
+                    false
+                ),
+                None,
+                "key {code:?} must not dispatch a commit for a locked mission"
+            );
+        }
+        let (x, y) = LOCATION_POSITIONS[items[locked].loc_idx];
+        let (sx, sy) = transform.to_screen(x as i32 + 2, y as i32 + 2);
+        assert_eq!(
+            state.handle_events(
+                vec![
+                    GameEvent::MouseDown(sx, sy, 1, 1),
+                    GameEvent::MouseUp(sx, sy, 1),
+                ],
+                transform,
+                false
+            ),
+            None,
+            "clicking a locked pin must not dispatch a commit"
+        );
+
+        // The ready pin still commits, so the gate is the state, not the map.
+        state.selected_classic = ready;
+        assert_eq!(
+            state.handle_events(
+                vec![GameEvent::KeyDown {
+                    keycode: Keycode::Return,
+                    physical_key: None
+                }],
+                transform,
+                false
+            ),
+            Some(CampaignMapChoice::SelectMission(items[ready].mission_idx))
+        );
+
+        // `Campaign::select_next_mission` asserts on exactly this pair
+        // ("neither accessible nor completed"), so a dispatched commit would
+        // panic in the engine; the checks above are what keep it unreached.
+        let mission_idx = items[locked].mission_idx;
+        assert!(!campaign.is_mission_accessible(mission_idx));
+        assert!(!campaign.is_mission_replayable(mission_idx));
     }
 }
 

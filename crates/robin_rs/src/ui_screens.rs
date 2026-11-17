@@ -8,6 +8,7 @@ use robin_engine::profiles as engine_profiles;
 use robin_engine::sherwood_stat as engine_sherwood_stat;
 use serde::{Deserialize, Serialize};
 
+use crate::campaign_progress::{MissionAvailability, availability_notes};
 use crate::ingame_menu::resources::{
     MT_INFOBULLE_BUTTON_CANCEL, MT_INFOBULLE_BUTTON_FARMERS_TO_BLAZON,
     MT_INFOBULLE_BUTTON_MISSION_TO_BLAZON, MT_INFOBULLE_BUTTON_MONEY_TO_BLAZON,
@@ -139,10 +140,13 @@ pub struct MissionDescriptionScreen {
     pub can_convert_money: bool,
     /// Whether the "convert mission" button is enabled.
     pub can_convert_mission: bool,
-    /// Whether the "start mission" button should be shown in the
-    /// blazon-requiring layout.  Gated on the mission's type being
-    /// non-`Pseudo`.
+    /// Whether a start/commit action may be offered at all. A locked mission
+    /// offers none: the engine asserts on committing a mission that is neither
+    /// accessible nor completed.
     pub show_start_mission: bool,
+    /// Campaign-derived state of the described mission.
+    #[serde(default)]
+    pub availability: MissionAvailability,
     /// Whether men-to-blazon conversion mode was chosen.
     pub men_to_blazon_mode: bool,
     /// The player's choice.
@@ -211,7 +215,6 @@ impl MissionDescriptionScreen {
 
         let picture_id = Self::get_mission_picture(level_descriptors);
         let title = Self::get_mission_text(level_descriptors, text_resources, 0);
-        let description = Self::get_mission_text(level_descriptors, text_resources, 2);
 
         // Initial enable flags come straight from the campaign.  When
         // the mission requires blazons AND is a pseudo-mission with zero
@@ -230,9 +233,19 @@ impl MissionDescriptionScreen {
 
         // The start-mission button only exists in the blazon branch
         // when the mission is *not* pseudo.  In the non-blazon branch
-        // it's always created as the generic OK button.  We store a
-        // single flag so renderer code can pick the right button to draw.
-        let show_start_mission = !requires_blazons || !is_pseudo;
+        // it is the generic OK button.  Both layouts refuse a locked
+        // mission outright.  We store a single flag so renderer code can
+        // pick the right button to draw.
+        let availability = MissionAvailability::derive(campaign, mission_index);
+        let show_start_mission = availability.starts_mission() && (!requires_blazons || !is_pseudo);
+        let mut description = Self::get_mission_text(level_descriptors, text_resources, 2);
+        if availability == MissionAvailability::Locked {
+            let reasons = availability_notes(campaign, profiles, mission_index);
+            if !reasons.is_empty() {
+                description.push_str("\n\n");
+                description.push_str(&reasons.join(" "));
+            }
+        }
 
         Self {
             mission_index,
@@ -244,6 +257,7 @@ impl MissionDescriptionScreen {
             can_convert_money,
             can_convert_mission,
             show_start_mission,
+            availability,
             men_to_blazon_mode: false,
             user_choice: MissionChoice::None,
             closed: false,
@@ -283,6 +297,17 @@ impl MissionDescriptionScreen {
         self.closed = true;
     }
 
+    /// Refresh the campaign-derived availability, e.g. after a blazon
+    /// conversion changed which missions are offered while this dialog stayed
+    /// open. Locking is one-way for the dialog's lifetime: once the campaign
+    /// stops offering the mission, this window can never start it again.
+    pub fn update_availability(&mut self, availability: MissionAvailability) {
+        self.availability = availability;
+        if !availability.starts_mission() {
+            self.show_start_mission = false;
+        }
+    }
+
     /// Update conversion button availability (called after buy-blazons closes).
     pub fn update_conversion_state(
         &mut self,
@@ -301,16 +326,13 @@ impl MissionDescriptionScreen {
     pub fn buttons(&self) -> Vec<MissionDescriptionButton> {
         let mut buttons = Vec::new();
         if self.requires_blazons {
-            // The three convert buttons go first in this order; then
-            // start-mission is appended when the mission is not pseudo.
+            // The three convert buttons go first in this order.
             buttons.push(MissionDescriptionButton::ConvertPeasants);
             buttons.push(MissionDescriptionButton::ConvertMoney);
             buttons.push(MissionDescriptionButton::ConvertMission);
-            if self.show_start_mission {
-                buttons.push(MissionDescriptionButton::StartMission);
-            }
-        } else {
-            // The generic OK / start-mission button.
+        }
+        // Start / generic OK exists only when the mission may start.
+        if self.show_start_mission {
             buttons.push(MissionDescriptionButton::StartMission);
         }
         // Cancel is always appended last.
@@ -321,8 +343,12 @@ impl MissionDescriptionScreen {
     /// Whether a given button is interactive for the current state.
     pub fn is_enabled(&self, button: MissionDescriptionButton) -> bool {
         match button {
-            MissionDescriptionButton::Cancel | MissionDescriptionButton::StartMission => true,
-            MissionDescriptionButton::ConvertPeasants => self.can_convert_peasants,
+            MissionDescriptionButton::Cancel => true,
+            MissionDescriptionButton::StartMission => self.show_start_mission,
+            // Converting peasants starts the mission immediately.
+            MissionDescriptionButton::ConvertPeasants => {
+                self.can_convert_peasants && self.show_start_mission
+            }
             MissionDescriptionButton::ConvertMoney => self.can_convert_money,
             MissionDescriptionButton::ConvertMission => self.can_convert_mission,
         }
