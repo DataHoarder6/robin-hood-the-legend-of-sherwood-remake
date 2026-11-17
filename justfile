@@ -9,3 +9,7 @@ reconcile-main:
 # Named gates from scripts/check-quality.sh; `tooling` is the fixture-free one.
 check suite="tooling":
     bash scripts/check-quality.sh {{suite}}
+
+# Build this worktree's dev game on the build host and copy it to the laptop.
+ship-dev:
+    scripts/ship-dev.sh
