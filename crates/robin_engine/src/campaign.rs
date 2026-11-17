@@ -2300,7 +2300,17 @@ impl Campaign {
             target_idx < self.missions.len(),
             "select_next_mission: mission index {target_idx} out of range"
         );
+
         if !self.accessible_mission_indices.contains(&target_idx) {
+            // Committing removed this mission from the accessible list, so
+            // asking for it again (back out to the map, pick the same mission
+            // again — or replay a command recorded by a build that dispatched
+            // the cancel as a selection) would look exactly like a
+            // history-replay request and panic. Re-committing is a no-op; the
+            // aging/removal side effects below only apply to a first commit.
+            if self.next_mission_idx == Some(target_idx) {
+                return;
+            }
             let replayable = self.missions[target_idx].attempt_history.has_success()
                 || self.missions[target_idx].status == MissionStatus::Won;
             assert!(
@@ -3513,6 +3523,62 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn recommitting_the_committed_mission_is_a_no_op() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1, 2];
+
+        campaign.select_next_mission(Some(1), &profiles);
+        let accessible = campaign.accessible_mission_indices.clone();
+        assert_eq!(campaign.next_mission_idx, Some(1));
+
+        // Backing out to the map and re-picking the same mission: by index…
+        campaign.select_next_mission(Some(1), &profiles);
+        // …and through `None`, which older recordings used to cancel a commit.
+        campaign.select_next_mission(None, &profiles);
+
+        assert_eq!(campaign.next_mission_idx, Some(1));
+        assert_eq!(campaign.accessible_mission_indices, accessible);
+        assert_eq!(campaign.history_replay_mission_idx, None);
+    }
+
+    #[test]
+    fn switching_the_commit_to_another_accessible_mission_works() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1, 2];
+
+        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(2), &profiles);
+
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        assert!(!campaign.accessible_mission_indices.contains(&2));
+    }
+
+    #[test]
+    #[should_panic(expected = "locked mission 2 is neither accessible nor completed")]
+    fn selecting_a_locked_mission_still_fails_loudly() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.select_next_mission(Some(2), &profiles);
+    }
+
+    #[test]
+    fn completed_missions_still_select_as_history_replays() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+
+        campaign.select_next_mission(Some(2), &profiles);
+
+        assert_eq!(campaign.history_replay_mission_idx, Some(2));
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        assert!(campaign.practice_return_snapshot.is_some());
     }
 
     #[test]
