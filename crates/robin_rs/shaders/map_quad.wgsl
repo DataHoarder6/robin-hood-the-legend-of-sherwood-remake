@@ -33,6 +33,14 @@ fn vs_main(v: VsIn) -> VsOut {
 fn fs_main(v: VsOut) -> @location(0) vec4<f32> {
     let map_pixel = floor(v.position.xy / v.camera.z + v.camera.xy);
     let texel = vec2<i32>(map_pixel + v.texture_offset);
-    let limit = vec2<i32>(textureDimensions(sampled_tex)) - vec2<i32>(1);
-    return textureLoad(sampled_tex, clamp(texel, vec2<i32>(0), limit), 0);
+    let dimensions = vec2<i32>(textureDimensions(sampled_tex));
+    // Outside the sampled texture is not map content. Clamping the lookup there
+    // would smear the border texel across every uncovered fragment, which is
+    // what a viewport larger than the level at the widest zoom exposes. Bound
+    // against the bound texture, not a level extent: the atlas bind group keeps
+    // in-range decals byte-identical.
+    if any(texel < vec2<i32>(0)) || any(texel >= dimensions) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return textureLoad(sampled_tex, texel, 0);
 }

@@ -192,6 +192,102 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+fn verify_map_background_outside_level_is_background(gpu: GpuContext) {
+    use robin_engine::coordinates::MapPoint;
+
+    // The widest zoom in a viewport larger than the level. Every level texel
+    // carries its own colour, so a border column or row stretched into the
+    // uncovered band stays distinguishable from real map content.
+    const LEVEL: u32 = 4;
+    const SCREEN: u32 = 16;
+    let level: Vec<u16> = (0..LEVEL)
+        .flat_map(|y| (0..LEVEL).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            robin_util::color::rgb565(
+                u8::try_from(16 + 48 * x).unwrap(),
+                u8::try_from(16 + 48 * y).unwrap(),
+                u8::try_from(8 + 24 * (x + y)).unwrap(),
+            )
+        })
+        .collect();
+    let level_rgb: Vec<(u8, u8, u8)> = level
+        .iter()
+        .map(|&texel| robin_util::color::rgb565_to_rgb8(texel))
+        .collect();
+    for (index, &(r, g, b)) in level_rgb.iter().enumerate() {
+        assert_ne!(
+            (r, g, b),
+            (0, 0, 0),
+            "level texel {index} must differ from the clear colour"
+        );
+    }
+
+    let mut renderer = Renderer::with_optional_surface(
+        gpu,
+        None,
+        None,
+        SCREEN as u16,
+        SCREEN as u16,
+        TextureScaleMode::Nearest,
+    );
+    assert!(renderer.upload_background_texture(LEVEL, LEVEL, &level));
+    let mut viewport = crate::host::ViewportState::new(
+        SCREEN as f32,
+        SCREEN as f32 + robin_engine::engine::PANNEL_HEIGHT,
+    );
+
+    for zoom in [0.5, 1.0, 2.0] {
+        for view in [MapPoint::new(0.0, 0.0), MapPoint::new(0.375, 0.625)] {
+            viewport.view_position = view;
+            viewport.zoom_factor = zoom;
+            renderer.begin_gpu_frame_clear();
+            crate::level_loading_host::draw_background(&viewport, &mut renderer);
+            let (width, height, pixels) = renderer.try_capture_frame_rgba().unwrap();
+            assert_eq!((width, height), (SCREEN, SCREEN));
+            let mut covered = 0;
+            for y in 0..height as usize {
+                for x in 0..width as usize {
+                    // The shader's screen-to-map lookup on the fragment centre.
+                    let map_x = ((x as f32 + 0.5) / zoom + view.x).floor() as i32;
+                    let map_y = ((y as f32 + 0.5) / zoom + view.y).floor() as i32;
+                    let index = (y * width as usize + x) * 4;
+                    let actual = &pixels[index..index + 4];
+                    if (0..LEVEL as i32).contains(&map_x) && (0..LEVEL as i32).contains(&map_y) {
+                        let (r, g, b) = level_rgb[(map_y as u32 * LEVEL + map_x as u32) as usize];
+                        assert_eq!(
+                            actual,
+                            [r, g, b, 255].as_slice(),
+                            "map pixel ({map_x}, {map_y}) at screen ({x}, {y}), zoom {zoom}, view {view:?}"
+                        );
+                        covered += 1;
+                        continue;
+                    }
+                    // Out of the sampled texture is background, never a clamp
+                    // onto the border texel.
+                    let border_x = map_x.clamp(0, LEVEL as i32 - 1) as u32;
+                    let border_y = map_y.clamp(0, LEVEL as i32 - 1) as u32;
+                    let (r, g, b) = level_rgb[(border_y * LEVEL + border_x) as usize];
+                    assert_ne!(
+                        actual,
+                        [r, g, b, 255].as_slice(),
+                        "border texel smeared to screen ({x}, {y}), zoom {zoom}, view {view:?}"
+                    );
+                    assert_eq!(
+                        actual,
+                        [0, 0, 0, 255].as_slice(),
+                        "background at screen ({x}, {y}), zoom {zoom}, view {view:?}"
+                    );
+                }
+            }
+            assert!(
+                covered > 0 && covered < (SCREEN * SCREEN) as usize,
+                "fixture must straddle the level edge, covered {covered}, zoom {zoom}, view {view:?}"
+            );
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
     if let Ok(configuration) = std::env::var("ASSET_CHARACTER_RENDER_CONFIG") {
         crate::game_render::archive_character_tests::capture(
@@ -215,6 +311,7 @@ pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
         verify_browser_baked_state_pixels(gpu.clone(), std::path::Path::new(&root));
     }
     verify_map_appearance_pixels(gpu.clone());
+    verify_map_background_outside_level_is_background(gpu.clone());
     verify_coop_compositing(gpu.clone());
     verify_map_patch_camera_alignment(gpu.clone(), false);
     verify_map_patch_camera_alignment(gpu.clone(), true);
