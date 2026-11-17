@@ -18,6 +18,9 @@ live corpus or deployment. See `docs/TESTING.md` for package and fixture gates.
 - `assert-replay-admission-wasm-memory.sh`: verify the isolated admission memory ceiling.
 - `replay-admission-wasm.cargo-config.toml`, `wasm-threads.cargo-config.toml`: distinct WASM build policies.
 - `test_quality_suites.py`, `test_portable_linker.py`: suite routing and linker portability regressions.
+- `doctor.sh`: read-only preflight for a checkout shared between agents; exits non-zero only for states that bite, and prints a fix per finding. Run as `just doctor`.
+- `reconcile-main.sh`: archives a drifted `main` tip as `archive/main-<date>-<sha>` and moves `main` to the integration ref; refuses a dirty tree, a running build or unique commits. Run as `just reconcile-main`.
+- `test_doctor.sh`, `test_reconcile_main.sh`: fixture regressions for the two, on synthetic repositories in a temp dir.
 - `release/`: native release authoring/publishing and its tests; see its own README.
 
 ## Replay evidence and campaigns
