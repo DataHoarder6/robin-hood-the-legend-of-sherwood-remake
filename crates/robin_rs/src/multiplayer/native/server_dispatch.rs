@@ -146,7 +146,7 @@ pub(super) async fn run_server_outgoing_pump(
                 let begin = {
                     let mut p = context.peers.lock();
                     p.readiness.host_frame = Some(frame);
-                    maybe_begin_sim_locked(&mut p)
+                    maybe_begin_sim_locked(&mut p, super::elapsed_ms(&context))
                 }?;
                 super::connect_all_provisional_seats(&context);
                 announce_begin_sim(&context, begin);

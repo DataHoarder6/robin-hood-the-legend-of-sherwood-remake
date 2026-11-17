@@ -234,7 +234,11 @@ must not be repaired by silently adopting a new default Engine.
 - A joining peer installs the exact snapshot and trims older pending input/hash
   state before announcing `ReadyToSim`.
 - Both interactive and true-headless missions wait until the configured
-  expected players are ready, then the server broadcasts `BeginSim`.
+  expected players are ready, then the server broadcasts `BeginSim`. The wait is
+  bounded: if the host has loaded and a peer has not become ready after 120 s,
+  the host evicts that peer and starts with the participants that did load. A
+  peer admitted after the wait began refreshes the budget once, so a late joiner
+  gets a full load window; a second joiner does not extend it again.
 - Admission is an explicit timeline state machine: a host waits for
   `BeginSim`; a peer waits for successful snapshot adoption, then `BeginSim`;
   both wait for `start_epoch_ms` before simulation advances. A peer never

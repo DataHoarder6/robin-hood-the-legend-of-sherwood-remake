@@ -438,18 +438,69 @@ fn ready_barrier_requires_attached_connected_quorum_and_preserves_provisional_fr
         host_frame: Some(10),
         ..Default::default()
     };
-    assert_eq!(barrier.candidate(2, [(true, false, Some(20))]), None);
-    assert_eq!(barrier.candidate(2, [(true, true, None)]), None);
-    assert_eq!(barrier.candidate(3, [(true, true, Some(20))]), None);
+    use super::server_protocol::ReadyDecision;
     assert_eq!(
-        barrier.candidate(2, [(true, true, Some(20)), (false, true, Some(25))]),
-        Some(25)
+        barrier.candidate(0, 2, [(true, false, Some(20))]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(1, 2, [(true, true, None)]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(2, 3, [(true, true, Some(20))]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(3, 2, [(true, true, Some(20)), (false, true, Some(25))]),
+        ReadyDecision::Begin(25)
     );
     barrier.commit(25, 100);
-    assert_eq!(barrier.candidate(2, [(true, true, Some(20))]), None);
+    assert_eq!(
+        barrier.candidate(4, 2, [(true, true, Some(20))]),
+        ReadyDecision::Wait
+    );
     barrier.reset();
     assert!(barrier.host_frame.is_none());
     assert!(barrier.begun.is_none());
+}
+
+#[test]
+fn ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner() {
+    use super::server_protocol::ReadyDecision;
+    let mut barrier = super::server_protocol::ReadyBarrier {
+        host_frame: Some(10),
+        ..Default::default()
+    };
+    // The host is ready and alone while a second seat is still expected.
+    assert_eq!(
+        barrier.candidate(1_000, 2, std::iter::empty()),
+        ReadyDecision::Wait
+    );
+    // A peer admits at 61 s: the wait refreshes once on its behalf.
+    let joined = [(true, true, None)];
+    assert_eq!(
+        barrier.candidate(61_000, 2, joined.iter().copied()),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(180_999, 2, joined.iter().copied()),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(181_000, 2, joined.iter().copied()),
+        ReadyDecision::Expired
+    );
+    // So a second joiner cannot extend it again.
+    assert_eq!(
+        barrier.candidate(300_000, 3, [(true, true, None), (true, true, None)]),
+        ReadyDecision::Expired
+    );
+    // The forced release uses the frames that did arrive, ignoring quorum.
+    assert_eq!(
+        barrier.forced_frame([(true, true, Some(20)), (true, true, None)]),
+        Some(20)
+    );
 }
 
 #[test]

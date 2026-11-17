@@ -173,6 +173,33 @@ impl PeerSessions {
         }
     }
 
+    /// Seats that are admitted but cannot finish the ready barrier: their
+    /// writer is gone, or they never sent a ready frame. Evicting clears
+    /// admission and drops the writer; the authenticated owner stays so the
+    /// client re-admits from a snapshot instead of freezing the session.
+    pub(super) fn evict_unready_seats(&mut self) -> Vec<u8> {
+        let mut evicted = self
+            .seats
+            .iter()
+            .filter_map(|(&seat, session)| {
+                (session.sim_connected
+                    && (session.sender.is_none() || session.ready_frame.is_none()))
+                .then_some(seat)
+            })
+            .collect::<Vec<_>>();
+        evicted.sort_unstable();
+        for &seat in &evicted {
+            let session = self
+                .seats
+                .get_mut(&seat)
+                .expect("evicted seat is authenticated");
+            session.sim_connected = false;
+            session.ready_frame = None;
+            session.sender = None;
+        }
+        evicted
+    }
+
     pub(super) fn record_ready(
         &mut self,
         seat: u8,
@@ -479,6 +506,45 @@ mod tests {
         }
     }
     #[test]
+    fn ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner() {
+        use super::super::server_protocol::ReadyDecision;
+        let mut peers = ServerPeers::new(3);
+        for seat in [1, 2] {
+            let (sender, _receiver) = unbounded_channel();
+            claim_test_seat(&mut peers, seat, sender);
+            peers.sessions.connect_sim_seat(seat);
+        }
+        let generation = *peers.sessions.generation(&1).unwrap();
+        peers.sessions.record_ready(1, generation, 20).unwrap();
+        peers.readiness.host_frame = Some(10);
+        assert_eq!(
+            peers.readiness.candidate(0, 2, peers.sessions.readiness()),
+            ReadyDecision::Wait
+        );
+        assert_eq!(peers.sessions.evict_unready_seats(), vec![2]);
+        assert!(!peers.sessions.is_sim_connected(&2));
+        assert!(peers.sessions.sender(&2).is_none());
+        assert_eq!(
+            peers
+                .sessions
+                .owner_seats()
+                .get(&PeerOwner::Native([2; 32])),
+            Some(&2),
+            "the evicted seat keeps its owner so it can re-admit"
+        );
+        assert_eq!(
+            peers.readiness.forced_frame(peers.sessions.readiness()),
+            Some(20),
+            "the forced release keeps the frame the ready peer reported"
+        );
+        assert_eq!(
+            peers.sessions.senders().count(),
+            1,
+            "only the ready peer keeps a writer to receive BeginSim"
+        );
+    }
+
+    #[test]
     fn registry_detachment_and_replacement_preserve_ownership_but_reset_readiness() {
         let mut peers = ServerPeers::new(2);
         let owner = PeerOwner::Native([7; 32]);
@@ -494,7 +560,7 @@ mod tests {
         peers.readiness.host_frame = Some(10);
         let detached = peers.sessions.detach_writer(&first.seat).unwrap();
         assert_eq!(peers.sessions.owner_seats().get(&owner), Some(&first.seat));
-        assert!(maybe_begin_sim_locked(&mut peers).unwrap().is_none());
+        assert!(maybe_begin_sim_locked(&mut peers, 0).unwrap().is_none());
 
         let (sender, _replacement_receiver) = unbounded_channel();
         let replacement = peers
@@ -521,17 +587,17 @@ mod tests {
             ),
             None
         );
-        assert!(maybe_begin_sim_locked(&mut peers).unwrap().is_none());
+        assert!(maybe_begin_sim_locked(&mut peers, 0).unwrap().is_none());
         peers
             .sessions
             .seats
             .get_mut(&first.seat)
             .unwrap()
             .ready_frame = Some(30);
-        let (frame, _, senders) = maybe_begin_sim_locked(&mut peers).unwrap().unwrap();
+        let (frame, _, senders) = maybe_begin_sim_locked(&mut peers, 0).unwrap().unwrap();
         assert_eq!(frame, 30);
         assert_eq!(senders.len(), 1);
-        assert!(maybe_begin_sim_locked(&mut peers).unwrap().is_none());
+        assert!(maybe_begin_sim_locked(&mut peers, 0).unwrap().is_none());
 
         assert_eq!(
             peers
@@ -565,7 +631,7 @@ mod tests {
         }
         peers.readiness.host_frame = Some(9);
         peers.sessions.connect_sim_seat(2);
-        assert!(maybe_begin_sim_locked(&mut peers).unwrap().is_none());
+        assert!(maybe_begin_sim_locked(&mut peers, 0).unwrap().is_none());
         peers.sessions.connect_sim_seat(1);
         peers.sessions.clear_ready();
         assert!(
@@ -576,9 +642,9 @@ mod tests {
                 .all(|session| session.ready_frame.is_none())
         );
         peers.sessions.record_ready(1, 1, 50).unwrap();
-        assert!(maybe_begin_sim_locked(&mut peers).unwrap().is_none());
+        assert!(maybe_begin_sim_locked(&mut peers, 0).unwrap().is_none());
         peers.sessions.record_ready(2, 2, 40).unwrap();
-        let (frame, _, senders) = maybe_begin_sim_locked(&mut peers).unwrap().unwrap();
+        let (frame, _, senders) = maybe_begin_sim_locked(&mut peers, 0).unwrap().unwrap();
         assert_eq!(frame, 50);
         assert_eq!(senders.len(), 2);
         assert_eq!(peers.sessions.detach_all_writers().len(), 2);
