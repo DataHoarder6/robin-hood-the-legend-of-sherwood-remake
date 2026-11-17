@@ -19,9 +19,11 @@ prints `<version>+<12-hex commit>`; compare it on every seat before a session. A
 mismatch refuses the join — that comparison is the preflight, not an error to
 work around.
 
-Cutting stable: tag `fork/main` as `vX.Y.Z` and push the tag. CI then builds the
-Windows and Linux release assets (`.github/workflows/native-release.yml`); a
-nightly run never produces a stable release.
+Cutting stable: tag `fork/main` as `vX.Y.Z`, push the tag, then start the
+release on that tag with `gh workflow run native-release.yml --ref vX.Y.Z`. The
+workflow treats a `v*` ref as a stable release whichever way the run starts; a
+run from a branch is a nightly prerelease. CI then builds the Windows and Linux
+release assets (`.github/workflows/native-release.yml`).
 
 ## Hosts
 
