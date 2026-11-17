@@ -1277,6 +1277,7 @@ pub(super) fn drain_mission_network(
         net.publish_frame(timeline.frame_number());
         net.service_modal_session(
             host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST,
+            u64::from(crate::window::process_uptime_ms()),
         )
         .map_err(|error| channel_failure("modal session control failed", error))?;
         if host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST {

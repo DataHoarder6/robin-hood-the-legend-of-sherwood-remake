@@ -158,9 +158,20 @@ impl<'a> ModalNet<'a> {
     pub fn waiting_message(&self) -> String {
         let names = self.net.modal_waiting_names(self.instance, &self.kind);
         if names.is_empty() {
-            "Waiting for the host to continue...".into()
-        } else {
-            format!("Waiting for {}...", names.join(", "))
+            return "Waiting for the host to continue...".into();
+        }
+        let remaining = self.net.modal_wait_remaining_ms(
+            self.instance,
+            &self.kind,
+            u64::from(crate::window::process_uptime_ms()),
+        );
+        match remaining {
+            Some(remaining_ms) => format!(
+                "Waiting for {} (continuing without them in {} s)...",
+                names.join(", "),
+                remaining_ms.div_ceil(1000)
+            ),
+            None => format!("Waiting for {}...", names.join(", ")),
         }
     }
 
@@ -177,7 +188,7 @@ impl<'a> ModalNet<'a> {
 
     pub fn poll_remote_dismissal(&self) -> Option<DialogResult> {
         self.net
-            .service_modal_session(self.is_host)
+            .service_modal_session(self.is_host, u64::from(crate::window::process_uptime_ms()))
             .unwrap_or_else(|error| panic!("modal session control failed: {error}"));
         let result = self
             .net
@@ -382,7 +393,13 @@ mod tests {
         client_in.send(NetEvent::ModalProgress(progress)).unwrap();
         assert_eq!(client_modal.poll_remote_dismissal(), None);
         assert_eq!(client_modal.waiting_message(), "Waiting for Carol...");
-        assert_eq!(host_modal.waiting_message(), "Waiting for Carol...");
+        // The host also shows the bounded wait; the client cannot know it.
+        let host_message = host_modal.waiting_message();
+        assert!(
+            host_message.starts_with("Waiting for Carol (continuing without them in ")
+                && host_message.ends_with(" s)..."),
+            "unexpected host wait message: {host_message}"
+        );
     }
 
     #[test]

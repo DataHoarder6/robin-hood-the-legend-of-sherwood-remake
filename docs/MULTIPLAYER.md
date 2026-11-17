@@ -290,6 +290,14 @@ encoding are unchanged. The normal replay journal still records the authoritativ
 kind/result at the mission-frame boundary; playback and seeking retain their
 existing modal batch policy.
 
+The acknowledgement barrier is bounded. Once the host has drawn a shared page and
+it is still waiting, a seat that has not acknowledged after 300 s is marked
+acknowledged: the host continues with the participants that are present, and the
+late or reconnecting seat receives the durable decision instead of a second
+chance to block the session. A peer's missing acknowledgement costs it the page,
+never the session. While the wait is live the story surface shows the seats it is
+waiting for and the seconds left before the host continues without them.
+
 Host-only save, load, restart, QuickLoad, and campaign-exit operations use an
 exact `Prepare`/`Ready`/`Commit` barrier. Clients first decode, validate, and
 retain the exact host bytes. The host commits only after every currently

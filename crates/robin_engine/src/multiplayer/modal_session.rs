@@ -20,6 +20,11 @@ fn requires_modal_acknowledgements(kind: &ModalKind) -> bool {
     is_shared_story_modal(kind) || is_terminal_summary(kind)
 }
 
+/// How long a shared page waits for a participant's acknowledgement before the
+/// host continues without it. Bounded waits keep one frozen or departed peer
+/// from freezing every other participant at a modal barrier.
+pub const MODAL_ACK_BUDGET_MS: u64 = 300_000;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ModalOccurrenceState {
     kind: ModalKind,
@@ -50,6 +55,9 @@ pub(super) struct ModalSyncState {
     local_proposals: Vec<ModalProposal>,
     pending_openings: Vec<ModalProgress>,
     emitted: std::collections::BTreeMap<u32, Vec<ModalKind>>,
+    /// When the host first saw each page blocked on acknowledgements. Cleared
+    /// when the page is decided or retired.
+    ack_waits: Vec<(ModalInstanceId, u64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,7 +264,7 @@ impl NetChannels {
     /// Process control traffic independently of any modal widget. This is also
     /// callable from blocking menu adapters; unmatched simulation events remain
     /// available to the normal session drain.
-    pub fn service_modal_session(&self, is_host: bool) -> Result<(), String> {
+    pub fn service_modal_session(&self, is_host: bool, now_ms: u64) -> Result<(), String> {
         let mut retained = Vec::new();
         let mut other = Vec::new();
         while let Ok(event) = self.try_recv_modal_event() {
@@ -351,6 +359,7 @@ impl NetChannels {
         }
         self.defer_events(other);
         if is_host {
+            self.expire_modal_acks(now_ms)?;
             let active: Vec<_> = self
                 .modal_sync
                 .lock()
@@ -366,6 +375,118 @@ impl NetChannels {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Pages that are active but neither decided nor released. The host owns
+    /// the wait; clients only display their own pending request.
+    fn undecided_ack_pages(&self) -> Result<Vec<(ModalInstanceId, ModalKind)>, String> {
+        let sync = self
+            .modal_sync
+            .lock()
+            .map_err(|_| "modal state lock poisoned")?;
+        Ok(sync
+            .occurrences
+            .iter()
+            .filter_map(|state| {
+                let instance = state.active?;
+                if !requires_modal_acknowledgements(&state.kind) {
+                    return None;
+                }
+                let decided = sync
+                    .decisions
+                    .iter()
+                    .any(|decision| decision.instance == instance && decision.kind == state.kind);
+                (!decided).then(|| (instance, state.kind.clone()))
+            })
+            .collect())
+    }
+
+    /// Time left before the host continues without the seats that have not
+    /// acknowledged the page. `None` once the page is not waiting.
+    pub fn modal_wait_remaining_ms(
+        &self,
+        instance: ModalInstanceId,
+        kind: &ModalKind,
+        now_ms: u64,
+    ) -> Option<u64> {
+        let sync = self.modal_sync.lock().ok()?;
+        let started = sync
+            .ack_waits
+            .iter()
+            .find(|(waiting, _)| *waiting == instance)?
+            .1;
+        let decided = sync
+            .decisions
+            .iter()
+            .any(|decision| decision.instance == instance && decision.kind == *kind);
+        if decided {
+            return None;
+        }
+        Some(MODAL_ACK_BUDGET_MS.saturating_sub(now_ms.saturating_sub(started)))
+    }
+
+    /// Continue without participants that never acknowledged a shared page.
+    ///
+    /// Only peer seats are marked; the host still makes the decision, and no
+    /// result is published until it does. A peer that reconnects later receives
+    /// the durable decision rather than a second chance to block the session.
+    fn expire_modal_acks(&self, now_ms: u64) -> Result<(), String> {
+        let pages = self.undecided_ack_pages()?;
+        let mut sync = self
+            .modal_sync
+            .lock()
+            .map_err(|_| "modal state lock poisoned")?;
+        sync.ack_waits
+            .retain(|(instance, _)| pages.iter().any(|(page, _)| page == instance));
+        for (instance, kind) in pages {
+            let started = match sync
+                .ack_waits
+                .iter()
+                .find(|(waiting, _)| *waiting == instance)
+            {
+                Some((_, started)) => *started,
+                None => {
+                    sync.ack_waits.push((instance, now_ms));
+                    continue;
+                }
+            };
+            if now_ms.saturating_sub(started) < MODAL_ACK_BUDGET_MS {
+                continue;
+            }
+            let count = sync.required_players.max(1);
+            if !sync
+                .votes
+                .iter()
+                .any(|vote| vote.instance == instance && vote.kind == kind)
+            {
+                sync.votes.push(ModalVotes {
+                    instance,
+                    kind: kind.clone(),
+                    seats: [false; crate::coop::MAX_PLAYERS],
+                    host_result: None,
+                });
+            }
+            let vote = sync
+                .votes
+                .iter_mut()
+                .find(|vote| vote.instance == instance && vote.kind == kind)
+                .expect("vote was just ensured");
+            let missing = (1..count)
+                .filter(|seat| !vote.seats[*seat as usize])
+                .collect::<Vec<_>>();
+            for seat in &missing {
+                vote.seats[*seat as usize] = true;
+            }
+            tracing::warn!(
+                ?instance,
+                ?kind,
+                missing = ?missing,
+                budget_ms = MODAL_ACK_BUDGET_MS,
+                "multiplayer: modal acknowledgement expired; continuing without the missing seats"
+            );
+            sync.ack_waits.retain(|(id, _)| *id != instance);
         }
         Ok(())
     }
@@ -702,7 +823,7 @@ impl NetChannels {
     /// The engine can have crossed that boundary during silent reconstruction;
     /// the host's token, rather than the client's current frame, identifies it.
     pub fn take_ready_story_announcements(&self, frame: u32) -> Result<Vec<ModalKind>, String> {
-        self.service_modal_session(false)?;
+        self.service_modal_session(false, 0)?;
         let mut sync = self
             .modal_sync
             .lock()
@@ -988,6 +1109,42 @@ mod tests {
     }
 
     #[test]
+    fn modal_ack_budget_expires_into_a_host_decision() {
+        let kind = ModalKind::MissionState {
+            kind: crate::player_command::MissionStateModalKind::EndState { won: true },
+        };
+        let (host, _host_in, _host_out) = fixture();
+        host.publish_frame(100);
+        let instance = host.present_modal(&kind, true).unwrap();
+        // The first observation starts the wait.
+        host.service_modal_session(true, 1_000).unwrap();
+        assert_eq!(
+            host.modal_wait_remaining_ms(instance, &kind, 1_000),
+            Some(MODAL_ACK_BUDGET_MS)
+        );
+        assert_eq!(
+            host.modal_wait_remaining_ms(instance, &kind, 61_000),
+            Some(MODAL_ACK_BUDGET_MS - 60_000)
+        );
+        // The host has decided; the peer has not acknowledged.
+        host.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+            .unwrap();
+        host.service_modal_session(true, 300_999).unwrap();
+        assert_eq!(
+            host.modal_decision(instance, &kind).unwrap(),
+            None,
+            "the page must still wait before its budget is spent"
+        );
+        host.service_modal_session(true, 301_000).unwrap();
+        assert_eq!(
+            host.modal_decision(instance, &kind).unwrap(),
+            Some(DialogResult::Completed),
+            "the host continues without the seat that never acknowledged"
+        );
+        assert_eq!(host.modal_wait_remaining_ms(instance, &kind, 301_000), None);
+    }
+
+    #[test]
     fn terminal_pages_wait_for_both_players_with_different_presentation_frames() {
         for kind in [
             ModalKind::MissionState {
@@ -1009,7 +1166,7 @@ mod tests {
             );
             assert_eq!(host.modal_decision(instance, &kind).unwrap(), None);
             forward(&host_out, &client_in, PlayerId::HOST);
-            client.service_modal_session(false).unwrap();
+            client.service_modal_session(false, 0).unwrap();
             assert!(
                 client
                     .take_ready_story_announcements(87)
@@ -1023,9 +1180,9 @@ mod tests {
                 .submit_modal_outcome(instance, &kind, DialogResult::Completed, false)
                 .unwrap();
             forward(&client_out, &host_in, PlayerId(1));
-            host.service_modal_session(true).unwrap();
+            host.service_modal_session(true, 0).unwrap();
             forward(&host_out, &client_in, PlayerId::HOST);
-            client.service_modal_session(false).unwrap();
+            client.service_modal_session(false, 0).unwrap();
             assert_eq!(
                 host.modal_decision(instance, &kind).unwrap(),
                 Some(DialogResult::Completed)
@@ -1053,7 +1210,7 @@ mod tests {
                 .submit_modal_outcome(instance, &kind, requested, false)
                 .unwrap();
             forward(&client_out, &host_in, PlayerId(1));
-            host.service_modal_session(true).unwrap();
+            host.service_modal_session(true, 0).unwrap();
             assert_eq!(
                 host.modal_decision(instance, &kind).unwrap(),
                 Some(DialogResult::Completed)
@@ -1111,7 +1268,7 @@ mod tests {
             // Loading or a suspended process delays all delivery. The simulation
             // stays frozen; the session still processes its control messages.
             forward(&host_out, &client_in, PlayerId::HOST);
-            client.service_modal_session(false).unwrap();
+            client.service_modal_session(false, 0).unwrap();
             assert_eq!(
                 client.take_ready_story_announcements(0).unwrap(),
                 vec![story()]
@@ -1130,13 +1287,13 @@ mod tests {
                 .propose_modal_dismiss(instance, story(), DialogResult::Completed)
                 .unwrap();
             forward(&client_out, &host_in, PlayerId(1));
-            host.service_modal_session(true).unwrap();
+            host.service_modal_session(true, 0).unwrap();
             assert_eq!(
                 host.modal_decision(instance, &story()).unwrap(),
                 Some(DialogResult::Completed)
             );
             forward(&host_out, &client_in, PlayerId::HOST);
-            client.service_modal_session(false).unwrap();
+            client.service_modal_session(false, 0).unwrap();
             assert_eq!(
                 client.modal_decision(instance, &story()).unwrap(),
                 Some(DialogResult::Completed)
@@ -1171,7 +1328,7 @@ mod tests {
             };
             client_in.send(NetEvent::ModalProgress(progress)).unwrap();
         }
-        client.service_modal_session(false).unwrap();
+        client.service_modal_session(false, 0).unwrap();
         assert_eq!(
             client.take_ready_story_announcements(0).unwrap(),
             vec![story()]
@@ -1198,7 +1355,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        client.service_modal_session(false).unwrap();
+        client.service_modal_session(false, 0).unwrap();
         assert_eq!(
             client.modal_decision(first, &story()).unwrap(),
             Some(DialogResult::Completed)
@@ -1289,9 +1446,9 @@ mod tests {
         assert!(host.story_barrier_pending());
         client.resend_pending_modal_proposals().unwrap();
         forward(&client_out, &host_in, PlayerId(1));
-        host.service_modal_session(true).unwrap();
+        host.service_modal_session(true, 0).unwrap();
         forward(&host_out, &client_in, PlayerId::HOST);
-        client.service_modal_session(false).unwrap();
+        client.service_modal_session(false, 0).unwrap();
         assert!(!host.story_barrier_pending());
         assert!(!client.story_barrier_pending());
         client.resend_pending_modal_proposals().unwrap();
@@ -1360,7 +1517,7 @@ mod tests {
         incoming
             .send(NetEvent::ModalDecision(decision.clone()))
             .unwrap();
-        client.service_modal_session(false).unwrap();
+        client.service_modal_session(false, 0).unwrap();
         assert_eq!(
             client.modal_decision(decision.instance, &story()).unwrap(),
             Some(DialogResult::Completed)
@@ -1373,7 +1530,7 @@ mod tests {
             .unwrap();
         assert!(
             client
-                .service_modal_session(false)
+                .service_modal_session(false, 0)
                 .unwrap_err()
                 .contains("conflicting")
         );
