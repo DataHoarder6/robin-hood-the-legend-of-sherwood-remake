@@ -11,6 +11,12 @@ mkdir -p "$test_root/datadir"
 export PARITY_EOF_DATADIR="$test_root/datadir"
 
 fake_tools="$test_root/tools"
+# Resolve the real checksum tool before the fake tools join PATH: a wrapper that
+# runs `sha256sum` by name finds itself, and `/usr/bin/sha256sum` does not exist
+# on a host whose utilities come from a profile.
+TEST_REAL_SHA256=$(command -v sha256sum)
+TEST_REAL_MKTEMP=$(command -v mktemp)
+export TEST_REAL_SHA256 TEST_REAL_MKTEMP
 mkdir -p "$fake_tools"
 cat >"$fake_tools/nice" <<'TOOL'
 #!/usr/bin/env bash
@@ -27,7 +33,7 @@ TOOL
 cat >"$fake_tools/mktemp" <<'TOOL'
 #!/usr/bin/env bash
 set -euo pipefail
-output=$(/usr/bin/mktemp "$@")
+output=$("${TEST_REAL_MKTEMP:?}" "$@")
 printf '%s\n' "$output"
 if [[ "$*" == *'.runner.log.tmp.'* \
     && -n "${TEST_PHASE_FLIP_ON_RUNNER_MKTEMP:-}" ]]
@@ -48,7 +54,7 @@ if [[ -n "${TEST_SHA_DELAY_PATTERN:-}" ]]; then
         fi
     done
 fi
-exec /usr/bin/sha256sum "$@"
+exec "${TEST_REAL_SHA256:?}" "$@"
 TOOL
 chmod +x "$fake_tools/nice" "$fake_tools/ionice" "$fake_tools/mktemp" \
     "$fake_tools/sha256sum"
