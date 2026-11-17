@@ -225,11 +225,10 @@ pub(super) fn prepare_fixed_tick_hud(
             }
         }
     }
-    if game.is_sherwood {
-        tooltip_update.sherwood =
-            hud.sherwood_layout
-                .hover_test(mp.x as i32, mp.y as i32, hud.sherwood_rail);
-    } else {
+    tooltip_update.sherwood =
+        hud.sherwood_layout
+            .hover_test(mp.x as i32, mp.y as i32, hud.sherwood_rail);
+    if !game.is_sherwood {
         tooltip_update.stature = hud
             .stature_layout
             .hit_test_geometric(mp.x as i32, mp.y as i32);
@@ -2203,7 +2202,7 @@ impl OverlayHudInputs<'_> {
         let sherwood_enable = if game.is_sherwood {
             sherwood_enable
         } else {
-            sherwood_hud::SherwoodButtonEnable::won_mission(
+            sherwood_hud::SherwoodButtonEnable::in_mission(
                 engine.mission_won() && game.is_start_mission_effectively_enabled(),
             )
         };

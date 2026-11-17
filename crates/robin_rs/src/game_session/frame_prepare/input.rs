@@ -300,8 +300,10 @@ fn touch_point_is_world(
     // Every control the rail offers claims its rect, gate open or closed: an
     // absent button must not swallow a world click, and a greyed one must not
     // pass one through to the world behind it.
-    reserved.extend(hud.sherwood_layout.occupied(hud.sherwood_rail));
     !reserved.iter().any(|rect| rect.contains_point(point))
+        && !hud
+            .sherwood_layout
+            .claims_point(hud.sherwood_rail, point.x, point.y)
 }
 
 /// The empty input batch of a frame whose mission UI owns input.

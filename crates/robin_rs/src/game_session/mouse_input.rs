@@ -1923,32 +1923,50 @@ pub(super) fn handle_sherwood_hud_buttons(
         return HandlerAction::Proceed;
     }
     if !game.is_sherwood {
-        *sherwood_enable = SherwoodButtonEnable::won_mission(
+        *sherwood_enable = SherwoodButtonEnable::in_mission(
             engine.mission().mission_won && game.is_start_mission_effectively_enabled(),
         );
         for event in events {
-            if let GameEvent::MouseDown(mx, my, 1, _) = *event
-                && sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable)
-                    == Some(SherwoodButton::StartMission)
-            {
-                if let Some(resources) = menu_resources.as_ref() {
-                    *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
-                        state: ingame_menu::YesNoModalState::new(
-                            event_pump,
-                            renderer,
-                            resources,
-                            resources.menu_text.get(resources::MT_MSG_LEAVE_MISSION_NOW),
-                        ),
-                        action: SherwoodConfirmationAction::LeaveWonMission,
-                    });
-                } else {
-                    dispatch_local_command(
-                        &host.transport,
-                        frame_cmds,
-                        &PlayerCommand::QuitMissionRequested,
-                    );
+            let GameEvent::MouseDown(mx, my, 1, _) = *event else {
+                continue;
+            };
+            match sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable) {
+                Some(SherwoodButton::StartMission) => {
+                    if let Some(resources) = menu_resources.as_ref() {
+                        *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
+                            state: ingame_menu::YesNoModalState::new(
+                                event_pump,
+                                renderer,
+                                resources,
+                                resources.menu_text.get(resources::MT_MSG_LEAVE_MISSION_NOW),
+                            ),
+                            action: SherwoodConfirmationAction::LeaveWonMission,
+                        });
+                    } else {
+                        dispatch_local_command(
+                            &host.transport,
+                            frame_cmds,
+                            &PlayerCommand::QuitMissionRequested,
+                        );
+                    }
+                    return HandlerAction::Continue;
                 }
-                return HandlerAction::Continue;
+                Some(SherwoodButton::QuitMission) => {
+                    // Abandoning a live mission: the shared mission-state
+                    // popup asks for confirmation, and its Completed result
+                    // dispatches `QuitMissionRequested` through the same
+                    // path the scripted leave prompt uses.
+                    host.effects
+                        .request_signal(crate::host::HostSignal::MissionStatePopup);
+                    return HandlerAction::Continue;
+                }
+                _ => {
+                    // An offered control whose gate is closed still owns its
+                    // pixels: consume the click instead of walking the men.
+                    if sherwood_layout.claims_point(*sherwood_rail, mx, my) {
+                        return HandlerAction::Continue;
+                    }
+                }
             }
         }
         return HandlerAction::Proceed;
@@ -2022,12 +2040,15 @@ pub(super) fn handle_sherwood_hud_buttons(
     if game.is_sherwood && !game.persistent.campaign_map_active {
         let mut sherwood_btn_hit = None;
         for event in events {
-            if let GameEvent::MouseDown(mx, my, 1 /* left */, _) = *event
-                && let Some(btn) =
-                    sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable)
-            {
+            let GameEvent::MouseDown(mx, my, 1 /* left */, _) = *event else {
+                continue;
+            };
+            if let Some(btn) = sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable) {
                 sherwood_btn_hit = Some(btn);
                 break;
+            }
+            if sherwood_layout.claims_point(*sherwood_rail, mx, my) {
+                return HandlerAction::Continue;
             }
         }
         if let Some(btn) = sherwood_btn_hit {
@@ -2676,6 +2697,14 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
                 *sherwood_enable = SherwoodButtonEnable::post_commit();
             }
             CampaignMapChoice::Quit => {
+                if ctx.engine.campaign().next_mission_idx.is_some() {
+                    // A mission is committed: the map is a detour from
+                    // Sherwood, so Escape returns to the camp with the commit
+                    // standing instead of ending the session.
+                    game.persistent.campaign_map_active = false;
+                    game.persistent.campaign_map_displayed = false;
+                    return Ok(HandlerAction::Continue);
+                }
                 // Escape / window close from the overlay with no
                 // mission committed: exit Sherwood to the main menu.
                 // We deliberately leave `campaign_map_displayed` set
