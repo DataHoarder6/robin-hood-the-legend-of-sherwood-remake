@@ -79,7 +79,7 @@ copy, then run the whole suite once:
 
 ```sh
 copy=$(scripts/remote-check.sh --sync)   # prints the build host's copy path
-ssh build-host "cd $copy && nix develop --command cargo test --locked -p robin_rs \
+ssh -n build-host "cd $copy && nix develop --command cargo test --locked -p robin_rs \
   --lib --no-default-features --features release -- <test-name>"
 scripts/remote-check.sh client-release
 ```

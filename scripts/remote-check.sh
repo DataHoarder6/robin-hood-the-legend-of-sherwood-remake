@@ -17,6 +17,11 @@
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
 set -euo pipefail
 
+# Nothing below reads stdin, and callers feed scripts to `bash -s`: a child that
+# inherits a script's stdin (ssh, rsync, git over ssh) drains the lines the
+# caller has not executed yet, and the script still exits 0.
+exec </dev/null
+
 host=${ROBIN_BUILD_HOST:-build-host}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
