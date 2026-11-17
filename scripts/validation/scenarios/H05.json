@@ -3,11 +3,37 @@
   "id": "H05",
   "extends": "H04",
   "peers": [
-    { "seat": 0, "role": "host" },
-    { "seat": 1, "role": "client" }
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
   ],
   "expect": [
-    { "assert": "transition", "payload": "LoadRestart", "acked": [0, 1], "committed": true },
-    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" }
+    {
+      "assert": "transition",
+      "payload": {
+        "CampaignExit": "LevelFailed"
+      },
+      "acked": [
+        0,
+        1
+      ],
+      "committed": true
+    },
+    {
+      "assert": "count",
+      "subject": "transition",
+      "name": "transition-commit",
+      "times": 1
+    },
+    {
+      "assert": "barrier",
+      "barrier": "snapshot-adopt",
+      "state": "reached"
+    }
   ]
 }

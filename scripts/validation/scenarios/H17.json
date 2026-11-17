@@ -2,14 +2,43 @@
   "schema": 1,
   "id": "H17",
   "peers": [
-    { "seat": 0, "role": "host" },
-    { "seat": 1, "role": "client" }
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
   ],
   "faults": [
-    { "at": { "barrier": "transition-commit", "after": 0 }, "peer": 1, "fault": "kill" }
+    {
+      "at": {
+        "barrier": "transition-commit",
+        "after": 0
+      },
+      "peer": 1,
+      "fault": "kill"
+    }
   ],
   "expect": [
-    { "assert": "transition", "payload": "CampaignExit", "acked": [0, 1], "committed": true },
-    { "assert": "transition-id-equal", "peers": [0, 1] }
+    {
+      "assert": "transition",
+      "payload": {
+        "CampaignExit": "LevelSucceeded"
+      },
+      "acked": [
+        0,
+        1
+      ],
+      "committed": true
+    },
+    {
+      "assert": "transition-id-equal",
+      "peers": [
+        0,
+        1
+      ]
+    }
   ]
 }

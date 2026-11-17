@@ -2,11 +2,30 @@
   "schema": 1,
   "id": "H03",
   "peers": [
-    { "seat": 0, "role": "host" },
-    { "seat": 1, "role": "client" }
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
   ],
   "expect": [
-    { "assert": "transition", "payload": "CampaignExit", "acked": [0, 1], "committed": true },
-    { "assert": "final-operation", "operation": "LevelSucceeded" }
+    {
+      "assert": "transition",
+      "payload": {
+        "CampaignExit": "LevelSucceeded"
+      },
+      "acked": [
+        0,
+        1
+      ],
+      "committed": true
+    },
+    {
+      "assert": "final-operation",
+      "operation": "LevelSucceeded"
+    }
   ]
 }

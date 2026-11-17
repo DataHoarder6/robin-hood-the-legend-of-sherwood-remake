@@ -96,8 +96,10 @@ scenario.
   "faults": [ { "at": { "barrier": "transition-commit", "after": 0 }, "peer": 1,
       "fault": "drop", "message": "SnapshotTransitionReady" } ],
   "expect": [ { "assert": "hash-equal", "peers": [0, 1], "every": 25 },
-      { "assert": "transition", "payload": "LoadRestart", "acked": [0, 1], "committed": true },
-      { "assert": "transition-id-equal", "peers": [0, 1] } ] }
+      { "assert": "transition", "payload": { "CampaignExit": "LevelFailed" },
+        "acked": [0, 1], "committed": true },
+      { "assert": "transition-id-equal", "peers": [0, 1] },
+      { "assert": "count", "subject": "barrier", "name": "begin-sim", "times": 1 } ] }
 ```
 
 `extends` runs the parent's `expect` list first: composition, not copying. `at`
@@ -107,9 +109,20 @@ is `{"frame": N}` in the issuing peer's numbering or `{"barrier": name,
 `netem`. `expect[].assert` is `hash-equal`, `hash-diverged`,
 `barrier` (`reached|released|absent`), `transition`, `transition-id-equal`,
 `modal`, `log` (`contains|absent`, `count`), `final-operation` (a `GameCode` name
-from `crates/robin_engine/src/game_operation.rs`) or `exit`. Transition ids are
-generated per run, so `transition-id-equal` compares peers instead of pinning
-one.
+from `crates/robin_engine/src/game_operation.rs`), `count` or `exit`. Transition
+ids are generated per run, so `transition-id-equal` compares peers instead of
+pinning one.
+
+`transition.payload` is the `SnapshotTransitionPayload` variant the host
+committed — `"Save"` or `{"CampaignExit": "<GameCode>"}` — because the exit code
+is the part two terminal rows differ in; `"LoadRestart"` is a debriefing action,
+not a transition. `count` is how a row states a cardinality claim without
+reading log wording: `{"assert": "count", "subject": "barrier"|"transition"|
+"operation"|"reconnect", "name": …, "times": n}`, where `reconnect` counts
+`Reconnect` frames for a seat and `operation` counts a `GameCode` dispatch.
+`seat` states what a seat holds after the run: `{"assert": "seat", "seat": 1,
+"selected": ["<character id>"], "owns": true|false}`, which is how a preserved
+selection or a refused late joiner is asserted.
 
 | verb | core | transport | process |
 | --- | --- | --- | --- |
@@ -120,9 +133,14 @@ one.
 | `reorder` | swap two queued events | swap two frames | `netem reorder` + `delay` |
 | `delay` | hold the event `ms` | hold the frame `ms` | `netem delay` |
 | `diverge` | mutate the peer engine directly | unsupported | `POST /native` on that peer alone |
+| `truncate` | cut the serialized event at `bytes` | cut the frame at `bytes` | unsupported |
+| `restart` | rebuild the peer from its `PeerOwner` | restart the client runtime with a fresh state | `SIGKILL` then relaunch as a new process |
+| `stall-surface` | hold the modal surface open past its deadline | same | same |
 
 `drop`, `duplicate`, `reorder` and `delay` name a `NetMsg` variant in `message`;
-the others name a peer. "This peer is one frame behind on purpose" is
+`truncate` also names `bytes`; `restart` names whether the seat keeps its
+identity (`"identity": "same"|"fresh"`), which is what separates a reconnect from
+a stranger claiming a seat; the others name a peer. "This peer is one frame behind on purpose" is
 `{"fault": "delay", "message": "Input", "ms": 40}`, not a new concept.
 
 A recorded session exports into the same file from the host replay: `FrameRecord`
@@ -136,7 +154,9 @@ the code because it names barriers, faults and assertions rather than steps.
 **Decision:** this schema is the only scenario input. The runner rejects an
 unknown field, an unknown fault verb, an unimplemented `expect` verb and a fault
 verb its layer cannot express, and a recorded export enters the corpus only after
-it re-simulates to its own recorded hashes.
+it re-simulates to its own recorded hashes. A row's layer in §1 is the floor: a
+scenario may raise it (`requires`), never lower it, and the corpus gate therefore
+reads the layer from the matrix rather than guessing it from the verbs.
 
 ## 3. How a scenario drives a session (#17)
 

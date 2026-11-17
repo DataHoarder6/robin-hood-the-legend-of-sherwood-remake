@@ -49,6 +49,39 @@ class CorpusValidationTests(unittest.TestCase):
         broken = scenario("H01", retries=2)
         self.assert_refused([broken, scenario("H02")], "unknown field")
 
+    def test_a_cardinality_claim_is_an_assertion_not_log_wording(self):
+        good = scenario(
+            "H01",
+            expect=PROVEN + [{"assert": "count", "subject": "barrier", "name": "begin-sim", "times": 1}],
+        )
+        self.assertEqual(corpus.validate(DEFAULTS, corpus_of(good, scenario("H02")), CONTRACT), [])
+        broken = scenario(
+            "H01",
+            expect=[{"assert": "count", "subject": "vibes", "name": "begin-sim", "times": 1}],
+        )
+        self.assert_refused([broken, scenario("H02")], "unknown count subject")
+
+    def test_a_campaign_exit_carries_the_code_two_terminal_rows_differ_in(self):
+        good = scenario(
+            "H01",
+            expect=[{"assert": "transition", "payload": {"CampaignExit": "LevelFailed"},
+                     "acked": [0, 1], "committed": True}],
+        )
+        self.assertEqual(corpus.validate(DEFAULTS, corpus_of(good, scenario("H02")), CONTRACT), [])
+        broken = scenario(
+            "H01",
+            expect=[{"assert": "transition", "payload": {"CampaignExit": "LevelExploded"},
+                     "acked": [0, 1], "committed": True}],
+        )
+        self.assert_refused([broken, scenario("H02")], "unknown GameCode")
+
+    def test_restart_states_whether_the_seat_keeps_its_identity(self):
+        good = scenario("H01", faults=[{"at": {"frame": 40}, "peer": 1,
+                                       "fault": "restart", "identity": "fresh"}])
+        self.assertEqual(corpus.validate(DEFAULTS, corpus_of(good, scenario("H02")), CONTRACT), [])
+        broken = scenario("H01", faults=[{"at": {"frame": 40}, "peer": 1, "fault": "restart"}])
+        self.assert_refused([broken, scenario("H02")], "identity same or fresh")
+
     def test_matrix_cell_without_a_scenario_is_refused(self):
         errors = corpus.validate(DEFAULTS, corpus_of(scenario("H01")), CONTRACT)
         self.assertEqual([error for error in errors if "matrix cells" in error],

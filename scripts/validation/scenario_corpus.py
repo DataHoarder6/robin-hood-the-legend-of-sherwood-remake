@@ -74,8 +74,13 @@ FAULT_VERBS = {
     "reorder": frozenset(LAYERS),
     "delay": frozenset(LAYERS),
     "diverge": frozenset({"core", "process"}),
+    "truncate": frozenset({"core", "transport"}),
+    "restart": frozenset(LAYERS),
+    "stall-surface": frozenset(LAYERS),
 }
 MESSAGE_VERBS = frozenset({"drop", "duplicate", "reorder", "delay"})
+TRUNCATE_BYTES = 1
+RESTART_IDENTITY = ("same", "fresh")
 
 # Section 2, the assertion vocabulary, with the keys each one may carry.
 # `required` and `optional` are the whole allowed field set, so an invented
@@ -90,7 +95,10 @@ EXPECT_FIELDS = {
     "log": (set(), {"contains", "absent", "count"}),
     "final-operation": ({"operation"}, set()),
     "exit": ({"peers", "status"}, set()),
+    "count": ({"subject", "name", "times"}, set()),
+    "seat": ({"seat", "selected", "owns"}, set()),
 }
+COUNT_SUBJECTS = ("barrier", "transition", "operation", "reconnect")
 
 REQUIRES = frozenset({"game-data", "graphical", "netem"})
 EXIT_STATUS = ("zero", "nonzero")
@@ -103,7 +111,7 @@ AT_FIELDS = {"frame"}
 BARRIER_AT_FIELDS = {"barrier", "after"}
 JOIN_FRAME_FIELDS = {"join_at_frame"}
 JOIN_BARRIER_FIELDS = {"join_at_barrier"}
-FAULT_FIELDS = {"at", "peer", "fault", "message", "ms"}
+FAULT_FIELDS = {"at", "peer", "fault", "message", "ms", "bytes", "identity"}
 
 TABLE_ROW = re.compile(r"^\|.*\|\s*$")
 SEPARATOR = re.compile(r"^\|[\s:|-]+\|\s*$")
@@ -375,6 +383,16 @@ class Checker:
                     self.fail(at, "'delay' must carry a positive ms")
             elif "ms" in fault:
                 self.fail(at, f"{verb!r} does not take ms")
+            if verb == "truncate":
+                if not _is_int(fault.get("bytes"), TRUNCATE_BYTES):
+                    self.fail(at, "'truncate' must carry a positive bytes")
+            elif "bytes" in fault:
+                self.fail(at, f"{verb!r} does not take bytes")
+            if verb == "restart":
+                if fault.get("identity") not in RESTART_IDENTITY:
+                    self.fail(at, "'restart' must name identity same or fresh")
+            elif "identity" in fault:
+                self.fail(at, f"{verb!r} does not take identity")
 
     def expect(self, where, document, seats):
         if "expect" not in document:
@@ -409,8 +427,7 @@ class Checker:
                 if verb == "exit" and expectation["status"] not in EXIT_STATUS:
                     self.fail(at, f"unknown exit status {expectation['status']!r}")
             elif verb == "transition":
-                if not isinstance(expectation["payload"], str) or not expectation["payload"]:
-                    self.fail(at, "payload must name a transition payload")
+                self.transition_payload(at, expectation["payload"])
                 self.seats(f"{at}.acked", expectation["acked"], seats)
                 if not isinstance(expectation["committed"], bool):
                     self.fail(at, "committed must be a boolean")
@@ -420,6 +437,37 @@ class Checker:
             elif verb == "final-operation":
                 if expectation["operation"] not in self.contract.game_codes:
                     self.fail(at, f"unknown GameCode {expectation['operation']!r}")
+            elif verb == "count":
+                if expectation["subject"] not in COUNT_SUBJECTS:
+                    self.fail(at, f"unknown count subject {expectation['subject']!r}")
+                if not isinstance(expectation["name"], str) or not expectation["name"]:
+                    self.fail(at, "count must name what it counts")
+                if not _is_int(expectation["times"], 0):
+                    self.fail(at, "times must be a non-negative integer")
+            elif verb == "seat":
+                self.seats(f"{at}.seat", [expectation["seat"]], seats)
+                selected = expectation.get("selected")
+                if selected is not None and (
+                    not isinstance(selected, list)
+                    or not all(isinstance(item, str) and item for item in selected)
+                ):
+                    self.fail(at, "selected must be a list of character ids")
+                owns = expectation.get("owns")
+                if owns is not None and not isinstance(owns, bool):
+                    self.fail(at, "owns must be a boolean")
+
+    def transition_payload(self, where, payload):
+        """A payload is `Save` or `{"CampaignExit": <GameCode>}`."""
+        if isinstance(payload, str):
+            if payload not in ("Save",):
+                self.fail(where, f"unknown transition payload {payload!r}")
+            return
+        if not isinstance(payload, dict) or set(payload) != {"CampaignExit"}:
+            self.fail(where, 'payload must be "Save" or {"CampaignExit": <GameCode>}')
+            return
+        code = payload["CampaignExit"]
+        if code not in self.contract.game_codes:
+            self.fail(where, f"unknown GameCode {code!r} in CampaignExit")
 
     def log(self, where, expectation):
         choices = [key for key in ("contains", "absent") if key in expectation]
