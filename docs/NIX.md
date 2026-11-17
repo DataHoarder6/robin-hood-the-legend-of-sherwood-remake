@@ -32,12 +32,17 @@ directory (the one containing `DATA/`), or the folder picker selects it on first
 `build-support/robin_build.rs` stamps `ROBIN_GIT_HASH` with `git rev-parse HEAD`, and
 `robin_replay_format` accepts only 12 lowercase hex. A Nix build has no `.git` to ask: the
 source is a store copy of the tracked tree, so the build script also takes an explicit
-`ROBIN_GIT_COMMIT`, which `flake.nix` fills from the revision it resolved (`self.rev`, or
-`self.dirtyRev` without its `-dirty` suffix). The value is validated as a full lowercase
-hex object ID and panics when malformed; the package also sets
+`ROBIN_PACKAGE_COMMIT`, which `nix/robin.nix` fills from the revision the flake resolved
+(`self.rev`, or `self.dirtyRev` without its `-dirty` suffix). The value is validated as a
+full lowercase hex object ID and panics when malformed; the package also sets
 `ROBIN_REQUIRE_BUILD_IDENTITY=1`, so a missing identity fails the build instead of
 stamping `unknown`. Build from a git checkout or a `git+file:`/`git+https:` flake ref; a
 plain `path:` flake resolves no revision and throws.
+
+The input keeps a name of its own rather than reusing `ROBIN_GIT_COMMIT`: Cargo exports a
+package's build-script `cargo:rustc-env` output into the environment of the binaries it
+runs (`cargo test`, `cargo run`), so a shared name would let that output pose as a
+packager's commit there and discovery would never run.
 
 `robin --version` prints `robin <package version>+<12-hex commit>`
 (`crate::version::CLI_VERSION`), the same prefix compact replays and join tickets carry.

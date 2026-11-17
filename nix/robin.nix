@@ -63,8 +63,12 @@ rustPlatform.buildRustPackage {
   # `git rev-parse HEAD` and the replay format rejects anything that is not 12
   # lowercase hex. A Nix build has no `.git`, so hand the build script the
   # commit the flake resolved; it is the only way `ROBIN_GIT_HASH` can be right
-  # here, and a malformed value panics instead of falling back.
-  ROBIN_GIT_COMMIT = gitHash;
+  # here, and a malformed value panics instead of falling back. The variable is
+  # named for this input, not for the `ROBIN_GIT_COMMIT` the script emits: Cargo
+  # exports a package's own build-script `rustc-env` output to the binaries it
+  # runs, so a shared name would let this build's output pose as a packager's
+  # commit to every test or tool it launches.
+  ROBIN_PACKAGE_COMMIT = gitHash;
 
   # Fail the build instead of stamping "unknown" when the identity above stops
   # working (a cargo behaviour change, a moved build script).
