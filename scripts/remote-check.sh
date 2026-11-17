@@ -129,7 +129,9 @@ case "${1:-}" in
     --prune)
         require_host
         keep=$(copy_name "${2:-}")
-        ssh -n "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] || rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
+        # Only real copies: the root is shared, and a cache or scratch directory
+        # someone keeps beside the copies is not this script's to delete.
+        ssh -n "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] && continue; [ -f \"\$d/Cargo.toml\" ] || continue; rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
         exit 0
         ;;
     --sync)
