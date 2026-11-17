@@ -1,5 +1,9 @@
 # Campaign purchases and per-PC state
 
+> Superseded 2026-11-17 for perks: they are a second money-out purchase, paid
+> in clovers under a last-clover floor (`perk_purchase_state`,
+> `crates/robin_engine/src/campaign.rs`) and wired through `PcStatus`.
+
 What exists today for "spend campaign money on a PC", and where each piece
 lives. Anchors are symbols, not line numbers, so they survive edits; every one
 resolves in the tree.
