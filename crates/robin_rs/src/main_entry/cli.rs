@@ -31,7 +31,9 @@ fn parse_replay_spec(s: &str) -> Result<String, String> {
 
 /// Robin Hood — The Legend of Sherwood (Rust port)
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
-#[command(version = crate::version::CLI_VERSION, about)]
+// `name` is what clap puts in `--version` and `--help`; the crate is `robin_rs`
+// but the binary, the package and every path that installs it say `robin`.
+#[command(name = "robin", version = crate::version::CLI_VERSION, about)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct CliArgs {
     /// Disable audio playback.
@@ -1435,7 +1437,9 @@ mod tests {
     fn version_flag_reports_the_stamped_commit() {
         use clap::CommandFactory as _;
 
-        let rendered = super::CliArgs::command().render_version();
+        let command = super::CliArgs::command();
+        assert_eq!(command.get_name(), "robin");
+        let rendered = command.render_version();
         assert!(
             rendered.contains(env!("ROBIN_GIT_HASH")),
             "--version must identify the built commit, got {rendered}"
