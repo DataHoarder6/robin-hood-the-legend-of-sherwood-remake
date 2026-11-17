@@ -112,7 +112,8 @@ cd $remote_dir
 git update-ref refs/heads/main refs/robin/check
 git symbolic-ref HEAD refs/heads/main
 git read-tree HEAD
-git rev-parse HEAD
+# stdout is the copy path alone, so callers can capture it.
+git rev-parse HEAD >&2
 EOF
 }
 
