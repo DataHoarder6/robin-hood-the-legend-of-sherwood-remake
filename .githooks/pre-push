@@ -3,8 +3,9 @@
 #
 # GitHub Actions creates no run for a push in this repository (issue #26), so the
 # last place a gate can run before `main` moves is here. The suites follow the
-# diff: anything under `crates/` or a gate script runs `client-release`, engine
-# crates also run `engine`, and every gated push is formatted. `SKIP_PUSH_GATE=1`
+# diff: anything under `crates/` runs `client-release`, engine crates also run
+# `engine`, anything under `scripts/`, `tools/` or `.githooks/` runs `tooling`,
+# and a Rust change is formatted. `SKIP_PUSH_GATE=1`
 # is for a deliberately red branch — the push is then a request for review, not
 # an integration.
 #
@@ -39,12 +40,24 @@ done
 paths=$(cat /tmp/robin-push-gate-paths.$$)
 rm -f /tmp/robin-push-gate-paths.$$
 
+# The suites follow the diff, so a Python-only change never pays for a Rust
+# build and a Rust change never skips the suite that compiles it.
+crates_changed=0
+engine_changed=0
+tooling_changed=0
+printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
+printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
+printf '%s\n' "$paths" | grep -qE '^((scripts|tools)/|\.githooks/)' && tooling_changed=1
+
 suites=()
-if printf '%s\n' "$paths" | grep -qE '^(crates/|\.githooks/|scripts/check-quality\.sh|scripts/remote-check\.sh|Cargo\.)'; then
+if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
     suites+=(format client-release)
 fi
-if printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)'; then
+if [ "$engine_changed" = 1 ]; then
     suites+=(engine)
+fi
+if [ "$tooling_changed" = 1 ]; then
+    suites+=(tooling)
 fi
 if [ ${#suites[@]} -eq 0 ]; then
     printf 'pre-push: no gated path changed; nothing to run.\n' >&2
