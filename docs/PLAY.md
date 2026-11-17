@@ -61,11 +61,8 @@ If the flake has no `packages.robin`, the packaging branch has not landed yet.
 
 ### Run dev on the laptop
 
-From the worktree, with the build-host awake:
-
-    nix build .#robin
-    nix copy --to ssh://laptop ./result
-    ssh laptop nix run /nix/store/<hash>-robin
+From the worktree: `scripts/ship-dev.sh` syncs it to the build host, builds
+`.#robin`, copies the closure to the laptop and prints the `nix run` line.
 
 Never install a dev build into the profile. Dev lives in the store path of its
 own commit, which is what lets stable and one dev build per worktree coexist on

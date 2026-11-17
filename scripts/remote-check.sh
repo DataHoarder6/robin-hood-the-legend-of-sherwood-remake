@@ -9,6 +9,7 @@
 #
 #   scripts/remote-check.sh engine          # this worktree, engine suite
 #   scripts/remote-check.sh engine feat/x   # explicit copy name
+#   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
 #   scripts/remote-check.sh --prune         # delete every copy but this one
 #
@@ -21,7 +22,7 @@ repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
     exit 2
 }
 
@@ -59,6 +60,57 @@ require_host() {
     exit 1
 }
 
+sync_worktree() {
+    remote_dir="~/$remote_root/$name"
+    printf 'remote-check: sync %s -> %s:%s\n' "$repository" "$host" "$remote_dir" >&2
+
+    # --delete keeps a copy faithful to this worktree; the Cargo target directory
+    # is excluded so the copy keeps its build cache across runs. The `.git` on the
+    # build host is the copy's own (see below); a worktree's is a file naming a
+    # gitdir that only exists here, so it must not travel.
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+mkdir -p ~/$remote_root
+EOF
+
+    rsync -a --delete \
+        --exclude target \
+        --exclude .worktrees \
+        --exclude .git \
+        "$repository/" "$host:$remote_dir/"
+
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+# build-support/robin_build.rs stamps ROBIN_GIT_HASH from "git rev-parse HEAD",
+# and the replay format rejects anything that is not 12 lowercase hex. A copy
+# with no usable repository stamps "unknown", and the replay and leaderboard
+# suites then fail version validation (27 tests, 2026-11-15). The copy needs a
+# real repository rather than a stub ref, because "nix develop" resolves this
+# directory as a git flake and hashes its tree.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    rm -rf .git
+    git init -q -b main .
+fi
+EOF
+
+    # Send this checkout's objects, incrementally, and point the copy's HEAD at
+    # them. The rsync'd working tree stays untouched, so uncommitted changes are
+    # still what the build compiles. `read-tree` refreshes the index from the new
+    # HEAD: without it every file would look deleted and the flake would hash an
+    # empty tree.
+    git -C "$repository" push -q --force "$host:$remote_dir/.git" HEAD:refs/robin/check
+
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+git update-ref refs/heads/main refs/robin/check
+git symbolic-ref HEAD refs/heads/main
+git read-tree HEAD
+git rev-parse HEAD
+EOF
+}
+
 case "${1:-}" in
     -h | --help | "")
         usage
@@ -72,6 +124,13 @@ case "${1:-}" in
         require_host
         keep=$(copy_name "${2:-}")
         ssh "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] || rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
+        exit 0
+        ;;
+    --sync)
+        name=$(copy_name "${2:-}")
+        require_host
+        sync_worktree
+        printf '%s\n' "$remote_dir"
         exit 0
         ;;
 esac
@@ -92,55 +151,13 @@ case " $suites " in
 esac
 
 require_host
-
-remote_dir="~/$remote_root/$name"
+sync_worktree
 lock="$remote_dir.lock"
-printf 'remote-check: %s %s -> %s:%s\n' "$suite" "$repository" "$host" "$remote_dir" >&2
-
-# --delete keeps a copy faithful to this worktree; the Cargo target directory
-# is excluded so the copy keeps its build cache across runs. The `.git` on the
-# build host is the copy's own (see below); a worktree's is a file naming a
-# gitdir that only exists here, so it must not travel.
-ssh "$host" bash -s <<EOF
-set -euo pipefail
-mkdir -p ~/$remote_root
-EOF
-
-rsync -a --delete \
-    --exclude target \
-    --exclude .worktrees \
-    --exclude .git \
-    "$repository/" "$host:$remote_dir/"
+printf 'remote-check: %s -> %s:%s\n' "$suite" "$host" "$remote_dir" >&2
 
 ssh "$host" bash -s <<EOF
 set -euo pipefail
 cd $remote_dir
-# build-support/robin_build.rs stamps ROBIN_GIT_HASH from "git rev-parse HEAD",
-# and the replay format rejects anything that is not 12 lowercase hex. A copy
-# with no usable repository stamps "unknown", and the replay and leaderboard
-# suites then fail version validation (27 tests, 2026-11-15). The copy needs a
-# real repository rather than a stub ref, because "nix develop" resolves this
-# directory as a git flake and hashes its tree.
-if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    rm -rf .git
-    git init -q -b main .
-fi
-EOF
-
-# Send this checkout's objects, incrementally, and point the copy's HEAD at
-# them. The rsync'd working tree stays untouched, so uncommitted changes are
-# still what the suite compiles. `read-tree` refreshes the index from the new
-# HEAD: without it every file would look deleted and the flake would hash an
-# empty tree.
-git -C "$repository" push -q --force "$host:$remote_dir/.git" HEAD:refs/robin/check
-
-ssh "$host" bash -s <<EOF
-set -euo pipefail
-cd $remote_dir
-git update-ref refs/heads/main refs/robin/check
-git symbolic-ref HEAD refs/heads/main
-git read-tree HEAD
-git rev-parse HEAD
 exec systemd-inhibit --what=idle --why='check-quality $suite' \
     flock -w 7200 $lock \
     nix develop --command bash scripts/check-quality.sh $suite
