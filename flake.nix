@@ -46,8 +46,8 @@
       # `build-support/robin_build.rs` stamps the commit into the binary so the
       # replay format and multiplayer ticket carry it. A Nix build has no
       # `.git`, so the commit is supplied from the flake's own git metadata
-      # (`ROBIN_GIT_COMMIT`) and never guessed: no revision here is an error,
-      # not an "unknown" stamp.
+      # (`ROBIN_PACKAGE_COMMIT`) and never guessed: no revision here is an
+      # error, not an "unknown" stamp.
       gitHash =
         if self ? rev then
           self.rev
