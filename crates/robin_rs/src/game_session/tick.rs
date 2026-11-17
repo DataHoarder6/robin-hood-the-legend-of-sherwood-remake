@@ -315,6 +315,18 @@ pub(super) fn drain_steps(
             }
             crate::http_server::StepKind::SetPaused { .. } => None,
         };
+        // A mission-end terminal page owns the mission on every participant:
+        // queue the typed dismissal before any step policy runs, so a
+        // multiplayer client can acknowledge the page it is showing and the
+        // step never advances frames behind it.
+        if modal_policy.is_some()
+            && let Some(terminal) = terminal_debriefing.as_deref_mut()
+            && terminal.current_kind().is_some()
+        {
+            let policy = modal_policy.as_mut().expect("checked above");
+            dismiss_terminal_modal_for_step(step, policy, terminal, host, terminal_save_manager);
+            continue;
+        }
         if let Err(error) =
             validate_multiplayer_step_request(host, timeline.multiplayer().admission(), &kind)
         {
@@ -333,12 +345,6 @@ pub(super) fn drain_steps(
             step.respond_err(RpcError::unavailable_capability(format!(
                 "blocked by {reason}; dismiss it in the game before stepping"
             )));
-            continue;
-        }
-        if let (Some(policy), Some(terminal)) =
-            (modal_policy.as_mut(), terminal_debriefing.as_deref_mut())
-        {
-            dismiss_terminal_modal_for_step(step, policy, terminal, host, terminal_save_manager);
             continue;
         }
         let strict_session_replay =
@@ -717,7 +723,7 @@ fn dismiss_terminal_modal_for_step(
     };
     if let Err(error) = validate_http_modal_result(&modal_kind, result)
         .map_err(RpcError::invalid_request)
-        .and_then(|()| authorize_http_modal_dismissals(host, &[terminal_dismissal]))
+        .and_then(|()| authorize_terminal_http_dismissal(host, &terminal_dismissal))
         .and_then(|()| {
             terminal
                 .queue_http_result(modal_kind.clone(), result, terminal_save_manager)
@@ -727,10 +733,12 @@ fn dismiss_terminal_modal_for_step(
         step.respond_err(error);
         return;
     }
-    step.respond_err(RpcError::unavailable_capability(format!(
-        "dismissed terminal modal {}; retry the step after the outer frame applies it",
-        serde_json::to_string(&modal_kind).expect("ModalKind serializes")
-    )));
+    step.respond_ok(serde_json::json!({
+        "direction": "terminal-modal-dismissal",
+        "modal": modal_kind,
+        "queued": true,
+        "note": "the dismissal is queued; step again after the outer frame applies it",
+    }));
 }
 
 fn validate_multiplayer_step_request(
@@ -1282,6 +1290,36 @@ use super::session_policy::validate_modal_result as validate_http_modal_result;
 /// local presentation state is changed. A host publishes the same decision
 /// its own UI would publish; a client can only submit an advisory proposal and
 /// must keep the modal open until that decision comes back from the host.
+/// Terminal pages are session-owned, so their dismissal follows the same rule
+/// as a story page: a host decides at once, a client only submits its
+/// acknowledgement. The client's acknowledgement is published by the modal gate
+/// when the queued result is applied, so it must not be proposed twice here.
+fn authorize_terminal_http_dismissal(
+    host: &Host,
+    dismissal: &crate::http_server::HttpModalDismissal,
+) -> Result<(), RpcError> {
+    if host.transport.net().is_none() {
+        return Ok(());
+    }
+    if !robin_engine::multiplayer::is_session_shared_modal(&dismissal.kind) {
+        return Err(RpcError::unavailable_capability(
+            "terminal modal is not shared by the session".to_owned(),
+        ));
+    }
+    if host.transport.local_seat() != PlayerId::HOST {
+        return Ok(());
+    }
+    let net = host.transport.net().expect("net checked above");
+    let instance = net
+        .open_modal_instance(&dismissal.kind)
+        .map_err(RpcError::internal)?;
+    net.decide_modal_dismiss(instance, dismissal.kind.clone(), dismissal.result)
+        .map_err(RpcError::internal)?;
+    net.complete_modal_instance(&dismissal.kind, instance)
+        .map_err(RpcError::internal)?;
+    Ok(())
+}
+
 fn authorize_http_modal_dismissals(
     host: &Host,
     dismissals: &[crate::http_server::HttpModalDismissal],

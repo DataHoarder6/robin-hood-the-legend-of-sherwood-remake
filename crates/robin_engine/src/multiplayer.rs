@@ -415,6 +415,14 @@ pub struct ModalDecision {
 }
 
 /// Story surfaces are opened by the host, including after client rollback.
+/// Whether the session owns this modal's identity and acknowledgements, so the
+/// host's decision is the only way to close it. Terminal mission-end pages are
+/// shared for the same reason story pages are: a peer that never acknowledged
+/// one must not be able to hold the others on the page.
+pub fn is_session_shared_modal(kind: &ModalKind) -> bool {
+    is_shared_story_modal(kind) || modal_session::is_terminal_summary(kind)
+}
+
 pub fn is_shared_story_modal(kind: &ModalKind) -> bool {
     matches!(
         kind,

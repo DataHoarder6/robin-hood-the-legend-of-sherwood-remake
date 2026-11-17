@@ -145,6 +145,13 @@ Backward movement fails if the requested frame predates retained rewind
 history. Moving the timeline resets rollback-checker history because the live
 Engine is now on a reconstructed timeline.
 
+A mission-end terminal page owns the mission until it is dismissed. Sending a
+step with a matching typed dismissal (or `auto_dismiss`) queues that dismissal and
+answers `200` with `{"direction":"terminal-modal-dismissal","queued":true}`
+without advancing frames; step again once the outer frame has applied it. This
+works on a multiplayer client too, where it is the acknowledgement the host's
+barrier is waiting for, and frame stepping stays host-only.
+
 ```bash
 curl -s -X POST -H 'Content-Type: application/json' \
   -d '{"n":1}' http://127.0.0.1:17640/step-forward

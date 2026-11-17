@@ -6,7 +6,7 @@ use super::*;
 
 // Terminal pages are driven by the mission outcome, not script-effect delivery.
 // Their occurrence identity must survive different peer presentation clocks.
-fn is_terminal_summary(kind: &ModalKind) -> bool {
+pub(super) fn is_terminal_summary(kind: &ModalKind) -> bool {
     matches!(
         kind,
         ModalKind::FinalDebriefing { .. }
