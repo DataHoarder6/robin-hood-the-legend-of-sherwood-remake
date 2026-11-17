@@ -279,10 +279,14 @@ fn begin_host_snapshot_transition(
             .map(|(seat, _)| seat)
             .copied()
             .collect::<HashSet<_>>();
+        let now_ms = u64::try_from(context.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let deadline_ms = now_ms.saturating_add(transition_budget_ms(&payload));
         peers.transitions.begin(PendingSnapshotTransition {
             id,
             payload: payload.clone(),
             awaiting,
+            answered: HashSet::new(),
+            deadline_ms,
         });
         let prepare = NetMsg::PrepareSnapshotTransition { id, payload };
         // Keep the peer-state lock until every current writer has

@@ -324,6 +324,9 @@ pub(super) struct ServerContext {
     pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
     pub(super) host_left: AtomicBool,
     pub(super) connections: Mutex<std::collections::HashMap<u8, iroh::endpoint::Connection>>,
+    /// Monotonic anchor for barrier deadlines. Never serialized; deadlines
+    /// stored in peer state are elapsed milliseconds from this instant.
+    pub(super) started: std::time::Instant,
 }
 
 pub(super) fn fail_server(context: &ServerContext, error: MultiplayerError) {
@@ -507,6 +510,7 @@ pub(super) fn start_server_inner(
         content,
         cancellation: Arc::clone(&cancellation),
         shutdown_tx: shutdown_tx.clone(),
+        started: std::time::Instant::now(),
     });
 
     let (startup_tx, startup_rx) =
@@ -649,6 +653,7 @@ pub(super) async fn run_server(
         Arc::clone(&context),
         endpoint.clone(),
     ));
+    let watchdog = tokio::spawn(run_transition_watchdog(Arc::clone(&context)));
 
     // Root task: explicit shutdown and an invalid host-side publication both
     // close the endpoint, ending every peer connection and the accept loop.
@@ -687,6 +692,8 @@ pub(super) async fn run_server(
     endpoint.close().await;
     accept.abort();
     let _ = accept.await;
+    watchdog.abort();
+    let _ = watchdog.await;
     if !pump_finished {
         pump.abort();
         let _ = pump.await;
@@ -793,6 +800,39 @@ pub(super) fn connect_all_provisional_seats(context: &ServerContext) {
     let connected_seats = seats.iter().map(|(seat, _)| *seat).collect::<Vec<_>>();
     publish_connect_seats(context, seats);
     finish_seat_connections(context, &connected_seats);
+}
+
+/// Evict peers that miss a snapshot-transition barrier once its deadline
+/// passes, then commit for everyone still connected.
+///
+/// Without this, a peer that never acknowledges — a frozen client, or a
+/// connection that was never reclaimed — freezes every mission transition for
+/// the rest of the session. Eviction is safe because an evicted seat keeps its
+/// authenticated owner and re-admits from an authoritative snapshot.
+async fn run_transition_watchdog(context: Arc<ServerContext>) {
+    let mut ticker = tokio::time::interval(Duration::from_millis(500));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if context.cancellation.load(Ordering::Acquire) {
+            return;
+        }
+        let committed = {
+            let mut peers = context.peers.lock();
+            let now_ms = u64::try_from(context.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            if let Some((id, evicted)) = peers.transitions.expire(now_ms) {
+                tracing::warn!(
+                    transition = ?id,
+                    evicted = ?evicted,
+                    "multiplayer: evicted unresponsive peers from snapshot transition"
+                );
+            }
+            take_committed_snapshot_transition(&mut peers)
+        };
+        if committed.is_some() {
+            commit_snapshot_transition(&context, committed);
+        }
+    }
 }
 
 pub(super) async fn run_server_accept_loop(context: Arc<ServerContext>, endpoint: Endpoint) {

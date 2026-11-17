@@ -44,6 +44,7 @@ fn dispatch_test_context() -> (super::ServerContext, Receiver<NetEvent>) {
         content: None,
         cancellation: Arc::new(super::AtomicBool::new(false)),
         shutdown_tx,
+        started: Instant::now(),
     };
     (context, incoming_rx)
 }
@@ -213,6 +214,8 @@ fn stale_peer_dispatch_rejects_every_effect_before_touching_successor_state() {
                     save_bytes: vec![1],
                 },
                 awaiting: HashSet::from([first.seat]),
+                answered: HashSet::new(),
+                deadline_ms: u64::MAX,
             });
         let messages = [
             (
@@ -358,6 +361,8 @@ fn prepared_transition_suppresses_new_and_cached_simulation_barriers() {
                 save_bytes: vec![1],
             },
             awaiting: HashSet::from([claim.seat]),
+            answered: HashSet::new(),
+            deadline_ms: u64::MAX,
         });
     }
     super::dispatch_server_peer_message(
@@ -400,6 +405,8 @@ fn current_snapshot_ack_commits_once_and_detaches_authority() {
                 save_bytes: vec![1],
             },
             awaiting: HashSet::from([claim.seat]),
+            answered: HashSet::new(),
+            deadline_ms: u64::MAX,
         });
     super::dispatch_server_peer_message(
         &context,
@@ -502,6 +509,8 @@ async fn inactive_reader_drains_terminal_frames_after_buffered_input_without_res
                         save_bytes: vec![1],
                     },
                     awaiting: HashSet::from([claim.seat]),
+                    answered: HashSet::new(),
+                    deadline_ms: u64::MAX,
                 });
         }
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -680,7 +689,7 @@ async fn independent_writer_failure_releases_generation_and_allows_snapshot_reco
 }
 
 #[test]
-fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consuming_barrier() {
+fn snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops() {
     let id = robin_engine::multiplayer::SnapshotTransitionId {
         session_id: super::MultiplayerSessionId([4; 32]),
         sequence: 1,
@@ -693,6 +702,8 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
             save_bytes: vec![1],
         },
         awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
     let wrong_id = robin_engine::multiplayer::SnapshotTransitionId { sequence: 2, ..id };
     assert!(transitions.acknowledge(PlayerId(1), wrong_id).is_err());
@@ -702,7 +713,9 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
         HashSet::from([1, 2])
     );
     transitions.acknowledge(PlayerId(1), id).unwrap();
-    assert!(transitions.acknowledge(PlayerId(1), id).is_err());
+    // A duplicate ack is a no-op: it must never turn a recoverable session into
+    // a protocol failure.
+    transitions.acknowledge(PlayerId(1), id).unwrap();
     assert!(transitions.take_completed().is_none());
     transitions.retain_for_reconnect(1);
     transitions.acknowledge(PlayerId(2), id).unwrap();
@@ -710,6 +723,59 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
     transitions.acknowledge(PlayerId(1), id).unwrap();
     assert_eq!(transitions.take_completed(), Some(id));
     assert_eq!(transitions.take_completed(), None);
+}
+
+#[test]
+fn expired_transition_evicts_absent_seats_and_completes_the_barrier() {
+    let id = robin_engine::multiplayer::SnapshotTransitionId {
+        session_id: super::MultiplayerSessionId([9; 32]),
+        sequence: 1,
+    };
+    let mut transitions = super::SnapshotTransitions::default();
+    transitions.begin(PendingSnapshotTransition {
+        id,
+        payload: robin_engine::multiplayer::SnapshotTransitionPayload::Save {
+            mission_id: 4,
+            save_bytes: vec![1, 2, 3],
+        },
+        awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: 5_000,
+    });
+    transitions.acknowledge(PlayerId(1), id).unwrap();
+    assert!(
+        transitions.expire(4_999).is_none(),
+        "a live barrier must not evict before its deadline"
+    );
+    let (expired_id, evicted) = transitions.expire(5_000).expect("deadline reached");
+    assert_eq!(expired_id, id);
+    assert_eq!(evicted, vec![2]);
+    // Eviction is not a protocol failure: the evicted seat may ack late, or
+    // when it re-admits from a snapshot.
+    transitions.acknowledge(PlayerId(2), id).unwrap();
+    assert_eq!(transitions.take_completed(), Some(id));
+    assert!(transitions.pending().is_none());
+}
+
+#[test]
+fn transition_budget_scales_with_payload_size() {
+    use robin_engine::multiplayer::SnapshotTransitionPayload;
+    let empty = SnapshotTransitionPayload::Save {
+        mission_id: 1,
+        save_bytes: Vec::new(),
+    };
+    let large = SnapshotTransitionPayload::Save {
+        mission_id: 1,
+        save_bytes: vec![0; 300_000],
+    };
+    assert_eq!(
+        super::super::server_protocol::transition_budget_ms(&empty),
+        super::super::server_protocol::TRANSITION_COMMIT_MS
+    );
+    assert!(
+        super::super::server_protocol::transition_budget_ms(&large)
+            > super::super::server_protocol::TRANSITION_COMMIT_MS
+    );
 }
 
 #[track_caller]
@@ -925,6 +991,8 @@ fn snapshot_transition_waits_for_every_current_peer() {
             save_bytes: vec![1, 2, 3],
         },
         awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
 
     assert!(take_committed_snapshot_transition(&mut peers).is_none());
@@ -953,6 +1021,8 @@ fn disconnected_transition_peer_must_ack_again_after_reconnect() {
             save_bytes: vec![4, 5],
         },
         awaiting: HashSet::new(),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
 
     retain_transition_peer_for_reconnect(&mut peers, 1);

@@ -292,6 +292,17 @@ perform a complete handshake/readiness admission for the replacement state.
 Local multiplayer saves remain explicitly diagnostic and are never accepted as
 authoritative load input.
 
+The barrier is bounded. The host stamps a deadline at prepare time from a
+monotonic clock: 60 s plus one second per 64 KiB of payload, which pays for the
+bytes a peer must receive, validate and retain. When the deadline passes, every
+seat still waiting is evicted from the barrier, the host commits for the
+remaining connected peers, and the evicted seat keeps its authenticated owner:
+it re-admits later from an authoritative snapshot. A late acknowledgement from
+an evicted seat is a no-op, and a duplicate `Ready` is idempotent. A transport
+close starts the deadline; it never evicts on its own. Without a deadline a
+frozen client, or a connection that was never reclaimed, freezes every mission
+transition for the rest of the session.
+
 ## CLI
 
 - `--server` hosts a game transport on the install's persistent iroh
