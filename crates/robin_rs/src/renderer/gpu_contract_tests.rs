@@ -192,6 +192,60 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+fn verify_map_background_outside_level_is_background(gpu: GpuContext) {
+    use robin_engine::coordinates::MapPoint;
+
+    // A viewport wider and taller than the level at the widest zoom. The level
+    // is uniform red, so an edge texel stretched into the uncovered region is
+    // indistinguishable from a correct draw unless the outside is asserted.
+    const SCREEN_W: u32 = 16;
+    const SCREEN_H: u32 = 8;
+    const LEVEL: u32 = 4;
+    const ZOOM: f32 = 0.5;
+
+    let mut renderer = Renderer::with_optional_surface(
+        gpu,
+        None,
+        None,
+        SCREEN_W as u16,
+        SCREEN_H as u16,
+        TextureScaleMode::Nearest,
+    );
+    renderer.upload_background_texture(LEVEL, LEVEL, &vec![0xF800; (LEVEL * LEVEL) as usize]);
+
+    let mut viewport = crate::host::ViewportState::new(
+        SCREEN_W as f32,
+        SCREEN_H as f32 + robin_engine::engine::PANNEL_HEIGHT,
+    );
+    viewport.view_position = MapPoint::new(0.0, 0.0);
+    viewport.zoom_factor = ZOOM;
+
+    renderer.begin_gpu_frame_clear();
+    crate::level_loading_host::draw_background(&viewport, &mut renderer);
+    let (width, height, pixels) = renderer.try_capture_frame_rgba().unwrap();
+    assert_eq!((width, height), (SCREEN_W, SCREEN_H));
+
+    let (red, green, blue) = robin_util::color::rgb565_to_rgb8(0xF800);
+    let level_opaque = [red, green, blue, 255];
+    let covered = (LEVEL as f32 * ZOOM) as u32;
+    assert!(
+        covered < SCREEN_W && covered < SCREEN_H,
+        "fixture must not cover the viewport"
+    );
+    for y in 0..height {
+        for x in 0..width {
+            let index = ((y * width + x) * 4) as usize;
+            let pixel = &pixels[index..index + 4];
+            if x < covered && y < covered {
+                assert_eq!(pixel, &level_opaque, "level pixel at ({x}, {y})");
+            } else {
+                assert_eq!(pixel, &[0, 0, 0, 255], "outside the level at ({x}, {y})");
+            }
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
     if let Ok(configuration) = std::env::var("ASSET_CHARACTER_RENDER_CONFIG") {
         crate::game_render::archive_character_tests::capture(
@@ -215,6 +269,7 @@ pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
         verify_browser_baked_state_pixels(gpu.clone(), std::path::Path::new(&root));
     }
     verify_map_appearance_pixels(gpu.clone());
+    verify_map_background_outside_level_is_background(gpu.clone());
     verify_coop_compositing(gpu.clone());
     verify_map_patch_camera_alignment(gpu.clone(), false);
     verify_map_patch_camera_alignment(gpu.clone(), true);
