@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Gate the push that updates the integration branch.
+#
+# GitHub Actions creates no run for a push in this repository (issue #26), so the
+# last place a gate can run before `main` moves is here. The suites follow the
+# diff: anything under `crates/` or a gate script runs `client-release`, engine
+# crates also run `engine`, and every gated push is formatted. `SKIP_PUSH_GATE=1`
+# is for a deliberately red branch — the push is then a request for review, not
+# an integration.
+#
+# Only `refs/heads/main` is gated: a review branch may be pushed red, and the
+# push that lands it is gated like any other.
+set -euo pipefail
+
+[ "${SKIP_PUSH_GATE:-0}" = 1 ] && exit 0
+
+integration=refs/heads/main
+repository=$(git rev-parse --show-toplevel)
+cd -- "$repository"
+
+gated=0
+while read -r _local_ref local_sha remote_ref remote_sha; do
+    [ "$remote_ref" = "$integration" ] || continue
+    # A deletion moves nothing into the integration branch.
+    [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # A first push of the integration branch has no base to diff against:
+        # run every suite rather than guess that it is clean.
+        changed=crates/
+    else
+        changed=$(git diff --name-only "$remote_sha" "$local_sha")
+    fi
+    printf '%s\n' "$changed" > /tmp/robin-push-gate-paths.$$
+    gated=1
+done
+
+[ "$gated" = 1 ] || exit 0
+
+paths=$(cat /tmp/robin-push-gate-paths.$$)
+rm -f /tmp/robin-push-gate-paths.$$
+
+suites=()
+if printf '%s\n' "$paths" | grep -qE '^(crates/|\.githooks/|scripts/check-quality\.sh|scripts/remote-check\.sh|Cargo\.)'; then
+    suites+=(format client-release)
+fi
+if printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)'; then
+    suites+=(engine)
+fi
+if [ ${#suites[@]} -eq 0 ]; then
+    printf 'pre-push: no gated path changed; nothing to run.\n' >&2
+    exit 0
+fi
+
+# remote-check pushes this checkout to the build host, and that push would enter
+# this hook again; the copy is a build cache, not an integration.
+for suite in "${suites[@]}"; do
+    printf 'pre-push: %s\n' "$suite" >&2
+    SKIP_PUSH_GATE=1 bash scripts/remote-check.sh "$suite" || {
+        printf 'pre-push: %s failed; the integration branch stays where it is.\n' "$suite" >&2
+        printf 'pre-push: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2
+        exit 1
+    }
+done
