@@ -72,6 +72,9 @@ keeps it to the time it takes to read the paths, since nothing is being publishe
     nix path-info --store file:///tmp/robinstore -r /nix/store/<hash>-robin-0.1.0
     du -sh /tmp/robinstore
 
+Copying a source *tree* to the build host is a different problem with a different
+route: `scripts/remote-check.sh`, never `rsync`. See `PARALLEL_AGENTS.md`.
+
 `nix run .#robin` runs the packaged binary on the builder without installing it.
 
 ## Layout of the packaging
