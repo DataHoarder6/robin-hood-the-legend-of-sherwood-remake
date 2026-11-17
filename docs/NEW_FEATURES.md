@@ -1,5 +1,18 @@
 # Post-port Features
 
+- **Sherwood perk purchases.** A sixth Sherwood HUD button opens a perks panel
+  with one row per campaign character and perk; Return/Space or a click on an
+  affordable row buys it through the host-authority
+  `PlayerCommand::CampaignPurchasePerk`. Perks cost clovers from
+  `CampaignValue::Amulets`, and a purchase is refused when it would spend the
+  last one, because that clover is the VIP death save
+  (`MINIMUM_CLOVERS_AFTER_PURCHASE`). One rule, `perk_purchase_state`, produces
+  both the panel's row state and the authoritative answer, so a row the panel
+  offers is exactly a row the engine accepts. Four perks exist: fight through a
+  swordfight, loot a knock-out, and no friendly-fire damage or knockback. The
+  button reuses the clover icon and the "Amulets" unit string because no perk
+  art or perk-specific cost word exists.
+
 - **Source-clock component clips with retained artwork.** A separate strict
   preview contract supports independently clocked rigid parts, flexible-cover
   morphs and explicit visibility phases. Source frame hashes, delays, gaps and
