@@ -63,6 +63,8 @@
 - `ast-grep` for structural queries (`ast-grep run --pattern 'panic!($$$)' --lang
   rust crates/robin_rs/src/`), `rg` for text. `sed -n 'A,Bp'` on a 4000-line file
   finds one call site and hides its neighbours; prefer the pattern search.
+- `rg -n` prints line numbers; `-r` is `--replace` and rewrites each match in the
+  output (`rg -rn PATTERN` prints `const n: u32`), so a search stays read-only.
 
 ## Committing
 

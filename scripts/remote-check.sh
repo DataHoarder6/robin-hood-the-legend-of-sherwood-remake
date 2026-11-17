@@ -17,6 +17,11 @@
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
 set -euo pipefail
 
+# Nothing below reads stdin, and callers feed scripts to `bash -s`: a child that
+# inherits a script's stdin (ssh, rsync, git over ssh) drains the lines the
+# caller has not executed yet, and the script still exits 0.
+exec </dev/null
+
 host=${ROBIN_BUILD_HOST:-build-host}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
@@ -37,7 +42,7 @@ copy_name() {
 }
 
 require_host() {
-    if ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
+    if ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
         return 0
     fi
     if [ "$host" = build-host ]; then
@@ -49,7 +54,7 @@ require_host() {
         wake-host build-host || true
         # WOL is fire-and-forget, so poll the ssh port for the boot budget.
         for _ in $(seq 60); do
-            if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
+            if ssh -n -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
                 printf 'remote-check: %s is up.\n' "$host" >&2
                 return 0
             fi
@@ -107,7 +112,8 @@ cd $remote_dir
 git update-ref refs/heads/main refs/robin/check
 git symbolic-ref HEAD refs/heads/main
 git read-tree HEAD
-git rev-parse HEAD
+# stdout is the copy path alone, so callers can capture it.
+git rev-parse HEAD >&2
 EOF
 }
 
@@ -117,13 +123,15 @@ case "${1:-}" in
         ;;
     --list)
         require_host
-        ssh "$host" "du -sh ~/$remote_root/*/ 2>/dev/null | sort -k2"
+        ssh -n "$host" "du -sh ~/$remote_root/*/ 2>/dev/null | sort -k2"
         exit 0
         ;;
     --prune)
         require_host
         keep=$(copy_name "${2:-}")
-        ssh "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] || rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
+        # Only real copies: the root is shared, and a cache or scratch directory
+        # someone keeps beside the copies is not this script's to delete.
+        ssh -n "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] && continue; [ -f \"\$d/Cargo.toml\" ] || continue; rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
         exit 0
         ;;
     --sync)

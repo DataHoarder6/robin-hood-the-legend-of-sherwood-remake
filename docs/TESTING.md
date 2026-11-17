@@ -71,6 +71,29 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 Feature choices are deliberate. Do not substitute `--all-features`; video,
 Android, browser threads, and shader tooling have distinct dependencies.
 
+`client` builds `robin_rs` with its `default = []`, so every module behind
+`multiplayer` — the native transport, the session barriers, the admission loop —
+is absent from that suite. A netcode change is gated by `client-release`, whose
+`release` feature includes `multiplayer`. Iterate on one test in the gate's own
+copy, then run the whole suite once:
+
+```sh
+copy=$(scripts/remote-check.sh --sync)   # prints the build host's copy path
+ssh -n build-host "cd $copy && nix develop --command cargo test --locked -p robin_rs \
+  --lib --no-default-features --features release -- <test-name>"
+scripts/remote-check.sh client-release
+```
+
+Every copy keeps its own `target/`, so a **new** copy starts from nothing: about
+5 minutes of dependencies on the build host, against 3-30 s for a rebuild in a
+warm one (12 cores, 2026-11-17). Keep one copy per branch and reuse it; a second
+name is for two agents building the same branch concurrently, not for a new
+branch. `scripts/remote-check.sh --sync <existing-name>` syncs into a copy
+instead of making one. A compiler cache is not the answer: `sccache` as a
+machine-local `rustc-wrapper` measured 310 s -> 222 s for a from-scratch rebuild,
+and an out-of-tree shared `CARGO_TARGET_DIR` reused nothing across copies (511
+crates recompiled). The copy is the thing to keep warm.
+
 CPU parity replay needs engine-owned timing separately from licensed game data:
 `original_parity_replay --core-datadir /path/to/assets/core-datadir TRACE`.
 The development default is `assets/core-datadir` relative to the invocation
