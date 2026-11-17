@@ -798,9 +798,11 @@ fn expired_transition_evicts_absent_seats_and_completes_the_barrier() {
         transitions.expire(4_999).is_none(),
         "a live barrier must not evict before its deadline"
     );
-    let (expired_id, evicted) = transitions.expire(5_000).expect("deadline reached");
-    assert_eq!(expired_id, id);
-    assert_eq!(evicted, vec![2]);
+    let expired = transitions.expire(5_000).expect("deadline reached");
+    assert_eq!(expired.id, id);
+    assert_eq!(expired.evicted, vec![2]);
+    assert_eq!(expired.waited_ms, 5_000);
+    assert_eq!(expired.payload_bytes, 3);
     // Eviction is not a protocol failure: the evicted seat may ack late, or
     // when it re-admits from a snapshot.
     transitions.acknowledge(PlayerId(2), id).unwrap();

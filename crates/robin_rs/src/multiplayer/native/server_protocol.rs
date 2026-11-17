@@ -11,7 +11,7 @@ pub(super) const TRANSITION_COMMIT_MS: u64 = 60_000;
 /// Payload transfer allowance added on top of the base commit budget.
 pub(super) const TRANSITION_PAYLOAD_BYTES_PER_SECOND: u64 = 64 * 1024;
 
-fn payload_bytes(payload: &SnapshotTransitionPayload) -> u64 {
+pub(super) fn payload_bytes(payload: &SnapshotTransitionPayload) -> u64 {
     match payload {
         SnapshotTransitionPayload::Save { save_bytes, .. } => save_bytes.len() as u64,
         SnapshotTransitionPayload::CampaignExit { engine_bytes, .. } => engine_bytes.len() as u64,
@@ -113,6 +113,11 @@ impl ReadyBarrier {
         }
     }
 
+    /// How long the barrier has been blocked, for the expiry event.
+    pub(super) fn waited_ms(&self, now_ms: u64) -> Option<u64> {
+        self.wait_since_ms.map(|since| now_ms.saturating_sub(since))
+    }
+
     /// Release frame once the wait expires: the host frame plus every ready
     /// frame that did arrive. Quorum is deliberately ignored here; the caller
     /// evicts the peers that were blocking the barrier.
@@ -146,6 +151,15 @@ pub(super) struct PendingSnapshotTransition {
     /// Monotonic milliseconds since server start at which absent peers are
     /// evicted. Set when the transition begins.
     pub(super) deadline_ms: u64,
+}
+
+/// One expired barrier, reported whole so the caller logs a single event with
+/// who was evicted, how long the barrier waited and how many bytes it carried.
+pub(super) struct ExpiredTransition {
+    pub(super) id: SnapshotTransitionId,
+    pub(super) evicted: Vec<u8>,
+    pub(super) waited_ms: u64,
+    pub(super) payload_bytes: u64,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -203,7 +217,7 @@ impl SnapshotTransitions {
     /// can log and commit. Eviction is what makes a missed barrier bounded:
     /// the connected peers proceed, and an evicted seat re-admits later from a
     /// snapshot instead of freezing the session.
-    pub(super) fn expire(&mut self, now_ms: u64) -> Option<(SnapshotTransitionId, Vec<u8>)> {
+    pub(super) fn expire(&mut self, now_ms: u64) -> Option<ExpiredTransition> {
         let transition = self.pending.as_mut()?;
         if now_ms < transition.deadline_ms || transition.awaiting.is_empty() {
             return None;
@@ -211,7 +225,16 @@ impl SnapshotTransitions {
         let mut evicted: Vec<u8> = transition.awaiting.drain().collect();
         evicted.sort_unstable();
         transition.answered.extend(evicted.iter().copied());
-        Some((transition.id, evicted))
+        Some(ExpiredTransition {
+            id: transition.id,
+            evicted,
+            waited_ms: now_ms.saturating_sub(
+                transition
+                    .deadline_ms
+                    .saturating_sub(transition_budget_ms(&transition.payload)),
+            ),
+            payload_bytes: payload_bytes(&transition.payload),
+        })
     }
 
     pub(super) fn retain_for_reconnect(&mut self, seat: u8) {

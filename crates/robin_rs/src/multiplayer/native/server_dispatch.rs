@@ -279,8 +279,15 @@ fn begin_host_snapshot_transition(
             .map(|(seat, _)| seat)
             .copied()
             .collect::<HashSet<_>>();
-        let now_ms = u64::try_from(context.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let now_ms = super::elapsed_ms(&context);
         let deadline_ms = now_ms.saturating_add(transition_budget_ms(&payload));
+        tracing::info!(
+            transition = ?id,
+            payload_bytes = super::server_protocol::payload_bytes(&payload),
+            budget_ms = transition_budget_ms(&payload),
+            awaiting = ?awaiting,
+            "multiplayer: snapshot transition prepared"
+        );
         peers.transitions.begin(PendingSnapshotTransition {
             id,
             payload: payload.clone(),

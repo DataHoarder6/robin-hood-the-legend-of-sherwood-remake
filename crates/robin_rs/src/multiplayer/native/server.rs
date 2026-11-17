@@ -254,6 +254,11 @@ pub(super) fn commit_snapshot_transition(
     let Some((id, senders)) = committed else {
         return;
     };
+    tracing::info!(
+        transition = ?id,
+        peers = senders.len(),
+        "multiplayer: snapshot transition committed"
+    );
     publish_context_continuation(context);
     for sender in &senders {
         sender
@@ -298,6 +303,7 @@ pub(super) fn maybe_begin_sim_locked(
             tracing::warn!(
                 evicted = ?evicted,
                 budget_ms = READY_BUDGET_MS,
+                waited_ms = peers.readiness.waited_ms(now_ms),
                 "multiplayer: ready barrier expired; evicting peers that never became ready"
             );
             peers
@@ -843,10 +849,12 @@ async fn run_barrier_watchdog(context: Arc<ServerContext>) {
         let (committed, begin) = {
             let mut peers = context.peers.lock();
             let now_ms = elapsed_ms(&context);
-            if let Some((id, evicted)) = peers.transitions.expire(now_ms) {
+            if let Some(expired) = peers.transitions.expire(now_ms) {
                 tracing::warn!(
-                    transition = ?id,
-                    evicted = ?evicted,
+                    transition = ?expired.id,
+                    evicted = ?expired.evicted,
+                    waited_ms = expired.waited_ms,
+                    payload_bytes = expired.payload_bytes,
                     "multiplayer: evicted unresponsive peers from snapshot transition"
                 );
             }
