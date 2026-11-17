@@ -255,8 +255,9 @@ const TALL_COLUMN_X_OFFSET: i32 = 45;
 /// Panel coordinates of the column: first slot, and the pitch between slots.
 const COLUMN_TOP: i32 = 105;
 const COLUMN_PITCH: i32 = 45;
-/// Clearance between a sprite's bottom edge and the next slot.
-const RAIL_GAP: i32 = 5;
+/// Clearance between a sprite's bottom edge and the next slot: the shipped
+/// 41 px tall buttons plus this reproduce the panel's 45 px pitch exactly.
+const RAIL_GAP: i32 = 4;
 
 /// Vertical tops of the tall column: start mission, quit mission, trading,
 /// perks.
@@ -708,18 +709,22 @@ mod tests {
         assert_eq!(column_tops(0, [0, 0, 0]), [105, 150, 195, 240]);
         // A wide slot that exactly meets the panel still leaves the anchor.
         assert_eq!(column_tops(100, [40, 40, 40]), [105, 150, 195, 240]);
+        // The artwork this data set ships: DisplayCampaignMap 74x53,
+        // GoToExit 74x60, the tall buttons 41x41.
+        assert_eq!(column_tops(60, [41, 41, 41]), [105, 150, 195, 240]);
+        assert_eq!(column_tops(53, [41, 41, 41]), [105, 150, 195, 240]);
     }
 
     #[test]
     fn column_tops_yield_to_a_wide_slot_taller_than_the_panel() {
-        assert_eq!(column_tops(101, [40, 40, 40]), [106, 151, 196, 241]);
-        assert_eq!(column_tops(120, [40, 40, 40]), [125, 170, 215, 260]);
+        assert_eq!(column_tops(102, [40, 40, 40]), [106, 151, 196, 241]);
+        assert_eq!(column_tops(120, [40, 40, 40]), [124, 169, 214, 259]);
     }
 
     #[test]
     fn column_tops_grow_the_pitch_for_tall_buttons() {
-        assert_eq!(column_tops(32, [60, 60, 60]), [105, 170, 235, 300]);
-        assert_eq!(column_tops(32, [40, 60, 60]), [105, 150, 215, 280]);
+        assert_eq!(column_tops(32, [60, 60, 60]), [105, 169, 233, 297]);
+        assert_eq!(column_tops(32, [40, 60, 60]), [105, 150, 214, 278]);
     }
 
     #[test]
