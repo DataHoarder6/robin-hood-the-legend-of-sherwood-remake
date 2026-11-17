@@ -17,7 +17,9 @@ Multiplayer binds the exact engine commit and wire protocol (`MULTIPLAYER.md`),
 so "the same stable build" means the same tag on every seat. `robin --version`
 prints `<version>+<12-hex commit>`; compare it on every seat before a session. A
 mismatch refuses the join — that comparison is the preflight, not an error to
-work around.
+work around. A dev build of a dirty worktree carries its HEAD commit, so it can
+report the stable commit while its bytes differ: route play through the stable
+profile, never a dev store path.
 
 Cutting stable: tag `fork/main` as `vX.Y.Z`, push the tag, then start the
 release on that tag with `gh workflow run native-release.yml --ref vX.Y.Z`. The
