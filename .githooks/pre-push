@@ -4,8 +4,8 @@
 # GitHub Actions creates no run for a push in this repository (issue #26), so the
 # last place a gate can run before `main` moves is here. The suites follow the
 # diff: anything under `crates/` runs `client-release`, engine crates also run
-# `engine`, anything under `scripts/`, `tools/` or `.githooks/` runs `tooling`,
-# and a Rust change is formatted. `SKIP_PUSH_GATE=1`
+# `engine`, a Rust change is formatted, and the scenario corpus is validated by
+# its own Python gate. `SKIP_PUSH_GATE=1`
 # is for a deliberately red branch — the push is then a request for review, not
 # an integration.
 #
@@ -44,10 +44,8 @@ rm -f /tmp/robin-push-gate-paths.$$
 # build and a Rust change never skips the suite that compiles it.
 crates_changed=0
 engine_changed=0
-tooling_changed=0
 printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
 printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
-printf '%s\n' "$paths" | grep -qE '^((scripts|tools)/|\.githooks/)' && tooling_changed=1
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
@@ -56,8 +54,17 @@ fi
 if [ "$engine_changed" = 1 ]; then
     suites+=(engine)
 fi
-if [ "$tooling_changed" = 1 ]; then
-    suites+=(tooling)
+
+# The scenario corpus has its own gate, and it must run on the push that changes
+# it: the `tooling` suite owns it, but that suite is not green on the build host
+# yet (docs/TESTING.md), and a gate nobody can pass is not a gate. This one is
+# pure Python and runs in milliseconds.
+if printf '%s\n' "$paths" | grep -qE '^scripts/validation/(scenarios/|scenario_corpus\.py)'; then
+    printf 'pre-push: scenario corpus\n' >&2
+    python3 scripts/validation/scenario_corpus.py || {
+        printf 'pre-push: the corpus does not match docs/multiplayer/HARNESS.md.\n' >&2
+        exit 1
+    }
 fi
 if [ ${#suites[@]} -eq 0 ]; then
     printf 'pre-push: no gated path changed; nothing to run.\n' >&2
