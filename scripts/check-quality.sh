@@ -93,6 +93,8 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py
         bash scripts/test_parity_orchestration.sh
         bash scripts/test_release.sh
+        bash scripts/test_doctor.sh
+        bash scripts/test_reconcile_main.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every
