@@ -66,6 +66,12 @@ pub fn report_directory() -> Option<PathBuf> {
     install_root().map(|root| root.join("reports"))
 }
 
+/// Directory holding pinned session diagnostics bundles. `None` when no install
+/// root exists.
+pub fn diagnostics_directory() -> Option<PathBuf> {
+    install_root().map(|root| root.join("diagnostics"))
+}
+
 /// Remembered game-installation choice. `None` when no install root exists.
 pub fn datadir_file() -> Option<PathBuf> {
     install_root().map(|root| root.join("datadir.txt"))
