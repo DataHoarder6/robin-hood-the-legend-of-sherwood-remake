@@ -51,11 +51,20 @@ impl RunLog {
     }
 }
 
-/// Open this run's log file under `directory`, pruning older runs first.
+/// Open this run's log file under `directory`.
+///
+/// Retention makes room first, keeping [`RETAINED_RUN_LOGS`] - 1 older files,
+/// and only then is this run's file created — so the file this process is about
+/// to append to can never be one of the pruned ones.
 pub(super) fn open(directory: &Path) -> std::io::Result<RunLog> {
+    open_at(directory, &current_stamp())
+}
+
+fn open_at(directory: &Path, stamp: &str) -> std::io::Result<RunLog> {
     std::fs::create_dir_all(directory)?;
-    let path = create_run_file(directory)?;
-    prune(directory, RETAINED_RUN_LOGS)?;
+    // One slot is this run's own file.
+    prune(directory, RETAINED_RUN_LOGS - 1)?;
+    let path = create_run_file(directory, stamp)?;
     let file = std::fs::OpenOptions::new().append(true).open(&path)?;
     Ok(RunLog {
         path: Some(path),
@@ -64,10 +73,13 @@ pub(super) fn open(directory: &Path) -> std::io::Result<RunLog> {
     })
 }
 
+fn current_stamp() -> String {
+    jiff::Zoned::now().strftime("%Y%m%dT%H%M%S").to_string()
+}
+
 /// `<install home>/logs/robin-<YYYYMMDDTHHMMSS>.log`, with a `-<pid>` suffix
 /// only when two processes on one install start inside the same second.
-fn create_run_file(directory: &Path) -> std::io::Result<PathBuf> {
-    let stamp = jiff::Zoned::now().strftime("%Y%m%dT%H%M%S").to_string();
+fn create_run_file(directory: &Path, stamp: &str) -> std::io::Result<PathBuf> {
     let name = format!("{FILE_PREFIX}{stamp}{FILE_SUFFIX}");
     let path = directory.join(name);
     match std::fs::OpenOptions::new()
@@ -92,12 +104,17 @@ fn create_run_file(directory: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Keep the newest `retained` run logs in `directory`.
+///
+/// Age comes from the filesystem, not from the name: a `-<pid>` collision sorts
+/// differently from the plain name, so byte order is not age order.
 fn prune(directory: &Path, retained: usize) -> std::io::Result<()> {
-    let mut logs = run_logs(directory)?;
-    // Names carry a fixed-width timestamp, so byte order is age order.
-    logs.sort();
+    let mut logs = Vec::new();
+    for path in run_logs(directory)? {
+        logs.push((std::fs::metadata(&path)?.modified()?, path));
+    }
+    logs.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let excess = logs.len().saturating_sub(retained);
-    for path in logs.into_iter().take(excess) {
+    for (_, path) in logs.into_iter().take(excess) {
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             // The file is evidence, not a reason to refuse to start.
@@ -226,5 +243,48 @@ mod tests {
         // Retention owns `robin-*.log` only.
         assert!(home.path().join("events.jsonl").exists());
         assert!(home.path().join("notes.txt").exists());
+    }
+
+    /// Two processes starting inside one second make the collision name
+    /// `robin-<stamp>-<pid>.log`, which sorts before `robin-<stamp>.log`
+    /// (`-` is `0x2D`, `.` is `0x2E`). Retention used to run after the file was
+    /// created and order by name, so the run's own log was the one deleted and
+    /// the append then failed `NotFound` — losing both the run log and the
+    /// event file for that process.
+    #[test]
+    fn a_same_second_collision_keeps_the_run_file_it_just_created() {
+        let home = tempfile::tempdir().unwrap();
+        let stamp = "20261118T101500";
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        // Nine processes from an earlier second, all named so they sort after
+        // this run's collision name.
+        for index in 0..RETAINED_RUN_LOGS - 1 {
+            let path = home
+                .path()
+                .join(format!("{FILE_PREFIX}{stamp}-999999{index}{FILE_SUFFIX}"));
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_modified(old).unwrap();
+        }
+        // Another process in this same second already took the plain name.
+        std::fs::File::create(
+            home.path()
+                .join(format!("{FILE_PREFIX}{stamp}{FILE_SUFFIX}")),
+        )
+        .unwrap();
+
+        let log = open_at(home.path(), stamp).unwrap();
+        let path = log.path().unwrap().to_path_buf();
+        assert!(path.exists(), "{}", path.display());
+        let mut writer = log.writer().unwrap();
+        std::io::Write::write_all(&mut writer, b"this run survives retention\n").unwrap();
+        std::io::Write::flush(&mut writer).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("this run survives retention"), "{written}");
+        let kept = names(home.path());
+        assert_eq!(kept.len(), RETAINED_RUN_LOGS, "{kept:?}");
+        assert!(
+            kept.contains(&path.file_name().unwrap().to_string_lossy().into_owned()),
+            "{kept:?}"
+        );
     }
 }

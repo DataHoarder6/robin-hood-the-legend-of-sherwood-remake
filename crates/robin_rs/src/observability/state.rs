@@ -6,6 +6,10 @@
 //! reached plus the operation that ended it. The snapshot is published at every
 //! RPC boundary, so the answer is at most one frame behind the live engine and
 //! survives the mission that produced it.
+//!
+//! One generation per mission attempt is the single owner of that narrative:
+//! a snapshot describes only the attempt that published it, an attempt records
+//! one terminal, and a new attempt starts without either.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -20,61 +24,96 @@ pub(crate) struct Terminal {
     pub(crate) at: String,
 }
 
+/// One attempt's snapshot, stamped with the generation that published it so it
+/// can never describe a later attempt.
+struct Published {
+    generation: u64,
+    document: Value,
+}
+
 #[derive(Default)]
 pub(super) struct StateSurface {
-    snapshot: Option<Value>,
+    /// Advanced by [`StateSurface::mission_started`]. Generation zero is the
+    /// window before this process has attempted a mission.
+    generation: u64,
+    snapshot: Option<Published>,
     terminal: Option<Terminal>,
+    /// The generation whose terminal is already recorded. One outcome records
+    /// once, whichever writer reaches the surface first.
+    terminal_generation: Option<u64>,
 }
 
 impl StateSurface {
-    /// A mission's first RPC boundary starts a new narrative: the previous
-    /// mission's terminal block no longer describes this process.
+    /// A mission attempt starts: the previous attempt's terminal block and
+    /// snapshot no longer describe this process.
     pub(super) fn mission_started(&mut self) {
+        self.generation += 1;
         self.terminal = None;
+        self.terminal_generation = None;
     }
 
     pub(super) fn publish(&mut self, snapshot: Value) {
-        self.snapshot = Some(snapshot);
+        self.snapshot = Some(Published {
+            generation: self.generation,
+            document: snapshot,
+        });
     }
 
-    /// Record the end of a mission. The operation survives from the last
-    /// published snapshot when the mission died without reporting one.
-    pub(super) fn record_terminal(&mut self, operation: Option<String>, reason: String) {
+    /// Record the end of this attempt. Returns whether it recorded: a second
+    /// writer for the same generation changes nothing and emits nothing.
+    ///
+    /// The operation survives from this generation's last published snapshot
+    /// when the attempt died without reporting one; a snapshot from an earlier
+    /// mission is never inherited.
+    pub(super) fn record_terminal(&mut self, operation: Option<String>, reason: String) -> bool {
+        if self.terminal_generation == Some(self.generation) {
+            return false;
+        }
         let operation = operation.or_else(|| self.published_operation());
         self.terminal = Some(Terminal {
             operation,
             reason,
             at: super::events_utc_now(),
         });
+        self.terminal_generation = Some(self.generation);
+        true
     }
 
     fn published_operation(&self) -> Option<String> {
-        self.snapshot
-            .as_ref()?
+        self.published()?
             .get("multiplayer")?
             .get("final_operation")?
             .as_str()
             .map(str::to_owned)
     }
 
-    /// The `/state` document: the last snapshot, the terminal block, and where
-    /// this run's evidence lives. `None` before this process has attempted a
-    /// mission, which is the one honest "nothing to report yet".
+    fn published(&self) -> Option<&Value> {
+        self.snapshot
+            .as_ref()
+            .filter(|snapshot| snapshot.generation == self.generation)
+            .map(|snapshot| &snapshot.document)
+    }
+
+    /// The `/state` document: this attempt's snapshot, the terminal block, and
+    /// where this run's evidence lives. `None` only before the process has
+    /// attempted a mission, which is the one honest "nothing to report yet".
     pub(super) fn document(&self) -> Option<Value> {
-        let Some(snapshot) = self.snapshot.as_ref() else {
-            return self.terminal.as_ref().map(|terminal| {
-                let mut document = serde_json::json!({
-                    "frame": null,
-                    "map": null,
-                    "replay": null,
-                    "multiplayer": null,
-                });
-                document["terminal"] =
-                    serde_json::to_value(terminal).expect("terminal block serializes");
-                document
-            });
+        let published = self.published();
+        if published.is_none() && self.terminal.is_none() && self.generation == 0 {
+            return None;
+        }
+        let mut document = match published {
+            Some(snapshot) => snapshot.clone(),
+            // An attempt that has not reached its first boundary yet: the
+            // previous mission's frame and map describe nothing this process is
+            // doing, so they are reported as absent rather than as current.
+            None => serde_json::json!({
+                "frame": null,
+                "map": null,
+                "replay": null,
+                "multiplayer": null,
+            }),
         };
-        let mut document = snapshot.clone();
         document["terminal"] = match self.terminal.as_ref() {
             Some(terminal) => serde_json::to_value(terminal).expect("terminal block serializes"),
             None => Value::Null,
@@ -120,7 +159,7 @@ mod tests {
     fn a_terminal_operation_keeps_the_last_snapshot_and_names_its_operation() {
         let mut surface = StateSurface::default();
         surface.publish(snapshot(240, "LevelInProgress"));
-        surface.record_terminal(Some("Quit".into()), "mission ended".into());
+        assert!(surface.record_terminal(Some("Quit".into()), "mission ended".into()));
         let document = surface.document().unwrap();
         assert_eq!(document["frame"], 240);
         assert_eq!(
@@ -161,5 +200,28 @@ mod tests {
         surface.record_terminal(Some("LevelFailed".into()), "mission ended".into());
         surface.mission_started();
         assert_eq!(surface.document().unwrap()["terminal"], Value::Null);
+    }
+
+    #[test]
+    fn one_outcome_records_once_and_a_later_attempt_inherits_nothing() {
+        let mut surface = StateSurface::default();
+        surface.mission_started();
+        surface.publish(snapshot(240, "LevelInProgress"));
+        assert!(surface.record_terminal(Some("Quit".into()), "mission ended".into()));
+        assert!(
+            !surface.record_terminal(None, "launch failed: drain".into()),
+            "the attempt already recorded its outcome"
+        );
+        assert_eq!(
+            surface.document().unwrap()["terminal"]["reason"],
+            "mission ended"
+        );
+
+        surface.mission_started();
+        assert!(surface.record_terminal(None, "launch failed: no game data".into()));
+        let document = surface.document().unwrap();
+        assert!(document["frame"].is_null(), "{document}");
+        assert!(document["multiplayer"].is_null(), "{document}");
+        assert!(document["terminal"]["operation"].is_null(), "{document}");
     }
 }
