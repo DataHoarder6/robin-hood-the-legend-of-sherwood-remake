@@ -44,6 +44,33 @@ robin_util::deny_deserialize!(
 );
 
 impl NativeRequest {
+    /// A request as the routing layer sees it, without network acquisition.
+    ///
+    /// It carries the `Host` a loopback client sends, because the routing layer
+    /// rejects a request whose `Host` does not name this listener (DNS
+    /// rebinding); a bare request would be refused before any route ran.
+    #[cfg(test)]
+    pub(super) fn test_request(
+        method: hyper::Method,
+        url: impl Into<String>,
+        listen_port: u16,
+    ) -> Self {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            hyper::header::HOST,
+            format!("127.0.0.1:{listen_port}")
+                .parse()
+                .expect("a loopback host header"),
+        );
+        Self {
+            url: url.into(),
+            method,
+            headers,
+            declared_length: None,
+            body: Bytes::new(),
+        }
+    }
+
     pub(super) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .get(name)

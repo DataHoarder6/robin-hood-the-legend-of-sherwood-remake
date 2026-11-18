@@ -110,8 +110,6 @@ pub enum HttpPayload {
     Console(String),
     /// `POST /command` — apply a PlayerCommand to the engine.
     Command(PlayerCommand),
-    /// `GET /state` / `robin.call("state")` — compact frame/replay status.
-    State,
     /// `GET /host-debug` / `robin.call("host-debug")` — host/UI-only state.
     HostDebug,
     /// `GET /engine-dump` — full serialized engine for ad-hoc debug.
@@ -155,7 +153,6 @@ pub enum HttpPayload {
 /// Internal routing types are deliberately separate from the transport schema.
 /// A query handler cannot receive a mutation or a deferred operation.
 pub(super) enum QueryRequest {
-    State,
     EngineDump,
     LevelAssets,
     Script,
@@ -194,7 +191,6 @@ pub(super) enum RoutedRequest {
 impl HttpPayload {
     pub(super) fn classify(self) -> RoutedRequest {
         match self {
-            Self::State => RoutedRequest::Query(QueryRequest::State),
             Self::HostDebug => RoutedRequest::HostDebug,
             Self::EngineDump => RoutedRequest::Query(QueryRequest::EngineDump),
             Self::LevelAssets => RoutedRequest::Query(QueryRequest::LevelAssets),
@@ -345,8 +341,7 @@ pub(super) fn ranked_input_taint(payload: &HttpPayload) -> Option<InputTaintKind
         | HttpPayload::GoToFrame { .. }
         | HttpPayload::SetPaused { .. } => Some(InputTaintKind::HttpSimulationStep),
         HttpPayload::LoadReplay { .. } => Some(InputTaintKind::ReplayPlayback),
-        HttpPayload::State
-        | HttpPayload::HostDebug
+        HttpPayload::HostDebug
         | HttpPayload::EngineDump
         | HttpPayload::LevelAssets
         | HttpPayload::Script

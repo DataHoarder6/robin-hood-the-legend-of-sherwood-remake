@@ -160,18 +160,9 @@ pub(crate) fn decompile_class(query: &str) -> Result<Option<String>, RpcError> {
 pub(crate) fn events_page(query: &str) -> Result<serde_json::Value, RpcError> {
     let mut query = QueryParameters::parse(query)?;
     let since: Option<u64> = query.number("since")?;
-    let limit = query
-        .number::<usize>("limit")?
-        .unwrap_or(crate::observability::DEFAULT_PAGE);
+    let limit: Option<usize> = query.number("limit")?;
     query.finish()?;
-    if limit == 0 {
-        return Err(RpcError::invalid_request("limit must be > 0"));
-    }
-    let page = crate::observability::events_page(since, limit);
-    Ok(serde_json::json!({
-        "events": page.events,
-        "next_seq": page.next_seq,
-    }))
+    super::diagnostics::events_document(since, limit)
 }
 
 #[cfg(test)]
@@ -180,10 +171,6 @@ mod tests {
 
     #[test]
     fn the_event_page_query_is_strict_and_names_its_cursor() {
-        let _process = crate::observability::lock_process_surface();
-        let home = tempfile::tempdir().unwrap();
-        // Safety: the process-surface guard holds the install-home env lock.
-        unsafe { std::env::set_var("ROBINHOOD_INSTALL_HOME", home.path()) };
         let first =
             crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
         crate::observability::event(
@@ -198,7 +185,6 @@ mod tests {
         for invalid in ["limit=x", "since=-1", "since=1&since=2", "unknown=1"] {
             assert!(events_page(invalid).is_err(), "{invalid}");
         }
-        unsafe { std::env::remove_var("ROBINHOOD_INSTALL_HOME") };
     }
 
     #[test]
