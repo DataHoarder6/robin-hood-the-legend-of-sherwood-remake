@@ -33,6 +33,7 @@ jobs=${NATIVE_CONVERT_JOBS:-2}
 timeout_seconds=${NATIVE_CONVERT_TIMEOUT_SECONDS:-7200}
 allow_other_corpora=${NATIVE_CONVERT_ALLOW_OTHER_CORPORA:-0}
 allow_direct_fixture=${NATIVE_CONVERT_TEST_ALLOW_DIRECT_RUNNER:-0}
+skip_global_writers=${NATIVE_CONVERT_TEST_SKIP_GLOBAL_WRITERS:-0}
 minimum_free_kib=${NATIVE_CONVERT_MIN_FREE_KIB:-10485760}
 minimum_available_kib_per_job=${NATIVE_CONVERT_MIN_AVAILABLE_KIB_PER_JOB:-8388608}
 meminfo_path=${NATIVE_CONVERT_TEST_MEMINFO:-/proc/meminfo}
@@ -52,6 +53,8 @@ jobs=$(normalize_bounded_uint "$jobs" 8) \
     || fail 'NATIVE_CONVERT_ALLOW_OTHER_CORPORA must be 0 or 1'
 [[ "$allow_direct_fixture" == 0 || "$allow_direct_fixture" == 1 ]] \
     || fail 'NATIVE_CONVERT_TEST_ALLOW_DIRECT_RUNNER must be 0 or 1'
+[[ "$skip_global_writers" == 0 || "$skip_global_writers" == 1 ]] \
+    || fail 'NATIVE_CONVERT_TEST_SKIP_GLOBAL_WRITERS must be 0 or 1'
 [[ "$minimum_free_kib" =~ ^[0-9]+$ ]] \
     || fail 'NATIVE_CONVERT_MIN_FREE_KIB must be an unsigned integer'
 minimum_free_kib=$(normalize_bounded_uint "$minimum_free_kib" 9223372036854775807) \
@@ -223,10 +226,13 @@ processes_matching() {
 # corpus. The global process inventory is necessarily observational because
 # legacy producers have no shared cross-corpus admission lock; use it only as
 # a resource-contention guard, and record any explicit waiver in provenance.
+# A fixture corpus in a temporary directory waives it (SKIP_GLOBAL_WRITERS):
+# on a shared build host another agent's copy sync matches, and that is not
+# something the fixture can wait for.
 target_writers=$(processes_matching target)
 [[ -z "$target_writers" ]] \
     || fail "target corpus still has an active writer:\n$target_writers"
-if (( allow_other_corpora == 0 )); then
+if (( allow_other_corpora == 0 )) && (( skip_global_writers == 0 )); then
     global_writers=$(processes_matching global)
     [[ -z "$global_writers" ]] \
         || fail "capture/conversion activity is not globally drained:\n$global_writers"
@@ -358,6 +364,7 @@ metadata="$work_dir/provenance.env"
     printf 'RUNNER_TRUST_SHA256=%s\n' "$runner_trust_sha"
     printf 'RUNNER_IS_BUNDLE=%s\n' "$runner_is_bundle"
     printf 'TEST_ALLOW_DIRECT_RUNNER=%s\n' "$allow_direct_fixture"
+    printf 'TEST_SKIP_GLOBAL_WRITERS=%s\n' "$skip_global_writers"
     printf 'NATIVE_CONVERSION_PROTOCOL=%s\n' "$native_conversion_protocol"
     printf 'RUNNER_EXEC=%q\n' "$runner_exec"
     printf 'WRAPPER_SHA256=%s\n' "$wrapper_sha"
