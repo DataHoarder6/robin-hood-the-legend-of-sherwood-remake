@@ -83,18 +83,35 @@ mkdir -p ~/$remote_root
 EOF
 
     # `--no-times` after `-a`: a changed file must arrive with a mtime *now*, not
-    # the mtime it had in the worktree. Cargo decides freshness by comparing a
-    # crate's file times with the fingerprint of its last build, so a file that
-    # is new in content but older in time (a merge commit's checkout is older
-    # than the build that followed it) reads as fresh and the stale rlib is
-    # linked — measured 2026-11-18: the merged engine file existed, the build
-    # insisted `transition_budget` did not. `--checksum` keeps the quick-check
-    # exact, so unchanged files keep their old mtime and are not recompiled.
-    rsync -a --no-times --checksum --delete \
+    # the mtime it had in the worktree. `--checksum` keeps the quick-check exact,
+    # so unchanged files keep their old mtime and are not recompiled, and the
+    # itemized output names exactly the files whose content changed.
+    #
+    # Cargo decides freshness by mtime, and this workspace keeps a copy of each
+    # crate's rmeta under `target/<profile>/build/<crate>/<hash>/out`. A file
+    # whose content is new but whose time is older than the build that followed
+    # it — a merge commit's checkout — therefore reads as fresh and the stale
+    # copy is linked: measured 2026-11-18, the engine file defined
+    # `transition_budget` while the build insisted it did not, on three gates in
+    # a row. So the copy's build state for every crate whose tree changed is
+    # purged, and mtime can no longer decide.
+    changed_crates=$(rsync -a --no-times --checksum --delete --itemize-changes \
         --exclude target \
         --exclude .worktrees \
         --exclude .git \
-        "$repository/" "$host:$remote_dir/"
+        "$repository/" "$host:$remote_dir/" \
+        | awk '/^>f/ {print $2}' \
+        | awk -F/ '/^crates\// && NF > 1 {print $2}' \
+        | sort -u)
+    if [ -n "$changed_crates" ]; then
+        ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+for crate in $changed_crates; do
+  rm -rf "target/debug/build/\$crate" target/debug/.fingerprint/"\$crate"-*
+done
+EOF
+    fi
 
     ssh "$host" bash -s <<EOF
 set -euo pipefail
