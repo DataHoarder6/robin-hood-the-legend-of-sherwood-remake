@@ -82,28 +82,29 @@ case; `invariant` and `vocabulary` are not cells.
 | H14 | process | fault | a restarted native owner (`identity: "fresh"`) while its seat is parked and the roster full → the host refuses the claim (`… already has its configured 2 players`), exactly one admission is logged in the session, and the replacement exits non-zero. It never reads the rejection text: `reject_opening` writes a `Reject`, but the handler ends before the peer sees it and the client reports `read frame header: connection lost`, so decoding that frame belongs to a transport row. asserts: `log(contains=multiplayer session already has its configured 2 players,at_least=1)`; `log(contains=multiplayer client connected,count=1)`; `exit(peers=1,status=nonzero)` | `peer_sessions::claim_seat` |
 | H15 | core | fault | a live client that settles the mission end does not complete locally: adoption of the host snapshot is still absent when the run is read. asserts: `barrier(name=snapshot-adopt,state=absent)` | `.../game_session/terminal_debriefing.rs` |
 | H16 | core | fault | a mismatch seen during recovery starts no second reconnect. asserts: `barrier(name=snapshot-adopt,state=reached)`; `hash-equal(peers=1,every=25)`; `count(subject=reconnect,name=1,times=1)` | `.../game_session/frame_prepare/pre_tick.rs` |
-| H17 | transport | fault | a transition pending when a seat reconnects completes with the same id on both peers once that seat acks again. asserts: `transition(payload=CampaignExit(LevelSucceeded),acked=0,1,committed=true)`; `transition-id-equal(peers=0,1)` | `server.rs` pending-Prepare resend |
+| H17 | transport | fault | a transition pending when a seat reconnects completes with the same id on both peers once that seat acks again. asserts: `transition(payload=CampaignExit(LevelSucceeded),acked=0,1,committed=true)`; `transition-id-equal(peers=0,1)` | `.../multiplayer/native/server.rs` pending-Prepare resend |
 | H18 | transport | fault | content admission needs no seat: a client reaches `content-ready` and is later admitted with a seat. asserts: `barrier(name=content-ready,state=reached)`; `seat(seat=1,owns=true)` | `host_content_preflight_uses_no_seat_then_exact_resume_reconnects` |
 | H19 | process | fault | host exit with a seat admitted — the kill is anchored on the monotonic `begin_sim_frame`, the only fact that says the seat was admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row. asserts: `log(contains=giving up on reconnection,count=1)`; `exit(peers=1,status=nonzero)` | `.../multiplayer/client_session.rs` |
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
-row's JSON must declare, and `scenario_corpus.py --check` fails when one is
-missing. The prose before it states the same claim in words; the part the
-assertion vocabulary cannot tokenise — an engine-byte comparison, a discarded
-prediction generation, the reason a window is reachable — is proved by the
-row's named test, whose existence the gate checks. So the prose may carry detail
-the tokens do not, and may never carry an assertion the row's prover does not
-make.
+row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
+fails when one is missing. The prose before it states the same claim in words;
+the part the assertion vocabulary cannot tokenise — an engine-byte comparison, a
+discarded prediction generation, the reason a window is reachable — is proved by
+the row's named test, whose existence the gate checks. So the prose may carry
+detail the tokens do not, and may never carry an assertion the row's prover does
+not make.
 
 **Decision:** this matrix is the coverage contract, and every row names its
-prover in the scenario file's `proves` object — a Rust test (`module::test_name`)
-for a `core` or `transport` row, this suite for a `process` row. The corpus gate
-fails when a named test does not exist in the tree, when `proves.layer` is not
-the layer this table gives the row, and when a cell's `asserts:` clause is not
-what the row declares. It also resolves every `Hnn` cell to a scenario file, so
-a cell cannot claim coverage the corpus lacks; only the issue that decides a
-`#nn` outcome may add that scenario, and each out-of-scope reason is one line
-with a code pointer.
+prover in the scenario file's `proves` object — a Rust test
+(`crate::module::test_name`) for a `core` or `transport` row, this suite for a
+`process` row. The corpus gate fails when a named test does not exist in the
+tree, when it is `#[ignore]`d and so runs in no suite by default, when
+`proves.layer` is not the layer this table gives the row, and when a cell's
+`asserts:` clause is not what the row declares. It also resolves every `Hnn`
+cell to a scenario file, so a cell cannot claim coverage the corpus lacks; only
+the issue that decides a `#nn` outcome may add that scenario, and each
+out-of-scope reason is one line with a code pointer.
 
 ## 2. Scenario format and fault vocabulary (#7)
 
@@ -240,9 +241,10 @@ no assertion reads log wording.
 ## 4. Per-install state isolation (#18)
 
 Per peer today: `save`, `config`, `cache`, `data`, `runtime`, `cwd` under the
-evidence root plus a private HTTP port (`multiplayer_e2e.py`). That separates
-Linux peers only because `dirs::data_dir()` honours `XDG_DATA_HOME`; Windows has
-no such variable, and only the save root has an override.
+evidence root plus a private HTTP port
+(`scripts/validation/multiplayer_e2e.py`). That separates Linux peers only
+because `dirs::data_dir()` honours `XDG_DATA_HOME`; Windows has no such
+variable, and only the save root has an override.
 
 | Path | Owner | Honours today |
 | --- | --- | --- |
@@ -267,13 +269,13 @@ after a run and fails the scenario if either changed.
 
 ## 5. Fault-injected runs: site and failure reporting (#19)
 
-**Decision:** the process layer runs only on the provisioned Linux build host, in
-one loopback-only user/network namespace per scenario — never on a GitHub-hosted
-runner, where `native-lifecycle` also does not run (`docs/TESTING.md`). Core and
-transport rows are proved by the Rust tests their `proves` names: a core row may
-name an `engine` test, and every transport row names a `client-release` test,
-the only suite that compiles the transport (`crates/robin_rs/Cargo.toml`,
-`default = []`).
+**Decision:** the process layer runs only on the provisioned Linux build host,
+in one loopback-only user/network namespace around the whole run — never on a
+GitHub-hosted runner, where `native-lifecycle` also does not run
+(`docs/TESTING.md`). Core and transport rows are proved by the Rust tests their
+`proves` names: a core row may name an `engine` test, and every transport row
+names a `client-release` test, the only suite that compiles the transport
+(`crates/robin_rs/Cargo.toml`, `default = []`).
 
 Exit status: **0** every `expect` observed; **1** an assertion failed, or a
 selected row was refused because the suite cannot express its faults — either is
@@ -287,16 +289,16 @@ Evidence per run at `<evidence>/<scenario-id>/<run>/`: the expanded scenario,
 `summary.json`, `events.jsonl`, one log per peer, `hashes.json` — one entry per
 `/state` sample's compared frame and desync count, plus the host replay's path
 and SHA-256 (or the fact that the host died before writing one) — and the
-binary's SHA-256. A non-empty directory is refused, as `lifecycle_gate.py`
-already does. Each run is bounded twice, by the scenario's
-`budget_s` (default 600) and by the harness alarm; a barrier wait is bounded by
-the transition-watchdog deadline (#4) plus a margin, so exit 2 means a promised
-state was missed, never that the machine was slow. After the last fault a row is
-read one evidence window later, and a pending `exit` is never settled by silence:
-a dropped session is not noticed until the transport's idle timeout expires, then
-retries for the client's `RECONNECT_BUDGET` before it publishes the fatal that
-ends the process, so the settle deadline covers both plus the capped backoff and
-the same margin.
+binary's SHA-256. A non-empty directory is refused, as
+`scripts/validation/lifecycle_gate.py` already does. Each run is bounded twice,
+by the scenario's `budget_s` (default 600) and by the harness alarm; a barrier
+wait is bounded by the transition-watchdog deadline (#4) plus a margin, so exit
+2 means a promised state was missed, never that the machine was slow. After the
+last fault a row is read one evidence window later, and a pending `exit` is
+never settled by silence: a dropped session is not noticed until the transport's
+idle timeout expires, then retries for the client's `RECONNECT_BUDGET` before it
+publishes the fatal that ends the process, so the settle deadline covers both
+plus the capped backoff and the same margin.
 
 Faults that cannot run there: Windows-specific ones (WinDivert duplication,
 Known Folder paths, MSVC replay hashes), faults needing a real WAN (NAT rebinding,
