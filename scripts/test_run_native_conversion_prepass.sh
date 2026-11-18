@@ -83,6 +83,10 @@ run_prepass() {
     local selected_runner=${TEST_RUNNER:-$runner}
     local selected_sha=${TEST_RUNNER_SHA:-$runner_sha}
     shift 2
+    # These corpora are fixtures in a temporary directory, and the global
+    # process scan is a contention guard for a real capture host: on a shared
+    # build host it matches another agent's `rsync` into a different copy and
+    # fails this suite for a reason it cannot control.
     env FAKE_CONVERT_INVOCATIONS="$invocations" \
         FAKE_LOADER_INVOCATIONS="${FAKE_LOADER_INVOCATIONS:-}" \
         FAKE_MUTATE_BUNDLE_WRAPPER="${FAKE_MUTATE_BUNDLE_WRAPPER:-}" \
@@ -94,6 +98,7 @@ run_prepass() {
         NATIVE_CONVERT_MIN_AVAILABLE_KIB_PER_JOB=0 \
         NATIVE_CONVERT_TEST_ALLOW_DIRECT_RUNNER=1 \
         NATIVE_CONVERT_TEST_MEMINFO=/proc/meminfo \
+        NATIVE_CONVERT_TEST_SKIP_GLOBAL_WRITERS=1 \
         "$@" "$repository/scripts/run_native_conversion_prepass.sh" \
             "$workspace" "$corpus" "$selected_runner" "$selected_sha" "$audit"
 }
@@ -567,5 +572,29 @@ then
     printf 'test failure: accepted incorrect runner hash\n' >&2
     exit 1
 fi
+
+# The global drain guard still refuses a conversion while another process that
+# looks like capture activity is running, and the fixture waiver above is what
+# lets these cases ignore the host's other tenants.
+guard_corpus="$test_root/corpus-global-guard"
+guard_audit="$test_root/audit-global-guard"
+make_corpus "$guard_corpus"
+add_source "$guard_corpus" 01-guard
+# The guard matches on the command line, so the stand-in only has to be a
+# process that names capture's own `rsync` publishing shape.
+cp -- "$BASH" "$test_root/rsync-capture-guard"
+# The trailing command keeps bash from exec-ing `sleep` in place of itself,
+# which would drop the name the guard matches on.
+"$test_root/rsync-capture-guard" -c 'sleep 60; :' &
+guard_writer=$!
+if run_prepass "$guard_corpus" "$guard_audit" NATIVE_CONVERT_TEST_SKIP_GLOBAL_WRITERS=0
+then
+    kill "$guard_writer" 2>/dev/null || true
+    printf 'test failure: ignored a global capture writer\n' >&2
+    exit 1
+fi
+kill "$guard_writer" 2>/dev/null || true
+wait "$guard_writer" 2>/dev/null || true
+run_prepass "$guard_corpus" "$guard_audit" >/dev/null
 
 printf 'native conversion prepass tests passed\n'
