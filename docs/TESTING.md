@@ -738,7 +738,9 @@ one definition, and runs only the scenarios the contract forces onto this layer:
 a `log` or `exit` assertion, or `requires: ["graphical"]`. Every other row is
 listed in `summary.json` with its section-3 reason, and a selected row whose
 faults the layer cannot express is refused there by name — nothing is skipped
-silently and there is no skip path.
+silently and there is no skip path. A refusal is a layering decision, not a
+failed assertion: it is named with its reason in `refused` and does not count
+against the suite verdict, which covers exactly the rows that ran.
 
 Each peer is a real `robin` process with a fresh `ROBINHOOD_INSTALL_HOME`, its
 own HTTP port and its own `assets/core-datadir`, inside one loopback-only
