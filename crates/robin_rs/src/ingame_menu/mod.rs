@@ -13,7 +13,7 @@
 //! - [`briefings`] — renders the primary/secondary objective list in the
 //!   left half of the pause window.
 //! - [`yesno`] — the 400x200 modal confirmation.
-//! - [`mission_state`] — the mission start/won/lost transient popup with
+//! - [`mission_state`] — the mission start/won/lost/aborted transient popup with
 //!   zoom transition and Yes/No confirm.
 //! - [`debriefing`] — the post-mission parchment with justified text,
 //!   pagination and Restart / Load / OK buttons.
@@ -91,28 +91,65 @@ pub enum ModalScreenOutcome<T> {
 
 use robin_engine::game_operation::GameCode;
 
-/// Translate a `GameCode` reported by the mission into a human-readable
-/// title / body pair.  Placeholder text used until the real level
-/// debriefing table lookup is wired up.
+use resources::{MT_TTL_MISSION_ABORTED, MT_TTL_MISSION_LOST, MT_TTL_MISSION_WON};
+
+/// Which original mission-end page a mission presents.
 ///
-/// Note: for proper localisation, the caller should look the title up via
-/// [`resources::MenuText`] using [`resources::MT_TTL_MISSION_WON`] /
-/// [`resources::MT_TTL_MISSION_LOST`] / [`resources::MT_TTL_MISSION_ABORTED`].
-pub fn mission_state_text(code: GameCode) -> Option<(&'static str, &'static str)> {
-    match code {
-        GameCode::LevelSucceeded => Some((
-            "Mission Won",
-            "The Sheriff's men have been defeated and the mission is complete.",
-        )),
-        GameCode::LevelFailed => Some((
-            "Mission Lost",
-            "Robin's band has been defeated.  You may reload a save or try again.",
-        )),
-        GameCode::LevelInterrupted => Some((
-            "Mission Abandoned",
-            "The mission was interrupted before it could be completed.",
-        )),
-        _ => None,
+/// The retail menu table carries one title per outcome — "Mission won",
+/// "Mission lost" and "Mission aborted" at ids 24–26 — and an abandoned
+/// mission is the third, not a lost one. The level's win/lose debriefing
+/// tables are unchanged: an aborted mission reads the lose table, whose
+/// script-selected entry (`ChooseVictoryDefeatText`) carries the retreat
+/// text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MissionEndKind {
+    Won,
+    #[default]
+    Lost,
+    Aborted,
+}
+
+impl MissionEndKind {
+    pub fn from_exit_code(code: GameCode) -> Option<Self> {
+        match code {
+            GameCode::LevelSucceeded => Some(Self::Won),
+            GameCode::LevelFailed => Some(Self::Lost),
+            GameCode::LevelInterrupted => Some(Self::Aborted),
+            GameCode::LevelInProgress
+            | GameCode::LevelNext
+            | GameCode::LevelRestart
+            | GameCode::Quit
+            | GameCode::LevelLoad
+            | GameCode::LevelSave => None,
+        }
+    }
+
+    /// A surface that only distinguishes victory from defeat (scripted
+    /// debriefings, pseudo-mission reports) keeps its two-way meaning.
+    pub fn from_won(won: bool) -> Self {
+        if won { Self::Won } else { Self::Lost }
+    }
+
+    pub fn is_won(self) -> bool {
+        self == Self::Won
+    }
+
+    /// Retail menu-text id for the page title.
+    pub fn title_id(self) -> usize {
+        match self {
+            Self::Won => MT_TTL_MISSION_WON,
+            Self::Lost => MT_TTL_MISSION_LOST,
+            Self::Aborted => MT_TTL_MISSION_ABORTED,
+        }
+    }
+
+    /// Line shown in the mission-state confirmation before the debriefing.
+    pub fn popup_message(self) -> &'static str {
+        match self {
+            Self::Won => "Mission Won",
+            Self::Lost => "Mission Lost",
+            Self::Aborted => "Mission Abandoned",
+        }
     }
 }
 
@@ -121,10 +158,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mission_state_text_handles_all_end_codes() {
-        assert!(mission_state_text(GameCode::LevelSucceeded).is_some());
-        assert!(mission_state_text(GameCode::LevelFailed).is_some());
-        assert!(mission_state_text(GameCode::LevelInterrupted).is_some());
-        assert!(mission_state_text(GameCode::LevelInProgress).is_none());
+    fn mission_end_kind_comes_from_the_exit_code() {
+        assert_eq!(
+            MissionEndKind::from_exit_code(GameCode::LevelSucceeded),
+            Some(MissionEndKind::Won)
+        );
+        assert_eq!(
+            MissionEndKind::from_exit_code(GameCode::LevelFailed),
+            Some(MissionEndKind::Lost)
+        );
+        assert_eq!(
+            MissionEndKind::from_exit_code(GameCode::LevelInterrupted),
+            Some(MissionEndKind::Aborted)
+        );
+        assert_eq!(
+            MissionEndKind::from_exit_code(GameCode::LevelInProgress),
+            None
+        );
+    }
+
+    #[test]
+    fn mission_end_titles_are_the_three_retail_ids() {
+        assert_eq!(MissionEndKind::Won.title_id(), 24);
+        assert_eq!(MissionEndKind::Lost.title_id(), 25);
+        assert_eq!(MissionEndKind::Aborted.title_id(), 26);
+        assert!(!MissionEndKind::Aborted.is_won());
     }
 }

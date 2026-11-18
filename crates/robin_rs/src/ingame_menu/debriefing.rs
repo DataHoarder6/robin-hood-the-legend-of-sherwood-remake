@@ -20,6 +20,7 @@ use crate::gfx_types::GameEvent;
 use crate::native_font::Font;
 use crate::widget::FrameWnd;
 
+use super::MissionEndKind;
 use super::layout::{
     MENU_H, MENU_W, MenuRect, MenuTransform, TextAlign, TooltipState, WrappedLine, draw_background,
     render_clipped_text_in_box_font,
@@ -27,7 +28,7 @@ use super::layout::{
 use super::resources::{
     IngameMenuResources, MT_BTN_LOAD, MT_INFOBULLE_BUTTON_OK, MT_INFOBULLE_BUTTON_RECOMMENCER,
     MT_STR_DB_S06, MT_STR_DB_S08, MT_STR_DB_S09, MT_STR_DB_S10, MT_STR_DB_S11, MT_STR_DB_S13,
-    MT_STR_DB_S17, MT_STR_DB_S18, MT_TTL_MISSION_LOST, MT_TTL_MISSION_WON, MenuText,
+    MT_STR_DB_S17, MT_STR_DB_S18, MenuText,
 };
 use super::widget_bridge::{self, ModalInputState, ModalScreenIo, ScreenFrame, ScreenKey};
 
@@ -106,13 +107,8 @@ enum PageOutcome {
 }
 
 /// Resolve the debriefing title from the menu text table.
-fn debriefing_title(resources: &IngameMenuResources, won: bool) -> String {
-    let id = if won {
-        MT_TTL_MISSION_WON
-    } else {
-        MT_TTL_MISSION_LOST
-    };
-    resources.menu_text.get(id)
+fn debriefing_title(resources: &IngameMenuResources, end: MissionEndKind) -> String {
+    resources.menu_text.get(end.title_id())
 }
 
 /// What one debriefing flow shows and which buttons it offers.
@@ -128,7 +124,7 @@ pub struct DebriefingContent<'a> {
     /// render the stat panel.
     pub stat: Option<&'a MissionStat>,
     pub mission_length_seconds: u32,
-    pub won: bool,
+    pub end: MissionEndKind,
     pub restart_allowed: bool,
     pub quick_load_key: Option<winit::keyboard::KeyCode>,
     /// Restart only triggers a load request when a restart snapshot
@@ -182,7 +178,7 @@ impl DebriefingModalState {
             body,
             stat,
             mission_length_seconds,
-            won,
+            end,
             restart_allowed,
             quick_load_key,
             restart_snapshot_exists,
@@ -191,7 +187,7 @@ impl DebriefingModalState {
         let stat_text =
             stat.map(|s| format_mission_stat_text(s, mission_length_seconds, &resources.menu_text));
         Self {
-            title: debriefing_title(resources, won),
+            title: debriefing_title(resources, end),
             body,
             stat_text,
             phase: if start_at_stat {

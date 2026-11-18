@@ -2931,3 +2931,12 @@ cancel column after, and finish/abandon while a mission plays. Presence is
 derived from campaign state every frame (host, client and mid-Sherwood load
 alike), while a control whose gate is closed — mission requirements unmet, the
 hourglass transient, trading unavailable — stays on the rail drawn disabled.
+
+Abandoning a live mission ends the level as `LevelInterrupted` and now shows
+the original's third mission-end page: the retail "Mission aborted" title
+(menu-text id 26) on the mission-state popup and the debriefing parchment,
+with the level's lose-table text at the index the mission script selected
+(`ChooseVictoryDefeatText`). The dismissal path is the same as the won and
+lost pages — the campaign map reopens with the attempt recorded as
+`Interrupted`. Evidence and the retail strings are in
+[mission-end pages](slop/MISSION_END_PAGES.md).

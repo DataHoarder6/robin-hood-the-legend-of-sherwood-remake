@@ -1,4 +1,4 @@
-//! Mission won / lost / quit transient popup.
+//! Mission won / lost / aborted transient popup.
 //!
 //! Creates a 629x480 frame window with the small menu background
 //! inside, plays a scaling open/close transition from the source
@@ -8,11 +8,12 @@
 use crate::ingame_menu::widget_bridge::{ModalScreenIo, ScreenFrame};
 use crate::renderer::Renderer;
 
+use super::MissionEndKind;
 use super::layout::{
     MENU_H, MENU_W, MenuRect, MenuTransform, TextAlign, VAlign, draw_background,
     render_clipped_text_in_box_font,
 };
-use super::resources::{IngameMenuResources, MT_TTL_MISSION_LOST, MT_TTL_MISSION_WON};
+use super::resources::IngameMenuResources;
 use super::yesno::YesNoModalState;
 
 const TRANSITION_SPEED: f32 = 1.5;
@@ -41,10 +42,10 @@ enum MissionStatePopupPhase {
     Done,
 }
 
-/// One-frame state for the mission won/lost popup.
+/// One-frame state for the mission-end popup.
 pub struct MissionStatePopupState {
     message: String,
-    won: bool,
+    end: MissionEndKind,
     source_button: Option<(i32, i32, i32, i32)>,
     phase: MissionStatePopupPhase,
 }
@@ -54,20 +55,20 @@ impl MissionStatePopupState {
         renderer: &Renderer,
         resources: &IngameMenuResources,
         message: String,
-        won: bool,
+        end: MissionEndKind,
         source_button: Option<(i32, i32, i32, i32)>,
     ) -> Self {
         let phase = MissionStatePopupPhase::Opening(MissionStateTransition::new(
             renderer,
             resources,
             &message,
-            won,
+            end,
             source_button,
             TransitionDirection::Open,
         ));
         Self {
             message,
-            won,
+            end,
             source_button,
             phase,
         }
@@ -97,7 +98,7 @@ impl MissionStatePopupState {
                             io.renderer,
                             io.resources,
                             &self.message,
-                            self.won,
+                            self.end,
                             self.source_button,
                             TransitionDirection::Close,
                         ));
@@ -139,7 +140,7 @@ impl MissionStateTransition {
         renderer: &Renderer,
         resources: &IngameMenuResources,
         message: &str,
-        won: bool,
+        end: MissionEndKind,
         source_button: Option<(i32, i32, i32, i32)>,
         direction: TransitionDirection,
     ) -> Self {
@@ -166,12 +167,7 @@ impl MissionStateTransition {
             TransitionDirection::Close => 0.05,
         };
 
-        let title_id = if won {
-            MT_TTL_MISSION_WON
-        } else {
-            MT_TTL_MISSION_LOST
-        };
-        let title = resources.menu_text.get(title_id);
+        let title = resources.menu_text.get(end.title_id());
 
         Self {
             transform,

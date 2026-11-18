@@ -107,8 +107,19 @@ fn mission_completion_clock() -> (Option<i64>, Option<u64>) {
     )
 }
 
-fn debriefing_text_table_id(won: bool, win_table_id: i32, lose_table_id: i32) -> i32 {
-    if won { win_table_id } else { lose_table_id }
+/// An aborted mission is not a victory, so it reads the level's lose table.
+/// The mission script selected the retreat entry there through
+/// `ChooseVictoryDefeatText`, exactly as a scripted retreat does.
+fn debriefing_text_table_id(
+    end: crate::ingame_menu::MissionEndKind,
+    win_table_id: i32,
+    lose_table_id: i32,
+) -> i32 {
+    if end.is_won() {
+        win_table_id
+    } else {
+        lose_table_id
+    }
 }
 
 fn leaderboard_outcome(
@@ -191,7 +202,7 @@ struct TerminalDebriefingPage {
     restart_allowed: bool,
     restart_snapshot_exists: bool,
     mission_id: u32,
-    won: bool,
+    end: crate::ingame_menu::MissionEndKind,
     mission_stat: robin_engine::mission_stat::MissionStat,
 }
 
@@ -274,16 +285,16 @@ pub(super) struct TerminalDebriefingContext<'a> {
 
 fn terminal_debriefing_page(
     context: &mut TerminalDebriefingContext<'_>,
-    won: bool,
+    end: crate::ingame_menu::MissionEndKind,
     terminal_mission_id: u32,
 ) -> TerminalDebriefingPage {
     let index = context.manager.engine.mission().victory_defeat_id as usize;
     let kind = engine_player_command::ModalKind::FinalDebriefing {
-        text_id: engine_player_command::DebriefingTextId::from_outcome(won, index),
+        text_id: engine_player_command::DebriefingTextId::from_outcome(end.is_won(), index),
     };
     let mut body = if let Some(descriptors) = context.resources.level_descriptors.as_ref() {
         let table_id = debriefing_text_table_id(
-            won,
+            end,
             descriptors.debriefing.win_text_table_id,
             descriptors.debriefing.lose_text_table_id,
         );
@@ -300,7 +311,7 @@ fn terminal_debriefing_page(
         tracing::warn!("Debriefing text lookup: level descriptors unavailable");
         "No dynamic resources for this level...".to_string()
     };
-    if won
+    if end.is_won()
         && context
             .host
             .frontend
@@ -328,7 +339,7 @@ fn terminal_debriefing_page(
         restart_allowed,
         restart_snapshot_exists,
         mission_id: terminal_mission_id,
-        won,
+        end,
         mission_stat: context.manager.engine.mission_stat().clone(),
     }
 }
@@ -368,7 +379,9 @@ impl TerminalDebriefingState {
         leaderboard_preparation: super::leaderboard_runtime::MissionEndPreparation,
     ) -> Self {
         let popup_kind = engine_player_command::ModalKind::MissionState {
-            kind: engine_player_command::MissionStateModalKind::EndState { won: page.won },
+            kind: engine_player_command::MissionStateModalKind::EndState {
+                won: page.end.is_won(),
+            },
         };
         let resources = context
             .resources
@@ -380,14 +393,14 @@ impl TerminalDebriefingState {
                 &context.presentation.renderer,
                 resources,
                 popup_title.clone(),
-                page.won,
+                page.end,
                 None,
             ));
         Self {
             popup_dismissal: ModalDismissalGate::default(),
             final_dismissal: ModalDismissalGate::default(),
             decisions: super::session_policy::TerminalDecisionOrder::new(
-                page.won,
+                page.end.is_won(),
                 match page.kind {
                     engine_player_command::ModalKind::FinalDebriefing { text_id } => text_id,
                     _ => unreachable!("terminal page identity"),
@@ -450,7 +463,7 @@ impl TerminalDebriefingState {
                 body: self.page.body.clone(),
                 stat: Some(&self.page.mission_stat),
                 mission_length_seconds: self.page.mission_length,
-                won: self.page.won,
+                end: self.page.end,
                 restart_allowed: self.page.restart_allowed,
                 quick_load_key: self.page.quick_load_key,
                 restart_snapshot_exists: self.page.restart_snapshot_exists,
@@ -886,7 +899,7 @@ impl TerminalDebriefingState {
                             body: body.clone(),
                             stat: Some(&self.page.mission_stat),
                             mission_length_seconds: self.page.mission_length,
-                            won: self.page.won,
+                            end: self.page.end,
                             restart_allowed: self.page.restart_allowed,
                             quick_load_key: self.page.quick_load_key,
                             restart_snapshot_exists: self.page.restart_snapshot_exists,
@@ -1046,7 +1059,8 @@ fn settle_terminal_debriefing(
         return TerminalDebriefingProgress::Complete;
     }
 
-    let won = exit_code == GameCode::LevelSucceeded;
+    let end = crate::ingame_menu::MissionEndKind::from_exit_code(exit_code)
+        .unwrap_or_else(|| panic!("terminal debriefing received non-terminal {exit_code:?}"));
     let outcome = leaderboard_outcome(exit_code).unwrap_or_else(|| {
         panic!("terminal debriefing received non-attempt operation {exit_code:?}")
     });
@@ -1067,7 +1081,7 @@ fn settle_terminal_debriefing(
             context.manager.engine.sim_config(),
         )
         .unwrap_or_else(|error| panic!("mission-end leaderboard capture failed: {error}"));
-    let page = terminal_debriefing_page(context, won, terminal_mission_id);
+    let page = terminal_debriefing_page(context, end, terminal_mission_id);
     let state = TerminalDebriefingState::new(
         context,
         exit_code,
@@ -1142,8 +1156,8 @@ pub(super) fn drive_tick_exit_modals(
         context.manager.engine.sim_config().difficulty,
         context.manager.engine.campaign().mission_attempt_sequence,
     );
-    let popup_title =
-        crate::ingame_menu::mission_state_text(exit_code).map(|(title, _)| title.to_owned());
+    let popup_title = crate::ingame_menu::MissionEndKind::from_exit_code(exit_code)
+        .map(|end| end.popup_message().to_owned());
     tracing::info!(
         ?exit_code,
         local_seat = ?context.host.transport.local_seat(),
@@ -1185,7 +1199,7 @@ mod tests {
                 restart_allowed: false,
                 restart_snapshot_exists: false,
                 mission_id: 1,
-                won: true,
+                end: crate::ingame_menu::MissionEndKind::Won,
                 mission_stat: Default::default(),
             },
             phase: TerminalDebriefingPhase::AwaitingMissionAuthority,
@@ -1669,8 +1683,60 @@ mod tests {
 
     #[test]
     fn terminal_text_table_follows_win_loss_outcome() {
-        assert_eq!(debriefing_text_table_id(true, 100, 200), 100);
-        assert_eq!(debriefing_text_table_id(false, 100, 200), 200);
+        use crate::ingame_menu::MissionEndKind;
+        assert_eq!(debriefing_text_table_id(MissionEndKind::Won, 100, 200), 100);
+        assert_eq!(
+            debriefing_text_table_id(MissionEndKind::Lost, 100, 200),
+            200
+        );
+        // An abandoned mission reads the lose table: the script's
+        // `ChooseVictoryDefeatText` picks the retreat entry there.
+        assert_eq!(
+            debriefing_text_table_id(MissionEndKind::Aborted, 100, 200),
+            200
+        );
+    }
+
+    #[test]
+    fn aborted_page_dismissal_returns_to_the_campaign() {
+        use crate::ingame_menu::MissionEndKind;
+        use robin_engine::player_command::{
+            DebriefingTextId, DialogResult, MissionStateModalKind, ModalKind,
+        };
+
+        // The abandon command ends the level as `LevelInterrupted`, which is
+        // its own page. Missions that define an abandoned variant select the
+        // lose table's retreat entry from `Finalize(abandoned=1)`.
+        let end = MissionEndKind::from_exit_code(GameCode::LevelInterrupted).unwrap();
+        assert_eq!(end, MissionEndKind::Aborted);
+        assert_eq!(debriefing_text_table_id(end, 100, 200), 200);
+        let text_id = DebriefingTextId::from_outcome(end.is_won(), 1);
+
+        let mut decisions =
+            super::super::session_policy::TerminalDecisionOrder::new(end.is_won(), text_id);
+        let popup = decisions.current_kind().unwrap();
+        assert_eq!(
+            popup,
+            ModalKind::MissionState {
+                kind: MissionStateModalKind::EndState { won: false },
+            }
+        );
+        decisions
+            .accept(&popup, DialogResult::Completed)
+            .expect("mission-state page dismissal");
+        let page = decisions.current_kind().unwrap();
+        decisions
+            .accept(&page, DialogResult::Completed)
+            .expect("debriefing page dismissal");
+        assert_eq!(decisions.current_kind(), None);
+
+        // Dismissing the aborted page settles on Continue: the session loop
+        // keeps the `LevelInterrupted` outcome and reopens the campaign map.
+        let settled = final_debriefing_outcome_from_replay(DialogResult::Completed);
+        assert_eq!(
+            terminal_debriefing_action(&settled, 7),
+            TerminalDebriefingAction::Continue
+        );
     }
 
     #[test]
