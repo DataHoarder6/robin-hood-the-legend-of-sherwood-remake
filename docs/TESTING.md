@@ -105,6 +105,18 @@ deliberately red branch. Review branches are not gated; the push that lands them
 is. GitHub Actions is not part of this: no push in this repository has ever
 produced a run (#26), so a workflow gate would be decoration.
 
+This repository does not land through the estate's `land` tool, for two
+structural reasons: its `origin` is the upstream project, which only takes pull
+requests, while the integration branch is `main` on the `fork` remote; and the
+gate needs the build host's warm copies plus the licensed game data that the
+data-gated suites read, which the estate gate host does not carry. `land` also
+insists on a branch (never a detached head) and on `origin/main` as the target,
+so invoking it here would gate one tree and push another repository. The path
+above — a worktree per task, one gated push of `HEAD` to `refs/heads/main` on
+`fork` — is the equivalent and the one every suite here is sized for. Revisit if
+the fork becomes the fork-of-record for `land` and the gate host gains the game
+data.
+
 CPU parity replay needs engine-owned timing separately from licensed game data:
 `original_parity_replay --core-datadir /path/to/assets/core-datadir TRACE`.
 The development default is `assets/core-datadir` relative to the invocation
