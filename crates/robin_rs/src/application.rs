@@ -80,9 +80,15 @@ impl ApplicationServices {
             error
         });
         #[cfg(not(target_arch = "wasm32"))]
-        let recording_index = crate::mission_replays::RecordingIndex::native(
-            crate::mission_replays::default_directory(),
-        );
+        let recording_index = match crate::mission_replays::default_directory() {
+            Some(directory) => crate::mission_replays::RecordingIndex::native(directory),
+            None => {
+                tracing::warn!(
+                    "no install directory for replays; attempt links and their background scan are unavailable"
+                );
+                crate::mission_replays::RecordingIndex::disabled()
+            }
+        };
         #[cfg(target_arch = "wasm32")]
         let recording_index = crate::mission_replays::RecordingIndex::disabled();
         Self {

@@ -9,6 +9,13 @@
 //! save root alone; `ROBINHOOD_MODS_DIR` belongs to the mod pack and is not
 //! install state.
 //!
+//! Every accessor here has the same contract: `None` when the platform exposes
+//! no data directory, no override was given, and `ROBINHOOD_SAVE_DIR` (for the
+//! save root only) is unset. A caller either has an install root or an explicit
+//! absence to report; no accessor invents a relative path in its place. Android
+//! has a root because its launcher sets `ROBINHOOD_INSTALL_HOME`; the browser
+//! has none.
+//!
 //! No other module may call `dirs::data_dir()`: the source-scoped test at the
 //! bottom of this file fails the crate when one does.
 
@@ -30,14 +37,13 @@ fn install_root() -> Option<PathBuf> {
 /// Root holding `profiles.json`, `keyconfigs.json`, `language.json` and one
 /// `Profile_NNN/` directory per player profile.
 ///
-/// `ROBINHOOD_SAVE_DIR` overrides this directory, and only this one.
-pub fn save_root() -> PathBuf {
+/// `ROBINHOOD_SAVE_DIR` overrides this directory, and only this one, so it is
+/// also the one accessor that can name a root while no install root exists.
+pub fn save_root() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("ROBINHOOD_SAVE_DIR") {
-        return PathBuf::from(dir);
+        return Some(PathBuf::from(dir));
     }
-    install_root()
-        .map(|root| root.join("saves"))
-        .unwrap_or_else(|| PathBuf::from("Data/Savegame/default"))
+    install_root().map(|root| root.join("saves"))
 }
 
 /// Durable Ed25519 seed shared by the leaderboard signer and the multiplayer
@@ -46,18 +52,16 @@ pub fn identity_key_path() -> Option<PathBuf> {
     install_root().map(|root| root.join("multiplayer_identity.key"))
 }
 
-/// Directory holding recorded `*.mission` replays.
-pub fn replay_directory() -> PathBuf {
-    install_root()
-        .map(|root| root.join("replays"))
-        .unwrap_or_else(|| PathBuf::from("Data/Replays"))
+/// Directory holding recorded `*.mission` replays. `None` when no install root
+/// exists.
+pub fn replay_directory() -> Option<PathBuf> {
+    install_root().map(|root| root.join("replays"))
 }
 
-/// Directory holding one attempt link per completed mission attempt.
-pub fn attempt_directory() -> PathBuf {
-    install_root()
-        .map(|root| root.join("replays").join("attempts"))
-        .unwrap_or_else(|| PathBuf::from("Data/Replays/attempts"))
+/// Directory holding one attempt link per completed mission attempt. `None`
+/// when no install root exists.
+pub fn attempt_directory() -> Option<PathBuf> {
+    install_root().map(|root| root.join("replays").join("attempts"))
 }
 
 /// Queue directory for captured diagnostics. `None` when no install root
@@ -117,9 +121,12 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         set_both(Some(home.path()), None);
 
-        assert_eq!(save_root(), home.path().join("saves"));
-        assert_eq!(replay_directory(), home.path().join("replays"));
-        assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
+        assert_eq!(save_root(), Some(home.path().join("saves")));
+        assert_eq!(replay_directory(), Some(home.path().join("replays")));
+        assert_eq!(
+            attempt_directory(),
+            Some(home.path().join("replays/attempts"))
+        );
         assert_eq!(report_directory(), Some(home.path().join("reports")));
         assert_eq!(
             session_diagnostics_directory(),
@@ -141,9 +148,12 @@ mod tests {
         let saves = tempfile::tempdir().unwrap();
         set_both(Some(home.path()), Some(saves.path()));
 
-        assert_eq!(save_root(), saves.path());
-        assert_eq!(replay_directory(), home.path().join("replays"));
-        assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
+        assert_eq!(save_root(), Some(saves.path().to_owned()));
+        assert_eq!(replay_directory(), Some(home.path().join("replays")));
+        assert_eq!(
+            attempt_directory(),
+            Some(home.path().join("replays/attempts"))
+        );
         assert_eq!(report_directory(), Some(home.path().join("reports")));
         assert_eq!(
             session_diagnostics_directory(),
@@ -163,9 +173,11 @@ mod tests {
         let _guard = guard();
         set_both(None, None);
         let Some(data_dir) = dirs::data_dir() else {
-            assert_eq!(save_root(), PathBuf::from("Data/Savegame/default"));
-            assert_eq!(replay_directory(), PathBuf::from("Data/Replays"));
-            assert_eq!(attempt_directory(), PathBuf::from("Data/Replays/attempts"));
+            // One absence, reported the same way by every accessor: no caller
+            // gets a relative path invented for it.
+            assert_eq!(save_root(), None);
+            assert_eq!(replay_directory(), None);
+            assert_eq!(attempt_directory(), None);
             assert_eq!(report_directory(), None);
             assert_eq!(session_diagnostics_directory(), None);
             assert_eq!(datadir_file(), None);
@@ -173,9 +185,9 @@ mod tests {
             return;
         };
         let base = data_dir.join("robin_hood");
-        assert_eq!(save_root(), base.join("saves"));
-        assert_eq!(replay_directory(), base.join("replays"));
-        assert_eq!(attempt_directory(), base.join("replays/attempts"));
+        assert_eq!(save_root(), Some(base.join("saves")));
+        assert_eq!(replay_directory(), Some(base.join("replays")));
+        assert_eq!(attempt_directory(), Some(base.join("replays/attempts")));
         assert_eq!(report_directory(), Some(base.join("reports")));
         assert_eq!(
             session_diagnostics_directory(),
@@ -186,6 +198,19 @@ mod tests {
             identity_key_path(),
             Some(base.join("multiplayer_identity.key"))
         );
+    }
+
+    #[test]
+    fn save_dir_alone_names_the_save_root_without_an_install_root() {
+        let _guard = guard();
+        let saves = tempfile::tempdir().unwrap();
+        set_both(None, Some(saves.path()));
+
+        // The documented exception: the save root's own override does not need
+        // an install root behind it.
+        assert_eq!(save_root(), Some(saves.path().to_owned()));
+
+        set_both(None, None);
     }
 
     /// The override is only as good as its exclusivity: a module that resolves

@@ -337,7 +337,8 @@ fn stage_recording_link(
     Ok(file)
 }
 
-pub(crate) fn default_directory() -> PathBuf {
+/// Attempt links live beside the replays; `None` when no install root exists.
+pub(crate) fn default_directory() -> Option<PathBuf> {
     crate::install_home::attempt_directory()
 }
 

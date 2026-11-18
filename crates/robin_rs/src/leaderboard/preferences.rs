@@ -256,16 +256,12 @@ fn is_exact_loopback(url: &url::Url) -> bool {
 }
 
 pub fn load() -> Result<LeaderboardPreferences, LeaderboardPreferencesError> {
+    let path = display_path()?;
     let Some(encoded) = read_store()? else {
         return Ok(LeaderboardPreferences::default());
     };
-    let preferences =
-        serde_json::from_str::<LeaderboardPreferences>(&encoded).map_err(|source| {
-            LeaderboardPreferencesError::Decode {
-                path: display_path(),
-                source,
-            }
-        })?;
+    let preferences = serde_json::from_str::<LeaderboardPreferences>(&encoded)
+        .map_err(|source| LeaderboardPreferencesError::Decode { path, source })?;
     preferences.validate()?;
     Ok(preferences)
 }
@@ -277,7 +273,7 @@ pub fn persist(preferences: &LeaderboardPreferences) -> Result<(), LeaderboardPr
     persist_store(&encoded)
 }
 
-fn display_path() -> PathBuf {
+fn display_path() -> Result<PathBuf, super::store::StoreError> {
     super::store::display_path(PREFERENCES_FILE, BROWSER_PREFERENCES_KEY)
 }
 

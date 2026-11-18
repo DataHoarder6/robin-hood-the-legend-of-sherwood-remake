@@ -36,7 +36,8 @@ pub(crate) struct ReplayEvidence {
 
 /// The most recently modified replay, which is the mission that just stopped.
 pub(crate) fn newest_replay() -> Option<ReplayEvidence> {
-    let (modified, path) = std::fs::read_dir(crate::install_home::replay_directory())
+    let directory = crate::install_home::replay_directory()?;
+    let (modified, path) = std::fs::read_dir(directory)
         .ok()?
         .filter_map(Result::ok)
         .map(|entry| entry.path())

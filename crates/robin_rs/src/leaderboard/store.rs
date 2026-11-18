@@ -22,25 +22,33 @@ pub enum StoreError {
     #[cfg(target_arch = "wasm32")]
     #[error("browser leaderboard storage unavailable: {0}")]
     Browser(String),
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error("no install directory for the leaderboard store {file}")]
+    DirectoryMissing { file: String },
 }
 
-pub(super) fn display_path(file: &str, browser_key: &str) -> PathBuf {
+pub(super) fn display_path(file: &str, browser_key: &str) -> Result<PathBuf, StoreError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = browser_key;
-        crate::save_file::default_save_directory().join(file)
+        crate::save_file::default_save_directory()
+            .map(|directory| directory.join(file))
+            .ok_or_else(|| StoreError::DirectoryMissing {
+                file: file.to_owned(),
+            })
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = file;
-        PathBuf::from(browser_key)
+        // A browser store's "path" is its local-storage key, for diagnostics.
+        Ok(PathBuf::from(browser_key))
     }
 }
 
 pub(super) fn read(file: &str, browser_key: &str) -> Result<Option<String>, StoreError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let path = display_path(file, browser_key);
+        let path = display_path(file, browser_key)?;
         super::storage::read_private_utf8(&path).map_err(|source| StoreError::Read { path, source })
     }
     #[cfg(target_arch = "wasm32")]
@@ -61,7 +69,7 @@ pub(super) fn write(
 ) -> Result<(), StoreError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let path = display_path(file, browser_key);
+        let path = display_path(file, browser_key)?;
         super::storage::replace_private(&path, prefix, encoded)
             .map_err(|source| StoreError::Persist { path, source })
     }

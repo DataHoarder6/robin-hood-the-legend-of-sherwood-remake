@@ -1077,12 +1077,12 @@ pub mod special_slots {
 ///   1. `ROBINHOOD_SAVE_DIR` environment variable (for tests / portable installs)
 ///   2. `<install root>/saves` — `ROBINHOOD_INSTALL_HOME` when set, otherwise
 ///      the platform data directory's `robin_hood` folder
-///   3. Fallback: `./Data/Savegame/default` (for installations without
-///      a per-user profile)
 ///
-/// The returned directory is *not* created automatically; the caller
-/// creates it on first write via `fs::create_dir_all`.
-pub fn default_save_directory() -> PathBuf {
+/// `None` when neither names a directory; the caller reports the absence
+/// instead of falling back to a path relative to the process's cwd. The
+/// returned directory is *not* created automatically; the caller creates it on
+/// first write via `fs::create_dir_all`.
+pub fn default_save_directory() -> Option<PathBuf> {
     crate::install_home::save_root()
 }
 
@@ -1092,9 +1092,10 @@ pub fn profile_save_subdirectory(profile_id: u32) -> String {
     format!("Profile_{profile_id:03}")
 }
 
-/// Full save directory for a specific profile — `<root>/Profile_NNN`.
-pub fn save_directory_for_profile(profile_id: u32) -> PathBuf {
-    default_save_directory().join(profile_save_subdirectory(profile_id))
+/// Full save directory for a specific profile — `<root>/Profile_NNN`, or `None`
+/// when no install root exists.
+pub fn save_directory_for_profile(profile_id: u32) -> Option<PathBuf> {
+    default_save_directory().map(|root| root.join(profile_save_subdirectory(profile_id)))
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -2062,7 +2063,7 @@ mod tests {
         // Safety: the set_var call is serialized by ENV_LOCK.
         unsafe { std::env::set_var("ROBINHOOD_SAVE_DIR", dir.path()) };
         let resolved = default_save_directory();
-        assert_eq!(resolved, dir.path());
+        assert_eq!(resolved.as_deref(), Some(dir.path()));
         unsafe { std::env::remove_var("ROBINHOOD_SAVE_DIR") };
     }
 

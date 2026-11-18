@@ -729,7 +729,10 @@ pub(super) fn print_screen_request_from_modifiers(
 }
 
 fn write_print_screen_png(w: u32, h: u32, rgba: Vec<u8>) {
-    let dir = crate::save_file::default_save_directory();
+    let Some(dir) = crate::save_file::default_save_directory() else {
+        tracing::warn!("PrintScreen: no install directory to write the screenshot");
+        return;
+    };
     if let Err(err) = std::fs::create_dir_all(&dir) {
         tracing::warn!("PrintScreen: failed to create {}: {err:#}", dir.display());
         return;

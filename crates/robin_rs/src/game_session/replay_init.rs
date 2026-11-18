@@ -97,18 +97,22 @@ impl std::io::Write for TeeWriter {
     }
 }
 
+/// `None` when no install root exists; recording then needs an explicit
+/// `--record` path rather than a replay written next to the process.
 #[cfg(not(target_arch = "wasm32"))]
-fn default_replay_path() -> String {
-    let dir = crate::install_home::replay_directory();
+fn default_replay_path() -> Option<String> {
+    let dir = crate::install_home::replay_directory()?;
     // `%:z` → `+HH:MM`; we strip the inner colon so the whole stamp is
     // filesystem-safe (e.g. `2026-04-17T09-32-15+02-00`).
     let stamp = jiff::Zoned::now()
         .strftime("%Y-%m-%dT%H-%M-%S%:z-%3f")
         .to_string()
         .replace(':', "-");
-    dir.join(format!("{stamp}.mission"))
-        .to_string_lossy()
-        .into_owned()
+    Some(
+        dir.join(format!("{stamp}.mission"))
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
@@ -131,7 +135,9 @@ pub(super) fn restart_recording(
     let mirror = control.begin_recording();
     #[cfg(all(not(target_arch = "wasm32"), not(test)))]
     let primary: Box<dyn std::io::Write + Send> = {
-        let default_path = std::path::PathBuf::from(default_replay_path());
+        let default_path = default_replay_path()
+            .ok_or_else(|| std::io::Error::other("no install directory for replays"))?;
+        let default_path = std::path::PathBuf::from(default_path);
         let directory = default_path
             .parent()
             .expect("default replay path has a directory");
@@ -179,13 +185,14 @@ pub(super) fn init_recording(
     let replay_path = if is_playing_back {
         None
     } else {
-        Some(
-            args.config
-                .cli
-                .record
-                .clone()
-                .unwrap_or_else(default_replay_path),
-        )
+        match args.config.cli.record.clone() {
+            Some(path) => Some(path),
+            None => Some(default_replay_path().ok_or_else(|| {
+                MissionError::replay(
+                    "no install directory for replays; pass --record <path>".to_owned(),
+                )
+            })?),
+        }
     };
     #[cfg(target_arch = "wasm32")]
     let replay_path = if is_playing_back {
@@ -769,7 +776,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn default_replay_path_uses_three_digit_milliseconds() {
-        let path = std::path::PathBuf::from(default_replay_path());
+        let path = std::path::PathBuf::from(
+            default_replay_path().expect("a test environment with an install root"),
+        );
         let name = path
             .file_name()
             .expect("default replay path has a filename")

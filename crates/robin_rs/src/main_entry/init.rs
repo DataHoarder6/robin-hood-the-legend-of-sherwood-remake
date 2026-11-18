@@ -113,6 +113,11 @@ pub enum InitError {
         message: String,
     },
 
+    #[error(
+        "no install directory for player profiles\nSet ROBINHOOD_INSTALL_HOME or ROBINHOOD_SAVE_DIR to a writable folder."
+    )]
+    PlayerProfileDirectoryMissing,
+
     #[error("install shipping datadir: {source:#}")]
     PlatformShippingDatadirInstall {
         #[source]
@@ -144,7 +149,9 @@ impl InitError {
             | Self::ContentProfilePatch { .. }
             | Self::ContentAudioDurations { .. }
             | Self::ContentLocalization { .. } => InitErrorCategory::Content,
-            Self::PlayerProfileState { .. } => InitErrorCategory::PlayerProfile,
+            Self::PlayerProfileState { .. } | Self::PlayerProfileDirectoryMissing => {
+                InitErrorCategory::PlayerProfile
+            }
             Self::PlatformShippingDatadirInstall { .. } | Self::PlatformCoreOverlay { .. } => {
                 InitErrorCategory::Platform
             }
@@ -505,7 +512,8 @@ fn rust_init_finish(
         profiles.missions.len(),
         profiles.hth_weapons.len()
     );
-    let player_profile_directory = crate::save_file::default_save_directory();
+    let player_profile_directory = crate::save_file::default_save_directory()
+        .ok_or(InitError::PlayerProfileDirectoryMissing)?;
     let (player_profiles, player_profiles_regenerated) =
         load_player_profile_manager(&player_profile_directory);
     let key_configs = load_key_config_store(&player_profile_directory, player_profiles_regenerated);
@@ -881,6 +889,10 @@ mod tests {
                     save_directory: "/saves".into(),
                     message: "no active player profile".to_owned(),
                 },
+                InitErrorCategory::PlayerProfile,
+            ),
+            (
+                InitError::PlayerProfileDirectoryMissing,
                 InitErrorCategory::PlayerProfile,
             ),
             (
