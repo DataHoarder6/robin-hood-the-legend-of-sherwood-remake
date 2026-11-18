@@ -390,15 +390,23 @@ to be deployed.
 
 ## Remaining work
 
-- add longer network fault/reorder tests around reconnect and modal lanes;
+Fault and reorder coverage is a contract now, not a wish: the matrix in
+`multiplayer/HARNESS.md` §1 names every cell, the corpus in
+`scripts/validation/scenarios/` states each one, and `multiplayer-e2e` runs the
+process-layer rows with real signals on the build host on every gated push. A
+cell with no scenario fails the corpus gate, so coverage cannot quietly regress;
+what follows is what the matrix deliberately does not cover yet.
+
 - define a host viewport policy for split-screen or replay viewing from a
   non-local seat;
 - define dedicated-server seat ownership; a true-headless `--server` still
   owns and bootstraps seat 0 like an interactive host;
-- extend network fault/reorder coverage around Spellforge snapshot adoption;
-  admission already recomputes the package hash, journal usage/digest, and
-  combined snapshot budget before state hashing or VM attachment. The bounded
-  persistent journal participates in snapshot adoption and desync detection.
+- extend the matrix around Spellforge snapshot adoption beyond admission, which
+  already recomputes the package hash, journal usage/digest and combined
+  snapshot budget before state hashing or VM attachment, and whose bounded
+  persistent journal participates in snapshot adoption and desync detection;
+- Windows-side faults (WinDivert duplication, Known Folder paths, MSVC replay
+  hashes) wait on the parity gate in #21, which needs a Windows executor.
 
 ## What each seat records
 
