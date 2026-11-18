@@ -1,7 +1,6 @@
 {
   "schema": 1,
   "id": "H19",
-  "budget_s": 180,
   "proves": { "layer": "process", "runner": "scripts/validation/multiplayer_e2e.py" },
   "peers": [
     { "seat": 0, "role": "host" },
