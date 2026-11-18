@@ -42,6 +42,14 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
         printf 'pre-push: commit them first — the suites would otherwise compile a tree that is not pushed.\n' >&2
         exit 1
     fi
+    # Untracked files are not pushed either. They cannot silently change a file
+    # the commit carries, but a new module or scenario the gate compiles while
+    # nobody else has it is still a gate that proves the wrong tree, so say so.
+    untracked=$(git ls-files --others --exclude-standard)
+    if [ -n "$untracked" ]; then
+        printf 'pre-push: untracked files are in the tree the suites compile but not in the push:\n' >&2
+        printf '%s\n' "$untracked" | sed 's/^/pre-push:   /' >&2
+    fi
 done
 
 [ "$gated" = 1 ] || exit 0
