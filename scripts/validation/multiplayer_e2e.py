@@ -19,9 +19,10 @@ Exit status (section 5):
   0  every `expect` of every selected scenario was observed
   1  an assertion failed, or a selected scenario cannot be expressed at this
      layer; the scenario and the expectation are named in `summary.json`
-  2  the deadline was hit: a scenario budget, or a barrier wait bounded by the
-     transition-watchdog deadline plus a margin. Exit 2 means a promised state
-     was missed, never that the machine was slow
+  2  the deadline was hit: a scenario budget, a barrier wait bounded by the
+     transition-watchdog deadline plus a margin, or a settle window that covers
+     the transport's idle timeout and the client's reconnect budget. Exit 2
+     means a promised state was missed, never that the machine was slow
   3  a prerequisite is missing and nothing about the game was proved
 
 Nothing is installed and nothing is skipped.
@@ -85,11 +86,26 @@ BARRIER_DEADLINE_S = TRANSITION_WATCHDOG_S + WATCHDOG_MARGIN_S
 # driver calls the session settled. Log growth is not a progress signal: a
 # reconnecting peer writes a schedule line per second forever.
 QUIET_S = 25
-# After the last injected fault, a row whose promises are log evidence alone is
-# read one initial-handshake budget later: the killed or refused peer has had
-# its full chance to report. A reaction later than that belongs to a different
-# fault, not to this one.
+# After the last injected fault, every row is read one initial-handshake budget
+# later: the killed or refused peer has had its full chance to report, and a
+# negative promise ("the host released no BeginSim") is only worth reading after
+# the reaction it denies has had time to happen. A reaction later than that
+# belongs to a different fault, not to this one.
 SETTLE_S = 20
+# A peer whose session dropped keeps retrying for the client's reconnect budget
+# (.../multiplayer/client_session.rs RECONNECT_BUDGET) before it publishes the
+# fatal that ends the process, and each attempt may be asleep for the capped
+# backoff (MAX_RECONNECT_BACKOFF) when the budget runs out. The drop itself is
+# only noticed when the transport's idle timeout expires: noq's default
+# `max_idle_timeout` is 30 s (noq-proto TransportConfig::default), which iroh
+# keeps. Section 1's bounded reconnect is observable only after that whole
+# window, so the settle deadline covers it.
+TRANSPORT_IDLE_S = 30
+RECONNECT_BUDGET_S = 60
+RECONNECT_BACKOFF_MAX_S = 10
+SESSION_DEADLINE_S = max(BARRIER_DEADLINE_S,
+                         TRANSPORT_IDLE_S + RECONNECT_BUDGET_S
+                         + RECONNECT_BACKOFF_MAX_S + WATCHDOG_MARGIN_S)
 # A running session that has not advanced a frame for this long is holding a
 # story scroll: the driver presses Return on the real window again.
 SURFACE_RETRY_S = 4
@@ -125,6 +141,10 @@ CLIENT_CONTENT_PHASES = frozenset(
 CLIENT_SNAPSHOT_PHASES = frozenset({"peer_waiting_for_begin", "waiting_for_start", "running"})
 RUNNING_PHASES = frozenset({"running"})
 POSITIVE_ASSERTIONS = frozenset({"exit", "barrier", "final-operation"})
+# `exit` states a peer is gone: zero or nonzero. `running` states it is still
+# there, which is how a row says "the host survived this fault" — `/state`
+# evidence alone cannot, because the samples stop when the process does.
+EXIT_RUNNING = "running"
 
 # Section 5 evidence per run. `binary.sha256` is repeated inside each run so a
 # single scenario directory is a complete record on its own.
@@ -281,33 +301,45 @@ def evaluate_log(expectation, texts, peers):
 
     Section 2's shape carries no peer field, so the promise is about the
     session's aggregated output; per-peer counts are recorded beside the verdict
-    so a failure names who spoke.
+    so a failure names who spoke. `count` is exact; `at_least` is the floor a
+    line printed once per retry needs, because its exact number is a schedule.
     """
     needle = expectation.get("contains") or expectation.get("absent")
     counts = {peer["seat"]: texts.get(peer["seat"], "").count(needle) for peer in peers}
     observed = sum(counts.values())
+    if "at_least" in expectation:
+        wanted = expectation["at_least"]
+        ok = observed >= wanted
+        detail = f"`{needle}` appeared {observed} times in the peers' output, expected at least {wanted}"
+        return ok, detail, counts
     wanted = expectation["count"]
-    if "contains" in expectation:
-        detail = f"`{needle}` appeared {observed} times in the peers' output, expected {wanted}"
-        return observed == wanted, detail, counts
+    ok = observed == wanted
     detail = f"`{needle}` appeared {observed} times in the peers' output, expected {wanted}"
-    return observed == wanted, detail, counts
+    return ok, detail, counts
 
 
 def evaluate_barrier(expectation, record):
     name, state = expectation["barrier"], expectation["state"]
-    hits = barrier_samples(name, state, record["trace"])
-    ok = bool(hits) if state != "absent" else not hits
+    # `absent` is denied by any *reached* sample: `barrier_samples` only knows
+    # reached and released, so asking it for "absent" would count nothing and
+    # pass the row for free.
+    hits = barrier_samples(name, "reached" if state == "absent" else state, record["trace"])
+    ok = not hits if state == "absent" else bool(hits)
     detail = f"`{name}` {state}: {len(hits)} of {len(record['trace'])} /state samples matched"
     return ok, detail, hits
 
 
 def evaluate_exit(expectation, record):
-    peers = expectation["peers"]
-    nonzero = expectation["status"] == "nonzero"
-    observed = {seat: record["statuses"].get(seat) for seat in peers}
-    ok = all(status is not None and (status != 0) == nonzero for status in observed.values())
-    return ok, f"exit status {expectation['status']} for seats {peers}: {observed}", observed
+    seats = expectation["peers"]
+    status = expectation["status"]
+    observed = {seat: record["statuses"].get(seat) for seat in seats}
+    if status == EXIT_RUNNING:
+        ok = all(value is None for value in observed.values())
+    else:
+        nonzero = status == "nonzero"
+        ok = all(value is not None and (value != 0) == nonzero
+                 for value in observed.values())
+    return ok, f"exit status {status} for seats {seats}: {observed}", observed
 
 
 def evaluate_final_operation(expectation, record):
@@ -489,6 +521,7 @@ class Peer:
         self.install = self.run / "installs" / name
         self.cwd = self.run / "peers" / name / "cwd"
         self.log = self.run / "logs" / f"{name}.log"
+        self.logs = [self.log]
         self.samples = self.run / "samples" / f"{name}.jsonl"
         self.process = None
         self.port = free_port()
@@ -544,7 +577,13 @@ class Peer:
         return None if self.process is None else self.process.poll()
 
     def text(self):
-        return ANSI.sub("", self.log.read_text(errors="replace"))
+        """Every launch of this seat, in launch order.
+
+        A `restart` with a fresh identity writes a new log file, but the seat is
+        the same seat: an expectation about what "this peer" said must see the
+        process it was before the restart too.
+        """
+        return "".join(ANSI.sub("", path.read_text(errors="replace")) for path in self.logs)
 
     def size(self):
         return self.log.stat().st_size if self.log.exists() else 0
@@ -701,39 +740,44 @@ class ScenarioRun:
     def settle(self):
         """Wait until the scenario's promises can be judged, or it is a hang.
 
-        Positive expectations (`exit`, a reached barrier, a final operation) are
-        waited for; a row that promises only log evidence is read `SETTLE_S`
-        after its last fault, because a killed or refused peer has then had its
-        whole initial-handshake budget to report and a later line would belong
-        to another fault. When nothing moves any more an unmet promise is a
-        failed assertion (exit 1), not a hang: the deadline only fires while the
-        session is still moving and a barrier never releases.
+        Three rules meet here. The timeline comes first: while a fault is still
+        due, the session is not over. Then every row is read `SETTLE_S` after its
+        last fault, so the killed or refused peer has had its window even when a
+        promise already holds — a negative promise ("the host released no
+        BeginSim") is only worth reading after the reaction it denies has had
+        time to happen. Only then are positive expectations waited for; and while
+        one of them is an `exit`, the session is never called settled for being
+        quiet, because a peer whose drop opened its reconnect budget sits silent
+        for that budget before it publishes the fatal (section 1's bounded
+        reconnect). Every other unmet promise is a failed assertion (exit 1) once
+        nothing moves: the deadline only fires while the session is still moving
+        and a barrier never releases.
         """
         positives = [
             expectation for expectation in self.expanded["expect"]
             if expectation["assert"] in POSITIVE_ASSERTIONS
             and expectation.get("state") != "absent"
+            and not (expectation["assert"] == "exit"
+                     and expectation["status"] == EXIT_RUNNING)
         ]
-        deadline = time.monotonic() + BARRIER_DEADLINE_S
+        exit_pending = any(expectation["assert"] == "exit" for expectation in positives)
+        deadline = time.monotonic() + SESSION_DEADLINE_S
         while time.monotonic() < deadline:
             self.poll()
             self.dispatch_faults()
+            if self.faults or time.monotonic() - self.last_fault_at < SETTLE_S:
+                time.sleep(0.1)
+                continue
             if positives and all(self.holds(item) for item in positives):
                 self.events.event("settled", description="every positive expectation observed")
                 return
-            after_faults = not self.faults and time.monotonic() - self.last_fault_at >= SETTLE_S
-            if positives:
-                if after_faults and self.seconds_since_change() >= QUIET_S:
-                    self.events.event("settled", description="no peer is moving",
-                                      quiet_s=QUIET_S)
-                    return
-            elif after_faults:
-                self.events.event("settled", description="last fault's evidence window",
-                                  settle_s=SETTLE_S)
+            if not exit_pending and self.seconds_since_change() >= QUIET_S:
+                self.events.event("settled", description="no peer is moving",
+                                  quiet_s=QUIET_S)
                 return
             time.sleep(0.1)
         raise ScenarioDeadline(
-            f"timed out after {BARRIER_DEADLINE_S}s settling the session; "
+            f"timed out after {SESSION_DEADLINE_S}s settling the session; "
             f"{len(positives) - sum(self.holds(item) for item in positives)} "
             "positive expectation(s) never became observable"
         )
@@ -788,13 +832,17 @@ class ScenarioRun:
             raise Unprovable(f"fault verb `{verb}` is not implemented at the process layer")
 
     def restart(self, peer, fault):
-        """SIGKILL, then relaunch as a new process (section 2's process meaning).
+        """`SIGKILL`, then relaunch as a new process (section 2's process meaning).
 
         `identity: same` keeps the install home, so the transport identity key
         inside it is the same owner and the seat can be reclaimed; `fresh` gives
         the replacement a new install home, a new identity and no seat.
         """
-        stop_process_group(peer.process)
+        peer.signal(signal.SIGKILL, "corpus restart")
+        try:
+            peer.process.wait(timeout=10)
+        except subprocess.TimeoutExpired as error:
+            raise ScenarioDeadline(f"{peer.name} survived SIGKILL") from error
         self.events.event("peer_stopped", peer=peer.name, returncode=peer.exit_status())
         if fault["identity"] == "fresh":
             suffix = f"-fresh{peer.launches}"
@@ -808,6 +856,7 @@ class ScenarioRun:
             peer.cwd = self.run / "peers" / (peer.name + suffix) / "cwd"
             peer.name = peer.name + suffix
             peer.log = self.run / "logs" / f"{peer.name}.log"
+            peer.logs.append(peer.log)
             peer.samples = self.run / "samples" / f"{peer.name}.jsonl"
         self.activity.pop(peer.seat, None)
         peer.launch()
@@ -941,7 +990,7 @@ def run_scenario(identifier, expanded, options, evidence):
         signal.signal(signal.SIGINT, interrupted)
         signal.signal(signal.SIGTERM, interrupted)
         signal.signal(signal.SIGALRM, interrupted)
-        signal.alarm(int(expanded["defaults"].get("budget_s", DEFAULT_BUDGET_S)))
+        signal.alarm(int(expanded.get("budget_s", DEFAULT_BUDGET_S)))
         verify_client(options.binary, {"binary_sha256": summary["binary_sha256"]})
         scenario.start()
         results, failures = scenario.judge()
@@ -1075,10 +1124,10 @@ def main(argv=None):
         suite["error"] = f"{type(error).__name__}: {error}"
         suite["traceback"] = traceback.format_exc()
 
-    for item in refused:
-        suite["verdicts"][item["id"]] = "refused"
     hangs = sorted(identifier for identifier, document in suite["scenarios"].items()
                    if document["verdict"] == "hang")
+    # Section 5 counts selected scenarios only: a refused row never ran — its
+    # reason is in `refused`, beside `skipped` — so it cannot turn the suite red.
     suite["verdict"] = (
         "prerequisite-missing" if suite.get("prerequisites_missing")
         else "interrupted" if suite.get("interrupted")

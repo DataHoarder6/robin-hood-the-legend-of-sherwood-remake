@@ -201,6 +201,28 @@ class AssertionTest(unittest.TestCase):
             {"assert": "log", "contains": "handshake error", "count": 1}, record)
         self.assertFalse(ok)
 
+    def trace(self, multiplayer):
+        record = self.record({})
+        record["trace"] = [({"seat": 0, "role": "host"}, {"multiplayer": multiplayer})]
+        return record
+
+    def test_an_absent_barrier_is_denied_by_one_reached_sample(self):
+        reached = self.trace({"admission": "running", "begin_sim_frame": 0})
+        ok, detail, hits = suite.evaluate_expectation(
+            {"assert": "barrier", "barrier": "begin-sim", "state": "absent"}, reached)
+        self.assertFalse(ok, detail)
+        self.assertEqual(len(hits), 1)
+        waiting = self.trace({"admission": "host_waiting_for_begin", "begin_sim_frame": None})
+        ok, _, _ = suite.evaluate_expectation(
+            {"assert": "barrier", "barrier": "begin-sim", "state": "absent"}, waiting)
+        self.assertTrue(ok)
+
+    def test_frame_zero_is_a_reached_begin_sim(self):
+        record = self.trace({"admission": "waiting_for_start", "begin_sim_frame": 0})
+        ok, _, _ = suite.evaluate_expectation(
+            {"assert": "barrier", "barrier": "begin-sim", "state": "reached"}, record)
+        self.assertTrue(ok)
+
     def test_absent_counts_zero_and_fails_on_one_hit(self):
         record = self.record({0: "received Welcome\n", 1: ""})
         ok, _, _ = suite.evaluate_expectation(
@@ -210,6 +232,20 @@ class AssertionTest(unittest.TestCase):
             {"assert": "log", "absent": "Reject", "count": 0}, record)
         self.assertTrue(ok)
 
+    def test_at_least_is_a_floor_for_a_line_printed_per_retry(self):
+        record = self.record({0: "refused\n" * 33, 1: ""})
+        ok, _, counts = suite.evaluate_expectation(
+            {"assert": "log", "contains": "refused", "at_least": 1}, record)
+        self.assertTrue(ok)
+        self.assertEqual(counts, {0: 33, 1: 0})
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "log", "contains": "refused", "at_least": 34}, record)
+        self.assertFalse(ok)
+        self.assertIn("at least 34", detail)
+        ok, _, _ = suite.evaluate_expectation(
+            {"assert": "log", "contains": "absent-line", "at_least": 1}, record)
+        self.assertFalse(ok)
+
     def test_exit_status_must_be_nonzero_and_known(self):
         expectation = {"assert": "exit", "peers": [1], "status": "nonzero"}
         ok, _, _ = suite.evaluate_expectation(expectation, self.record({}, {0: 0, 1: 2}))
@@ -218,6 +254,15 @@ class AssertionTest(unittest.TestCase):
         self.assertFalse(ok)
         ok, _, _ = suite.evaluate_expectation(expectation, self.record({}, {0: 0, 1: None}))
         self.assertFalse(ok)
+
+    def test_running_exit_states_the_peer_is_still_there(self):
+        expectation = {"assert": "exit", "peers": [0], "status": "running"}
+        ok, _, _ = suite.evaluate_expectation(expectation, self.record({}, {0: None, 1: 2}))
+        self.assertTrue(ok)
+        for status in (0, 1, -9):
+            ok, _, _ = suite.evaluate_expectation(expectation,
+                                                  self.record({}, {0: status, 1: 2}))
+            self.assertFalse(ok)
 
     def test_final_operation_is_read_from_every_peer(self):
         latest = {

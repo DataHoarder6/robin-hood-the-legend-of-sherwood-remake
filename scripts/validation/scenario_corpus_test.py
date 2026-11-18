@@ -1,5 +1,9 @@
 """The corpus gate refuses anything the document does not admit."""
+from pathlib import Path
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import scenario_corpus as corpus
 
@@ -61,6 +65,18 @@ class CorpusValidationTests(unittest.TestCase):
         )
         self.assert_refused([broken, scenario("H02")], "unknown count subject")
 
+    def test_a_log_line_is_counted_exactly_or_with_a_floor(self):
+        floor = scenario("H01", expect=PROVEN + [
+            {"assert": "log", "contains": "refused", "at_least": 1}])
+        self.assertEqual(corpus.validate(DEFAULTS, corpus_of(floor, scenario("H02")), CONTRACT), [])
+        both = scenario("H01", expect=[{"assert": "log", "contains": "x", "count": 1,
+                                        "at_least": 1}])
+        self.assert_refused([both, scenario("H02")], "exactly one of count or at_least")
+        neither = scenario("H01", expect=[{"assert": "log", "contains": "x"}])
+        self.assert_refused([neither, scenario("H02")], "exactly one of count or at_least")
+        absent = scenario("H01", expect=[{"assert": "log", "absent": "x", "at_least": 1}])
+        self.assert_refused([absent, scenario("H02")], "absent states a zero count")
+
     def test_a_campaign_exit_carries_the_code_two_terminal_rows_differ_in(self):
         good = scenario(
             "H01",
@@ -109,6 +125,14 @@ class CorpusValidationTests(unittest.TestCase):
         expanded = corpus.expanded("H02", found, DEFAULTS, CONTRACT)
         self.assertEqual(expanded["expect"], PROVEN + child["expect"])
         self.assertEqual(expanded["faults"], [])  # the parent's faults are the child's own window
+
+    def test_budget_survives_expansion(self):
+        bounded = scenario("H01", budget_s=180)
+        expanded = corpus.expanded("H01", corpus_of(bounded), DEFAULTS, CONTRACT)
+        self.assertEqual(expanded["budget_s"], 180)
+        unbounded = corpus.expanded("H02", corpus_of(
+            scenario("H02", expect=PROVEN)), DEFAULTS, CONTRACT)
+        self.assertNotIn("budget_s", unbounded)
 
     def test_repository_corpus_matches_the_document(self):
         defaults, scenarios = corpus.load_corpus()
