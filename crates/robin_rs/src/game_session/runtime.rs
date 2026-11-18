@@ -3751,7 +3751,7 @@ mod tests {
             timeline.multiplayer.admission,
             MultiplayerAdmission::HostWaitingForBegin
         );
-        assert!(timeline.multiplayer.admission_paused(500));
+        assert!(timeline.multiplayer.admission_paused(500, 0).unwrap());
 
         timeline
             .apply_multiplayer_admission_events(&[MultiplayerAdmissionEvent::BeginSim {
@@ -3760,8 +3760,8 @@ mod tests {
             }])
             .expect("valid multiplayer admission");
 
-        assert!(timeline.multiplayer.admission_paused(999));
-        assert!(!timeline.multiplayer.admission_paused(1_000));
+        assert!(timeline.multiplayer.admission_paused(999, 0).unwrap());
+        assert!(!timeline.multiplayer.admission_paused(1_000, 0).unwrap());
         assert_eq!(
             timeline.multiplayer.admission,
             MultiplayerAdmission::Running
@@ -3798,8 +3798,8 @@ mod tests {
                 start_epoch_ms: 2_000,
             }
         );
-        assert!(timeline.multiplayer.admission_paused(1_999));
-        assert!(!timeline.multiplayer.admission_paused(2_000));
+        assert!(timeline.multiplayer.admission_paused(1_999, 0).unwrap());
+        assert!(!timeline.multiplayer.admission_paused(2_000, 0).unwrap());
     }
 
     #[test]
@@ -3849,15 +3849,15 @@ mod tests {
                 .take_due_comparisons(timeline.current_frame)
                 .is_empty()
         );
-        assert!(timeline.multiplayer.admission_paused(99));
+        assert!(timeline.multiplayer.admission_paused(99, 0).unwrap());
         timeline
             .apply_multiplayer_admission_events(&[MultiplayerAdmissionEvent::BeginSim {
                 frame: 35,
                 start_epoch_ms: 100,
             }])
             .expect("valid multiplayer admission");
-        assert!(timeline.multiplayer.admission_paused(99));
-        assert!(!timeline.multiplayer.admission_paused(100));
+        assert!(timeline.multiplayer.admission_paused(99, 0).unwrap());
+        assert!(!timeline.multiplayer.admission_paused(100, 0).unwrap());
     }
 
     #[test]
@@ -3971,8 +3971,8 @@ mod tests {
                 },
             ])
             .expect("valid multiplayer admission");
-        assert!(timeline.multiplayer.admission_paused(99));
-        assert!(!timeline.multiplayer.admission_paused(100));
+        assert!(timeline.multiplayer.admission_paused(99, 0).unwrap());
+        assert!(!timeline.multiplayer.admission_paused(100, 0).unwrap());
     }
 
     #[test]
@@ -3991,8 +3991,8 @@ mod tests {
                 },
             ])
             .expect("valid multiplayer admission");
-        assert!(timeline.multiplayer.admission_paused(100));
-        assert!(!timeline.multiplayer.admission_paused(200));
+        assert!(timeline.multiplayer.admission_paused(100, 0).unwrap());
+        assert!(!timeline.multiplayer.admission_paused(200, 0).unwrap());
     }
 
     #[test]
@@ -4007,7 +4007,7 @@ mod tests {
                 },
             ])
             .expect("valid multiplayer admission");
-        assert!(!timeline.multiplayer.admission_paused(10));
+        assert!(!timeline.multiplayer.admission_paused(10, 0).unwrap());
 
         timeline
             .apply_multiplayer_admission_events(&[MultiplayerAdmissionEvent::Disconnected])
@@ -4017,7 +4017,32 @@ mod tests {
             timeline.multiplayer.admission,
             MultiplayerAdmission::PeerWaitingForSnapshot
         );
-        assert!(timeline.multiplayer.admission_paused(11));
+        assert!(timeline.multiplayer.admission_paused(11, 0).unwrap());
+    }
+
+    #[test]
+    fn admission_phase_fails_once_its_budget_is_spent() {
+        let mut timeline = multiplayer_timeline(false);
+        assert_eq!(
+            timeline.multiplayer.admission,
+            MultiplayerAdmission::PeerWaitingForSnapshot
+        );
+        assert!(timeline.multiplayer.admission_paused(0, 1_000).unwrap());
+        // Still inside the budget: the peer may legitimately be loading.
+        assert!(
+            timeline
+                .multiplayer
+                .admission_paused(0, 1_000 + multiplayer_sync::ADMISSION_BUDGET_MS as u32 - 1)
+                .unwrap()
+        );
+        let error = timeline
+            .multiplayer
+            .admission_paused(0, 1_000 + multiplayer_sync::ADMISSION_BUDGET_MS as u32)
+            .expect_err("a phase that never progresses must fail the session");
+        assert!(
+            error.to_string().contains("no admission progress"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

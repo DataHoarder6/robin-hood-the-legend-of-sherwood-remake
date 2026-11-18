@@ -50,6 +50,10 @@ const INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const MAX_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 const RECONNECT_BACKOFF: Duration = Duration::from_millis(500);
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(10);
+/// Total time a dropped client may keep retrying before the session is
+/// declared gone. Without a cap the client retries forever and the player sits
+/// on a frozen frame instead of returning to the menu.
+pub(super) const RECONNECT_BUDGET: Duration = Duration::from_secs(60);
 
 // ─── Handle ──────────────────────────────────────────────────────
 
@@ -146,6 +150,8 @@ pub(super) struct ClientTimings {
     pub(super) initial_attempt: Duration,
     /// One whole reconnect attempt.
     pub(super) reconnect_attempt: Option<Duration>,
+    /// How long repeated reconnect attempts may continue after a drop.
+    pub(super) reconnect_budget: Duration,
     pub(super) post_content_welcome: Duration,
     pub(super) content_write: Option<Duration>,
     pub(super) content_chunk_idle: Duration,
@@ -608,6 +614,12 @@ async fn resolve_reconnect_prelude<T: ClientTransport>(
 
 // ─── Connection lifecycle ────────────────────────────────────────
 
+/// A dropped session may keep retrying until its budget is spent. A session
+/// that has not dropped has no budget open.
+fn reconnect_expired(opened: bool, waited: Duration, budget: Duration) -> bool {
+    opened && waited >= budget
+}
+
 /// Drive one connection: initial handshake and content admission, then each
 /// session until it ends, auto-reconnecting with exponential backoff. Returns
 /// when the game loop drops the outgoing queue, shutdown is requested, or a
@@ -716,6 +728,23 @@ pub(super) async fn run_client_io<T: ClientTransport>(
     }
 
     let mut backoff = RECONNECT_BACKOFF;
+    let mut reconnect_started: Option<web_time::Instant> = None;
+    // A drop opens the reconnect budget; a successful reconnect closes it.
+    let reconnected_too_long = |started: &Option<web_time::Instant>| {
+        reconnect_expired(
+            started.is_some(),
+            started.map(|started| started.elapsed()).unwrap_or_default(),
+            T::TIMINGS.reconnect_budget,
+        )
+    };
+    let give_up = |incoming: &Sender<NetEvent>| {
+        let error = MultiplayerError::Timeout {
+            phase: "reconnecting to the host".into(),
+            after: T::TIMINGS.reconnect_budget,
+        };
+        tracing::warn!(%error, "multiplayer: giving up on reconnection");
+        let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
+    };
     loop {
         match run_session(transport, session, outbound, &incoming).await {
             SessionEnd::Drop(reason) => {
@@ -727,10 +756,15 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                         "multiplayer: discarded outbound commands from abandoned prediction session"
                     );
                 }
+                reconnect_started.get_or_insert_with(web_time::Instant::now);
+                if reconnected_too_long(&reconnect_started) {
+                    give_up(&incoming);
+                    return;
+                }
                 if deliver_lifecycle(
                     &incoming,
                     [
-                        NetEvent::Note(format!("disconnected: {reason}; reconnecting...")),
+                        NetEvent::Note(format!("{reason}; reconnecting...")),
                         NetEvent::Disconnected,
                     ],
                 )
@@ -823,6 +857,7 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                                 );
                             }
                             backoff = RECONNECT_BACKOFF;
+                            reconnect_started = None;
                             break new_session;
                         }
                         Err(error) => ("content handshake", error),
@@ -830,6 +865,10 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                 }
                 Err(error) => ("transport", error),
             };
+            if reconnected_too_long(&reconnect_started) {
+                give_up(&incoming);
+                return;
+            }
             tracing::warn!("reconnect {failure_kind} failed: {error}; will retry in {backoff:?}");
             if sleep_or_cancel::<T::Timer>(transport.cancellation(), backoff).await {
                 return;
@@ -980,6 +1019,26 @@ pub(super) mod tests {
             frame: 9,
             start_epoch_ms: 12,
         }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn reconnect_budget_expires_only_after_a_drop_spends_it() {
+        assert!(
+            !reconnect_expired(false, Duration::from_secs(600), RECONNECT_BUDGET),
+            "a live session has no reconnect budget open"
+        );
+        assert!(!reconnect_expired(
+            true,
+            Duration::from_secs(59),
+            RECONNECT_BUDGET
+        ));
+        assert!(reconnect_expired(true, RECONNECT_BUDGET, RECONNECT_BUDGET));
+        assert!(reconnect_expired(
+            true,
+            Duration::from_secs(61),
+            RECONNECT_BUDGET
+        ));
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]

@@ -240,6 +240,11 @@ pub(super) fn sync_render_camera(frontend: &mut crate::host::HostFrontend) {
 /// Local UI state that can refuse, or answer, a scripted step request.
 pub(super) struct StepUiGates<'a> {
     pub(super) active_modal: &'a mut Option<ActiveModal>,
+    /// Where a step that ends the mission hands the mission-end page. A step can
+    /// produce a terminal tick, and the frame that follows presents it from here;
+    /// without a sink (headless) the step only reports the code.
+    pub(super) pending_terminal_debriefing:
+        Option<&'a mut Option<super::terminal_debriefing::PendingTerminalDebriefing>>,
     pub(super) terminal_debriefing:
         Option<&'a mut super::terminal_debriefing::TerminalDebriefingState>,
     pub(super) terminal_save_manager: Option<&'a crate::savegame::SaveGameManager>,
@@ -287,11 +292,13 @@ pub(super) fn drain_steps(
 ) {
     let StepUiGates {
         active_modal,
+        pending_terminal_debriefing,
         mut terminal_debriefing,
         terminal_save_manager,
         mission_ui_block_reason,
         mut session_modals,
     } = gates;
+    let mut pending_terminal_debriefing = pending_terminal_debriefing;
     if steps.is_empty() {
         return;
     }
@@ -307,6 +314,20 @@ pub(super) fn drain_steps(
         // Keep the response handle intact: every branch below consumes the
         // complete PendingStep when it replies.
         let kind = step.kind.clone();
+        // The page is settled by the next frame. Until it exists a step must not
+        // advance behind it; once it does, its typed dismissal path below owns
+        // the request.
+        if pending_terminal_debriefing
+            .as_deref()
+            .is_some_and(Option::is_some)
+            && terminal_debriefing.is_none()
+        {
+            step.respond_err(RpcError::unavailable_capability(
+                "mission ended; the mission-end page owns the session until it is dismissed"
+                    .to_owned(),
+            ));
+            continue;
+        }
         let mut modal_policy = match &kind {
             crate::http_server::StepKind::Forward { modal_policy, .. }
             | crate::http_server::StepKind::Back { modal_policy, .. }
@@ -315,6 +336,33 @@ pub(super) fn drain_steps(
             }
             crate::http_server::StepKind::SetPaused { .. } => None,
         };
+        // A mission-end terminal page owns the mission on every participant:
+        // queue the typed dismissal before any step policy runs, so a
+        // multiplayer client can acknowledge the page it is showing and the
+        // step never advances frames behind it.
+        if modal_policy.is_some()
+            && let Some(terminal) = terminal_debriefing.as_deref_mut()
+        {
+            let policy = modal_policy.as_mut().expect("checked above");
+            match queue_terminal_modal_dismissal(policy, terminal, host, terminal_save_manager) {
+                Err(error) => {
+                    step.respond_err(error);
+                    continue;
+                }
+                Ok(()) if host.transport.local_seat() != PlayerId::HOST => {
+                    // The client's modal tick publishes the acknowledgement;
+                    // a client may never advance the host's timeline.
+                    step.respond_ok(serde_json::json!({
+                        "direction": "terminal-modal-dismissal",
+                        "queued": true,
+                    }));
+                    continue;
+                }
+                // The host advances the frame that applies and publishes the
+                // queued decision; the step continues below.
+                Ok(()) => {}
+            }
+        }
         if let Err(error) =
             validate_multiplayer_step_request(host, timeline.multiplayer().admission(), &kind)
         {
@@ -333,12 +381,6 @@ pub(super) fn drain_steps(
             step.respond_err(RpcError::unavailable_capability(format!(
                 "blocked by {reason}; dismiss it in the game before stepping"
             )));
-            continue;
-        }
-        if let (Some(policy), Some(terminal)) =
-            (modal_policy.as_mut(), terminal_debriefing.as_deref_mut())
-        {
-            dismiss_terminal_modal_for_step(step, policy, terminal, host, terminal_save_manager);
             continue;
         }
         let strict_session_replay =
@@ -384,9 +426,10 @@ pub(super) fn drain_steps(
                         .as_mut()
                         .expect("forward steps always carry a modal policy"),
                     session_modals.as_deref_mut(),
+                    pending_terminal_debriefing.as_deref_mut(),
                 );
                 match result {
-                    Ok((advanced, dismissed_during)) => {
+                    Ok((advanced, dismissed_during, _)) => {
                         accepted_dismissals.extend(dismissed_during);
                         if let Err(error) =
                             begin_synchronized_step_resync(host, timeline, &manager.engine)
@@ -492,8 +535,9 @@ pub(super) fn drain_steps(
                                 .as_mut()
                                 .expect("go-to-frame steps always carry a modal policy"),
                             session_modals.as_deref_mut(),
+                            pending_terminal_debriefing.as_deref_mut(),
                         ) {
-                            Ok((advanced, dismissed_during)) => {
+                            Ok((advanced, dismissed_during, _)) => {
                                 accepted_dismissals.extend(dismissed_during);
                                 if advanced < delta {
                                     Err(RpcError::unavailable_capability(format!(
@@ -629,7 +673,8 @@ fn seek_replay_step(
             return Ok(());
         }
         if target > current {
-            let (_, dismissed) = run_forward_ticks_with_session_modals(
+            // A replay seek never produces a live terminal tick.
+            let (_, dismissed, _) = run_forward_ticks_with_session_modals(
                 StepWorld {
                     manager: &mut *manager,
                     host: &mut *host,
@@ -641,6 +686,7 @@ fn seek_replay_step(
                 target - current,
                 modal_policy.as_mut().expect("seek modal policy"),
                 session_modals.as_deref_mut(),
+                None,
             )?;
             accepted_dismissals.extend(dismissed);
         }
@@ -679,58 +725,52 @@ fn seek_replay_step(
 
 /// A step request arrived while the terminal debriefing owns the mission:
 /// queue its typed dismissal (explicit or auto) and reply, never stepping.
-fn dismiss_terminal_modal_for_step(
-    step: crate::http_server::PendingStep,
+/// Queue the step's typed dismissal for the terminal page that owns the mission.
+///
+/// The queued result is applied by the frame that follows, so a host step must
+/// advance that frame while a client -- which may not step -- only reports the
+/// queued acknowledgement. Every rejection is returned with the reply text so
+/// the caller answers the request exactly once.
+fn queue_terminal_modal_dismissal(
     policy: &mut crate::http_server::StepModalPolicy,
     terminal: &mut super::terminal_debriefing::TerminalDebriefingState,
     host: &mut Host,
     terminal_save_manager: Option<&crate::savegame::SaveGameManager>,
-) {
+) -> Result<(), RpcError> {
     let Some(modal_kind) = terminal.current_kind() else {
-        step.respond_err(RpcError::unavailable_capability(
+        return Err(RpcError::unavailable_capability(
             "blocked by mission-end leaderboard; dismiss it in the game before stepping".to_owned(),
         ));
-        return;
     };
     let explicit = policy
         .dismissals
         .iter()
         .position(|dismissal| dismissal.kind == modal_kind)
         .map(|index| policy.dismissals.remove(index).result);
-    let result = match explicit.or_else(|| {
-        policy
-            .auto_dismiss
-            .then(|| default_http_modal_result(&modal_kind))
-    }) {
-        Some(result) => result,
-        None => {
-            step.respond_err(RpcError::unavailable_capability(format!(
+    let result = explicit
+        .or_else(|| {
+            policy
+                .auto_dismiss
+                .then(|| default_http_modal_result(&modal_kind))
+        })
+        .ok_or_else(|| {
+            RpcError::unavailable_capability(format!(
                 "blocked by modal {}; retry with auto_dismiss=true or a matching typed dismissal",
                 serde_json::to_string(&modal_kind).expect("ModalKind serializes")
-            )));
-            return;
-        }
-    };
+            ))
+        })?;
     let terminal_dismissal = crate::http_server::HttpModalDismissal {
         kind: modal_kind.clone(),
         result,
     };
-    if let Err(error) = validate_http_modal_result(&modal_kind, result)
+    validate_http_modal_result(&modal_kind, result)
         .map_err(RpcError::invalid_request)
-        .and_then(|()| authorize_http_modal_dismissals(host, &[terminal_dismissal]))
+        .and_then(|()| authorize_terminal_http_dismissal(host, &terminal_dismissal))
         .and_then(|()| {
             terminal
-                .queue_http_result(modal_kind.clone(), result, terminal_save_manager)
+                .queue_http_result(modal_kind, result, terminal_save_manager)
                 .map_err(RpcError::unavailable_capability)
         })
-    {
-        step.respond_err(error);
-        return;
-    }
-    step.respond_err(RpcError::unavailable_capability(format!(
-        "dismissed terminal modal {}; retry the step after the outer frame applies it",
-        serde_json::to_string(&modal_kind).expect("ModalKind serializes")
-    )));
 }
 
 fn validate_multiplayer_step_request(
@@ -809,7 +849,8 @@ pub(super) fn run_forward_ticks(
     n: u32,
     modal_policy: &mut crate::http_server::StepModalPolicy,
 ) -> Result<(u32, Vec<crate::http_server::HttpModalDismissal>), String> {
-    run_forward_ticks_with_session_modals(world, timeline, n, modal_policy, None)
+    run_forward_ticks_with_session_modals(world, timeline, n, modal_policy, None, None)
+        .map(|(advanced, dismissed, _)| (advanced, dismissed))
         .map_err(|error| error.to_string())
 }
 
@@ -870,7 +911,17 @@ pub(super) fn run_forward_ticks_with_session_modals(
     n: u32,
     modal_policy: &mut crate::http_server::StepModalPolicy,
     mut session_modals: Option<&mut super::session_policy::SessionModalScheduler>,
-) -> Result<(u32, Vec<crate::http_server::HttpModalDismissal>), RpcError> {
+    mut terminal_handoff: Option<
+        &mut Option<super::terminal_debriefing::PendingTerminalDebriefing>,
+    >,
+) -> Result<
+    (
+        u32,
+        Vec<crate::http_server::HttpModalDismissal>,
+        Option<robin_engine::game_operation::GameCode>,
+    ),
+    RpcError,
+> {
     let StepWorld {
         manager,
         host,
@@ -880,6 +931,7 @@ pub(super) fn run_forward_ticks_with_session_modals(
     } = world;
     let mut advanced = 0;
     let mut dismissed = Vec::new();
+    let mut terminal_exit = None;
     for _ in 0..n {
         // Stepping into a save-marker / load-back frame must pin or swap
         // state exactly like the normal playback admission path.
@@ -1043,6 +1095,40 @@ pub(super) fn run_forward_ticks_with_session_modals(
             game.operation
                 .set(robin_engine::game_operation::GameCode::LevelInProgress);
         }
+        // A live step can end the mission. Stage the completion and hand the
+        // mission-end page to the frame that follows, exactly as a live tick
+        // does: otherwise the operation stays terminal, no frame presents the
+        // page, and the session closes behind a paused timeline.
+        if replay_timeline_after.is_none()
+            && let Some(code) = tick_exit_code
+        {
+            terminal_exit = Some(code);
+            if let Some(handoff) = terminal_handoff.as_deref_mut() {
+                let terminal_mission_id = crate::main_entry::current_mission_id(
+                    engine.campaign(),
+                    &assets.profile_manager,
+                );
+                let previous_attempt_sequence =
+                    super::terminal_debriefing::stage_terminal_campaign_update(
+                        false,
+                        &host.transport,
+                        &mut transaction,
+                        code,
+                        engine.sim_config().difficulty,
+                        engine.campaign().mission_attempt_sequence,
+                    );
+                let popup_title =
+                    crate::ingame_menu::mission_state_text(code).map(|(title, _)| title.to_owned());
+                *handoff = Some(super::terminal_debriefing::PendingTerminalDebriefing::new(
+                    code,
+                    terminal_mission_id,
+                    previous_attempt_sequence,
+                    popup_title,
+                ));
+                game.operation
+                    .set(robin_engine::game_operation::GameCode::LevelInProgress);
+            }
+        }
 
         let after = replay_timeline_after.unwrap_or_else(|| timeline.current_frame().next());
         if append_history && after.number() > frame {
@@ -1114,8 +1200,11 @@ pub(super) fn run_forward_ticks_with_session_modals(
         {
             scheduler.checkpoint(player.current_frame(), &host.effects);
         }
+        if terminal_exit.is_some() {
+            break;
+        }
     }
-    Ok((advanced, dismissed))
+    Ok((advanced, dismissed, terminal_exit))
 }
 
 /// Rewind to `target`, restoring rollback state from the rewind
@@ -1282,6 +1371,36 @@ use super::session_policy::validate_modal_result as validate_http_modal_result;
 /// local presentation state is changed. A host publishes the same decision
 /// its own UI would publish; a client can only submit an advisory proposal and
 /// must keep the modal open until that decision comes back from the host.
+/// Terminal pages are session-owned, so their dismissal follows the same rule
+/// as a story page: a host decides at once, a client only submits its
+/// acknowledgement. The client's acknowledgement is published by the modal gate
+/// when the queued result is applied, so it must not be proposed twice here.
+fn authorize_terminal_http_dismissal(
+    host: &Host,
+    dismissal: &crate::http_server::HttpModalDismissal,
+) -> Result<(), RpcError> {
+    if host.transport.net().is_none() {
+        return Ok(());
+    }
+    if !robin_engine::multiplayer::is_session_shared_modal(&dismissal.kind) {
+        return Err(RpcError::unavailable_capability(
+            "terminal modal is not shared by the session".to_owned(),
+        ));
+    }
+    if host.transport.local_seat() != PlayerId::HOST {
+        return Ok(());
+    }
+    let net = host.transport.net().expect("net checked above");
+    let instance = net
+        .open_modal_instance(&dismissal.kind)
+        .map_err(RpcError::internal)?;
+    net.decide_modal_dismiss(instance, dismissal.kind.clone(), dismissal.result)
+        .map_err(RpcError::internal)?;
+    net.complete_modal_instance(&dismissal.kind, instance)
+        .map_err(RpcError::internal)?;
+    Ok(())
+}
+
 fn authorize_http_modal_dismissals(
     host: &Host,
     dismissals: &[crate::http_server::HttpModalDismissal],
@@ -1965,6 +2084,7 @@ mod tests {
             1,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(stationary.0, 0);
@@ -1978,6 +2098,7 @@ mod tests {
             1,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(forward.0, 1);
@@ -2029,6 +2150,7 @@ mod tests {
             2,
             &mut strict,
             Some(&mut scheduler),
+            None,
         )
         .unwrap();
         assert_eq!(repeated.0, 1);
@@ -2497,6 +2619,7 @@ mod tests {
             &mut timeline,
             1,
             &mut modal_policy,
+            None,
             None,
         )
         .expect_err("replay EOF must refuse a synthetic live frame");

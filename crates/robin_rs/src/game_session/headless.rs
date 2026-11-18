@@ -508,6 +508,7 @@ impl HeadlessMission {
             &mut control.manual_pause,
             StepUiGates {
                 active_modal: &mut active_modal,
+                pending_terminal_debriefing: None,
                 terminal_debriefing: None,
                 terminal_save_manager: None,
                 mission_ui_block_reason: None,

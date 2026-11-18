@@ -44,6 +44,7 @@ fn dispatch_test_context() -> (super::ServerContext, Receiver<NetEvent>) {
         content: None,
         cancellation: Arc::new(super::AtomicBool::new(false)),
         shutdown_tx,
+        started: Instant::now(),
     };
     (context, incoming_rx)
 }
@@ -213,6 +214,8 @@ fn stale_peer_dispatch_rejects_every_effect_before_touching_successor_state() {
                     save_bytes: vec![1],
                 },
                 awaiting: HashSet::from([first.seat]),
+                answered: HashSet::new(),
+                deadline_ms: u64::MAX,
             });
         let messages = [
             (
@@ -358,6 +361,8 @@ fn prepared_transition_suppresses_new_and_cached_simulation_barriers() {
                 save_bytes: vec![1],
             },
             awaiting: HashSet::from([claim.seat]),
+            answered: HashSet::new(),
+            deadline_ms: u64::MAX,
         });
     }
     super::dispatch_server_peer_message(
@@ -400,6 +405,8 @@ fn current_snapshot_ack_commits_once_and_detaches_authority() {
                 save_bytes: vec![1],
             },
             awaiting: HashSet::from([claim.seat]),
+            answered: HashSet::new(),
+            deadline_ms: u64::MAX,
         });
     super::dispatch_server_peer_message(
         &context,
@@ -431,18 +438,69 @@ fn ready_barrier_requires_attached_connected_quorum_and_preserves_provisional_fr
         host_frame: Some(10),
         ..Default::default()
     };
-    assert_eq!(barrier.candidate(2, [(true, false, Some(20))]), None);
-    assert_eq!(barrier.candidate(2, [(true, true, None)]), None);
-    assert_eq!(barrier.candidate(3, [(true, true, Some(20))]), None);
+    use super::server_protocol::ReadyDecision;
     assert_eq!(
-        barrier.candidate(2, [(true, true, Some(20)), (false, true, Some(25))]),
-        Some(25)
+        barrier.candidate(0, 2, [(true, false, Some(20))]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(1, 2, [(true, true, None)]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(2, 3, [(true, true, Some(20))]),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(3, 2, [(true, true, Some(20)), (false, true, Some(25))]),
+        ReadyDecision::Begin(25)
     );
     barrier.commit(25, 100);
-    assert_eq!(barrier.candidate(2, [(true, true, Some(20))]), None);
+    assert_eq!(
+        barrier.candidate(4, 2, [(true, true, Some(20))]),
+        ReadyDecision::Wait
+    );
     barrier.reset();
     assert!(barrier.host_frame.is_none());
     assert!(barrier.begun.is_none());
+}
+
+#[test]
+fn ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner() {
+    use super::server_protocol::ReadyDecision;
+    let mut barrier = super::server_protocol::ReadyBarrier {
+        host_frame: Some(10),
+        ..Default::default()
+    };
+    // The host is ready and alone while a second seat is still expected.
+    assert_eq!(
+        barrier.candidate(1_000, 2, std::iter::empty()),
+        ReadyDecision::Wait
+    );
+    // A peer admits at 61 s: the wait refreshes once on its behalf.
+    let joined = [(true, true, None)];
+    assert_eq!(
+        barrier.candidate(61_000, 2, joined.iter().copied()),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(180_999, 2, joined.iter().copied()),
+        ReadyDecision::Wait
+    );
+    assert_eq!(
+        barrier.candidate(181_000, 2, joined.iter().copied()),
+        ReadyDecision::Expired
+    );
+    // So a second joiner cannot extend it again.
+    assert_eq!(
+        barrier.candidate(300_000, 3, [(true, true, None), (true, true, None)]),
+        ReadyDecision::Expired
+    );
+    // The forced release uses the frames that did arrive, ignoring quorum.
+    assert_eq!(
+        barrier.forced_frame([(true, true, Some(20)), (true, true, None)]),
+        Some(20)
+    );
 }
 
 #[test]
@@ -502,6 +560,8 @@ async fn inactive_reader_drains_terminal_frames_after_buffered_input_without_res
                         save_bytes: vec![1],
                     },
                     awaiting: HashSet::from([claim.seat]),
+                    answered: HashSet::new(),
+                    deadline_ms: u64::MAX,
                 });
         }
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -680,7 +740,7 @@ async fn independent_writer_failure_releases_generation_and_allows_snapshot_reco
 }
 
 #[test]
-fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consuming_barrier() {
+fn snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops() {
     let id = robin_engine::multiplayer::SnapshotTransitionId {
         session_id: super::MultiplayerSessionId([4; 32]),
         sequence: 1,
@@ -693,6 +753,8 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
             save_bytes: vec![1],
         },
         awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
     let wrong_id = robin_engine::multiplayer::SnapshotTransitionId { sequence: 2, ..id };
     assert!(transitions.acknowledge(PlayerId(1), wrong_id).is_err());
@@ -702,7 +764,9 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
         HashSet::from([1, 2])
     );
     transitions.acknowledge(PlayerId(1), id).unwrap();
-    assert!(transitions.acknowledge(PlayerId(1), id).is_err());
+    // A duplicate ack is a no-op: it must never turn a recoverable session into
+    // a protocol failure.
+    transitions.acknowledge(PlayerId(1), id).unwrap();
     assert!(transitions.take_completed().is_none());
     transitions.retain_for_reconnect(1);
     transitions.acknowledge(PlayerId(2), id).unwrap();
@@ -710,6 +774,61 @@ fn snapshot_tracker_rejects_wrong_and_duplicate_acknowledgements_without_consumi
     transitions.acknowledge(PlayerId(1), id).unwrap();
     assert_eq!(transitions.take_completed(), Some(id));
     assert_eq!(transitions.take_completed(), None);
+}
+
+#[test]
+fn expired_transition_evicts_absent_seats_and_completes_the_barrier() {
+    let id = robin_engine::multiplayer::SnapshotTransitionId {
+        session_id: super::MultiplayerSessionId([9; 32]),
+        sequence: 1,
+    };
+    let mut transitions = super::SnapshotTransitions::default();
+    transitions.begin(PendingSnapshotTransition {
+        id,
+        payload: robin_engine::multiplayer::SnapshotTransitionPayload::Save {
+            mission_id: 4,
+            save_bytes: vec![1, 2, 3],
+        },
+        awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: 5_000,
+    });
+    transitions.acknowledge(PlayerId(1), id).unwrap();
+    assert!(
+        transitions.expire(4_999).is_none(),
+        "a live barrier must not evict before its deadline"
+    );
+    let expired = transitions.expire(5_000).expect("deadline reached");
+    assert_eq!(expired.id, id);
+    assert_eq!(expired.evicted, vec![2]);
+    assert_eq!(expired.waited_ms, 5_000);
+    assert_eq!(expired.payload_bytes, 3);
+    // Eviction is not a protocol failure: the evicted seat may ack late, or
+    // when it re-admits from a snapshot.
+    transitions.acknowledge(PlayerId(2), id).unwrap();
+    assert_eq!(transitions.take_completed(), Some(id));
+    assert!(transitions.pending().is_none());
+}
+
+#[test]
+fn transition_budget_scales_with_payload_size() {
+    use robin_engine::multiplayer::SnapshotTransitionPayload;
+    let empty = SnapshotTransitionPayload::Save {
+        mission_id: 1,
+        save_bytes: Vec::new(),
+    };
+    let large = SnapshotTransitionPayload::Save {
+        mission_id: 1,
+        save_bytes: vec![0; 300_000],
+    };
+    assert_eq!(
+        super::super::server_protocol::transition_budget_ms(&empty),
+        super::super::server_protocol::TRANSITION_COMMIT_MS
+    );
+    assert!(
+        super::super::server_protocol::transition_budget_ms(&large)
+            > super::super::server_protocol::TRANSITION_COMMIT_MS
+    );
 }
 
 #[track_caller]
@@ -925,6 +1044,8 @@ fn snapshot_transition_waits_for_every_current_peer() {
             save_bytes: vec![1, 2, 3],
         },
         awaiting: HashSet::from([1, 2]),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
 
     assert!(take_committed_snapshot_transition(&mut peers).is_none());
@@ -953,6 +1074,8 @@ fn disconnected_transition_peer_must_ack_again_after_reconnect() {
             save_bytes: vec![4, 5],
         },
         awaiting: HashSet::new(),
+        answered: HashSet::new(),
+        deadline_ms: u64::MAX,
     });
 
     retain_transition_peer_for_reconnect(&mut peers, 1);

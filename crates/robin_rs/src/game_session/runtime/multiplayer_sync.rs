@@ -7,8 +7,15 @@
 //! `TimelineRuntime`, which sequences both owners.
 use super::MultiplayerAdmission;
 use super::timing::MultiplayerTiming;
-use crate::game_session::multiplayer::MultiplayerRollbackTelemetry;
+use crate::game_session::multiplayer::{
+    MultiplayerRollbackTelemetry, MultiplayerSessionError, SessionProtocolFailure,
+};
 use serde::Serialize;
+
+/// How long one admission phase may wait for the next message before the
+/// session is declared broken. Sized above the host's 120 s load budget and its
+/// one ready-barrier extension, so a healthy but slow peer is never cut off.
+pub(in crate::game_session) const ADMISSION_BUDGET_MS: u64 = 180_000;
 
 #[derive(Debug, Serialize)]
 pub(in crate::game_session) struct MultiplayerSync {
@@ -17,6 +24,11 @@ pub(in crate::game_session) struct MultiplayerSync {
     /// Frame of the accepted `BeginSim` barrier. Retained after the gate opens
     /// so `/state` can report the one start boundary this mission used.
     begin_sim_frame: Option<u32>,
+    /// The admission phase that is waiting and when it started, in process
+    /// uptime milliseconds. Cleared whenever the session runs, so each phase
+    /// gets its own budget instead of sharing one long wait.
+    #[serde(skip)]
+    admission_wait: Option<(MultiplayerAdmission, u32)>,
     /// Process-side diagnostics from the most recent network rollback.
     #[serde(skip)]
     last_rollback: Option<MultiplayerRollbackTelemetry>,
@@ -32,6 +44,7 @@ impl MultiplayerSync {
             },
             timing: MultiplayerTiming::default(),
             begin_sim_frame: None,
+            admission_wait: None,
             last_rollback: None,
         }
     }
@@ -71,7 +84,15 @@ impl MultiplayerSync {
 
     /// Advance the wall-clock release gate and report whether simulation must
     /// remain held for multiplayer admission.
-    pub(in crate::game_session) fn admission_paused(&mut self, now_epoch_ms: u64) -> bool {
+    ///
+    /// A phase that waits longer than [`ADMISSION_BUDGET_MS`] fails the session:
+    /// the message that would release it belongs to a peer that is gone, and
+    /// waiting forever leaves the player on a loaded but frozen mission.
+    pub(in crate::game_session) fn admission_paused(
+        &mut self,
+        now_epoch_ms: u64,
+        now_uptime_ms: u32,
+    ) -> Result<bool, MultiplayerSessionError> {
         if let MultiplayerAdmission::WaitingForStart {
             frame,
             start_epoch_ms,
@@ -81,10 +102,26 @@ impl MultiplayerSync {
             self.admission = MultiplayerAdmission::Running;
             tracing::info!(frame, "multiplayer: synchronized start gate opened");
         }
-        !matches!(
+        if matches!(
             self.admission,
             MultiplayerAdmission::NotRequired | MultiplayerAdmission::Running
-        )
+        ) {
+            self.admission_wait = None;
+            return Ok(false);
+        }
+        let state = self.admission;
+        let started = match self.admission_wait {
+            Some((waiting, started)) if waiting == state => started,
+            _ => {
+                self.admission_wait = Some((state, now_uptime_ms));
+                now_uptime_ms
+            }
+        };
+        let waited_ms = u64::from(now_uptime_ms.saturating_sub(started));
+        if waited_ms >= ADMISSION_BUDGET_MS {
+            return Err(SessionProtocolFailure::AdmissionTimeout { state, waited_ms }.into());
+        }
+        Ok(true)
     }
 
     /// `local_frame` is the timeline cursor at receipt; it only feeds the

@@ -190,6 +190,7 @@ impl ClientTransport for BrowserClientTransport {
         handshake_frame: None,
         initial_attempt: HANDSHAKE_ATTEMPT_TIMEOUT,
         reconnect_attempt: None,
+        reconnect_budget: client_session::RECONNECT_BUDGET,
         post_content_welcome: CONTENT_IDLE_TIMEOUT,
         content_write: None,
         content_chunk_idle: CONTENT_IDLE_TIMEOUT,

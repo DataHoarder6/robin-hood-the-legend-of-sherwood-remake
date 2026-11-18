@@ -240,18 +240,28 @@ must not be repaired by silently adopting a new default Engine.
 - A joining peer installs the exact snapshot and trims older pending input/hash
   state before announcing `ReadyToSim`.
 - Both interactive and true-headless missions wait until the configured
-  expected players are ready, then the server broadcasts `BeginSim`.
+  expected players are ready, then the server broadcasts `BeginSim`. The wait is
+  bounded: if the host has loaded and a peer has not become ready after 120 s,
+  the host evicts that peer and starts with the participants that did load. A
+  peer admitted after the wait began refreshes the budget once, so a late joiner
+  gets a full load window; a second joiner does not extend it again.
 - Admission is an explicit timeline state machine: a host waits for
   `BeginSim`; a peer waits for successful snapshot adoption, then `BeginSim`;
   both wait for `start_epoch_ms` before simulation advances. A peer never
   announces `ReadyToSim` after a decode/adoption failure, and `BeginSim` before
-  its snapshot is a fatal ordering error.
+  its snapshot is a fatal ordering error. Each admission phase has its own
+  180 s budget: when it expires the session ends with a fatal error instead of a
+  loaded but frozen mission, and a pinned JSON bundle naming the phase, seat,
+  session and newest replay is written under `robin_hood/diagnostics/`.
 - True-headless hosts perform the same local-seat bootstrap and frame-zero
   snapshot publication as interactive hosts, then keep the reconnect snapshot
   and host clock samples current while running.
 - Native clients reconnect with exponential backoff and reclaim their parked
   owner generation. Browser clients reconnect with the same ephemeral iroh
-  endpoint and durable session/host/transport proof. Disconnect immediately
+  endpoint and durable session/host/transport proof. Reconnection is bounded:
+  after a drop the client retries for 60 s, then publishes a fatal timeout that
+  returns the game to the menu instead of leaving it on a frozen frame.
+  Disconnect immediately
   returns admission to the snapshot-wait
   state; simulation and headless HTTP timeline steps remain held until the
   replacement snapshot and `BeginSim` are accepted. A replacement snapshot
@@ -289,6 +299,14 @@ encoding are unchanged. The normal replay journal still records the authoritativ
 kind/result at the mission-frame boundary; playback and seeking retain their
 existing modal batch policy.
 
+The acknowledgement barrier is bounded. Once the host has drawn a shared page and
+it is still waiting, a seat that has not acknowledged after 300 s is marked
+acknowledged: the host continues with the participants that are present, and the
+late or reconnecting seat receives the durable decision instead of a second
+chance to block the session. A peer's missing acknowledgement costs it the page,
+never the session. While the wait is live the story surface shows the seats it is
+waiting for and the seconds left before the host continues without them.
+
 Host-only save, load, restart, QuickLoad, and campaign-exit operations use an
 exact `Prepare`/`Ready`/`Commit` barrier. Clients first decode, validate, and
 retain the exact host bytes. The host commits only after every currently
@@ -297,6 +315,17 @@ peers must acknowledge again. Participants then leave the old mission and
 perform a complete handshake/readiness admission for the replacement state.
 Local multiplayer saves remain explicitly diagnostic and are never accepted as
 authoritative load input.
+
+The barrier is bounded. The host stamps a deadline at prepare time from a
+monotonic clock: 60 s plus one second per 64 KiB of payload, which pays for the
+bytes a peer must receive, validate and retain. When the deadline passes, every
+seat still waiting is evicted from the barrier, the host commits for the
+remaining connected peers, and the evicted seat keeps its authenticated owner:
+it re-admits later from an authoritative snapshot. A late acknowledgement from
+an evicted seat is a no-op, and a duplicate `Ready` is idempotent. A transport
+close starts the deadline; it never evicts on its own. Without a deadline a
+frozen client, or a connection that was never reclaimed, freezes every mission
+transition for the rest of the session.
 
 ## CLI
 
@@ -370,3 +399,23 @@ to be deployed.
   admission already recomputes the package hash, journal usage/digest, and
   combined snapshot budget before state hashing or VM attachment. The bounded
   persistent journal participates in snapshot adoption and desync detection.
+
+## What each seat records
+
+Every seat records, into its own install directory (see the harness doc's
+isolation rule):
+
+- a local mission replay of every mission it plays (`replays/`), produced by the
+  same recorder single-player uses — a peer is not a spectator, it owns a
+  timeline;
+- its own log stream, with the multiplayer events (seat, session, transition
+  ids, admission phase, evictions);
+
+and, when a session fails, a pinned bundle under `robin_hood/diagnostics/` that
+names the reason, the phase, the seat, the session and the newest replay.
+
+The **host's** replay is the shared record: it carries every seat's input and the
+authoritative hash chain, and a bug report is reproduced from it. A peer's replay
+is a local witness: comparing the two per-25-frame hash chains is the desync
+oracle. No seat ever writes another seat's files, and no peer records on behalf of
+the host.
