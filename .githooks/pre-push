@@ -34,6 +34,14 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     fi
     printf '%s\n' "$changed" > /tmp/robin-push-gate-paths.$$
     gated=1
+    # The suites compile the working tree, but the push lands a commit. If the two
+    # differ, the gate proves a tree nobody else will ever build.
+    if ! git diff --quiet "$local_sha" -- .; then
+        printf 'pre-push: the worktree differs from the commit being pushed:\n' >&2
+        git diff --name-only "$local_sha" -- . | sed 's/^/pre-push:   /' >&2
+        printf 'pre-push: commit them first — the suites would otherwise compile a tree that is not pushed.\n' >&2
+        exit 1
+    fi
 done
 
 [ "$gated" = 1 ] || exit 0
