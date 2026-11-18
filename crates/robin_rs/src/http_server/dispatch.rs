@@ -111,6 +111,15 @@ impl SessionIngress {
                 }
             }
         }
+        // The last completed boundary is what `/state` answers with, including
+        // after this mission is gone. Publishing here (not in the listener) keeps
+        // the snapshot authoritative: it is the engine the tick just used.
+        crate::observability::publish_state(snapshot_state(
+            engine,
+            self.replay_status(),
+            transport,
+            session,
+        ));
     }
 }
 

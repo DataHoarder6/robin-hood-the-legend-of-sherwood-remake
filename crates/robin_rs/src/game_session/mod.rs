@@ -237,7 +237,7 @@ pub(crate) async fn run_mission_headless(
     rng_seed: u64,
     sim_config: engine_api::SimConfig,
 ) -> MissionOutcome {
-    retirement::run(callbacks, async move |callbacks| {
+    let outcome = retirement::run(callbacks, async move |callbacks| {
         run_mission_headless_body(
             callbacks,
             campaign,
@@ -250,7 +250,25 @@ pub(crate) async fn run_mission_headless(
         )
         .await
     })
-    .await
+    .await;
+    report_mission_terminal(&outcome.result);
+    outcome
+}
+
+/// One terminal record per finished driver attempt.
+///
+/// `/state` keeps answering with this mission's last published snapshot and
+/// names the operation it reached and why it stopped — the answer an agent
+/// needs after the RPC session is gone. A `GameCode` names its own operation; a
+/// failure names the operation from the last snapshot and carries the error text
+/// as the reason.
+fn report_mission_terminal(result: &Result<GameCode, MissionError>) {
+    match result {
+        Ok(code) => {
+            crate::observability::record_terminal(Some(format!("{code:?}")), "mission ended")
+        }
+        Err(error) => crate::observability::record_terminal(None, error.to_string()),
+    }
 }
 
 async fn run_mission_headless_body(
@@ -274,6 +292,7 @@ async fn run_mission_headless_body(
         .clone();
     #[cfg(not(target_arch = "wasm32"))]
     crate::diagnostic_context::begin_mission(&mission_name, &args);
+    crate::observability::mission_started(&mission_name);
     let has_decoded_saved_world = pending_decoded_saved_world(callbacks);
     let archive_restored = args
         .content
@@ -874,10 +893,12 @@ pub(crate) async fn run_mission(
     start: MissionStart,
     args: crate::main_entry::MissionRequest,
 ) -> MissionOutcome {
-    retirement::run(callbacks, async move |callbacks| {
+    let outcome = retirement::run(callbacks, async move |callbacks| {
         run_mission_body(window, callbacks, campaign, profiles, start, args).await
     })
-    .await
+    .await;
+    report_mission_terminal(&outcome.result);
+    outcome
 }
 
 async fn run_mission_body(
@@ -981,6 +1002,11 @@ async fn run_mission_with_seed(
             .profile(profiles)
             .mission_filename,
         args,
+    );
+    crate::observability::mission_started(
+        &campaign.missions[start.mission_idx]
+            .profile(profiles)
+            .mission_filename,
     );
     let outcome = match InteractiveMissionBuilder::build(
         window,

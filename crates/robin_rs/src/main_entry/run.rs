@@ -242,7 +242,14 @@ fn finish_application(
     result: Result<i32, LaunchError>,
     shutdown: Result<(), String>,
 ) -> Result<i32, LaunchError> {
-    LaunchError::with_shutdown(result, shutdown)
+    let result = LaunchError::with_shutdown(result, shutdown);
+    // A run that never reached a mission, or died between missions, has no
+    // mission outcome to report. It still stopped, and `/state` must say why:
+    // the process outlives the RPC session that would have asked.
+    if let Err(error) = &result {
+        crate::observability::record_terminal(None, format!("launch failed: {error}"));
+    }
+    result
 }
 
 /// Resolve the launch route before starting any transport or speculative work.

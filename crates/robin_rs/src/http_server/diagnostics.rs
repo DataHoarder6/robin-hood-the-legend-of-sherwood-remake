@@ -21,6 +21,8 @@ pub(crate) fn info_json() -> serde_json::Value {
             {"method": "GET",  "path": "/host-debug",         "desc": "host/UI state for ad-hoc debug, including trajectory preview and mouse hover fields"},
             {"method": "GET",  "path": "/script",             "desc": "mission-script class & function listing"},
             {"method": "GET",  "path": "/script/decompile",   "desc": "decompile to TypeScript-like pseudocode (?class=Foo)"},
+            {"method": "GET",  "path": "/state",              "desc": "last published mission snapshot, terminal block and this run's evidence paths; answered off the mission queue so it survives a deadlocked or finished mission"},
+            {"method": "GET",  "path": "/events",             "desc": "multiplayer session event ring, oldest first (?since=<seq>&limit=<n>) → {events, next_seq}"},
             {"method": "POST", "path": "/native",             "desc": "invoke one native: {op, args, this?}"},
             {"method": "POST", "path": "/batch",              "desc": "invoke many natives on one tick: {calls: [{op, args, this?}]}"},
             {"method": "POST", "path": "/console",            "desc": "run a debug-console command: {command: '...'}"},
@@ -110,11 +112,12 @@ fn multiplayer_state(
                 .unwrap_or_default(),
         })
     });
+    // Only a session installed with its mission knows the roster. A transport
+    // holding channels without one (test drivers) reports the fact as unknown
+    // instead of a guessed player count.
     let expected_players = transport
         .mission_sim_config()
-        .expect("an admitted session retains its simulation config")
-        .coop
-        .players;
+        .map(|config| config.coop.players);
     serde_json::json!({
         "local_seat": transport.local_seat().0,
         "expected_players": expected_players,
