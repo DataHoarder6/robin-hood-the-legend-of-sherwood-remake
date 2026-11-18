@@ -818,8 +818,10 @@ It needs a native `robin` and a `robin.exe` from the same commit (both must
 report the same `--version`, whose suffix is the commit), one recording made by
 that commit, a game-data root containing `Data/`, and `wine` with `winepath`.
 Each binary runs from its install directory — its parent by default,
-`--linux-dir`/`--windows-dir` override — which must carry `assets/core-datadir`;
-playback itself is `--headless --no-sound --http-server 0 --replay FILE`.
+`--linux-dir`/`--windows-dir` or the suite's `PARITY_LINUX_DIR`/`PARITY_WINDOWS_DIR`
+override — which must carry `assets/core-datadir`. A binary in a checkout's
+`target/release` therefore needs one of those overrides. Playback itself is
+`--headless --no-sound --http-server 0 --replay FILE`.
 
 Exit status: `0` every sampled frame matches, `1` the pair is not proven
 identical (the first divergent frame with both values and the surrounding chain,

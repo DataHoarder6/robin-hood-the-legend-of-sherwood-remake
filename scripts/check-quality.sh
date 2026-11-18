@@ -89,9 +89,14 @@ case "$1" in
         : "${PARITY_WINDOWS_EXE:?Set PARITY_WINDOWS_EXE to the robin.exe from that commit}"
         : "${PARITY_REPLAY:?Set PARITY_REPLAY to a recording made by that commit}"
         : "${PARITY_DATA_DIR:?Set PARITY_DATA_DIR to the game root containing Data/}"
-        exec python3 scripts/validation/parity_check.py \
-            --linux "$PARITY_LINUX_BIN" --windows "$PARITY_WINDOWS_EXE" \
-            --replay "$PARITY_REPLAY" --data-dir "$PARITY_DATA_DIR"
+        # Each binary runs from its install directory, which must carry
+        # assets/core-datadir. Defaults to the binary's own directory; set these
+        # when the binary lives in target/release of a checkout.
+        args=(--linux "$PARITY_LINUX_BIN" --windows "$PARITY_WINDOWS_EXE"
+              --replay "$PARITY_REPLAY" --data-dir "$PARITY_DATA_DIR")
+        [[ -n "${PARITY_LINUX_DIR:-}" ]] && args+=(--linux-dir "$PARITY_LINUX_DIR")
+        [[ -n "${PARITY_WINDOWS_DIR:-}" ]] && args+=(--windows-dir "$PARITY_WINDOWS_DIR")
+        exec python3 scripts/validation/parity_check.py "${args[@]}"
         ;;
     gpu)
         # This test also invokes renderer::verify_offscreen_gpu_contract.
