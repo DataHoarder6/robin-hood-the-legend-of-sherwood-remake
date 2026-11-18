@@ -56,6 +56,24 @@ dismissal path is unchanged — `DialogResult::Completed` settles to
 `SettledDebriefingOutcome::Ok`, the session keeps `LevelInterrupted`, and the
 campaign map reopens with the attempt recorded as `Interrupted`.
 
+## The leave / abandon confirmation
+
+Before any of those pages, the rail's ✗ (in-mission `MissionAbandon`, tooltip
+id 292) opens the mission-state confirmation. Its question is not fixed: it is
+the retail ask for the state the button was pressed in, chosen from the same
+`MissionEndKind` that titles the page (`MissionEndKind::leave_prompt_id`).
+
+| state at the press | question id | text |
+| --- | --- | --- |
+| not won | 238 | "Do you really want to abort the mission?" |
+| won (`MissionEndKind::Won`) | 235 | "You've won the mission. Do you want to leave now?" |
+
+The engine's first-time "you may leave now" banner raises the same signal after
+a won mission, so it asks 235 with the won title; the ✗ pressed while still
+losing asks 238 and titles the popup as the abandon it confirms. Confirming
+either one dispatches `QuitMissionRequested` and nothing else; cancelling
+closes the popup and the mission keeps running.
+
 What would reopen this: a retail mission in which an aborted outcome shows the
 *won* table, or a leak of the original's mission-state popup or debriefing
 resource ids showing only two title ids (24–25). Neither exists in the shipped

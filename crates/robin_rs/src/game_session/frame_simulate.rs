@@ -754,7 +754,27 @@ fn dispatch_active_modal_outcome(
     }
 }
 
-/// Drive the first mission-won "leave now" prompt after scripted modal lanes.
+/// State and question the mission-state confirmation opens with.
+///
+/// The question follows the state the button was pressed in, from the same
+/// `MissionEndKind` that titles the mission-end page: a won mission is left
+/// as the courtesy question (#235), a live one is abandoned, which is the
+/// outcome the confirmation produces (#238).
+fn leave_prompt(
+    menu_text: &crate::ingame_menu::resources::MenuText,
+    mission_won: bool,
+) -> (crate::ingame_menu::MissionEndKind, String) {
+    let end = if mission_won {
+        crate::ingame_menu::MissionEndKind::Won
+    } else {
+        crate::ingame_menu::MissionEndKind::Aborted
+    };
+    (end, menu_text.get(end.leave_prompt_id()))
+}
+
+/// Drive the mission-state leave/abandon confirmation after scripted modal
+/// lanes: the engine's first "you may leave now" banner and the rail's ✗
+/// both raise the same signal.
 fn drive_leave_mission_prompt(
     host: &mut Host,
     engine: &robin_engine::engine::Engine,
@@ -787,19 +807,15 @@ fn drive_leave_mission_prompt(
                 kind: engine_player_command::MissionStateModalKind::LeaveMissionNow,
             };
             let replay_result = pop_matching_dismissal(&mut frame.replay_modal_dismissals, &kind);
-            let message = menu_resources.menu_text.get(MT_MSG_LEAVE_MISSION_NOW);
-            let message = if message.is_empty() {
-                "You may leave the mission now.".to_string()
-            } else {
-                message
-            };
+            let (end, message) =
+                leave_prompt(&menu_resources.menu_text, engine.mission().mission_won);
             ui.active_modal = Some(ActiveModal::MissionState {
                 kind,
                 state: MissionStatePopupState::new(
                     &presentation.renderer,
                     menu_resources,
                     message,
-                    crate::ingame_menu::MissionEndKind::Won,
+                    end,
                     None,
                 ),
                 replay_result,
@@ -1825,7 +1841,40 @@ fn manual_step_ui_block_reason(
 
 #[cfg(test)]
 mod tests {
-    use super::{ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, ui_task_modal_admission};
+    use super::{
+        ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, leave_prompt, ui_task_modal_admission,
+    };
+
+    /// Distinct markers in the two question slots prove which retail entry
+    /// the confirmation asks, independent of the fallback wording.
+    fn question_table() -> crate::ingame_menu::resources::MenuText {
+        use crate::ingame_menu::resources::{
+            MT_MSG_LEAVE_MISSION_NOW, MT_MSG_REALLY_ABORT_MISSION,
+        };
+        let mut strings = vec![String::new(); MT_MSG_REALLY_ABORT_MISSION + 1];
+        strings[MT_MSG_LEAVE_MISSION_NOW] = "leave a won mission".to_string();
+        strings[MT_MSG_REALLY_ABORT_MISSION] = "abandon a live mission".to_string();
+        let mut menu_text = crate::ingame_menu::resources::MenuText::english_fallbacks_only();
+        menu_text.replace_strings_for_test(strings);
+        menu_text
+    }
+
+    #[test]
+    fn leave_prompt_asks_the_abort_question_until_the_mission_is_won() {
+        use crate::ingame_menu::MissionEndKind;
+
+        let menu_text = question_table();
+
+        let (end, message) = leave_prompt(&menu_text, false);
+        assert_eq!(end, MissionEndKind::Aborted);
+        assert_eq!(end.leave_prompt_id(), 238);
+        assert_eq!(message, "abandon a live mission");
+
+        let (end, message) = leave_prompt(&menu_text, true);
+        assert_eq!(end, MissionEndKind::Won);
+        assert_eq!(end.leave_prompt_id(), 235);
+        assert_eq!(message, "leave a won mission");
+    }
 
     #[test]
     fn load_errors_wait_for_scripted_modals_instead_of_disappearing() {

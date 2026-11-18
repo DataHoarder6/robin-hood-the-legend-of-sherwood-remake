@@ -2938,5 +2938,7 @@ the original's third mission-end page: the retail "Mission aborted" title
 with the level's lose-table text at the index the mission script selected
 (`ChooseVictoryDefeatText`). The dismissal path is the same as the won and
 lost pages — the campaign map reopens with the attempt recorded as
-`Interrupted`. Evidence and the retail strings are in
-[mission-end pages](slop/MISSION_END_PAGES.md).
+`Interrupted`. The confirmation before it asks the retail question for the
+state it was opened in — the abort question (id 238) while the mission is
+unfinished, the won-leave question (id 235) once it is won. Evidence, the
+strings and the ids are in [mission-end pages](slop/MISSION_END_PAGES.md).
