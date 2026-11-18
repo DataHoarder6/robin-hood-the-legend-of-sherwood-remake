@@ -887,6 +887,7 @@ mod tests {
                 exit_code: GameCode::LevelFailed,
                 engine: None,
             },
+            0,
         ));
         let state = snapshot_state(
             &engine,

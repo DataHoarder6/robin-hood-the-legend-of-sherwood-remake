@@ -22,6 +22,10 @@ pub struct HostTransport {
     speech_timing_locale: Option<String>,
     mission_id: Option<String>,
     synchronization: TransportSynchronization,
+    /// Counts transport generations: every disconnect that holds simulation
+    /// opens a new one. A prepare received on an earlier generation can never
+    /// be committed by the current one.
+    generation: u64,
     /// Verified full-mod bytes, VFS overlays, and cache lease for a
     /// host-distributed mission. Field order makes the network runtime stop
     /// before this mount is dropped with the enclosing transport.
@@ -45,19 +49,41 @@ pub struct PendingSnapshotTransition {
     id: robin_engine::multiplayer::SnapshotTransitionId,
     payload: PendingSnapshotTransitionPayload,
     committed: bool,
+    /// Bytes this prepare carried on the wire; the acknowledgement budget is
+    /// derived from them (`robin_engine::multiplayer::TRANSITION_COMMIT_MS` plus
+    /// one second per 64 KiB).
+    wire_bytes: u64,
+    /// The transport generation and instant that prepared this payload. A
+    /// commit can only arrive on the generation that received the prepare, and
+    /// only inside the payload's own budget.
+    prepared_generation: u64,
+    prepared_at: web_time::Instant,
 }
 
 impl PendingSnapshotTransition {
     pub(crate) fn new(
         id: robin_engine::multiplayer::SnapshotTransitionId,
         payload: PendingSnapshotTransitionPayload,
+        wire_bytes: u64,
     ) -> Self {
         Self {
             id,
             payload,
             committed: false,
+            wire_bytes,
+            prepared_generation: 0,
+            prepared_at: web_time::Instant::now(),
         }
     }
+
+    pub(crate) fn budget(&self) -> std::time::Duration {
+        robin_engine::multiplayer::transition_budget(self.wire_bytes)
+    }
+
+    pub(crate) fn age(&self, now: web_time::Instant) -> std::time::Duration {
+        now.saturating_duration_since(self.prepared_at)
+    }
+
     /// Called by the authenticated transport event drain; the prepared payload
     /// and instance remain private and cannot be swapped after this admission.
     pub(crate) fn commit_authenticated(
@@ -110,6 +136,14 @@ impl PendingSnapshotTransitionPayload {
 pub enum SnapshotSave {
     Local(crate::main_entry::PreparedLoad),
     Remote(Box<crate::save_file::GameSaveFile>),
+}
+
+/// A prepared transition that outlived its own budget. The caller fails the
+/// session by name instead of waiting for the admission watchdog.
+pub(crate) struct ExpiredSnapshotTransition {
+    pub(crate) id: robin_engine::multiplayer::SnapshotTransitionId,
+    pub(crate) age_ms: u64,
+    pub(crate) budget_ms: u64,
 }
 
 /// Only the transport's committed take can create this process-local token.
@@ -221,11 +255,65 @@ impl HostTransport {
     }
 
     /// Hold simulation without losing the admitted seat, campaign, or runtime.
+    ///
+    /// This is a transport-generation boundary: a prepare received on the
+    /// generation that just ended can never be committed again, because the
+    /// host commits once and then rebuilds that generation's transport. The
+    /// host re-sends a still-pending prepare on the replacement stream
+    /// (`server.rs` reconnect opening), so dropping it here costs one
+    /// re-acknowledgement and never a session.
     pub(crate) fn await_authoritative_snapshot(&mut self) {
-        if !self.has_snapshot_transition() {
-            self.synchronization = TransportSynchronization::AwaitingSnapshot;
-        }
+        self.generation = self.generation.wrapping_add(1);
+        self.abandon_snapshot_transition("transport generation ended");
+        self.synchronization = TransportSynchronization::AwaitingSnapshot;
     }
+
+    /// Drop a prepare whose commit can no longer arrive, naming it in the log.
+    pub(crate) fn abandon_snapshot_transition(&mut self, reason: &'static str) {
+        let TransportSynchronization::Prepared(pending) = std::mem::replace(
+            &mut self.synchronization,
+            TransportSynchronization::AwaitingSnapshot,
+        ) else {
+            return;
+        };
+        let age = pending.age(web_time::Instant::now());
+        tracing::warn!(
+            transition = ?pending.id,
+            session_id = ?pending.id.session_id,
+            generation = pending.prepared_generation,
+            committed = pending.committed,
+            age_ms = u64::try_from(age.as_millis()).unwrap_or(u64::MAX),
+            reason,
+            "multiplayer: dropping a prepared snapshot transition whose commit can never arrive"
+        );
+    }
+
+    /// A prepared transition may not outlive its own budget. Returns the
+    /// expired transition so the caller can fail the session by name instead of
+    /// letting an admission watchdog discover the stall minutes later.
+    pub(crate) fn expire_snapshot_transition(
+        &mut self,
+        now: web_time::Instant,
+    ) -> Option<ExpiredSnapshotTransition> {
+        let TransportSynchronization::Prepared(pending) = &self.synchronization else {
+            return None;
+        };
+        if pending.committed {
+            return None;
+        }
+        let age = pending.age(now);
+        if age < pending.budget() {
+            return None;
+        }
+        let expired = ExpiredSnapshotTransition {
+            id: pending.id,
+            age_ms: u64::try_from(age.as_millis()).unwrap_or(u64::MAX),
+            budget_ms: u64::try_from(pending.budget().as_millis()).unwrap_or(u64::MAX),
+        };
+        self.synchronization = TransportSynchronization::AwaitingSnapshot;
+        Some(expired)
+    }
+
     pub(crate) fn begin_simulation(&mut self) {
         assert!(
             !self.has_snapshot_transition(),
@@ -238,6 +326,9 @@ impl HostTransport {
             !self.has_snapshot_transition(),
             "snapshot transition already prepared"
         );
+        let mut pending = pending;
+        pending.prepared_generation = self.generation;
+        pending.prepared_at = web_time::Instant::now();
         self.synchronization = TransportSynchronization::Prepared(pending);
     }
     pub(crate) fn commit_snapshot_transition(
@@ -403,6 +494,7 @@ mod transport_lifecycle_tests {
                 exit_code: robin_engine::game_operation::GameCode::LevelInterrupted,
                 engine: None,
             },
+            0,
         ));
     }
 
@@ -446,9 +538,13 @@ mod transport_lifecycle_tests {
         );
         transport.await_authoritative_snapshot();
         assert!(
-            transport.has_snapshot_transition(),
-            "disconnect cannot discard an authenticated preparation"
+            !transport.has_snapshot_transition(),
+            "a prepare belongs to the generation that received it; the replacement \
+             stream re-sends it (server reconnect opening) rather than committing \
+             across the boundary"
         );
+        // The slot is free again, so the re-sent prepare is accepted.
+        prepare(&mut transport);
         transport
             .commit_snapshot_transition(transition_id())
             .unwrap();
@@ -467,6 +563,57 @@ mod transport_lifecycle_tests {
         assert!(!transport.authoritative_transition_actions_enabled());
         transport.begin_simulation();
         assert!(transport.authoritative_transition_actions_enabled());
+    }
+
+    /// #43, the defence behind the generation boundary: a prepare that is still
+    /// uncommitted past its own payload budget fails the session by name, so a
+    /// lost commit is reported where it happened rather than by the admission
+    /// watchdog minutes later.
+    #[test]
+    fn a_prepared_transition_expires_at_its_own_budget() {
+        let mut transport = installed(PlayerId(1));
+        prepare(&mut transport);
+        let prepared_at = web_time::Instant::now();
+        assert!(
+            transport
+                .expire_snapshot_transition(prepared_at + std::time::Duration::from_secs(59))
+                .is_none(),
+            "a transition inside its budget is not expired"
+        );
+        assert!(transport.has_snapshot_transition());
+        let expired = transport
+            .expire_snapshot_transition(
+                prepared_at
+                    + robin_engine::multiplayer::transition_budget(0)
+                    + std::time::Duration::from_millis(1),
+            )
+            .expect("a transition past its budget expires");
+        assert_eq!(expired.id, transition_id());
+        assert_eq!(
+            expired.budget_ms,
+            u64::try_from(robin_engine::multiplayer::transition_budget(0).as_millis()).unwrap()
+        );
+        assert!(
+            !transport.has_snapshot_transition(),
+            "an expired transition no longer holds a start barrier"
+        );
+    }
+
+    #[test]
+    fn a_committed_transition_does_not_expire() {
+        let mut transport = installed(PlayerId(1));
+        prepare(&mut transport);
+        transport
+            .commit_snapshot_transition(transition_id())
+            .unwrap();
+        assert!(
+            transport
+                .expire_snapshot_transition(
+                    web_time::Instant::now() + std::time::Duration::from_secs(3_600)
+                )
+                .is_none(),
+            "the payload is committed; only its consumer may release it"
+        );
     }
 
     #[test]

@@ -327,6 +327,18 @@ close starts the deadline; it never evicts on its own. Without a deadline a
 frozen client, or a connection that was never reclaimed, freezes every mission
 transition for the rest of the session.
 
+A peer's copy of a prepared transition belongs to the transport generation that
+received it. When that generation ends — a disconnect, desync recovery, or the
+host rebuilding its mission transport for a replacement mission — the peer drops
+the prepare and names it in the log; the host's replacement stream re-sends a
+still-pending prepare with the same session-bound id, so the cost is one
+re-acknowledgement and never a lost session. A prepare that stays uncommitted
+past its own payload budget fails that peer's session by name (`snapshot
+transition … stayed prepared for … ms`) instead of being discovered minutes
+later by the admission watchdog. Holding a start barrier for a prepare that can
+no longer be committed is what left a restarted mission frozen with one seat
+running and the other waiting for `BeginSim` (#43).
+
 ## CLI
 
 - `--server` hosts a game transport on the install's persistent iroh

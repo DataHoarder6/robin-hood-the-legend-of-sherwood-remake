@@ -6,25 +6,16 @@ use robin_engine::multiplayer::{SnapshotTransitionId, SnapshotTransitionPayload}
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Base budget for a host-authored transition commit.
-pub(super) const TRANSITION_COMMIT_MS: u64 = 60_000;
-/// Payload transfer allowance added on top of the base commit budget.
-pub(super) const TRANSITION_PAYLOAD_BYTES_PER_SECOND: u64 = 64 * 1024;
-
 pub(super) fn payload_bytes(payload: &SnapshotTransitionPayload) -> u64 {
-    match payload {
-        SnapshotTransitionPayload::Save { save_bytes, .. } => save_bytes.len() as u64,
-        SnapshotTransitionPayload::CampaignExit { engine_bytes, .. } => engine_bytes.len() as u64,
-    }
+    payload.payload_bytes()
 }
 
 /// Total time a transition may wait before absent peers are evicted.
 ///
-/// The base budget covers round trips and validation; the payload term covers
-/// the bytes a peer must receive, validate and retain before it can ack.
+/// The contract lives with the payload (`SnapshotTransitionPayload::budget`)
+/// because a peer enforces the same budget on the transition it prepared.
 pub(super) fn transition_budget_ms(payload: &SnapshotTransitionPayload) -> u64 {
-    TRANSITION_COMMIT_MS
-        + payload_bytes(payload).saturating_mul(1000) / TRANSITION_PAYLOAD_BYTES_PER_SECOND
+    u64::try_from(payload.budget().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// How long the host waits for peers to finish loading before it starts the

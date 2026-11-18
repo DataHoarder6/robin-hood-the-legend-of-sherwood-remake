@@ -736,11 +736,10 @@ impl TerminalDebriefingState {
                     && context.host.transport.local_seat() == engine_player_command::PlayerId::HOST
                     && let Some(net) = context.host.transport.net()
                 {
+                    let engine_bytes = context.manager.engine.encode_native_snapshot();
+                    let wire_bytes = engine_bytes.len() as u64;
                     let id = net
-                        .begin_campaign_exit_transition(
-                            self.exit_code,
-                            context.manager.engine.encode_native_snapshot(),
-                        )
+                        .begin_campaign_exit_transition(self.exit_code, engine_bytes)
                         .expect("failed to begin multiplayer mission completion");
                     context.host.transport.prepare_snapshot_transition(
                         crate::host::PendingSnapshotTransition::new(
@@ -749,6 +748,7 @@ impl TerminalDebriefingState {
                                 exit_code: self.exit_code,
                                 engine: None,
                             },
+                            wire_bytes,
                         ),
                     );
                     self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
