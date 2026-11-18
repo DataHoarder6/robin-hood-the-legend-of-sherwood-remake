@@ -144,9 +144,7 @@ pub(crate) fn clear_replay() {
     }
 }
 pub fn directory() -> Result<PathBuf> {
-    Ok(dirs::data_dir()
-        .context("OS data directory is unavailable")?
-        .join("robin_hood/reports"))
+    crate::install_home::report_directory().context("no install directory is available for reports")
 }
 pub(crate) fn bound_text(mut text: String, limit: usize) -> String {
     let mut end = limit.min(text.len());

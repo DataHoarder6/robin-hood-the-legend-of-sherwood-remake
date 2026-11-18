@@ -23,6 +23,7 @@ use std::sync::{Mutex, OnceLock};
 ))]
 pub mod auto_update;
 pub mod gameplay_settings;
+pub mod install_home;
 pub(crate) use leaderboard::signing as leaderboard_signing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bug_report;

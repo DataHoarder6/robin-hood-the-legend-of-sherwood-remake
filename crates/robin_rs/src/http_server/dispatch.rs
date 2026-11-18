@@ -3,14 +3,14 @@
 use super::*;
 
 impl SessionIngress {
-    pub fn drain(
+    pub(crate) fn drain(
         &mut self,
         engine: &mut Engine,
         frontend: &mut crate::host::HostFrontend,
-        local_seat: robin_engine::player_command::PlayerId,
-        net: Option<&crate::multiplayer::NetChannels>,
+        transport: &crate::host::HostTransport,
         assets: &LevelAssets,
         post_commands: &mut FrameCommands,
+        session: SessionFacts,
     ) -> Vec<engine_api::ExternalAction> {
         let mut selected = frontend.selected_view_element();
         let mut external_actions = Vec::new();
@@ -18,13 +18,14 @@ impl SessionIngress {
             engine,
             assets,
             &mut selected,
-            net,
+            Some(transport),
             post_commands,
             &mut external_actions,
             DispatchCapabilities::Interactive {
                 frontend,
-                local_seat,
+                local_seat: transport.local_seat(),
             },
+            Some(session),
         );
         external_actions
     }
@@ -51,6 +52,7 @@ impl SessionIngress {
             &mut commands,
             &mut external_actions,
             DispatchCapabilities::Headless,
+            None,
         );
         commands
     }
@@ -62,11 +64,13 @@ impl SessionIngress {
         engine: &mut Engine,
         assets: &LevelAssets,
         selected_view_element: &mut Option<engine_element::EntityId>,
-        net: Option<&crate::multiplayer::NetChannels>,
+        transport: Option<&crate::host::HostTransport>,
         commands: &mut FrameCommands,
         external_actions: &mut Vec<engine_api::ExternalAction>,
         mut capabilities: DispatchCapabilities<'_>,
+        session: Option<SessionFacts>,
     ) {
+        let net = transport.and_then(crate::host::HostTransport::net);
         for req in self.take_requests() {
             if !req.admit_unless_deferred() {
                 continue;
@@ -85,6 +89,8 @@ impl SessionIngress {
                     self.replay_status(),
                     engine,
                     assets,
+                    transport,
+                    session,
                 )),
                 RoutedRequest::Deferred(request) => {
                     self.defer_request(request, req.response_tx, capabilities.has_presentation())
@@ -299,9 +305,13 @@ pub(super) fn dispatch_query(
     replay: Option<ReplayStatus>,
     engine: &Engine,
     assets: &LevelAssets,
+    transport: Option<&crate::host::HostTransport>,
+    session: Option<SessionFacts>,
 ) -> Reply {
     match query {
-        QueryRequest::State => Ok(ReplyBody::Json(snapshot_state(engine, replay))),
+        QueryRequest::State => Ok(ReplyBody::Json(snapshot_state(
+            engine, replay, transport, session,
+        ))),
         QueryRequest::EngineDump => engine_dump_json(engine)
             .map(ReplyBody::Json)
             .map_err(|e| RpcError::internal(format!("engine serialize: {e}"))),

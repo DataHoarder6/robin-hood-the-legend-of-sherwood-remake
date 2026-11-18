@@ -28,6 +28,7 @@ use replay_launch::prepare_replay_mission;
 pub(crate) use replay_launch::{PreparedReplayLaunch, prepare_replay_launch};
 mod retirement;
 mod runtime;
+pub(crate) use runtime::MultiplayerAdmission;
 mod session_policy;
 mod setup;
 pub(crate) use setup::PhaseTimer;

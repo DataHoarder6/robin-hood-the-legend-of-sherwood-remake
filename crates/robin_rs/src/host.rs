@@ -48,7 +48,8 @@ pub(crate) use effects::SherwoodTradingAccess;
 pub use effects::{DeferredAudioRequest, HostAudio, HostEffectBatches, HostSignal};
 pub(crate) use transport::CommittedSnapshotTransition;
 pub use transport::{
-    HostTransport, PendingSnapshotTransition, PendingSnapshotTransitionPayload, SnapshotSave,
+    HostTransport, PendingSnapshotTransition, PendingSnapshotTransitionKind,
+    PendingSnapshotTransitionPayload, SnapshotSave,
 };
 pub use viewport::ViewportState;
 

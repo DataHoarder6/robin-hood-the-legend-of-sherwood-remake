@@ -495,6 +495,18 @@ mod transport_lifecycle_tests {
 mod dispatch_tests {
     use super::*;
 
+    /// A single-player mission reports no multiplayer block; the facts still
+    /// have to name a phase because `/state` requires them beside a transport.
+    fn detached_session_facts() -> SessionFacts {
+        SessionFacts {
+            admission: crate::game_session::MultiplayerAdmission::NotRequired,
+            begin_sim_frame: None,
+            last_compared_hash_frame: None,
+            desync_count: 0,
+            final_operation: robin_engine::game_operation::GameCode::LevelInProgress,
+        }
+    }
+
     #[test]
     fn shared_dispatch_preserves_admission_commands_queries_and_capability_differences() {
         for graphical in [false, true] {
@@ -519,10 +531,10 @@ mod dispatch_tests {
                 let external = ingress.drain(
                     &mut engine,
                     &mut host.frontend,
-                    robin_engine::player_command::PlayerId::HOST,
-                    None,
+                    &host.transport,
                     &assets,
                     &mut commands,
+                    detached_session_facts(),
                 );
                 assert!(external.is_empty());
                 commands
@@ -613,10 +625,10 @@ mod dispatch_tests {
                 ingress.drain(
                     &mut engine,
                     &mut host.frontend,
-                    robin_engine::player_command::PlayerId::HOST,
-                    None,
+                    &host.transport,
                     &assets,
                     &mut FrameCommands::new(),
+                    detached_session_facts(),
                 );
                 assert!(
                     matches!(dump.try_recv().unwrap(), Err(error) if error.kind == RpcErrorKind::Internal && error.message.starts_with("engine serialize:"))
@@ -634,8 +646,14 @@ mod dispatch_tests {
     fn query_dispatch_has_only_read_authority() {
         // Function-pointer coercion is a compile-time capability proof: adding
         // mutable state, frontend input, or command sinks breaks this contract.
-        let _: fn(QueryRequest, Option<ReplayStatus>, &Engine, &LevelAssets) -> Reply =
-            dispatch_query;
+        let _: fn(
+            QueryRequest,
+            Option<ReplayStatus>,
+            &Engine,
+            &LevelAssets,
+            Option<&crate::host::HostTransport>,
+            Option<SessionFacts>,
+        ) -> Reply = dispatch_query;
         let _: fn(
             &Engine,
             &crate::host::HostFrontend,

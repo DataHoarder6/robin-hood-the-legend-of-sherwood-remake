@@ -1069,29 +1069,21 @@ pub mod special_slots {
     pub const SHERWOOD: &str = "Sherwood";
 }
 
-/// Resolve the per-OS save-game *root* directory. This is the folder that
+/// Resolve the per-install save-game *root* directory. This is the folder that
 /// holds `profiles.json`, `keyconfigs.json`, and one `Profile_NNN/`
 /// subdirectory per player profile.
 ///
 /// Priority (first hit wins):
 ///   1. `ROBINHOOD_SAVE_DIR` environment variable (for tests / portable installs)
-///   2. OS data dir via `dirs::data_dir()` — e.g. `~/.local/share/robin_hood/saves`
-///      on Linux, `%APPDATA%\robin_hood\saves` on Windows,
-///      `~/Library/Application Support/robin_hood/saves` on macOS
+///   2. `<install root>/saves` — `ROBINHOOD_INSTALL_HOME` when set, otherwise
+///      the platform data directory's `robin_hood` folder
 ///   3. Fallback: `./Data/Savegame/default` (for installations without
 ///      a per-user profile)
 ///
 /// The returned directory is *not* created automatically; the caller
 /// creates it on first write via `fs::create_dir_all`.
 pub fn default_save_directory() -> PathBuf {
-    if let Ok(override_dir) = std::env::var("ROBINHOOD_SAVE_DIR") {
-        return PathBuf::from(override_dir);
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(data_dir) = dirs::data_dir() {
-        return data_dir.join("robin_hood").join("saves");
-    }
-    PathBuf::from("Data/Savegame/default")
+    crate::install_home::save_root()
 }
 
 /// Name of the per-profile save subdirectory: `Profile_%03lu` against
@@ -2061,11 +2053,13 @@ mod tests {
 
     #[test]
     fn default_save_directory_respects_env_override() {
-        // Use a unique env var to avoid clashes with other parallel tests.
+        // `ROBINHOOD_SAVE_DIR` is process-global; every test that touches it
+        // shares the resolver's lock.
+        let _guard = crate::install_home::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let dir = tempdir().unwrap();
-        // Safety: `ROBINHOOD_SAVE_DIR` is only read/written by this test, and no
-        // other test in the crate touches std::env. That keeps the set_var call
-        // free of concurrent getenv readers from sibling tests.
+        // Safety: the set_var call is serialized by ENV_LOCK.
         unsafe { std::env::set_var("ROBINHOOD_SAVE_DIR", dir.path()) };
         let resolved = default_save_directory();
         assert_eq!(resolved, dir.path());

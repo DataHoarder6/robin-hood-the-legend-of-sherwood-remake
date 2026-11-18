@@ -72,12 +72,16 @@ the same machine.
 
 ### Two instances on one machine
 
-Saves and the multiplayer identity key both live under `ROBINHOOD_SAVE_DIR`, or
-under `dirs::data_dir()` when it is unset. A second instance started without an
-override shares the first one's saves and player key, and cannot join it. Give
-each instance its own root:
+Saves, the multiplayer identity key, replays, attempt links, diagnostic reports
+and the remembered datadir all live under `ROBINHOOD_INSTALL_HOME`, or under
+`dirs::data_dir()/robin_hood` when it is unset. A second instance started
+without an override shares the first one's saves and player key, and cannot join
+it. Give each instance its own root:
 
-    ROBINHOOD_SAVE_DIR=/tmp/robin-b robin
+    ROBINHOOD_INSTALL_HOME=/tmp/robin-b robin
+
+`ROBINHOOD_SAVE_DIR` still overrides the save root alone, for a portable or
+test save folder that must not move the transport identity.
 
 ### The Windows seat
 

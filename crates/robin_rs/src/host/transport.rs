@@ -88,6 +88,25 @@ pub enum PendingSnapshotTransitionPayload {
     },
 }
 
+/// Wire-level identity of a prepared transition: its variant and, for a
+/// campaign exit, its exit code. The payload bytes stay out of diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingSnapshotTransitionKind {
+    Save,
+    CampaignExit(robin_engine::game_operation::GameCode),
+}
+
+impl PendingSnapshotTransitionPayload {
+    pub(crate) fn kind(&self) -> PendingSnapshotTransitionKind {
+        match self {
+            Self::Save { .. } => PendingSnapshotTransitionKind::Save,
+            Self::CampaignExit { exit_code, .. } => {
+                PendingSnapshotTransitionKind::CampaignExit(*exit_code)
+            }
+        }
+    }
+}
+
 pub enum SnapshotSave {
     Local(crate::main_entry::PreparedLoad),
     Remote(Box<crate::save_file::GameSaveFile>),
@@ -147,6 +166,20 @@ impl HostTransport {
     }
     pub fn has_snapshot_transition(&self) -> bool {
         matches!(self.synchronization, TransportSynchronization::Prepared(_))
+    }
+
+    /// The prepared outer-mission transition this peer holds, if any. Both
+    /// peers keep the authenticated id and payload until commit.
+    pub(crate) fn pending_snapshot_transition(
+        &self,
+    ) -> Option<(
+        robin_engine::multiplayer::SnapshotTransitionId,
+        PendingSnapshotTransitionKind,
+    )> {
+        let TransportSynchronization::Prepared(pending) = &self.synchronization else {
+            return None;
+        };
+        Some((pending.id, pending.payload.kind()))
     }
 
     /// Install one fully validated session before engine construction. Metadata

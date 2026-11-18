@@ -115,6 +115,7 @@ use transport::relay;
 #[cfg(target_arch = "wasm32")]
 use transport::resolve_deferred_reply;
 use transport::{HttpServer, Queue};
+pub(crate) use types::SessionFacts;
 use types::{
     CommandRequest, DeferredRequest, ProcessRequest, QueryRequest, RoutedRequest,
     ranked_input_taint,

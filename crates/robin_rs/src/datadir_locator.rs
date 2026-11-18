@@ -250,13 +250,9 @@ fn display_available() -> bool {
 // ─── Persisted choice ────────────────────────────────────────────
 
 /// Location of the remembered-datadir config, next to the saves
-/// (`~/.local/share/robin_hood/datadir.txt` on Linux). `None` when the
-/// build has no OS-data-dir support.
+/// (`<install root>/datadir.txt`). `None` when no install root exists.
 fn config_path() -> Option<PathBuf> {
-    #[cfg(not(target_arch = "wasm32"))]
-    return dirs::data_dir().map(|dir| dir.join("robin_hood").join("datadir.txt"));
-    #[cfg(target_arch = "wasm32")]
-    None
+    crate::install_home::datadir_file()
 }
 
 /// Previously confirmed datadir, if it is still a valid installation.

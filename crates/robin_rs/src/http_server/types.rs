@@ -6,6 +6,23 @@ fn default_true() -> bool {
     true
 }
 
+/// Game-side facts `/state` reports beside the transport's own. Assembled at
+/// the RPC boundary from the timeline and the game operation, never read from
+/// a global.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SessionFacts {
+    /// Current deterministic-mission admission phase.
+    pub(crate) admission: crate::game_session::MultiplayerAdmission,
+    /// Frame of the most recently accepted `BeginSim` barrier.
+    pub(crate) begin_sim_frame: Option<u32>,
+    /// Most recent frame whose host/peer hashes were compared.
+    pub(crate) last_compared_hash_frame: Option<u32>,
+    /// Host/peer mismatches observed in this mission.
+    pub(crate) desync_count: u64,
+    /// Current `GameCode`, e.g. `LevelInProgress` or `Quit`.
+    pub(crate) final_operation: robin_engine::game_operation::GameCode,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HttpModalDismissal {
     pub kind: ModalKind,

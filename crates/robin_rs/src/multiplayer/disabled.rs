@@ -22,6 +22,14 @@ impl MultiplayerRuntime {
     pub(super) fn preserve_session_for_next_mission(&mut self) {
         match *self {}
     }
+
+    pub(super) fn connect_string(&self) -> Option<String> {
+        match *self {}
+    }
+
+    pub(super) fn transition_awaiting_seats(&self) -> Option<Vec<u8>> {
+        match *self {}
+    }
 }
 
 /// Campaign lifetime token. Without a transport there is no campaign state
