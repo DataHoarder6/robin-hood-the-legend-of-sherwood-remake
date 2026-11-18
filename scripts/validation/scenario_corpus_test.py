@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -230,5 +231,69 @@ class CorpusValidationTests(unittest.TestCase):
             self.assertTrue(proves.get("tests") or proves.get("runner"))
 
 
+class RustTestResolutionTests(unittest.TestCase):
+    """A test's name is the module path `cargo test` selects, not its file path."""
+
+    def tree(self, root, files):
+        for name, text in files.items():
+            path = Path(root) / "crates/robin_rs/src" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def test_a_path_mounted_module_names_its_children_under_the_mount(self):
+        # `multiplayer.rs` mounts `enabled.rs` as `transport`, so the file at
+        # `multiplayer/native/server/tests.rs` is `multiplayer::transport::…`
+        # and a path built from the file layout names nothing cargo selects.
+        files = {
+            "lib.rs": "pub mod multiplayer;\n",
+            "multiplayer.rs": (
+                '#[cfg(feature = "multiplayer")]\n'
+                '#[path = "multiplayer/enabled.rs"]\n'
+                "mod transport;\n"
+            ),
+            "multiplayer/enabled.rs": "pub(super) mod native;\n",
+            "multiplayer/native.rs": "mod server;\n",
+            "multiplayer/native/server.rs": "#[cfg(test)]\nmod tests;\n",
+            "multiplayer/native/server/tests.rs": "#[test]\nfn probe() {}\n",
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self.tree(root, files)
+            found = corpus.rust_test("robin_rs", "multiplayer::transport::native::server::tests",
+                                     "probe", root=Path(root))
+            self.assertEqual(found, Path(root) / "crates/robin_rs/src/multiplayer/native/server/tests.rs")
+            self.assertIsNone(
+                corpus.rust_test("robin_rs", "multiplayer::native::server::tests",
+                                 "probe", root=Path(root)))
+
+    def test_an_inline_submodule_must_be_declared_by_the_file(self):
+        files = {
+            "lib.rs": "pub mod game;\n",
+            "game.rs": "mod tests {\n    #[test]\n    fn probe() {}\n}\n",
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self.tree(root, files)
+            self.assertIsNotNone(corpus.rust_test("robin_rs", "game::tests", "probe",
+                                                 root=Path(root)))
+            # `game::elsewhere::tests` is not a module the file declares.
+            self.assertIsNone(corpus.rust_test("robin_rs", "game::elsewhere::tests", "probe",
+                                               root=Path(root)))
+
+    def test_an_ignored_test_is_named_as_ignored(self):
+        files = {
+            "lib.rs": "pub mod game;\n",
+            "game.rs": ('#[test]\n#[ignore = "requires full game data"]\nfn probe() {}\n'),
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self.tree(root, files)
+            self.assertTrue(corpus.ignored_test("robin_rs", "game", "probe", root=Path(root)))
+
+    def test_an_ignored_prover_is_refused(self):
+        # A `#[ignore]`d test exists but no suite runs it, so it proves nothing.
+        broken = scenario("H01", proves={"layer": "core", "tests": CORE_TESTS})
+        with mock.patch.object(corpus, "ignored_test", return_value=True):
+            errors = corpus.validate(DEFAULTS, corpus_of(broken, scenario("H02")), CONTRACT)
+        self.assertTrue(any("is `#[ignore]`d" in error for error in errors), errors)
+
 if __name__ == "__main__":
     unittest.main()
+

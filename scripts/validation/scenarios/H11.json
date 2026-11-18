@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "H11",
   "proves": { "layer": "transport", "tests": [
-      "robin_rs::multiplayer::native::peer_sessions::tests::ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner",
-      "robin_rs::multiplayer::native::server::tests::ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner"
+      "robin_rs::multiplayer::transport::native::peer_sessions::tests::ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner",
+      "robin_rs::multiplayer::transport::native::server::tests::ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner"
   ] },
   "peers": [
     { "seat": 0, "role": "host" },

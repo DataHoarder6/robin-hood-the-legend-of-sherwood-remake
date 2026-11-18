@@ -210,36 +210,93 @@ def normalise(token):
     return re.sub(r"\s+", "", token)
 
 
+MODULE_DECLARATION = re.compile(
+    r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*(;|\{)\s*$")
+PATH_ATTRIBUTE = re.compile(r'^\s*#\[path\s*=\s*"([^"]+)"\s*\]\s*$')
+ATTRIBUTE_OR_COMMENT = re.compile(r"^\s*(?:#\[|//)")
+MAX_MODULE_DEPTH = 32
+
+
+def _path_attribute(lines, number):
+    """The `#[path = …]` in the attribute block above `lines[number]`, if any."""
+    for earlier in reversed(lines[max(0, number - MAX_MODULE_DEPTH):number]):
+        match = PATH_ATTRIBUTE.match(earlier)
+        if match is not None:
+            return match.group(1)
+        if not earlier.strip() or ATTRIBUTE_OR_COMMENT.match(earlier):
+            continue
+        break
+    return None
+
+
+def _module_tree(src):
+    """`(module path, file)` for every file the crate's own `mod` tree mounts.
+
+    Rust, not the filesystem, names a module: `multiplayer.rs` mounts
+    `multiplayer/enabled.rs` as `mod transport`, so the tests in
+    `multiplayer/native/server/tests.rs` are `multiplayer::transport::native::…`
+    and a path built from the file layout names nothing `cargo test` selects.
+    Children of a file mounted by name live in the directory named after it;
+    children of a `#[path]`-mounted file live next to it, which is how
+    `enabled.rs` keeps its submodules in `multiplayer/`.
+    """
+    mounted, stack, seen = [], [], set()
+    for name in ("lib.rs", "main.rs"):
+        root = src / name
+        if root.is_file():
+            stack.append(((), root, src))
+    while stack:
+        module, path, child_dir = stack.pop()
+        if (module, path) in seen or len(module) > MAX_MODULE_DEPTH:
+            continue
+        seen.add((module, path))
+        mounted.append((module, path))
+        lines = path.read_text(errors="replace").splitlines()
+        for number, line in enumerate(lines):
+            match = MODULE_DECLARATION.match(line)
+            if match is None or match.group(2) != ";":
+                continue
+            name = match.group(1)
+            attribute = _path_attribute(lines, number)
+            if attribute is not None:
+                target = path.parent / attribute
+                target_dir = target.parent
+            else:
+                target = child_dir / f"{name}.rs"
+                if not target.is_file():
+                    target = child_dir / name / "mod.rs"
+                target_dir = target.parent if target.name == "mod.rs" else child_dir / name
+            if target.is_file():
+                stack.append((module + (name,), target, target_dir))
+    return mounted
+
+
 @functools.cache
 def _rust_index(root=ROOT):
     """`crate` -> {(module path, test name): file} for every `#[test]` fn.
 
-    A Rust test is named `crate::module::path::test_name`; the module path is the
-    file it lives in, so `a/b.rs` and `a/b/mod.rs` both resolve to `a::b`, and an
-    inline `mod tests { … }` in `a/b.rs` is `a::b::tests`.
+    The module path comes from [`_module_tree`], so it is the path `cargo test`
+    selects, `#[path]` mounting included. An inline `mod tests { … }` adds a
+    segment the tree walk does not enter; [`rust_test`] accepts it only when the
+    file itself declares that submodule.
     """
     index = {}
     for crate in RUST_CRATES["core"]:
         src = root / "crates" / crate / "src"
         if not src.is_dir():
             continue
-        modules = {}
-        for path in src.rglob("*.rs"):
-            parts = list(path.relative_to(src).with_suffix("").parts)
-            if parts[-1] == "mod":
-                parts = parts[:-1]
-            modules[tuple(parts)] = path
         tests = {}
-        for module, path in modules.items():
-            text = path.read_text(errors="replace")
-            lines = text.splitlines()
+        for module, path in _module_tree(src):
+            lines = path.read_text(errors="replace").splitlines()
             for number, line in enumerate(lines):
                 match = re.match(r"\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
                 if match is None:
                     continue
                 window = lines[max(0, number - 6):number]
                 if any(re.match(r"\s*#\[test\]\s*$", attribute) for attribute in window):
-                    tests[(module, match.group(1))] = path
+                    ignored = any(re.match(r"\s*#\[ignore\b", attribute)
+                                  for attribute in window)
+                    tests[(module, match.group(1))] = (path, ignored)
         index[crate] = tests
     return index
 
@@ -248,12 +305,8 @@ def _declares_submodule(path, name):
     return re.search(rf"\bmod\s+{re.escape(name)}\b", path.read_text(errors="replace")) is not None
 
 
-def rust_test(crate, module_path, name, root=ROOT):
-    """The file holding `#[test] fn name` under `crate::module_path`.
-
-    A module segment that is not a file of its own must be an inline `mod` the
-    file declares, so a path cannot borrow a test from an unrelated neighbour.
-    """
+def _resolve(crate, module_path, name, root=ROOT):
+    """`(file, ignored)` for the named test, or `None` when the tree has none."""
     tests = _rust_index(root).get(crate, {})
     if not tests:
         raise ContractError(f"crates/{crate}/src has no Rust tests to resolve")
@@ -262,10 +315,25 @@ def rust_test(crate, module_path, name, root=ROOT):
         found = tests.get((candidate, name))
         if found is None:
             continue
-        if candidate != module and not _declares_submodule(found, module[-1]):
+        if candidate != module and not _declares_submodule(found[0], module[-1]):
             continue
         return found
-    return None
+
+
+def rust_test(crate, module_path, name, root=ROOT):
+    """The file holding `#[test] fn name` under `crate::module_path`.
+
+    A module segment that is not a file of its own must be an inline `mod` the
+    file declares, so a path cannot borrow a test from an unrelated neighbour.
+    """
+    found = _resolve(crate, module_path, name, root)
+    return None if found is None else found[0]
+
+
+def ignored_test(crate, module_path, name, root=ROOT):
+    """Whether the named test is `#[ignore]`d, so no suite runs it by default."""
+    found = _resolve(crate, module_path, name, root)
+    return found is not None and found[1]
 
 
 def _tables(text):
@@ -487,6 +555,8 @@ class Checker:
             found = rust_test(crate, module_path, test_name)
             if found is None:
                 self.fail(here, f"{name} is not a `#[test]` in crates/{crate}")
+            elif ignored_test(crate, module_path, test_name):
+                self.fail(here, f"{name} is `#[ignore]`d, so no suite runs it by default")
 
     def peers(self, where, document):
         peers = document["peers"]

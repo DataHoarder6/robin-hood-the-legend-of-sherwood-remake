@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "H17",
   "proves": { "layer": "transport", "tests": [
-      "robin_rs::multiplayer::native::server::tests::disconnected_transition_peer_must_ack_again_after_reconnect",
-      "robin_rs::multiplayer::native::server::tests::snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops"
+      "robin_rs::multiplayer::transport::native::server::tests::disconnected_transition_peer_must_ack_again_after_reconnect",
+      "robin_rs::multiplayer::transport::native::server::tests::snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops"
   ] },
   "peers": [
     { "seat": 0, "role": "host" },

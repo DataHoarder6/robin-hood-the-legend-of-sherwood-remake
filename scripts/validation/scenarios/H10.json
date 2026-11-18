@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "H10",
   "proves": { "layer": "core", "tests": [
-      "robin_rs::multiplayer::native::server::tests::snapshot_transition_waits_for_every_current_peer",
-      "robin_rs::multiplayer::native::server::tests::snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops"
+      "robin_rs::multiplayer::transport::native::server::tests::snapshot_transition_waits_for_every_current_peer",
+      "robin_rs::multiplayer::transport::native::server::tests::snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops"
   ] },
   "peers": [
     { "seat": 0, "role": "host" },
