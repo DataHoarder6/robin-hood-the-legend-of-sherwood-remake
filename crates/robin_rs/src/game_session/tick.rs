@@ -723,12 +723,11 @@ fn seek_replay_step(
     }
 }
 
-/// A step request arrived while the terminal debriefing owns the mission:
-/// queue its typed dismissal (explicit or auto) and reply, never stepping.
-/// Queue the step's typed dismissal for the terminal page that owns the mission.
+/// Queue the step's typed dismissal (explicit or auto) for the terminal page
+/// that owns the mission.
 ///
-/// The queued result is applied by the frame that follows, so a host step must
-/// advance that frame while a client -- which may not step -- only reports the
+/// The queued result is applied by the frame that follows, so a host step
+/// advances that frame while a client -- which may not step -- only reports the
 /// queued acknowledgement. Every rejection is returned with the reply text so
 /// the caller answers the request exactly once.
 fn queue_terminal_modal_dismissal(
