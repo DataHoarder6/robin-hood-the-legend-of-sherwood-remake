@@ -392,10 +392,13 @@ to be deployed.
 
 Fault and reorder coverage is a contract now, not a wish: the matrix in
 `multiplayer/HARNESS.md` §1 names every cell, the corpus in
-`scripts/validation/scenarios/` states each one, and `multiplayer-e2e` runs the
-process-layer rows with real signals on the build host on every gated push. A
-cell with no scenario fails the corpus gate, so coverage cannot quietly regress;
-what follows is what the matrix deliberately does not cover yet.
+`scripts/validation/scenarios/` states each one, and the file that proves each
+row is named in the row and enforced by the corpus gate — a Rust test for the
+core and transport rows, `multiplayer-e2e` for the process rows. The process
+suite runs real processes with real signals on the build host, on demand and as
+the second step of the stable-release preflight (`docs/RELEASES.md`), not on
+every push: it needs the licensed data, a built binary and an unprivileged
+namespace. What follows is what the matrix deliberately does not cover yet.
 
 - define a host viewport policy for split-screen or replay viewing from a
   non-local seat;

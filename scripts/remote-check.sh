@@ -14,6 +14,8 @@
 #   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
 #   scripts/remote-check.sh --prune         # delete every copy but this one
+#   scripts/remote-check.sh --prune-stale [DAYS]
+#                                           # delete copies untouched for DAYS (default 7)
 #
 # The suites run under flock, so two agents on one copy queue instead of
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
@@ -128,12 +130,50 @@ case "${1:-}" in
         ssh -n "$host" "du -sh ~/$remote_root/*/ 2>/dev/null | sort -k2"
         exit 0
         ;;
+    --prune-stale)
+        require_host
+        keep=$(copy_name "")
+        days=${2:-7}
+        case $days in
+            '' | *[!0-9]*)
+                printf 'remote-check: --prune-stale takes a day count, not %s\n' "$days" >&2
+                exit 2
+                ;;
+        esac
+        # The login shell on the build host is not POSIX, so the loop runs under
+        # bash over stdin. Only directories that look like a copy are candidates,
+        # and a copy is stale when this host has not written into it for DAYS.
+        ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd ~/$remote_root 2>/dev/null || exit 0
+for d in */; do
+    d=\${d%/}
+    [ "\$d" = '$keep' ] && continue
+    [ -f "\$d/Cargo.toml" ] || continue
+    [ -n "\$(find "\$d" -maxdepth 0 -mtime +$days)" ] || continue
+    printf 'pruned %s\n' "\$d" >&2
+    rm -rf -- "\$d" "\$d.lock"
+done
+du -sh ~/$remote_root 2>/dev/null || true
+EOF
+        exit 0
+        ;;
     --prune)
         require_host
         keep=$(copy_name "${2:-}")
         # Only real copies: the root is shared, and a cache or scratch directory
         # someone keeps beside the copies is not this script's to delete.
-        ssh -n "$host" "cd ~/$remote_root 2>/dev/null || exit 0; for d in */; do d=\${d%/}; [ \"\$d\" = '$keep' ] && continue; [ -f \"\$d/Cargo.toml\" ] || continue; rm -rf -- \"\$d\" \"\$d.lock\"; done; du -sh ~/$remote_root 2>/dev/null || true"
+        ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd ~/$remote_root 2>/dev/null || exit 0
+for d in */; do
+    d=\${d%/}
+    [ "\$d" = '$keep' ] && continue
+    [ -f "\$d/Cargo.toml" ] || continue
+    rm -rf -- "\$d" "\$d.lock"
+done
+du -sh ~/$remote_root 2>/dev/null || true
+EOF
         exit 0
         ;;
     --sync)

@@ -135,7 +135,7 @@ Levers, cheapest first:
 
 ```sh
 rm -rf target/debug/incremental          # in every checkout holding one
-scripts/remote-check.sh --prune          # stale copies on the build host
+scripts/remote-check.sh --prune-stale 7  # copies nothing has written to for a week
 nix-collect-garbage --delete-older-than 14d
 rm -rf target                            # last: a full rebuild follows
 ```
