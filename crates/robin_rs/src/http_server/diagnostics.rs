@@ -1,5 +1,6 @@
 //! Read-only RPC diagnostic builders. No request queue or transport ownership.
 use crate::http_server::ReplayStatus;
+use crate::http_server::SessionFacts;
 use robin_engine::engine::{Engine, LevelAssets};
 #[cfg(any(feature = "script-rpc", target_arch = "wasm32"))]
 use robin_engine::natives as engine_natives;
@@ -53,7 +54,15 @@ pub(crate) fn list_natives_json() -> serde_json::Value {
 }
 
 /// Build the stable public state response without acquiring request authority.
-pub(crate) fn snapshot_state(engine: &Engine, replay: Option<ReplayStatus>) -> serde_json::Value {
+///
+/// `transport` is the mission's transport when one is admitted; its absence is
+/// what makes `multiplayer` `null`, exactly as a single-player mission reports.
+pub(crate) fn snapshot_state(
+    engine: &Engine,
+    replay: Option<ReplayStatus>,
+    transport: Option<&crate::host::HostTransport>,
+    session: Option<SessionFacts>,
+) -> serde_json::Value {
     let replay = replay.map(|s| {
         serde_json::json!({
             "frame": s.frame,
@@ -62,10 +71,62 @@ pub(crate) fn snapshot_state(engine: &Engine, replay: Option<ReplayStatus>) -> s
             "checkpoint_seek": true,
         })
     });
+    let multiplayer = transport.and_then(|transport| {
+        transport.net().map(|_| {
+            let session = session.expect("an admitted transport reports its session facts");
+            multiplayer_state(transport, session)
+        })
+    });
     serde_json::json!({
         "frame": engine.frame_counter(),
         "map": engine.mission_map_name(),
         "replay": replay,
+        "multiplayer": multiplayer,
+    })
+}
+
+/// Project one admitted session onto the `/state` wire shape. Every value is
+/// read from the live transport, timeline or game operation; nothing here is
+/// derived from log text.
+fn multiplayer_state(
+    transport: &crate::host::HostTransport,
+    session: SessionFacts,
+) -> serde_json::Value {
+    let pending_transition = transport.pending_snapshot_transition().map(|(id, kind)| {
+        let payload = match kind {
+            crate::host::PendingSnapshotTransitionKind::Save => {
+                serde_json::json!("Save")
+            }
+            crate::host::PendingSnapshotTransitionKind::CampaignExit(exit_code) => {
+                serde_json::json!({"CampaignExit": format!("{exit_code:?}")})
+            }
+        };
+        serde_json::json!({
+            "id": serde_json::to_value(id).expect("snapshot transition id serializes"),
+            "payload": payload,
+            "awaiting": transport
+                .net()
+                .map(crate::multiplayer::NetChannels::transition_awaiting_seats)
+                .unwrap_or_default(),
+        })
+    });
+    let expected_players = transport
+        .mission_sim_config()
+        .expect("an admitted session retains its simulation config")
+        .coop
+        .players;
+    serde_json::json!({
+        "local_seat": transport.local_seat().0,
+        "expected_players": expected_players,
+        "admission": session.admission.wire_name(),
+        "begin_sim_frame": session.begin_sim_frame,
+        "pending_transition": pending_transition,
+        "last_compared_hash_frame": session.last_compared_hash_frame,
+        "desync_count": session.desync_count,
+        "final_operation": format!("{:?}", session.final_operation),
+        "connect_string": transport
+            .net()
+            .and_then(crate::multiplayer::NetChannels::connect_string),
     })
 }
 
@@ -718,9 +779,10 @@ mod tests {
         engine.test_set_frame_counter(42);
         let before = engine.encode_native_snapshot();
         assert_eq!(
-            snapshot_state(&engine, None),
+            snapshot_state(&engine, None, None, None),
             serde_json::json!({
-                "frame": 42, "map": engine.mission_map_name(), "replay": null
+                "frame": 42, "map": engine.mission_map_name(), "replay": null,
+                "multiplayer": null
             })
         );
         assert_eq!(
@@ -730,10 +792,13 @@ mod tests {
                     frame: 3,
                     total: 9,
                     paused: true
-                })
+                }),
+                None,
+                None
             ),
             serde_json::json!({"frame": 42, "map": engine.mission_map_name(),
-                "replay": {"frame": 3, "total": 9, "paused": true, "checkpoint_seek": true}})
+                "replay": {"frame": 3, "total": 9, "paused": true, "checkpoint_seek": true},
+                "multiplayer": null})
         );
         assert_eq!(
             snapshot_script(&engine),
@@ -744,6 +809,105 @@ mod tests {
             serde_json::json!({"error": "no mission script loaded"})
         );
         assert_eq!(engine.encode_native_snapshot(), before);
+    }
+
+    #[test]
+    fn state_reports_the_admitted_multiplayer_session() {
+        use robin_engine::game_operation::GameCode;
+        use robin_engine::player_command::PlayerId;
+
+        let (mut engine, _assets) = robin_engine::test_support::fresh_engine();
+        engine.test_set_frame_counter(42);
+        let mut transport = crate::host::HostTransport::default();
+        transport.install_session(
+            crate::multiplayer::NetChannels::new().0,
+            PlayerId::HOST,
+            "Dem_Lei_MP".into(),
+            7,
+            robin_engine::engine::SimConfig {
+                coop: robin_engine::coop::CoopRules {
+                    players: 2,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            None,
+        );
+        let session = SessionFacts {
+            admission: crate::game_session::MultiplayerAdmission::HostWaitingForBegin,
+            begin_sim_frame: Some(133),
+            last_compared_hash_frame: Some(50),
+            desync_count: 1,
+            final_operation: GameCode::Quit,
+        };
+
+        assert_eq!(
+            snapshot_state(&engine, None, Some(&transport), Some(session)),
+            serde_json::json!({
+                "frame": 42,
+                "map": engine.mission_map_name(),
+                "replay": null,
+                "multiplayer": {
+                    "local_seat": 0,
+                    "expected_players": 2,
+                    "admission": "host_waiting_for_begin",
+                    "begin_sim_frame": 133,
+                    "pending_transition": null,
+                    "last_compared_hash_frame": 50,
+                    "desync_count": 1,
+                    "final_operation": "Quit",
+                    "connect_string": null,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn state_reports_the_prepared_snapshot_transition() {
+        use robin_engine::game_operation::GameCode;
+        use robin_engine::multiplayer::{MultiplayerSessionId, SnapshotTransitionId};
+
+        let (engine, _assets) = robin_engine::test_support::fresh_engine();
+        let mut transport = crate::host::HostTransport::default();
+        transport.install_session(
+            crate::multiplayer::NetChannels::new().0,
+            robin_engine::player_command::PlayerId::HOST,
+            "Dem_Lei_MP".into(),
+            7,
+            robin_engine::engine::SimConfig::default(),
+            None,
+        );
+        let id = SnapshotTransitionId {
+            session_id: MultiplayerSessionId([9; 32]),
+            sequence: 2,
+        };
+        transport.prepare_snapshot_transition(crate::host::PendingSnapshotTransition::new(
+            id,
+            crate::host::PendingSnapshotTransitionPayload::CampaignExit {
+                exit_code: GameCode::LevelFailed,
+                engine: None,
+            },
+        ));
+        let state = snapshot_state(
+            &engine,
+            None,
+            Some(&transport),
+            Some(SessionFacts {
+                admission: crate::game_session::MultiplayerAdmission::Running,
+                begin_sim_frame: Some(0),
+                last_compared_hash_frame: None,
+                desync_count: 0,
+                final_operation: GameCode::LevelFailed,
+            }),
+        );
+        assert_eq!(
+            state["multiplayer"]["pending_transition"],
+            serde_json::json!({
+                "id": serde_json::to_value(id).unwrap(),
+                "payload": {"CampaignExit": "LevelFailed"},
+                "awaiting": [],
+            })
+        );
     }
 
     #[test]

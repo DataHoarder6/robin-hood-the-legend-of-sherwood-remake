@@ -38,7 +38,7 @@ blocked or loading game should fail quickly.
 | --- | --- | --- |
 | `GET` | `/` or `/info` | endpoint discovery document |
 | `GET` | `/natives` | every script native with index and signature |
-| `GET` | `/state` | compact frame, map and replay status |
+| `GET` | `/state` | compact frame, map, replay and multiplayer session status |
 | `GET` | `/engine-dump` | complete serialized deterministic Engine state |
 | `GET` | `/level-assets` | static level data plus runtime fast-grid flags |
 | `GET` | `/host-debug` | non-authoritative host/UI debug state |
@@ -48,6 +48,27 @@ blocked or loading game should fail quickly.
 `/engine-dump` and `/host-debug` are deliberately separate. The former is
 authoritative simulation state; the latter contains local viewport, hover and
 trajectory-preview details which do not belong in Engine snapshots.
+
+`/state` also carries the admitted session when one exists; a single-player
+mission reports `"multiplayer": null`.
+
+```json
+{"frame": 133, "map": "Dem_Lei_MP", "replay": null,
+ "multiplayer": {
+   "local_seat": 0, "expected_players": 2,
+   "admission": "running", "begin_sim_frame": 133,
+   "pending_transition": null,
+   "last_compared_hash_frame": 125, "desync_count": 0,
+   "final_operation": "LevelInProgress",
+   "connect_string": "{\"id\":…,\"addrs\":[…]}"
+ }}
+```
+
+`admission` is a stable lowercase phase name; `pending_transition` is
+`{"id", "payload", "awaiting"}` with `payload` `"Save"` or
+`{"CampaignExit": "<GameCode>"}` and `awaiting` the seats whose acknowledgement
+the host's commit still waits for. `connect_string` is the host's dial address
+and `null` on a client.
 
 ## Command endpoints
 

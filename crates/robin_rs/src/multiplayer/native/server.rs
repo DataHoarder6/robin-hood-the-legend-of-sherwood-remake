@@ -91,6 +91,21 @@ impl ServerHandle {
     pub(in crate::multiplayer) fn preserve_session_for_next_mission(&mut self) {
         self.preserve_on_shutdown = true;
     }
+
+    /// Seats whose acknowledgement the pending snapshot-transition commit
+    /// still waits for, or `None` when no transition is pending.
+    pub(crate) fn transition_awaiting_seats(&self) -> Option<Vec<u8>> {
+        let peers = self.context.peers.lock();
+        let mut awaiting = peers
+            .transitions
+            .pending()?
+            .awaiting
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        awaiting.sort_unstable();
+        Some(awaiting)
+    }
 }
 
 pub(super) fn publish_context_continuation(context: &ServerContext) {

@@ -131,6 +131,7 @@ fn process_pre_tick_state_hash_with_reporter(
             continue;
         };
         if local_hash != host_hash {
+            runtime.network_mut().record_desync();
             let last_rollback = runtime.multiplayer().last_rollback();
             let last_rollback_path = last_rollback.map_or("none", |r| r.path);
             let last_rollback_earliest = last_rollback.map_or(0, |r| r.earliest_frame);

@@ -1608,6 +1608,7 @@ impl InteractiveFrameSimulation {
                 engine: &mut *engine,
                 assets,
                 dev: &mut *dev,
+                final_operation: game.operation.get_current(),
             },
             frame,
         );

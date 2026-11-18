@@ -10,6 +10,12 @@ pub(in crate::game_session) struct NetworkReconciliation {
     pending_inputs: BTreeMap<TimelineFrame, Vec<PlayerInput>>,
     peer_hashes: BTreeMap<u32, u64>,
     local_hashes: BTreeMap<u32, u64>,
+    /// Diagnostics: the most recent frame whose hashes were compared, match or
+    /// mismatch. Survives prediction recovery because the comparison happened.
+    last_compared_hash_frame: Option<u32>,
+    /// Diagnostics: mismatches observed in this mission. A recovery reconnects
+    /// but does not erase what the peer already observed.
+    desync_count: u64,
 }
 
 impl NetworkReconciliation {
@@ -104,9 +110,24 @@ impl NetworkReconciliation {
             .is_some_and(|(&frame, _)| frame <= current.number())
         {
             let (frame, remote) = self.peer_hashes.pop_first().expect("due hash exists");
+            self.last_compared_hash_frame = Some(frame);
             comparisons.push((frame, remote, self.local_hashes.get(&frame).copied()));
         }
         comparisons
+    }
+
+    pub(in crate::game_session) fn last_compared_hash_frame(&self) -> Option<u32> {
+        self.last_compared_hash_frame
+    }
+
+    pub(in crate::game_session) fn desync_count(&self) -> u64 {
+        self.desync_count
+    }
+
+    /// The peer observed a host/local mismatch at `frame`. Diagnostics only:
+    /// recovery is driven by the caller, never by this counter.
+    pub(in crate::game_session) fn record_desync(&mut self) {
+        self.desync_count = self.desync_count.saturating_add(1);
     }
 }
 
@@ -151,6 +172,22 @@ mod tests {
                 .take_due_comparisons(TimelineFrame::from_wire(100))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn comparison_diagnostics_survive_prediction_recovery() {
+        let mut network = NetworkReconciliation::default();
+        network.admit_remote_hash(25, 1);
+        network.remember_local_hash(25, 2);
+        assert_eq!(
+            network.take_due_comparisons(TimelineFrame::from_wire(25)),
+            vec![(25, 1, Some(2))]
+        );
+        assert_eq!(network.last_compared_hash_frame(), Some(25));
+        network.record_desync();
+        network.abandon_prediction();
+        assert_eq!(network.last_compared_hash_frame(), Some(25));
+        assert_eq!(network.desync_count(), 1);
     }
 
     #[test]

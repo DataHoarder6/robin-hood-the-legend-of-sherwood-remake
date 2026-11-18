@@ -20,6 +20,19 @@ pub(crate) enum MultiplayerAdmission {
 }
 
 impl MultiplayerAdmission {
+    /// Stable lowercase phase name for `/state`; independent of `Debug`.
+    pub(crate) fn wire_name(self) -> &'static str {
+        match self {
+            Self::NotRequired => "not_required",
+            Self::HostWaitingForBegin => "host_waiting_for_begin",
+            Self::HostWaitingForResyncBegin { .. } => "host_waiting_for_resync_begin",
+            Self::PeerWaitingForSnapshot => "peer_waiting_for_snapshot",
+            Self::PeerWaitingForBegin { .. } => "peer_waiting_for_begin",
+            Self::WaitingForStart { .. } => "waiting_for_start",
+            Self::Running => "running",
+        }
+    }
+
     pub(super) fn apply(
         &mut self,
         event: MultiplayerAdmissionEvent,

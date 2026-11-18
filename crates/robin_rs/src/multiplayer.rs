@@ -97,6 +97,22 @@ impl NetChannels {
             runtime.preserve_session_for_next_mission();
         }
     }
+
+    /// The host's stable dial address. `None` on a client, which dials rather
+    /// than being dialled, and on an unattached bundle.
+    pub(crate) fn connect_string(&self) -> Option<String> {
+        self.runtime.as_ref()?.connect_string()
+    }
+
+    /// Seats whose acknowledgement the host's pending snapshot-transition
+    /// commit still waits for. A client's commit waits for no seat, so this is
+    /// empty there.
+    pub(crate) fn transition_awaiting_seats(&self) -> Vec<u8> {
+        self.runtime
+            .as_ref()
+            .and_then(MultiplayerRuntime::transition_awaiting_seats)
+            .unwrap_or_default()
+    }
 }
 
 impl Deref for NetChannels {
@@ -139,6 +155,37 @@ mod tests {
         let connect_string = handle.connect_string();
         channels.attach_runtime(handle);
         (channels, connect_string)
+    }
+
+    #[test]
+    fn state_reports_the_hosts_dial_address() {
+        use robin_engine::game_operation::GameCode;
+
+        let (channels, connect_string) = start_owned_server();
+        let mut transport = crate::host::HostTransport::default();
+        transport.install_session(
+            channels,
+            PlayerId::HOST,
+            "Dem_Lei_MP".into(),
+            42,
+            robin_engine::engine::SimConfig::default(),
+            Some("en-US".into()),
+        );
+        let (engine, _assets) = robin_engine::test_support::fresh_engine();
+        let state = crate::http_server::diagnostics::snapshot_state(
+            &engine,
+            None,
+            Some(&transport),
+            Some(crate::http_server::SessionFacts {
+                admission: crate::game_session::MultiplayerAdmission::HostWaitingForBegin,
+                begin_sim_frame: None,
+                last_compared_hash_frame: None,
+                desync_count: 0,
+                final_operation: GameCode::LevelInProgress,
+            }),
+        );
+        assert_eq!(state["multiplayer"]["connect_string"], connect_string);
+        assert_eq!(state["multiplayer"]["local_seat"], serde_json::json!(0));
     }
 
     #[test]

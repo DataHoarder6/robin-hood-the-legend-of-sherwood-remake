@@ -447,6 +447,7 @@ impl MissionRuntime {
                 engine: &mut self.world.manager.engine,
                 assets: &self.world.assets,
                 dev: &mut self.world.dev,
+                final_operation: self.world.game.operation.get_current(),
             },
             frame,
         );
@@ -499,6 +500,8 @@ pub(super) struct PostTickRpcPhase<'a> {
     pub(super) engine: &'a mut Engine,
     pub(super) assets: &'a LevelAssets,
     pub(super) dev: &'a mut DevState,
+    /// `Game::operation` at this boundary, reported by `/state`.
+    pub(super) final_operation: robin_engine::game_operation::GameCode,
 }
 
 /// Shared post-tick effect/RPC boundary. Neither driver grants access to Game,
@@ -522,7 +525,15 @@ pub(super) fn drain_post_tick_rpc(
         engine,
         assets,
         dev,
+        final_operation,
     } = phase;
+    let session = crate::http_server::SessionFacts {
+        admission: timeline.multiplayer().admission(),
+        begin_sim_frame: timeline.multiplayer().begin_sim_frame(),
+        last_compared_hash_frame: timeline.network().last_compared_hash_frame(),
+        desync_count: timeline.network().desync_count(),
+        final_operation,
+    };
     let pending_actions = frame.unapplied_post_external_actions();
     if !pending_actions.is_empty() {
         crate::sim_timeline::run_post_external_action_stage(
@@ -541,10 +552,10 @@ pub(super) fn drain_post_tick_rpc(
     let actions = http.drain(
         engine,
         frontend,
-        transport.local_seat(),
-        transport.net(),
+        transport,
         assets,
         &mut frame.stage_post_commands(),
+        session,
     );
     timeline
         .replay
@@ -869,7 +880,7 @@ pub(super) struct TimelineRuntime {
 /// Network admission state for the deterministic mission timeline.
 ///
 mod admission;
-pub(super) use admission::MultiplayerAdmission;
+pub(crate) use admission::MultiplayerAdmission;
 
 /// Move the cursor and drop network inputs queued before it. Shared by
 /// [`TimelineRuntime::adopt_frame`] and history rebasing, which may run while
@@ -1139,6 +1150,9 @@ impl TimelineRuntime {
                 self.multiplayer.timing.clear_schedule();
             }
             self.multiplayer.admission.apply(*event)?;
+            if let MultiplayerAdmissionEvent::BeginSim { frame, .. } = event {
+                self.multiplayer.record_begin_sim(*frame);
+            }
         }
         Ok(())
     }
@@ -1845,6 +1859,7 @@ mod tests {
                 engine: &mut engine,
                 assets: &assets,
                 dev: &mut dev,
+                final_operation: robin_engine::game_operation::GameCode::LevelInProgress,
             },
             &mut frame,
         );
@@ -1883,6 +1898,7 @@ mod tests {
                 engine: &mut engine,
                 assets: &assets,
                 dev: &mut dev,
+                final_operation: robin_engine::game_operation::GameCode::LevelInProgress,
             },
             &mut frame,
         );
@@ -3749,6 +3765,11 @@ mod tests {
         assert_eq!(
             timeline.multiplayer.admission,
             MultiplayerAdmission::Running
+        );
+        assert_eq!(
+            timeline.multiplayer.begin_sim_frame(),
+            Some(0),
+            "the accepted start barrier survives the gate opening for /state"
         );
     }
 

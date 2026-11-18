@@ -14,6 +14,9 @@ use serde::Serialize;
 pub(in crate::game_session) struct MultiplayerSync {
     pub(super) admission: MultiplayerAdmission,
     pub(super) timing: MultiplayerTiming,
+    /// Frame of the accepted `BeginSim` barrier. Retained after the gate opens
+    /// so `/state` can report the one start boundary this mission used.
+    begin_sim_frame: Option<u32>,
     /// Process-side diagnostics from the most recent network rollback.
     #[serde(skip)]
     last_rollback: Option<MultiplayerRollbackTelemetry>,
@@ -28,12 +31,23 @@ impl MultiplayerSync {
                 (true, false) => MultiplayerAdmission::PeerWaitingForSnapshot,
             },
             timing: MultiplayerTiming::default(),
+            begin_sim_frame: None,
             last_rollback: None,
         }
     }
 
     pub(in crate::game_session) fn admission(&self) -> MultiplayerAdmission {
         self.admission
+    }
+
+    pub(in crate::game_session) fn begin_sim_frame(&self) -> Option<u32> {
+        self.begin_sim_frame
+    }
+
+    /// One mission accepts one start barrier; a resynchronized replacement
+    /// mission records its own release.
+    pub(in crate::game_session) fn record_begin_sim(&mut self, frame: u32) {
+        self.begin_sim_frame = Some(frame);
     }
 
     pub(in crate::game_session) fn timing(&self) -> &MultiplayerTiming {

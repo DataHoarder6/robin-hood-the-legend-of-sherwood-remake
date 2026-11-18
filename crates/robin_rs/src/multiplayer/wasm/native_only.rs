@@ -32,4 +32,12 @@ impl ServerHandle {
     pub(in crate::multiplayer) fn preserve_session_for_next_mission(&mut self) {
         match *self {}
     }
+
+    pub(in crate::multiplayer) fn connect_string(&self) -> Option<String> {
+        match *self {}
+    }
+
+    pub(in crate::multiplayer) fn transition_awaiting_seats(&self) -> Option<Vec<u8>> {
+        match *self {}
+    }
 }

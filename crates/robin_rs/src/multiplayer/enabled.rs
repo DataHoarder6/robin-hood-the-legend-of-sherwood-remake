@@ -94,6 +94,22 @@ impl MultiplayerRuntime {
             Self::Client(_) => {}
         }
     }
+
+    /// `Some` only for the hosting peer; see [`super::NetChannels::connect_string`].
+    pub(super) fn connect_string(&self) -> Option<String> {
+        match self {
+            Self::Server(handle) => Some(handle.connect_string()),
+            Self::Client(_) => None,
+        }
+    }
+
+    /// `Some` only for the hosting peer, whose commit barrier holds peer acks.
+    pub(super) fn transition_awaiting_seats(&self) -> Option<Vec<u8>> {
+        match self {
+            Self::Server(handle) => handle.transition_awaiting_seats(),
+            Self::Client(_) => None,
+        }
+    }
 }
 
 impl Drop for MultiplayerRuntime {
