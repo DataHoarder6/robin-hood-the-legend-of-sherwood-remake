@@ -352,10 +352,6 @@ impl EventFile {
         Ok(path)
     }
 
-    fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
-    }
-
     fn append(&mut self, record: &Value) {
         if self.file.is_none() {
             return;

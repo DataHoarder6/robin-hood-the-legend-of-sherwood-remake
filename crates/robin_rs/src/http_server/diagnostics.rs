@@ -90,7 +90,10 @@ pub(crate) fn events_document(
 /// never queues.
 ///
 /// `params` is the already-decoded JS parameter object: `null`/absent for
-/// `/state`, `{since, limit}` for `/events`.
+/// `/state`, `{since, limit}` for `/events`. The native listener builds the same
+/// two answers from [`state_reply`] and [`events_document`]; only the browser
+/// needs the method dispatch.
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn observability_reply(method: &str, params: serde_json::Value) -> Reply {
     match method {
         "state" => state_reply(),
@@ -104,6 +107,7 @@ pub(crate) fn observability_reply(method: &str, params: serde_json::Value) -> Re
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct EventsParams {

@@ -235,17 +235,13 @@ mod tests {
                 "{method} must not become a queued request"
             );
         }
-        // The inline builder is what the bridge calls; `state` may still have no
-        // mission to report, which is its own documented answer.
-        match crate::http_server::diagnostics::observability_reply("state", serde_json::Value::Null)
-        {
+        // The inline builders are what both transports call; `state` may still
+        // have no mission to report, which is its own documented answer.
+        match crate::http_server::diagnostics::state_reply() {
             Ok(_) => {}
             Err(error) => assert_eq!(error.message, "engine not ready — no mission state yet"),
         }
-        let page = crate::http_server::diagnostics::observability_reply(
-            "events",
-            serde_json::json!({"limit": 1}),
-        );
+        let page = crate::http_server::diagnostics::events_document(None, Some(1));
         assert!(page.is_ok(), "events answers inline");
         let cursor = crate::http_server::diagnostics::events_document(None, None).unwrap();
         assert!(cursor.get("events").is_some(), "{cursor}");
