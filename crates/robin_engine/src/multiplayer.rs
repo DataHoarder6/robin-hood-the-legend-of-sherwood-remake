@@ -14,7 +14,9 @@
 #[path = "multiplayer/modal_session.rs"]
 mod modal_session;
 use modal_session::ModalSyncState;
-pub use modal_session::{ModalEffectAdmission, ModalPublication, ModalRecoveryState};
+pub use modal_session::{
+    ModalAckExpiry, ModalEffectAdmission, ModalPublication, ModalRecoveryState,
+};
 
 use crate::engine::Engine;
 use crate::player_command::{DialogResult, ModalKind, PlayerCommand, PlayerId, PlayerInput};

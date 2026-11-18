@@ -19,6 +19,8 @@ pub(crate) struct SessionBundle {
     pub(crate) session_id: Option<String>,
     /// Newest replay at the time of failure; the mission that just stopped.
     pub(crate) replay: Option<PathBuf>,
+    /// This run's trace log; the bundle points at its own copy of the story.
+    pub(crate) log: Option<PathBuf>,
     pub(crate) written_at: String,
 }
 
@@ -71,12 +73,23 @@ pub(crate) fn record_session_failure(
     seat: Option<u8>,
     session_id: Option<String>,
 ) {
+    crate::observability::event(
+        crate::observability::EventKind::SessionFailed,
+        format!("multiplayer: session failed: {reason}"),
+    )
+    .seat_number_opt(seat)
+    .field("reason", reason)
+    .field("admission", admission)
+    .field("session_id", session_id.clone())
+    .error()
+    .record();
     let bundle = SessionBundle {
         reason: reason.to_owned(),
         admission: admission.map(str::to_owned),
         seat,
         session_id,
         replay: newest_replay(),
+        log: crate::observability::run_log_path(),
         written_at: String::new(),
     };
     match write_session_bundle(bundle) {
@@ -105,6 +118,7 @@ mod tests {
             seat: Some(1),
             session_id: Some("MultiplayerSessionId([7; 32])".into()),
             replay: Some(PathBuf::from("/tmp/example.mission")),
+            log: Some(PathBuf::from("/tmp/logs/robin-20261117T220000.log")),
             written_at: "2026-11-17T22-00-00+02-00-000".into(),
         };
         let encoded = serde_json::to_value(&bundle).unwrap();
@@ -114,6 +128,7 @@ mod tests {
             "seat",
             "session_id",
             "replay",
+            "log",
             "written_at",
         ] {
             assert!(encoded.get(key).is_some(), "missing {key}");

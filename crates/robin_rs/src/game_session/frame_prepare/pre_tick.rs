@@ -149,19 +149,29 @@ fn process_pre_tick_state_hash_with_reporter(
                 runtime.multiplayer().timing().schedule_frame(),
                 runtime.network().pending_frame_count(),
             );
-            tracing::warn!(
-                frame,
-                local = format!("{local_hash:016x}"),
-                host = format!("{host_hash:016x}"),
-                host_schedule_frame = runtime.multiplayer().timing().schedule_frame(),
-                pending_input_frames = runtime.network().pending_frame_count(),
-                last_rollback_path,
-                last_rollback_earliest,
-                last_rollback_target,
-                last_rollback_replayed,
-                last_rollback_total_us,
-                "{description}"
-            );
+            crate::observability::event(
+                crate::observability::EventKind::Desync,
+                description.clone(),
+            )
+            .seat(host.transport.local_seat())
+            .frame(frame)
+            .field("local", format!("{local_hash:016x}"))
+            .field("host", format!("{host_hash:016x}"))
+            .field(
+                "host_schedule_frame",
+                runtime.multiplayer().timing().schedule_frame(),
+            )
+            .field(
+                "pending_input_frames",
+                runtime.network().pending_frame_count(),
+            )
+            .field("last_rollback_path", last_rollback_path)
+            .field("last_rollback_earliest", last_rollback_earliest)
+            .field("last_rollback_target", last_rollback_target)
+            .field("last_rollback_replayed", last_rollback_replayed)
+            .field("last_rollback_total_us", last_rollback_total_us)
+            .warn()
+            .record();
             report(&description);
             crate::game_session::multiplayer::reconnect_desynced_client(
                 host,

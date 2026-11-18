@@ -51,6 +51,10 @@ impl MultiplayerAdmission {
         &mut self,
         event: MultiplayerAdmissionEvent,
     ) -> Result<(), MultiplayerSessionError> {
+        // Debug, not Display: the trigger's own frames are the reason a phase
+        // moved, and a session log without them cannot be replayed by hand.
+        let trigger = format!("{event:?}");
+        let from = *self;
         *self = match (*self, event) {
             (
                 MultiplayerAdmission::WaitingForStart {
@@ -112,6 +116,20 @@ impl MultiplayerAdmission {
                 return Err(SessionProtocolFailure::AdmissionOrdering { state, event }.into());
             }
         };
+        if from != *self {
+            crate::observability::event(
+                crate::observability::EventKind::Admission,
+                format!(
+                    "multiplayer: admission {} → {}",
+                    from.wire_name(),
+                    self.wire_name()
+                ),
+            )
+            .field("from", from.wire_name())
+            .field("to", self.wire_name())
+            .field("trigger", trigger)
+            .record();
+        }
         Ok(())
     }
 }

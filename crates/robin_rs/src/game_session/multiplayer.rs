@@ -203,6 +203,33 @@ fn channel_failure(context: &'static str, detail: String) -> MultiplayerSessionE
     SessionProtocolFailure::Channel { context, detail }.into()
 }
 
+/// Announce this peer as ready for `frame` and record it.
+///
+/// The host's start barrier counts exactly these announcements, so the event
+/// names the same frame the wire message does; one helper for every path keeps
+/// a missed announcement visible as a missing event rather than as a silent
+/// copy of the wrong wording.
+fn publish_ready_to_sim(
+    transport: &crate::host::HostTransport,
+    frame: u32,
+) -> Result<(), MultiplayerSessionError> {
+    let net = transport
+        .net()
+        .expect("readiness is published only on an admitted session");
+    net.send_ready_to_sim(frame).map_err(|error| {
+        channel_failure("fatal multiplayer readiness publication failure", error)
+    })?;
+    crate::observability::event(
+        crate::observability::EventKind::BarrierReached,
+        format!("multiplayer: ready-to-sim announced for frame {frame}"),
+    )
+    .seat(transport.local_seat())
+    .frame(frame)
+    .field("barrier", "ready_to_sim")
+    .record();
+    Ok(())
+}
+
 /// Stop prediction immediately; the existing transport recovery supplies a
 /// fresh host snapshot and readiness barrier before gameplay resumes.
 pub(super) fn reconnect_desynced_client(
@@ -494,11 +521,21 @@ impl NetDrain<'_> {
                     return Ok(());
                 }
                 match &input.command {
-                    PlayerCommand::ConnectSeat { nickname, .. } => self
-                        .host
-                        .frontend
-                        .diagnostics_mut()
-                        .queue_console_output(format!("{nickname} connected")),
+                    PlayerCommand::ConnectSeat { nickname, .. } => {
+                        self.host
+                            .frontend
+                            .diagnostics_mut()
+                            .queue_console_output(format!("{nickname} connected"));
+                        crate::observability::event(
+                            crate::observability::EventKind::SeatConnected,
+                            format!("multiplayer: seat connected: {nickname}"),
+                        )
+                        .seat(input.player_id)
+                        .frame(target_frame)
+                        .field("nickname", nickname.clone())
+                        .field("role", "peer")
+                        .record();
+                    }
                     PlayerCommand::DisconnectSeat { player_id } => {
                         let name = self
                             .manager
@@ -510,6 +547,15 @@ impl NetDrain<'_> {
                             .frontend
                             .diagnostics_mut()
                             .queue_console_output(format!("{name} disconnected"));
+                        crate::observability::event(
+                            crate::observability::EventKind::SeatEvicted,
+                            format!("multiplayer: seat evicted: {name}"),
+                        )
+                        .seat(*player_id)
+                        .frame(target_frame)
+                        .field("nickname", name)
+                        .warn()
+                        .record();
                     }
                     _ => {}
                 }
@@ -532,7 +578,13 @@ impl NetDrain<'_> {
                 }
             }
             NetEvent::AssignedLocalSeat(seat) => {
-                tracing::info!(?seat, "multiplayer: local seat assigned (late)");
+                crate::observability::event(
+                    crate::observability::EventKind::SeatAssigned,
+                    format!("multiplayer: local seat assigned (late): {}", seat.0),
+                )
+                .seat(seat)
+                .field("source", "late")
+                .record();
                 self.host.transport.confirm_local_seat(seat);
             }
             NetEvent::Note(s) => self.host.frontend.diagnostics_mut().queue_console_output(s),
@@ -541,10 +593,14 @@ impl NetDrain<'_> {
                     .frontend
                     .diagnostics_mut()
                     .queue_console_output("Disconnected; reconnecting…".into());
-                tracing::warn!(
+                crate::observability::event(
+                    crate::observability::EventKind::SeatEvicted,
                     "multiplayer: peer disconnected — transport will auto-reconnect; \
-                     simulation is held until an authoritative snapshot arrives"
-                );
+                     simulation is held until an authoritative snapshot arrives",
+                )
+                .seat(self.host.transport.local_seat())
+                .warn()
+                .record();
                 self.host.transport.await_authoritative_snapshot();
                 self.admission_events
                     .push(MultiplayerAdmissionEvent::Disconnected);
@@ -563,7 +619,13 @@ impl NetDrain<'_> {
                     .frontend
                     .diagnostics_mut()
                     .queue_console_output("Reconnected; synchronizing game…".into());
-                tracing::info!("multiplayer: transport reconnected; awaiting host snapshot");
+                crate::observability::event(
+                    crate::observability::EventKind::SeatConnected,
+                    "multiplayer: transport reconnected; awaiting host snapshot",
+                )
+                .seat(self.host.transport.local_seat())
+                .field("source", "reconnect")
+                .record();
                 self.host
                     .transport
                     .net()
@@ -648,11 +710,13 @@ impl NetDrain<'_> {
                     return Ok(());
                 }
                 self.host.transport.begin_simulation();
-                tracing::info!(
-                    frame,
-                    start_epoch_ms,
-                    "multiplayer: begin-sim barrier released"
-                );
+                crate::observability::event(
+                    crate::observability::EventKind::BarrierReleased,
+                    format!("multiplayer: begin-sim barrier released at frame {frame}"),
+                )
+                .frame(frame)
+                .field("start_epoch_ms", start_epoch_ms)
+                .record();
                 if self.effective_frame != frame {
                     self.effective_frame = frame;
                     let adopted = TimelineFrame::from_wire(frame);
@@ -667,7 +731,18 @@ impl NetDrain<'_> {
                     });
             }
             NetEvent::PrepareSnapshotTransition { id, payload } => {
-                self.on_prepare_snapshot_transition(id, payload)?;
+                if let Err(error) = self.on_prepare_snapshot_transition(id, payload) {
+                    crate::observability::event(
+                        crate::observability::EventKind::TransitionAborted,
+                        format!("multiplayer: snapshot transition refused: {error}"),
+                    )
+                    .seat(self.host.transport.local_seat())
+                    .field("id", id)
+                    .field("reason", error.to_string())
+                    .error()
+                    .record();
+                    return Err(error);
+                }
             }
             NetEvent::CommitSnapshotTransition { id } => {
                 self.host
@@ -751,13 +826,8 @@ impl NetDrain<'_> {
                             "multiplayer: adopting host's engine snapshot"
                         );
                         self.effective_frame = frame;
-                        if let Some(net) = self.host.transport.net() {
-                            net.send_ready_to_sim(frame).map_err(|error| {
-                                channel_failure(
-                                    "fatal multiplayer readiness publication failure",
-                                    error,
-                                )
-                            })?;
+                        if self.host.transport.net().is_some() {
+                            publish_ready_to_sim(&self.host.transport, frame)?;
                         }
                         *self.rewind_buffer = RewindBuffer::new();
                         self.rewind_buffer
@@ -803,13 +873,8 @@ impl NetDrain<'_> {
                         "multiplayer: skipping frame-0 snapshot adopt; \
                          local engine already matches host"
                     );
-                    if let Some(net) = self.host.transport.net() {
-                        net.send_ready_to_sim(frame).map_err(|error| {
-                            channel_failure(
-                                "fatal multiplayer readiness publication failure",
-                                error,
-                            )
-                        })?;
+                    if self.host.transport.net().is_some() {
+                        publish_ready_to_sim(&self.host.transport, frame)?;
                     }
                     if replacing_prediction_future {
                         *self.rewind_buffer = RewindBuffer::new();
@@ -851,13 +916,8 @@ impl NetDrain<'_> {
                                 replacing_prediction_future,
                             );
                             self.rewrote_sim_state = true;
-                            if let Some(net) = self.host.transport.net() {
-                                net.send_ready_to_sim(frame).map_err(|error| {
-                                    channel_failure(
-                                        "fatal multiplayer readiness publication failure",
-                                        error,
-                                    )
-                                })?;
+                            if self.host.transport.net().is_some() {
+                                publish_ready_to_sim(&self.host.transport, frame)?;
                             }
                         }
                         Err(error) => {
@@ -1186,13 +1246,7 @@ impl NetDrain<'_> {
                 })?;
             // ReconnectAll resets host readiness as well as peer readiness.
             // Publish this exact held boundary into the replacement barrier.
-            host.transport
-                .net()
-                .expect("admitted session retains its channels")
-                .send_ready_to_sim(effective_frame)
-                .map_err(|error| {
-                    channel_failure("fatal multiplayer readiness publication failure", error)
-                })?;
+            publish_ready_to_sim(&host.transport, effective_frame)?;
             host.transport.await_authoritative_snapshot();
             network.discard_pending_inputs();
         }

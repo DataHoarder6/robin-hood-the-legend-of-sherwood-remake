@@ -25,6 +25,17 @@ fn requires_modal_acknowledgements(kind: &ModalKind) -> bool {
 /// from freezing every other participant at a modal barrier.
 pub const MODAL_ACK_BUDGET_MS: u64 = 300_000;
 
+/// One page the host continued past because participants never acknowledged it.
+///
+/// A fact about the session, not presentation: it is what a log reader needs to
+/// explain why the host closed a page nobody answered.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModalAckExpiry {
+    pub instance: ModalInstanceId,
+    pub kind: ModalKind,
+    pub missing: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ModalOccurrenceState {
     kind: ModalKind,
@@ -58,6 +69,9 @@ pub(super) struct ModalSyncState {
     /// When the host first saw each page blocked on acknowledgements. Cleared
     /// when the page is decided or retired.
     ack_waits: Vec<(ModalInstanceId, u64)>,
+    /// Pages the host continued past without every acknowledgement, waiting to
+    /// be reported by the adapter that would have shown the wait.
+    expiries: Vec<ModalAckExpiry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +273,19 @@ impl NetChannels {
             self.decide_modal_dismiss(instance, kind.clone(), result)?;
         }
         Ok(ModalPublication::HostDecisionQueued)
+    }
+
+    /// Pages whose acknowledgement budget ran out during the last
+    /// [`NetChannels::service_modal_session`], oldest first.
+    ///
+    /// Draining is what reports them: the adapter that owns the modal surface
+    /// emits one session event per page, so the event and the engine's own
+    /// warning describe the same instant.
+    pub fn take_modal_ack_expiries(&self) -> Vec<ModalAckExpiry> {
+        self.modal_sync
+            .lock()
+            .map(|mut sync| std::mem::take(&mut sync.expiries))
+            .unwrap_or_default()
     }
 
     /// Process control traffic independently of any modal widget. This is also
@@ -486,6 +513,11 @@ impl NetChannels {
                 budget_ms = MODAL_ACK_BUDGET_MS,
                 "multiplayer: modal acknowledgement expired; continuing without the missing seats"
             );
+            sync.expiries.push(ModalAckExpiry {
+                instance,
+                kind: kind.clone(),
+                missing: missing.iter().copied().collect(),
+            });
             sync.ack_waits.retain(|(id, _)| *id != instance);
         }
         Ok(())

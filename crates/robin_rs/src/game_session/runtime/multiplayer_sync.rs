@@ -100,7 +100,15 @@ impl MultiplayerSync {
             && now_epoch_ms >= start_epoch_ms
         {
             self.admission = MultiplayerAdmission::Running;
-            tracing::info!(frame, "multiplayer: synchronized start gate opened");
+            crate::observability::event(
+                crate::observability::EventKind::Admission,
+                "multiplayer: synchronized start gate opened",
+            )
+            .frame(frame)
+            .field("from", "waiting_for_start")
+            .field("to", "running")
+            .field("start_epoch_ms", start_epoch_ms)
+            .record();
         }
         if matches!(
             self.admission,
@@ -119,6 +127,18 @@ impl MultiplayerSync {
         };
         let waited_ms = u64::from(now_uptime_ms.saturating_sub(started));
         if waited_ms >= ADMISSION_BUDGET_MS {
+            crate::observability::event(
+                crate::observability::EventKind::BarrierExpired,
+                format!(
+                    "multiplayer: admission barrier expired after {waited_ms} ms in {}",
+                    state.label()
+                ),
+            )
+            .field("state", state.wire_name())
+            .field("waited_ms", waited_ms)
+            .field("budget_ms", ADMISSION_BUDGET_MS)
+            .warn()
+            .record();
             return Err(SessionProtocolFailure::AdmissionTimeout { state, waited_ms }.into());
         }
         Ok(true)
