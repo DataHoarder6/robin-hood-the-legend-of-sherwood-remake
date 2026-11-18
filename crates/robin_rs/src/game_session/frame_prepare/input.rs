@@ -288,7 +288,7 @@ fn touch_point_is_world(
     }
 
     let point = crate::gfx_types::Point::new(point.x as i32, point.y as i32);
-    let mut reserved = vec![
+    let reserved = vec![
         hud.zoom_layout.zoom_up,
         hud.zoom_layout.zoom_down,
         hud.corner_layout.clock,

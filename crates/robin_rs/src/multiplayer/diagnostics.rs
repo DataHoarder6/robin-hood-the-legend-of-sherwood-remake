@@ -22,13 +22,6 @@ pub(crate) struct SessionBundle {
     pub(crate) written_at: String,
 }
 
-/// Where a bundle goes, and where the replay it names is read from: one
-/// resolver, so a session started with `ROBINHOOD_INSTALL_HOME` writes its
-/// evidence into that install and nobody else's.
-pub(crate) fn diagnostics_dir() -> Option<PathBuf> {
-    crate::install_home::session_diagnostics_directory()
-}
-
 /// The most recently modified replay, which is the mission that just stopped.
 pub(crate) fn newest_replay() -> Option<PathBuf> {
     std::fs::read_dir(crate::install_home::replay_directory())
