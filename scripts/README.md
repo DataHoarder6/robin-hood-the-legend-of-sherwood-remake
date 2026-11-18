@@ -100,6 +100,7 @@ proof of dead code. Most require external game data or Python imaging packages.
 - `input_worker.py`: input injection helper.
 - `lifecycle_gate.py`, `window_close.py`: startup/shutdown lifecycle checks.
 - `multiplayer_live.py`: multiplayer scenarios.
+- `parity_check.py`: Linux × Windows replay-hash parity for one recording.
 - `parity_sweep.py`: bounded client replay sweep.
 - `replay_history_fixture.py`: replay-history fixture generation.
 - `runtime_evidence.py`: runtime evidence capture/verification.

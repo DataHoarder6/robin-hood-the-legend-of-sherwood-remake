@@ -7,7 +7,7 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format core scripting-llvm engine assets protocols services parity client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
+    printf 'suites: format core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
     exit 2
 fi
 
@@ -79,6 +79,25 @@ case "$1" in
             --binary "$ROBIN_E2E_BINARY" --data "$ROBINHOOD_DATA_DIR" \
             --snapshot "$(git rev-parse HEAD)" --evidence "$evidence"
         ;;
+    parity-cross)
+        # Linux x Windows replay-hash parity: one recording, one data root, the
+        # native binary and the Windows release binary under wine. Provisioned
+        # only (licensed data and wine); exit 3 (a missing prerequisite) is a
+        # suite failure here, never a green run. Wine is not Windows; see
+        # docs/TESTING.md for the limit this proves and the one it does not.
+        : "${PARITY_LINUX_BIN:?Set PARITY_LINUX_BIN to a native robin built from the target commit}"
+        : "${PARITY_WINDOWS_EXE:?Set PARITY_WINDOWS_EXE to the robin.exe from that commit}"
+        : "${PARITY_REPLAY:?Set PARITY_REPLAY to a recording made by that commit}"
+        : "${PARITY_DATA_DIR:?Set PARITY_DATA_DIR to the game root containing Data/}"
+        # Each binary runs from its install directory, which must carry
+        # assets/core-datadir. Defaults to the binary's own directory; set these
+        # when the binary lives in target/release of a checkout.
+        args=(--linux "$PARITY_LINUX_BIN" --windows "$PARITY_WINDOWS_EXE"
+              --replay "$PARITY_REPLAY" --data-dir "$PARITY_DATA_DIR")
+        [[ -n "${PARITY_LINUX_DIR:-}" ]] && args+=(--linux-dir "$PARITY_LINUX_DIR")
+        [[ -n "${PARITY_WINDOWS_DIR:-}" ]] && args+=(--windows-dir "$PARITY_WINDOWS_DIR")
+        exec python3 scripts/validation/parity_check.py "${args[@]}"
+        ;;
     gpu)
         # This test also invokes renderer::verify_offscreen_gpu_contract.
         WGPU_BACKEND=vulkan cargo test --locked -p robin_rs --lib gpu_upscale::tests::headless_downlevel_device_executes_every_multipass_profile -- --ignored --exact
@@ -103,6 +122,7 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p lifecycle_gate_test.py
         python3 -m unittest discover -s scripts/validation -p namespace_x11_test.py
         python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py
+        python3 -m unittest discover -s scripts/validation -p parity_check_test.py
         python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
         python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py
         bash scripts/test_parity_orchestration.sh
