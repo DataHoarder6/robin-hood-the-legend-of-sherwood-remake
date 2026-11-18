@@ -29,14 +29,9 @@ pub(crate) fn diagnostics_dir() -> Option<PathBuf> {
     crate::install_home::session_diagnostics_directory()
 }
 
-pub(crate) fn replays_dir() -> Option<PathBuf> {
-    Some(crate::install_home::replay_directory())
-}
-
 /// The most recently modified replay, which is the mission that just stopped.
 pub(crate) fn newest_replay() -> Option<PathBuf> {
-    let dir = replays_dir()?;
-    std::fs::read_dir(dir)
+    std::fs::read_dir(crate::install_home::replay_directory())
         .ok()?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -52,7 +47,8 @@ pub(crate) fn newest_replay() -> Option<PathBuf> {
 pub(crate) fn write_session_bundle(
     mut bundle: SessionBundle,
 ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let dir = diagnostics_dir().ok_or("no data directory for diagnostics")?;
+    let dir = crate::install_home::session_diagnostics_directory()
+        .ok_or("no data directory for diagnostics")?;
     std::fs::create_dir_all(&dir)?;
     // `%:z` → `+HH:MM`; strip the inner colon so the stamp is path-safe.
     let stamp = jiff::Zoned::now()

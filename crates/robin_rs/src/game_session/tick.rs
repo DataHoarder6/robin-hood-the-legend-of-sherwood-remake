@@ -1056,7 +1056,7 @@ pub(super) fn run_forward_ticks_with_session_modals(
         // rewind_active gating — stepping while paused is the whole
         // point of the endpoint.
         let application_context = host.application_context().clone();
-        let record_live_input = source.records_live_input();
+        let live_transaction = source.records_live_input();
         let append_history = source.history() == ManualHistory::Append;
         let replay_timeline_after = source.replay_after();
         if !append_history && replay_timeline_after.is_none() {
@@ -1070,9 +1070,19 @@ pub(super) fn run_forward_ticks_with_session_modals(
         // raw-checkpoint transition, not the save/load projection protocol.
         timeline
             .replay_mut()
-            .begin_recording(&mut transaction, record_live_input);
-        transaction.admit_inline_transaction();
-        let history_input = append_history.then(|| simulation_frame.clone());
+            .begin_recording(&mut transaction, live_transaction);
+        // A live step is a fresh host frame: its tick admits pre-refresh input
+        // only, and the post-initialize stage below applies everything staged
+        // for after the hourglass, exactly as the graphical frame does. A
+        // buffered or recorded frame is one complete authoritative transaction
+        // and keeps both phases inside that single admission.
+        let tick_input = if live_transaction {
+            transaction.admit_simulation();
+            transaction.hourglass_input()
+        } else {
+            transaction.admit_inline_transaction();
+            simulation_frame
+        };
         let tick_exit_code = game.run_engine_tick(
             &mut host.frontend,
             &mut host.audio,
@@ -1082,7 +1092,7 @@ pub(super) fn run_forward_ticks_with_session_modals(
             assets,
             engine,
             dev,
-            simulation_frame,
+            tick_input,
             false,
             false,
         );
@@ -1117,6 +1127,11 @@ pub(super) fn run_forward_ticks_with_session_modals(
                         engine.sim_config().difficulty,
                         engine.campaign().mission_attempt_sequence,
                     );
+                tracing::info!(
+                    previous_attempt_sequence,
+                    staged_post_commands = transaction.post_commands().len(),
+                    "stepped tick ended the mission; staged its campaign update"
+                );
                 let popup_title = crate::ingame_menu::MissionEndKind::from_exit_code(code)
                     .map(|end| end.popup_message().to_owned());
                 *handoff = Some(super::terminal_debriefing::PendingTerminalDebriefing::new(
@@ -1129,6 +1144,32 @@ pub(super) fn run_forward_ticks_with_session_modals(
                     .set(robin_engine::game_operation::GameCode::LevelInProgress);
             }
         }
+        // The post-initialize stage, not the tick, applies post-boundary
+        // commands, so a step whose tick ended the mission hands them to that
+        // stage here. Without this the staged campaign update only ever reached
+        // the recorder and the mission-end page waited for a sequence that no
+        // frame advanced. Buffered and recorded frames already admitted their
+        // whole transaction above.
+        if live_transaction {
+            let requested = transaction.post_initialize_requested();
+            let post_initialized = timeline.lifecycle_mut().cross_post_initialize(|| {
+                super::runtime::apply_post_boundary_input(
+                    &mut transaction,
+                    host,
+                    engine,
+                    assets,
+                    dev,
+                    requested,
+                )
+            });
+            if post_initialized
+                && let Some(net) = host.transport.net()
+                && host.transport.local_seat() == PlayerId::HOST
+            {
+                net.set_initial_snapshot(timeline.current_frame().number(), engine);
+            }
+        }
+        let history_input = append_history.then(|| transaction.authoritative_input());
 
         let after = replay_timeline_after.unwrap_or_else(|| timeline.current_frame().next());
         if append_history && after.number() > frame {
@@ -1701,6 +1742,125 @@ mod tests {
             Game::default(),
             timeline,
         )
+    }
+
+    /// A stepping fixture whose campaign has a current mission, which the
+    /// terminal handoff needs to identify the mission it is ending.
+    fn terminal_stepping_fixture() -> (
+        engine_api::LevelAssets,
+        engine_manager_api::EngineManager,
+        Host,
+        engine_api::DevState,
+        Game,
+        super::super::runtime::TimelineRuntime,
+    ) {
+        let mut assets = engine_api::LevelAssets::new();
+        std::sync::Arc::make_mut(&mut assets.profile_manager)
+            .missions
+            .push(robin_engine::profiles::MissionProfile {
+                id: 1,
+                ..Default::default()
+            });
+        let mut campaign = Campaign::default();
+        campaign.missions.push(robin_engine::mission::Mission {
+            profile_idx: Some(0),
+            ..Default::default()
+        });
+        campaign.current_mission_idx = Some(0);
+        let engine = engine_api::Engine::new_for_test(1024.0, 768.0, campaign, &mut assets)
+            .expect("fixture engine");
+        let timeline = super::super::runtime::TimelineRuntime::new(
+            super::super::replay_init::ReplayAndRollback {
+                recording_control: std::sync::Arc::<crate::replay_service::ReplayService>::default(
+                )
+                .recording(),
+                recorder: None,
+                player: None,
+                rollback_checker: None,
+                rewind_buffer: RewindBuffer::new(),
+                start_paused: false,
+            },
+            super::super::runtime::FrameContract::Graphical,
+            false,
+            true,
+        );
+        (
+            assets,
+            engine_manager_api::EngineManager::new(engine),
+            Host::default(),
+            engine_api::DevState::default(),
+            Game::default(),
+            timeline,
+        )
+    }
+
+    /// A step whose tick ends the mission applies the campaign completion in
+    /// its own transaction, at the same post-initialize stage a live frame uses.
+    /// Without that the staged command only reached the recorder, the attempt
+    /// sequence never advanced, and the mission-end page waited forever on a
+    /// paused timeline that had nothing left to tick.
+    #[test]
+    fn stepped_terminal_tick_applies_the_campaign_update_once() {
+        let (assets, mut manager, mut host, mut dev, mut game, mut timeline) =
+            terminal_stepping_fixture();
+        manager.engine.test_set_mission_flags(true, false, false);
+        let before = manager.engine.campaign().mission_attempt_sequence;
+        let mut handoff = None;
+        let mut policy = crate::http_server::StepModalPolicy::default();
+
+        let (advanced, _, exit) = run_forward_ticks_with_session_modals(
+            step_world!(manager, host, assets, dev, game),
+            &mut timeline,
+            3,
+            &mut policy,
+            None,
+            Some(&mut handoff),
+        )
+        .expect("a stepped terminal tick");
+
+        assert_eq!(
+            advanced, 1,
+            "the step stops at the frame that ended the mission"
+        );
+        assert_eq!(timeline.frame_number(), 1);
+        assert_eq!(
+            exit,
+            Some(robin_engine::game_operation::GameCode::LevelSucceeded),
+            "the step still reports the terminal code"
+        );
+        let pending = handoff.expect("the mission-end page is handed to the next frame");
+        assert_eq!(pending.previous_attempt_sequence(), before);
+        assert_eq!(
+            manager.engine.campaign().mission_attempt_sequence,
+            before + 1,
+            "the manual transaction applies the completion exactly once"
+        );
+        // `drive_tick_exit_modals` opens the page only once the attempt
+        // sequence has passed the value the ending tick observed.
+        assert!(
+            manager.engine.campaign().mission_attempt_sequence
+                > pending.previous_attempt_sequence(),
+        );
+
+        // Rewind reconstruction replays this frame as one transaction, so the
+        // completion must be in its journal, not just in the engine state.
+        let recorded = timeline
+            .history()
+            .buffer()
+            .frame_for(0)
+            .expect("the stepped frame's journal");
+        assert!(recorded.run_post_initialize);
+        assert_eq!(recorded.post_commands.len(), 1);
+        assert!(matches!(
+            recorded.post_commands[0]
+                .clone()
+                .into_player_input()
+                .command,
+            PlayerCommand::ApplyQuitMissionUpdates {
+                exit_code: robin_engine::game_operation::GameCode::LevelSucceeded,
+                ..
+            }
+        ));
     }
 
     #[test]

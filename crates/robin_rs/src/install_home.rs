@@ -121,6 +121,10 @@ mod tests {
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
+        assert_eq!(
+            diagnostics_directory(),
+            Some(home.path().join("diagnostics"))
+        );
         assert_eq!(datadir_file(), Some(home.path().join("datadir.txt")));
         assert_eq!(
             identity_key_path(),
@@ -141,6 +145,10 @@ mod tests {
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
+        assert_eq!(
+            diagnostics_directory(),
+            Some(home.path().join("diagnostics"))
+        );
         assert_eq!(datadir_file(), Some(home.path().join("datadir.txt")));
         assert_eq!(
             identity_key_path(),
