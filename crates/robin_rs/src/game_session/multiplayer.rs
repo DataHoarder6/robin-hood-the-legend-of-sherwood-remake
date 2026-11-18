@@ -7,6 +7,8 @@ use crate::host::Host;
 use crate::rewind::RewindBuffer;
 use robin_engine::engine::{Engine, LevelAssets};
 use robin_engine::engine_manager as engine_manager_api;
+use robin_engine::multiplayer::ModalInstanceId;
+use robin_engine::player_command::ModalKind;
 use robin_engine::player_command::PlayerCommand;
 use robin_engine::player_command::PlayerInput;
 use robin_engine::sim_timeline::RestorePolicy;
@@ -18,9 +20,22 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum MultiplayerAdmissionEvent {
     Disconnected,
-    InitialSnapshotAdopted { frame: u32 },
-    HostResynchronizing { frame: u32 },
-    BeginSim { frame: u32, start_epoch_ms: u64 },
+    InitialSnapshotAdopted {
+        frame: u32,
+    },
+    HostResynchronizing {
+        frame: u32,
+    },
+    BeginSim {
+        frame: u32,
+        start_epoch_ms: u64,
+    },
+    /// The wall-clock start gate reached its frame; `WaitingForStart` becomes
+    /// `Running`. The trigger carries the barrier it opens.
+    StartGateOpened {
+        frame: u32,
+        start_epoch_ms: u64,
+    },
 }
 
 fn canonicalize_player_input_order(inputs: &mut Vec<PlayerInput>) {
@@ -228,6 +243,25 @@ fn publish_ready_to_sim(
     .field("barrier", "ready_to_sim")
     .record();
     Ok(())
+}
+
+/// Record one page the host continued past without every acknowledgement.
+///
+/// Called from the session's own modal service, at the instant the engine
+/// decides the wait is over, so the fact survives a run with no modal surface
+/// bound and there is no second copy to drift from.
+pub(crate) fn record_modal_expiry(instance: ModalInstanceId, kind: &ModalKind, missing: &[u8]) {
+    crate::observability::event(
+        crate::observability::EventKind::ModalExpired,
+        format!(
+            "multiplayer: modal acknowledgement expired for {kind:?}; the host continued without seats {missing:?}"
+        ),
+    )
+    .field("instance", instance)
+    .field("modal", format!("{kind:?}"))
+    .field("missing_seats", missing)
+    .warn()
+    .record();
 }
 
 /// Stop prediction immediately; the existing transport recovery supplies a
@@ -594,7 +628,7 @@ impl NetDrain<'_> {
                     .diagnostics_mut()
                     .queue_console_output("Disconnected; reconnecting…".into());
                 crate::observability::event(
-                    crate::observability::EventKind::SeatEvicted,
+                    crate::observability::EventKind::TransportDisconnected,
                     "multiplayer: peer disconnected — transport will auto-reconnect; \
                      simulation is held until an authoritative snapshot arrives",
                 )
@@ -620,7 +654,7 @@ impl NetDrain<'_> {
                     .diagnostics_mut()
                     .queue_console_output("Reconnected; synchronizing game…".into());
                 crate::observability::event(
-                    crate::observability::EventKind::SeatConnected,
+                    crate::observability::EventKind::TransportReconnected,
                     "multiplayer: transport reconnected; awaiting host snapshot",
                 )
                 .seat(self.host.transport.local_seat())
@@ -1373,6 +1407,7 @@ pub(super) fn drain_mission_network(
         net.service_modal_session(
             host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST,
             u64::from(crate::window::process_uptime_ms()),
+            &mut record_modal_expiry,
         )
         .map_err(|error| channel_failure("modal session control failed", error))?;
         if host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST {
@@ -2269,6 +2304,55 @@ mod tests {
             assert!(matches!(result, Err(MultiplayerSessionError::Protocol(_))));
             assert_eq!(before, manager.engine.encode_native_snapshot());
         }
+    }
+
+    /// The transport retries a lost peer link on its own; that is not an
+    /// eviction, and a poller reading `seat_evicted` would conclude a
+    /// participant was removed. A reconnect is its own pair of facts.
+    #[test]
+    fn a_transport_reconnect_is_not_an_eviction() {
+        let (mut host, mut manager, mut assets, incoming, _outgoing) = network_drain_fixture();
+        let mut rewind = RewindBuffer::new();
+        let mut pending = super::super::runtime::reconciliation::NetworkReconciliation::default();
+        let since =
+            crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
+        incoming.send(NetEvent::Disconnected).unwrap();
+        drain_net_inputs(
+            &mut host,
+            &mut manager,
+            0,
+            &mut pending,
+            &mut assets,
+            &mut rewind,
+        )
+        .expect("disconnect drains");
+        incoming.send(NetEvent::Reconnected).unwrap();
+        drain_net_inputs(
+            &mut host,
+            &mut manager,
+            0,
+            &mut pending,
+            &mut assets,
+            &mut rewind,
+        )
+        .expect("reconnect drains");
+
+        let page = crate::observability::events_page(Some(since), crate::observability::MAX_PAGE);
+        let kinds: Vec<&str> = page
+            .events
+            .iter()
+            .filter_map(|event| event["kind"].as_str())
+            .filter(|kind| kind.starts_with("transport_") || kind.starts_with("seat_"))
+            .collect();
+        assert_eq!(
+            kinds,
+            ["transport_disconnected", "transport_reconnected"],
+            "{page:?}"
+        );
+        assert!(
+            !kinds.contains(&"seat_evicted"),
+            "a reconnect evicts nobody: {page:?}"
+        );
     }
 
     fn rewind_with_horizon(manager: &EngineManager, start: u32, end: u32) -> RewindBuffer {

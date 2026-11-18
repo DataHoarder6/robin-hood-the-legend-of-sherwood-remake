@@ -112,6 +112,18 @@ impl MultiplayerAdmission {
                 frame,
                 start_epoch_ms,
             },
+            (
+                MultiplayerAdmission::WaitingForStart {
+                    frame: waiting_frame,
+                    start_epoch_ms: waiting_epoch,
+                },
+                MultiplayerAdmissionEvent::StartGateOpened {
+                    frame,
+                    start_epoch_ms,
+                },
+            ) if frame == waiting_frame && start_epoch_ms == waiting_epoch => {
+                MultiplayerAdmission::Running
+            }
             (state, event) => {
                 return Err(SessionProtocolFailure::AdmissionOrdering { state, event }.into());
             }
@@ -137,6 +149,7 @@ impl MultiplayerAdmission {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn repeated_begin_is_idempotent_only_for_the_same_barrier() {
         let mut state = MultiplayerAdmission::PeerWaitingForBegin {
@@ -162,5 +175,70 @@ mod tests {
             assert!(state.apply(event).is_err());
             assert_eq!(state, waiting);
         }
+    }
+
+    /// The start gate is a transition like any other: the same owner moves the
+    /// phase and records the event, and an event that does not name the
+    /// barrier the phase waits on is a protocol failure rather than a silent
+    /// release.
+    #[test]
+    fn the_start_gate_opens_through_the_state_machine() {
+        let barrier = MultiplayerAdmissionEvent::BeginSim {
+            frame: 133,
+            start_epoch_ms: 1_763_461_265_422,
+        };
+        let mut state = MultiplayerAdmission::HostWaitingForBegin;
+        state.apply(barrier).unwrap();
+        assert_eq!(
+            state,
+            MultiplayerAdmission::WaitingForStart {
+                frame: 133,
+                start_epoch_ms: 1_763_461_265_422,
+            }
+        );
+        let before =
+            crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
+        state
+            .apply(MultiplayerAdmissionEvent::StartGateOpened {
+                frame: 133,
+                start_epoch_ms: 1_763_461_265_422,
+            })
+            .unwrap();
+        assert_eq!(state, MultiplayerAdmission::Running);
+        let page = crate::observability::events_page(Some(before), crate::observability::MAX_PAGE);
+        let opened: Vec<&serde_json::Value> = page
+            .events
+            .iter()
+            .filter(|event| {
+                event["detail"]["trigger"]
+                    .as_str()
+                    .is_some_and(|trigger| trigger.contains("StartGateOpened"))
+            })
+            .collect();
+        assert_eq!(opened.len(), 1, "{page:?}");
+        assert_eq!(opened[0]["kind"], "admission");
+        assert_eq!(opened[0]["detail"]["from"], "waiting_for_start");
+        assert_eq!(opened[0]["detail"]["to"], "running");
+
+        let mut waiting = MultiplayerAdmission::WaitingForStart {
+            frame: 800,
+            start_epoch_ms: 5,
+        };
+        assert!(
+            waiting
+                .apply(MultiplayerAdmissionEvent::StartGateOpened {
+                    frame: 801,
+                    start_epoch_ms: 5,
+                })
+                .is_err(),
+            "another barrier cannot open this gate"
+        );
+        assert_eq!(
+            waiting,
+            MultiplayerAdmission::WaitingForStart {
+                frame: 800,
+                start_epoch_ms: 5,
+            }
+        );
     }
 }

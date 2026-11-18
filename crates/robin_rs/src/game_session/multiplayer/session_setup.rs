@@ -372,7 +372,7 @@ fn host_session(
                 ));
             }
             crate::observability::event(
-                crate::observability::EventKind::SeatConnected,
+                crate::observability::EventKind::HostStarted,
                 format!(
                     "multiplayer: hosting on iroh endpoint {}",
                     handle.endpoint_id()
