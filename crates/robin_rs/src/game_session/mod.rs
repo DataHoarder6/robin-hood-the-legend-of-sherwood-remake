@@ -1014,6 +1014,9 @@ async fn run_mission_with_seed(
 }
 
 #[cfg(test)]
+mod sherwood_deployment_tests;
+
+#[cfg(test)]
 mod required_state_tests {
     #[test]
     fn standalone_multiplayer_returns_to_menu_after_mission_exit() {
