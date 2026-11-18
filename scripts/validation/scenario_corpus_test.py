@@ -10,7 +10,7 @@ import scenario_corpus as corpus
 CONTRACT = corpus.Contract(
     covered=frozenset({"H01", "H02"}),
     layers={"H01": "core", "H02": "core", "H03": "transport"},
-    game_codes=frozenset({"Quit", "LevelSucceeded", "LevelFailed"}),
+    game_codes=frozenset({"quit", "level_succeeded", "level_failed"}),
 )
 DEFAULTS = {
     "schema": 1,
@@ -80,7 +80,7 @@ class CorpusValidationTests(unittest.TestCase):
     def test_a_campaign_exit_carries_the_code_two_terminal_rows_differ_in(self):
         good = scenario(
             "H01",
-            expect=[{"assert": "transition", "payload": {"CampaignExit": "LevelFailed"},
+            expect=[{"assert": "transition", "payload": {"CampaignExit": "level_failed"},
                      "acked": [0, 1], "committed": True}],
         )
         self.assertEqual(corpus.validate(DEFAULTS, corpus_of(good, scenario("H02")), CONTRACT), [])
@@ -119,7 +119,7 @@ class CorpusValidationTests(unittest.TestCase):
 
     def test_extends_runs_the_parent_expectations_first(self):
         parent = scenario("H01", expect=PROVEN, faults=[{"at": {"frame": 5}, "peer": 1, "fault": "kill"}])
-        child = scenario("H02", extends="H01", expect=[{"assert": "final-operation", "operation": "Quit"}])
+        child = scenario("H02", extends="H01", expect=[{"assert": "final-operation", "operation": "quit"}])
         found = corpus_of(parent, child)
         self.assertEqual(corpus.chain("H02", found), ["H01", "H02"])
         expanded = corpus.expanded("H02", found, DEFAULTS, CONTRACT)

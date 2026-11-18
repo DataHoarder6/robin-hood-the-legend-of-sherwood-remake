@@ -31,6 +31,26 @@ pub enum GameCode {
     LevelSave = 8,
 }
 
+impl GameCode {
+    /// Stable lowercase name this code has on the HTTP wire (`/state` and a
+    /// snapshot transition's payload). The exhaustive match makes a new
+    /// variant name itself before it can reach a client; `Debug` never decides
+    /// a wire value, and the test below pins every spelling.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Self::LevelInProgress => "level_in_progress",
+            Self::LevelFailed => "level_failed",
+            Self::LevelSucceeded => "level_succeeded",
+            Self::LevelInterrupted => "level_interrupted",
+            Self::LevelNext => "level_next",
+            Self::LevelRestart => "level_restart",
+            Self::Quit => "quit",
+            Self::LevelLoad => "level_load",
+            Self::LevelSave => "level_save",
+        }
+    }
+}
+
 /// FFI-compatible struct: `{ GameCode code; SaveGame* save_game; }`.
 ///
 /// The `save_game` pointer is opaque (`void*`) on the Rust side.
@@ -134,6 +154,26 @@ mod tests {
             let json = serde_json::to_string(op).unwrap();
             let back: GameCode = serde_json::from_str(&json).unwrap();
             assert_eq!(*op, back);
+        }
+    }
+
+    #[test]
+    fn wire_names_are_stable_lowercase_spellings() {
+        // One row per variant: a new variant must name itself here, and a
+        // rename must be a deliberate wire change, not a `Debug` accident.
+        let table = [
+            (GameCode::LevelInProgress, "level_in_progress"),
+            (GameCode::LevelFailed, "level_failed"),
+            (GameCode::LevelSucceeded, "level_succeeded"),
+            (GameCode::LevelInterrupted, "level_interrupted"),
+            (GameCode::LevelNext, "level_next"),
+            (GameCode::LevelRestart, "level_restart"),
+            (GameCode::Quit, "quit"),
+            (GameCode::LevelLoad, "level_load"),
+            (GameCode::LevelSave, "level_save"),
+        ];
+        for (code, name) in table {
+            assert_eq!(code.wire_name(), name);
         }
     }
 

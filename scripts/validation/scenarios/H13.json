@@ -26,7 +26,7 @@
     {
       "assert": "transition",
       "payload": {
-        "CampaignExit": "LevelSucceeded"
+        "CampaignExit": "level_succeeded"
       },
       "acked": [
         0,

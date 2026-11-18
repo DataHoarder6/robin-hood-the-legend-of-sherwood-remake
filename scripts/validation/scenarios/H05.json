@@ -16,7 +16,7 @@
     {
       "assert": "transition",
       "payload": {
-        "CampaignExit": "LevelFailed"
+        "CampaignExit": "level_failed"
       },
       "acked": [
         0,

@@ -10,6 +10,6 @@
     { "seat": 1, "role": "client" }
   ],
   "expect": [
-    { "assert": "final-operation", "operation": "Quit" }
+    { "assert": "final-operation", "operation": "quit" }
   ]
 }

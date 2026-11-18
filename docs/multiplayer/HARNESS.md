@@ -58,15 +58,15 @@ case; `invariant` and `vocabulary` are not cells.
 | --- | --- | --- | --- | --- |
 | H01 | core | baseline | peers hash-equal every 25th frame; one `BeginSim` frame | `story_regression::pair` |
 | H02 | core | fault | same-frame `SelectPc` from two seats: seat order wins, `coop_can_select` refuses the second in `Exclusive`, hashes equal | `robin_engine/src/engine/coop.rs` |
-| H03 | core | baseline | `LevelSucceeded` → prepare/ready/commit `CampaignExit`; committed engine equals the host snapshot | `completed_mission_snapshot_commits_the_hosts_campaign_before_rebuilding` |
-| H04 | core | baseline | same for `LevelFailed` | same test's failure arm |
-| H05 | core | baseline | `LevelFailed` → `Restart` → `LoadRestart` acked by both, committed once, replacement admitted | new (the sibling #2 named) |
-| H06 | core | baseline | exactly one `QuitMissionRequested` in the authoritative frame; final operation `Quit` | `robin_engine::player_command` |
+| H03 | core | baseline | `level_succeeded` → prepare/ready/commit `CampaignExit`; committed engine equals the host snapshot | `completed_mission_snapshot_commits_the_hosts_campaign_before_rebuilding` |
+| H04 | core | baseline | same for `level_failed` | same test's failure arm |
+| H05 | core | baseline | `level_failed` → `Restart` → `LoadRestart` acked by both, committed once, replacement admitted | new (the sibling #2 named) |
+| H06 | core | baseline | exactly one `QuitMissionRequested` in the authoritative frame; final operation `quit` | `robin_engine::player_command` |
 | H07 | core | fault | drop, host advances, snapshot adopted, seat and selection preserved, hashes agree from adoption | `pair` + `Link::reconnect` |
 | H08 | core | fault | peer state mutated, mismatch at the next sampled frame, one reconnect, agreement after | `.../frame_prepare/pre_tick.rs` |
 | H09 | core | vocabulary | duplicated `ModalProgress`/`ModalDecision` yields one decision per occurrence | `modal_session_delayed_surface_and_delivery_matrix` |
 | H10 | core | invariant | no commit while a seat is in `awaiting`; an ack from a seat never awaited is `RemoteProtocol` | `SnapshotTransitions` tests |
-| H11 | transport | fault | the earliest drop a process boundary can address — after content admission, before the seat's `BeginSim` acknowledgement — does not wedge the host: the start barrier releases without the dead seat, the host's mission stays `LevelInProgress` and its process keeps running; the pre-`ContentReady` window has no `/state` anchor and stays a transport row | `.../multiplayer/native/server.rs` |
+| H11 | transport | fault | the earliest drop a process boundary can address — after content admission, before the seat's `BeginSim` acknowledgement — does not wedge the host: the start barrier releases without the dead seat, the host's mission stays `level_in_progress` and its process keeps running; the pre-`ContentReady` window has no `/state` anchor and stays a transport row | `.../multiplayer/native/server.rs` |
 | H12 | transport | fault | connect to a closed endpoint → the client reports `Game loop failed: multiplayer: failed to connect to` and exits non-zero with no seat | `.../multiplayer/client_session.rs` |
 | H13 | core | fault | commit requires the exact id; a mutated or truncated payload never commits | `crates/robin_rs/src/host/transport.rs` |
 | H14 | transport | fault | a restarted native owner (`identity: "fresh"`) while its seat is parked and the roster full → the host refuses the claim (`… already has its configured 2 players`), exactly one admission happens in the session, and the replacement exits non-zero. It never reads the rejection text: `reject_opening` writes a `Reject`, but the handler ends before the peer sees it and the client reports `read frame header: connection lost`, so decoding that frame belongs to a transport row | `peer_sessions::claim_seat` |
@@ -96,7 +96,7 @@ scenario.
   "faults": [ { "at": { "barrier": "transition-commit", "after": 0 }, "peer": 1,
       "fault": "drop", "message": "SnapshotTransitionReady" } ],
   "expect": [ { "assert": "hash-equal", "peers": [0, 1], "every": 25 },
-      { "assert": "transition", "payload": { "CampaignExit": "LevelFailed" },
+      { "assert": "transition", "payload": { "CampaignExit": "level_failed" },
         "acked": [0, 1], "committed": true },
       { "assert": "transition-id-equal", "peers": [0, 1] },
       { "assert": "count", "subject": "barrier", "name": "begin-sim", "times": 1 } ] }
@@ -109,15 +109,15 @@ is `{"frame": N}` in the issuing peer's numbering or `{"barrier": name,
 `netem`. `expect[].assert` is `hash-equal`, `hash-diverged`,
 `barrier` (`reached|released|absent`), `transition`, `transition-id-equal`,
 `modal`, `log` (`contains|absent`, and exactly one of `count` or `at_least`),
-`final-operation` (a `GameCode` name
-from `crates/robin_engine/src/game_operation.rs`), `count` or `exit`. Transition
+`final-operation` (a
+`GameCode::wire_name` from `crates/robin_engine/src/game_operation.rs`), `count` or `exit`. Transition
 ids are generated per run, so `transition-id-equal` compares peers instead of
 pinning one. `count` on a log line is exact; `at_least` is its floor, for a line
 printed once per retry — a refused handshake prints its reason on every attempt,
 so that line's exact number is a retry schedule, not a contract.
 
 `transition.payload` is the `SnapshotTransitionPayload` variant the host
-committed — `"Save"` or `{"CampaignExit": "<GameCode>"}` — because the exit code
+committed — `"Save"` or `{"CampaignExit": "<GameCode wire name>"}` — because the exit code
 is the part two terminal rows differ in; `"LoadRestart"` is a debriefing action,
 not a transition. `count` is how a row states a cardinality claim without
 reading log wording: `{"assert": "count", "subject": "barrier"|"transition"|

@@ -11,7 +11,7 @@
   "expect": [
     { "assert": "barrier", "barrier": "content-ready", "state": "reached" },
     { "assert": "barrier", "barrier": "begin-sim", "state": "reached" },
-    { "assert": "final-operation", "operation": "LevelInProgress" },
+    { "assert": "final-operation", "operation": "level_in_progress" },
     { "assert": "exit", "peers": [0], "status": "running" }
   ]
 }
