@@ -22,17 +22,12 @@ pub(crate) struct SessionBundle {
     pub(crate) written_at: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("robin_hood"))
-}
-
 pub(crate) fn diagnostics_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("diagnostics"))
+    crate::install_home::session_diagnostics_directory()
 }
 
 pub(crate) fn replays_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("replays"))
+    Some(crate::install_home::replay_directory())
 }
 
 /// The most recently modified replay, which is the mission that just stopped.
