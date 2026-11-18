@@ -9,7 +9,8 @@
     { "at": { "frame": 0 }, "peer": 0, "fault": "kill" }
   ],
   "expect": [
-    { "assert": "log", "contains": "Fatal", "count": 1 },
+    { "assert": "log", "contains": "Game loop failed: multiplayer: failed to connect to", "count": 1 },
+    { "assert": "exit", "peers": [1], "status": "nonzero" },
     { "assert": "barrier", "barrier": "content-ready", "state": "absent" }
   ]
 }

@@ -66,15 +66,15 @@ case; `invariant` and `vocabulary` are not cells.
 | H08 | core | fault | peer state mutated, mismatch at the next sampled frame, one reconnect, agreement after | `.../frame_prepare/pre_tick.rs` |
 | H09 | core | vocabulary | duplicated `ModalProgress`/`ModalDecision` yields one decision per occurrence | `modal_session_delayed_surface_and_delivery_matrix` |
 | H10 | core | invariant | no commit while a seat is in `awaiting`; an ack from a seat never awaited is `RemoteProtocol` | `SnapshotTransitions` tests |
-| H11 | transport | fault | close before `ContentRequest` → handshake error, no `Welcome` | `.../multiplayer/native/server.rs` |
-| H12 | transport | fault | connect to a closed endpoint → `Fatal` after `INITIAL_CONNECT_TIMEOUT`, no seat | `.../multiplayer/client_session.rs` |
+| H11 | transport | fault | the earliest drop a process boundary can address — after content admission, before the seat's `BeginSim` acknowledgement — does not wedge the host: the start barrier releases without the dead seat, the host's mission stays `LevelInProgress` and its process keeps running; the pre-`ContentReady` window has no `/state` anchor and stays a transport row | `.../multiplayer/native/server.rs` |
+| H12 | transport | fault | connect to a closed endpoint → the client reports `Game loop failed: multiplayer: failed to connect to` and exits non-zero with no seat | `.../multiplayer/client_session.rs` |
 | H13 | core | fault | commit requires the exact id; a mutated or truncated payload never commits | `crates/robin_rs/src/host/transport.rs` |
-| H14 | transport | fault | restarted native owner while its seat is parked and the roster full → `Reject`, no second `Welcome` | `peer_sessions::claim_seat` |
+| H14 | transport | fault | a restarted native owner (`identity: "fresh"`) while its seat is parked and the roster full → the host refuses the claim (`… already has its configured 2 players`), exactly one admission happens in the session, and the replacement exits non-zero. It never reads the rejection text: `reject_opening` writes a `Reject`, but the handler ends before the peer sees it and the client reports `read frame header: connection lost`, so decoding that frame belongs to a transport row | `peer_sessions::claim_seat` |
 | H15 | core | fault | a peer whose surface never dismisses the debriefing still acks and re-admits | `.../game_session/terminal_debriefing.rs` |
 | H16 | core | fault | a mismatch seen during recovery starts no second reconnect | `docs/MULTIPLAYER.md`, "Join, start and reconnect" |
 | H17 | transport | fault | a reconnecting seat gets the pending `PrepareSnapshotTransition` with the same id and its ack is accepted | `server.rs` pending-Prepare resend |
 | H18 | transport | fault | an interrupted chunk stream aborts with no seat; a later client resumes from `resume_offset` | `host_content_preflight_uses_no_seat_then_exact_resume_reconnects` |
-| H19 | transport | fault | host exit during transfer → stream close → client handshake error, non-zero exit | new |
+| H19 | transport | fault | host exit with a seat admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row | `.../multiplayer/client_session.rs` |
 
 **Decision:** this matrix is the coverage contract. The corpus gate resolves
 every `Hnn` cell to a scenario file and fails when one is missing, so a cell
@@ -108,10 +108,13 @@ is `{"frame": N}` in the issuing peer's numbering or `{"barrier": name,
 `{"join_at_barrier": name}`; `requires` lists `game-data`, `graphical` or
 `netem`. `expect[].assert` is `hash-equal`, `hash-diverged`,
 `barrier` (`reached|released|absent`), `transition`, `transition-id-equal`,
-`modal`, `log` (`contains|absent`, `count`), `final-operation` (a `GameCode` name
+`modal`, `log` (`contains|absent`, and exactly one of `count` or `at_least`),
+`final-operation` (a `GameCode` name
 from `crates/robin_engine/src/game_operation.rs`), `count` or `exit`. Transition
 ids are generated per run, so `transition-id-equal` compares peers instead of
-pinning one.
+pinning one. `count` on a log line is exact; `at_least` is its floor, for a line
+printed once per retry — a refused handshake prints its reason on every attempt,
+so that line's exact number is a retry schedule, not a contract.
 
 `transition.payload` is the `SnapshotTransitionPayload` variant the host
 committed — `"Save"` or `{"CampaignExit": "<GameCode>"}` — because the exit code
@@ -122,7 +125,10 @@ reading log wording: `{"assert": "count", "subject": "barrier"|"transition"|
 `Reconnect` frames for a seat and `operation` counts a `GameCode` dispatch.
 `seat` states what a seat holds after the run: `{"assert": "seat", "seat": 1,
 "selected": ["<character id>"], "owns": true|false}`, which is how a preserved
-selection or a refused late joiner is asserted.
+selection or a refused late joiner is asserted. `exit` states how a seat's
+process ended — `zero`, `nonzero`, or `running`, the last being a peer still
+there, which is how a row says the host survived a fault: `/state` samples stop
+when the process does, so they cannot on their own.
 
 | verb | core | transport | process |
 | --- | --- | --- | --- |
@@ -242,7 +248,12 @@ hash manifest and the binary's SHA-256. A non-empty directory is refused, as
 `lifecycle_gate.py` already does. Each run is bounded twice, by the scenario's
 `budget_s` (default 600) and by the harness alarm; a barrier wait is bounded by
 the transition-watchdog deadline (#4) plus a margin, so exit 2 means a promised
-state was missed, never that the machine was slow.
+state was missed, never that the machine was slow. After the last fault a row is
+read one evidence window later, and a pending `exit` is never settled by silence:
+a dropped session is not noticed until the transport's idle timeout expires, then
+retries for the client's `RECONNECT_BUDGET` before it publishes the fatal that
+ends the process, so the settle deadline covers both plus the capped backoff and
+the same margin.
 
 Faults that cannot run there: Windows-specific ones (WinDivert duplication,
 Known Folder paths, MSVC replay hashes), faults needing a real WAN (NAT rebinding,

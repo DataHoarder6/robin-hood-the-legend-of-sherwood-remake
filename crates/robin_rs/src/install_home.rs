@@ -66,9 +66,9 @@ pub fn report_directory() -> Option<PathBuf> {
     install_root().map(|root| root.join("reports"))
 }
 
-/// Directory holding pinned session diagnostics bundles. `None` when no install
-/// root exists.
-pub fn diagnostics_directory() -> Option<PathBuf> {
+/// Directory for the pinned bundle a multiplayer session writes when it fails.
+/// `None` when no install root exists.
+pub fn session_diagnostics_directory() -> Option<PathBuf> {
     install_root().map(|root| root.join("diagnostics"))
 }
 
@@ -159,6 +159,7 @@ mod tests {
             assert_eq!(replay_directory(), PathBuf::from("Data/Replays"));
             assert_eq!(attempt_directory(), PathBuf::from("Data/Replays/attempts"));
             assert_eq!(report_directory(), None);
+            assert_eq!(session_diagnostics_directory(), None);
             assert_eq!(datadir_file(), None);
             assert_eq!(identity_key_path(), None);
             return;
@@ -168,6 +169,10 @@ mod tests {
         assert_eq!(replay_directory(), base.join("replays"));
         assert_eq!(attempt_directory(), base.join("replays/attempts"));
         assert_eq!(report_directory(), Some(base.join("reports")));
+        assert_eq!(
+            session_diagnostics_directory(),
+            Some(base.join("diagnostics"))
+        );
         assert_eq!(datadir_file(), Some(base.join("datadir.txt")));
         assert_eq!(
             identity_key_path(),

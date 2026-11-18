@@ -6,10 +6,12 @@
     { "seat": 1, "role": "client", "start": { "join_at_frame": 0 } }
   ],
   "faults": [
-    { "at": { "frame": 0 }, "peer": 1, "fault": "kill" }
+    { "at": { "barrier": "content-ready", "after": 0 }, "peer": 1, "fault": "kill" }
   ],
   "expect": [
-    { "assert": "log", "contains": "handshake error", "count": 1 },
-    { "assert": "log", "absent": "Welcome", "count": 0 }
+    { "assert": "barrier", "barrier": "content-ready", "state": "reached" },
+    { "assert": "barrier", "barrier": "begin-sim", "state": "reached" },
+    { "assert": "final-operation", "operation": "LevelInProgress" },
+    { "assert": "exit", "peers": [0], "status": "running" }
   ]
 }

@@ -92,7 +92,7 @@ EXPECT_FIELDS = {
     "transition": ({"payload", "acked", "committed"}, set()),
     "transition-id-equal": ({"peers"}, set()),
     "modal": ({"count"}, set()),
-    "log": (set(), {"contains", "absent", "count"}),
+    "log": (set(), {"contains", "absent", "count", "at_least"}),
     "final-operation": ({"operation"}, set()),
     "exit": ({"peers", "status"}, set()),
     "count": ({"subject", "name", "times"}, set()),
@@ -101,7 +101,7 @@ EXPECT_FIELDS = {
 COUNT_SUBJECTS = ("barrier", "transition", "operation", "reconnect")
 
 REQUIRES = frozenset({"game-data", "graphical", "netem"})
-EXIT_STATUS = ("zero", "nonzero")
+EXIT_STATUS = ("zero", "nonzero", "running")
 
 DEFAULTS_FIELDS = {"schema", "mission", "seed", "expected_players", "peer_count"}
 SCENARIO_FIELDS = {"schema", "id", "extends", "peers", "faults", "expect", "requires", "budget_s"}
@@ -476,11 +476,19 @@ class Checker:
         text = expectation[choices[0]]
         if not isinstance(text, str) or not text:
             self.fail(where, f"{choices[0]} must be a non-empty string")
+        cardinals = [key for key in ("count", "at_least") if key in expectation]
+        if len(cardinals) != 1:
+            return self.fail(where, "log asserts exactly one of count or at_least")
         if "count" in expectation:
             if not _is_int(expectation["count"], 0):
                 self.fail(where, "count must be a non-negative integer")
             elif choices[0] == "absent" and expectation["count"] != 0:
                 self.fail(where, "absent cannot require a non-zero count")
+        else:
+            if not _is_int(expectation["at_least"], 1):
+                self.fail(where, "at_least must be a positive integer")
+            elif choices[0] == "absent":
+                self.fail(where, "absent states a zero count, not at_least")
 
 
 def chain(identifier, scenarios):
@@ -548,6 +556,10 @@ def expanded(identifier, scenarios, defaults, contract):
     }
     if "requires" in document:
         result["requires"] = document["requires"]
+    if "budget_s" in document:
+        # Section 5's per-scenario bound: the run is an alarm for the caller,
+        # so it survives expansion instead of being read from the defaults.
+        result["budget_s"] = document["budget_s"]
     return result
 
 

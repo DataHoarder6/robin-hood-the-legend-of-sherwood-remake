@@ -6,9 +6,11 @@
     { "seat": 1, "role": "client" }
   ],
   "faults": [
-    { "at": { "frame": 40 }, "peer": 1, "fault": "kill" }
+    { "at": { "frame": 40 }, "peer": 1, "fault": "restart", "identity": "fresh" }
   ],
   "expect": [
-    { "assert": "log", "contains": "Reject", "count": 1 }
+    { "assert": "log", "contains": "multiplayer session already has its configured 2 players", "at_least": 1 },
+    { "assert": "log", "contains": "multiplayer client connected", "count": 1 },
+    { "assert": "exit", "peers": [1], "status": "nonzero" }
   ]
 }

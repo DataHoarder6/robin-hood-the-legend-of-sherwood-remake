@@ -25,9 +25,8 @@ pub(crate) struct SessionBundle {
 /// Where a bundle goes, and where the replay it names is read from: one
 /// resolver, so a session started with `ROBINHOOD_INSTALL_HOME` writes its
 /// evidence into that install and nobody else's.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn diagnostics_dir() -> Option<PathBuf> {
-    crate::install_home::diagnostics_directory()
+    crate::install_home::session_diagnostics_directory()
 }
 
 pub(crate) fn replays_dir() -> Option<PathBuf> {
