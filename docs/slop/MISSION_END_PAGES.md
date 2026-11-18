@@ -30,12 +30,14 @@ end
 ```
 
 (Decompiled from `DATA/Levels/*.scb` with `disasm_scb --decompile`; e.g.
-`Tac18_FoA_EC`, `Emb01_FoA_EC`, `Str01_Lin_EC`, `H04_Lei_VL`.) The same
+`Tac18_FoA_EC`, `Emb01_FoA_EC`, `Str01_Lin_EC`.) The same
 scripted retreat uses index `1` outside the terminal path (`H04_Lei_VL`
 `CheckVictoryCondition`). The index selects a line in the level's win/lose
-table named by `RHLevel*.red`; for the lose tables, index 0 narrates a defeat
-and index 1 the withdrawal — e.g. `1000356` sub 1 "Robin should have been more
-restrained", `1000414` sub 1 "What a blow! But the worst has been avoided…".
+table named by `RHLevel*.red`. In the lose tables index 0 narrates a death or
+defeat and index 1 usually a withdrawal — e.g. `1000356` sub 1 "Robin should
+have been more restrained", `1000414` sub 1 "What a blow! But the worst has
+been avoided…". A few missions use index 1 for the loss of the last PC with a
+required skill instead (`1000342`, `1000352`).
 
 The port keeps the same data path: `ChooseVictoryDefeatText` writes
 `mission.victory_defeat_id`, and the terminal page reads
