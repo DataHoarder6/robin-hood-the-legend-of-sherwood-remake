@@ -293,6 +293,7 @@ fn begin_host_snapshot_transition(
             payload: payload.clone(),
             awaiting,
             answered: HashSet::new(),
+            started_ms: now_ms,
             deadline_ms,
         });
         let prepare = NetMsg::PrepareSnapshotTransition { id, payload };
