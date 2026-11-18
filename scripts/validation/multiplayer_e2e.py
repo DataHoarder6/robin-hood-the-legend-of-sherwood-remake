@@ -85,6 +85,11 @@ BARRIER_DEADLINE_S = TRANSITION_WATCHDOG_S + WATCHDOG_MARGIN_S
 # driver calls the session settled. Log growth is not a progress signal: a
 # reconnecting peer writes a schedule line per second forever.
 QUIET_S = 25
+# After the last injected fault, a row whose promises are log evidence alone is
+# read one initial-handshake budget later: the killed or refused peer has had
+# its full chance to report. A reaction later than that belongs to a different
+# fault, not to this one.
+SETTLE_S = 20
 # A running session that has not advanced a frame for this long is holding a
 # story scroll: the driver presses Return on the real window again.
 SURFACE_RETRY_S = 4
@@ -574,6 +579,7 @@ class ScenarioRun:
         self.peers = []
         self.faults = list(expanded["faults"])
         self.fired = []
+        self.last_fault_at = time.monotonic()
         self.activity = {}
         self.last_change = time.monotonic()
         self.last_frame = None
@@ -696,11 +702,12 @@ class ScenarioRun:
         """Wait until the scenario's promises can be judged, or it is a hang.
 
         Positive expectations (`exit`, a reached barrier, a final operation) are
-        waited for. When no peer is moving any more the run is over even if a
-        promise was missed, which is an assertion failure (exit 1): an unmet
-        promise in a session where nothing moves is a failed assertion, not a
-        hang. The deadline only fires while the session is still moving and a
-        barrier never releases.
+        waited for; a row that promises only log evidence is read `SETTLE_S`
+        after its last fault, because a killed or refused peer has then had its
+        whole initial-handshake budget to report and a later line would belong
+        to another fault. When nothing moves any more an unmet promise is a
+        failed assertion (exit 1), not a hang: the deadline only fires while the
+        session is still moving and a barrier never releases.
         """
         positives = [
             expectation for expectation in self.expanded["expect"]
@@ -714,8 +721,15 @@ class ScenarioRun:
             if positives and all(self.holds(item) for item in positives):
                 self.events.event("settled", description="every positive expectation observed")
                 return
-            if self.seconds_since_change() >= QUIET_S:
-                self.events.event("settled", description="no peer is moving", quiet_s=QUIET_S)
+            after_faults = not self.faults and time.monotonic() - self.last_fault_at >= SETTLE_S
+            if positives:
+                if after_faults and self.seconds_since_change() >= QUIET_S:
+                    self.events.event("settled", description="no peer is moving",
+                                      quiet_s=QUIET_S)
+                    return
+            elif after_faults:
+                self.events.event("settled", description="last fault's evidence window",
+                                  settle_s=SETTLE_S)
                 return
             time.sleep(0.1)
         raise ScenarioDeadline(
@@ -760,6 +774,7 @@ class ScenarioRun:
         peer = self.peer(fault["peer"])
         verb = fault["fault"]
         self.fired.append(fault)
+        self.last_fault_at = time.monotonic()
         self.events.event("fault", peer=peer.name, fault=verb, at=fault["at"])
         if verb == "kill":
             peer.signal(signal.SIGKILL, "corpus kill")
