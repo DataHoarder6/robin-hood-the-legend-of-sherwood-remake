@@ -84,14 +84,9 @@ impl SessionIngress {
                 RoutedRequest::Query(QueryRequest::EngineDump) => {
                     req.response_tx.send(capabilities.engine_dump(engine));
                 }
-                RoutedRequest::Query(query) => req.response_tx.send(dispatch_query(
-                    query,
-                    self.replay_status(),
-                    engine,
-                    assets,
-                    transport,
-                    session,
-                )),
+                RoutedRequest::Query(query) => {
+                    req.response_tx.send(dispatch_query(query, engine, assets))
+                }
                 RoutedRequest::Deferred(request) => {
                     self.defer_request(request, req.response_tx, capabilities.has_presentation())
                 }
@@ -111,6 +106,15 @@ impl SessionIngress {
                 }
             }
         }
+        // The last completed boundary is what `/state` answers with, including
+        // after this mission is gone. Publishing here (not in the listener) keeps
+        // the snapshot authoritative: it is the engine the tick just used.
+        crate::observability::publish_state(snapshot_state(
+            engine,
+            self.replay_status(),
+            transport,
+            session,
+        ));
     }
 }
 
@@ -300,18 +304,8 @@ fn dispatch_command(
     }
 }
 
-pub(super) fn dispatch_query(
-    query: QueryRequest,
-    replay: Option<ReplayStatus>,
-    engine: &Engine,
-    assets: &LevelAssets,
-    transport: Option<&crate::host::HostTransport>,
-    session: Option<SessionFacts>,
-) -> Reply {
+pub(super) fn dispatch_query(query: QueryRequest, engine: &Engine, assets: &LevelAssets) -> Reply {
     match query {
-        QueryRequest::State => Ok(ReplyBody::Json(snapshot_state(
-            engine, replay, transport, session,
-        ))),
         QueryRequest::EngineDump => engine_dump_json(engine)
             .map(ReplyBody::Json)
             .map_err(|e| RpcError::internal(format!("engine serialize: {e}"))),

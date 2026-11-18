@@ -38,7 +38,8 @@ blocked or loading game should fail quickly.
 | --- | --- | --- |
 | `GET` | `/` or `/info` | endpoint discovery document |
 | `GET` | `/natives` | every script native with index and signature |
-| `GET` | `/state` | compact frame, map, replay and multiplayer session status |
+| `GET` | `/state` | last published frame, map, replay, multiplayer status and terminal block |
+| `GET` | `/events` | multiplayer session event ring (`?since=<seq>&limit=<n>`) |
 | `GET` | `/engine-dump` | complete serialized deterministic Engine state |
 | `GET` | `/level-assets` | static level data plus runtime fast-grid flags |
 | `GET` | `/host-debug` | non-authoritative host/UI debug state |
@@ -49,8 +50,22 @@ blocked or loading game should fail quickly.
 authoritative simulation state; the latter contains local viewport, hover and
 trajectory-preview details which do not belong in Engine snapshots.
 
-`/state` also carries the admitted session when one exists; a single-player
-mission reports `"multiplayer": null`.
+`/state` and `/events` answer from the process's own observability surface
+without entering the mission queue. That queue is exactly what stops answering
+when the game thread is deadlocked, and the mission is exactly what is gone once
+it ends. On native the answer is built on the listener thread; in the browser it
+is built inside the `rh_rpc` call, before the request could reach the tick queue.
+Either way one shape answers, and neither endpoint has a queued decoder. Other
+endpoints still queue their work and keep the 60-second budget.
+
+## `/state`
+
+`/state` returns the last snapshot the mission loop published at an RPC
+boundary, so it answers after the mission that produced it has ended.
+It also carries the admitted session when one exists; a single-player mission
+reports `"multiplayer": null`, and so does a session whose host Welcome has not
+been adopted yet — the roster arrives with that Welcome, so there is no player
+count to report before it.
 
 ```json
 {"frame": 133, "map": "Dem_Lei_MP", "replay": null,
@@ -61,6 +76,13 @@ mission reports `"multiplayer": null`.
    "last_compared_hash_frame": 125, "desync_count": 0,
    "final_operation": "LevelInProgress",
    "connect_string": "{\"id\":…,\"addrs\":[…]}"
+ },
+ "terminal": null,
+ "observability": {
+   "trace_log": "/home/you/.local/share/robin_hood/logs/robin-20261118T101500.log",
+   "event_log": "/home/you/.local/share/robin_hood/logs/events.jsonl",
+   "event_run": "20261118T101500-4711#0",
+   "next_event_seq": 42
  }}
 ```
 
@@ -69,6 +91,93 @@ mission reports `"multiplayer": null`.
 `{"CampaignExit": "<GameCode>"}` and `awaiting` the seats whose acknowledgement
 the host's commit still waits for. `connect_string` is the host's dial address
 and `null` on a client.
+
+`terminal` is `null` while a mission is producing snapshots. A mission that
+ended sets it, and the snapshot stays the last one published:
+
+```json
+{"terminal": {"operation": "Quit", "reason": "mission ended",
+              "at": "2026-11-18T10:22:41.120Z"}}
+```
+
+`operation` is the `GameCode` the mission ended on; a mission that died without
+reporting one keeps the `final_operation` of the snapshot that mission
+published. A failed launch reports `null` with the launch error as `reason`, and
+a mission that succeeded but whose services failed to drain reports
+`application shutdown: …` — a shutdown, not a failed launch. One attempt records
+one `terminal` and one `session_ended` event; a second writer for the same
+attempt is ignored.
+
+While an attempt is running, the frame, map and `multiplayer` block describe that
+attempt's last boundary. A new attempt starts without the previous one's
+snapshot, so a failed launch reports `null` for all three rather than repeating
+the mission before it.
+
+Before the first RPC boundary there is nothing to report: `/state` answers `503`
+with `{"error":"engine not ready — no mission state yet"}`.
+
+`observability.next_event_seq` is the cursor to hand to `/events` to follow the
+session from this snapshot onward, and `event_run` names the run that cursor
+belongs to. `trace_log` and `event_log` are the two files described below.
+
+## Run log
+
+Every native process writes its trace to
+`<install home>/logs/robin-<YYYYMMDDTHHMMSS>.log` in addition to stderr, so a
+game started from a desktop launcher that inherits no terminal still leaves
+evidence. `<install home>` is `ROBINHOOD_INSTALL_HOME` when set, else
+`<platform data dir>/robin_hood`; `install_home::log_directory` is the only
+resolver. The process keeps the newest ten run logs and prunes the rest at
+startup, and logs the path it opened once, at startup. `/state`'s
+`observability.trace_log` repeats it.
+
+## Session events
+
+`GET /events?since=<seq>&limit=<n>` serves the multiplayer event ring, oldest
+first. `limit` defaults to 100 and caps at 1000; `since` is the `next_seq` from
+the previous page, so a poller never repeats an event.
+
+```json
+{"run": "20261118T101500-4711#0",
+ "events": [
+  {"seq": 41, "uptime_ms": 812345, "utc": "2026-11-18T10:21:05.422Z",
+   "kind": "barrier_released", "seat": null, "frame": 133,
+   "detail": {"start_epoch_ms": 1763461265422,
+              "message": "multiplayer: begin-sim barrier released at frame 133"}}
+ ],
+ "next_seq": 42}
+```
+
+`kind` is one of `mission_started`, `host_started`, `admission`,
+`seat_connected`, `seat_assigned`, `seat_evicted`, `transport_disconnected`,
+`transport_reconnected`, `barrier_reached`, `barrier_released`,
+`barrier_expired`, `transition_prepared`, `transition_committed`,
+`transition_aborted`, `transition_dropped`, `modal_announced`, `modal_proposed`,
+`modal_acked`, `modal_expired`, `desync`, `session_failed` and `session_ended`.
+`seat` and `frame` are `null` when the event has no seat or frame; `detail`
+carries the event's own fields and always names the wording in `message`.
+
+`host_started` means this process is hosting; `seat_connected` means a peer
+joined (by its `ConnectSeat` or by this process dialing out); `seat_assigned` is
+this process receiving its seat from the host; `seat_evicted` is reserved for an
+admitted `DisconnectSeat`. A lost peer link is `transport_disconnected` followed
+by `transport_reconnected` when the transport recovers — the transport retries
+on its own, so no seat was evicted.
+
+`seq` restarts at zero in every process, so `run` identifies the process run that
+served the page and `next_seq` is always that run's true cursor. A poller that
+keeps a cursor across a game restart sees `run` change and an empty page whose
+`next_seq` is the new run's cursor, not the stale one it sent: reset the cursor
+and re-read, or the missed events stay invisible. `observability.event_run` in
+`/state` carries the same identity.
+
+The same call site writes the ring, the tracing line and one JSON line in
+`<install home>/logs/events.jsonl`, so the log text and the JSON never drift.
+The ring holds the newest 512 events in memory. On disk the live file belongs to
+one process: startup archives the previous run's file as
+`events-<stamp>-<pid>.jsonl`, keeps the newest two archives, and stops appending
+past 4 MiB (the ring keeps answering). Both survive the mission that produced
+them.
 
 ## Command endpoints
 

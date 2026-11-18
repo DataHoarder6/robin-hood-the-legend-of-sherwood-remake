@@ -10,10 +10,9 @@ use super::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum RequestKind {
     Script,
-    State,
     HostDebug,
     LevelAssets,
     Decompile,
@@ -34,7 +33,6 @@ impl RequestKind {
     pub(super) fn from_method(method: &str) -> Option<Self> {
         Some(match method {
             "script" => Self::Script,
-            "state" => Self::State,
             "host-debug" => Self::HostDebug,
             "level-assets" => Self::LevelAssets,
             "decompile" => Self::Decompile,
@@ -152,7 +150,6 @@ pub(super) fn decode_browser(
 fn decode(kind: RequestKind, params: Parameters<'_>) -> Result<HttpPayload, RpcError> {
     Ok(match kind {
         RequestKind::Script => HttpPayload::Script,
-        RequestKind::State => HttpPayload::State,
         RequestKind::HostDebug => HttpPayload::HostDebug,
         RequestKind::LevelAssets => HttpPayload::LevelAssets,
         RequestKind::GetReplay => HttpPayload::GetReplay,
@@ -223,6 +220,34 @@ fn decode(kind: RequestKind, params: Parameters<'_>) -> Result<HttpPayload, RpcE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn state_and_events_are_answered_inline_and_have_no_queued_decoder() {
+        // `/state` and `/events` are the two endpoints that must answer while
+        // the mission queue does not (deadlocked or finished mission). The
+        // browser bridge resolves them inline, so nothing may decode them into
+        // a payload that would be pushed onto the tick queue.
+        for method in ["state", "events"] {
+            assert_eq!(RequestKind::from_method(method), None, "{method}");
+            assert!(
+                decode_browser(method, serde_json::Value::Null).is_err(),
+                "{method} must not become a queued request"
+            );
+        }
+        // The inline builders are what both transports call; `state` may still
+        // have no mission to report, which is its own documented answer.
+        match crate::http_server::diagnostics::state_reply() {
+            Ok(_) => {}
+            Err(error) => assert_eq!(error.message, "engine not ready — no mission state yet"),
+        }
+        let page = crate::http_server::diagnostics::events_document(None, Some(1));
+        assert!(page.is_ok(), "events answers inline");
+        let cursor = crate::http_server::diagnostics::events_document(None, None).unwrap();
+        assert!(cursor.get("events").is_some(), "{cursor}");
+        assert!(cursor.get("run").is_some(), "{cursor}");
+        assert!(cursor.get("next_seq").is_some(), "{cursor}");
+    }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

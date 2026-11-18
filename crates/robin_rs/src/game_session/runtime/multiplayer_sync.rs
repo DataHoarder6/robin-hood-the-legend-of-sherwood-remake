@@ -8,7 +8,8 @@
 use super::MultiplayerAdmission;
 use super::timing::MultiplayerTiming;
 use crate::game_session::multiplayer::{
-    MultiplayerRollbackTelemetry, MultiplayerSessionError, SessionProtocolFailure,
+    MultiplayerAdmissionEvent, MultiplayerRollbackTelemetry, MultiplayerSessionError,
+    SessionProtocolFailure,
 };
 use serde::Serialize;
 
@@ -99,8 +100,11 @@ impl MultiplayerSync {
         } = self.admission
             && now_epoch_ms >= start_epoch_ms
         {
-            self.admission = MultiplayerAdmission::Running;
-            tracing::info!(frame, "multiplayer: synchronized start gate opened");
+            self.admission
+                .apply(MultiplayerAdmissionEvent::StartGateOpened {
+                    frame,
+                    start_epoch_ms,
+                })?;
         }
         if matches!(
             self.admission,
@@ -119,6 +123,18 @@ impl MultiplayerSync {
         };
         let waited_ms = u64::from(now_uptime_ms.saturating_sub(started));
         if waited_ms >= ADMISSION_BUDGET_MS {
+            crate::observability::event(
+                crate::observability::EventKind::BarrierExpired,
+                format!(
+                    "multiplayer: admission barrier expired after {waited_ms} ms in {}",
+                    state.label()
+                ),
+            )
+            .field("state", state.wire_name())
+            .field("waited_ms", waited_ms)
+            .field("budget_ms", ADMISSION_BUDGET_MS)
+            .warn()
+            .record();
             return Err(SessionProtocolFailure::AdmissionTimeout { state, waited_ms }.into());
         }
         Ok(true)

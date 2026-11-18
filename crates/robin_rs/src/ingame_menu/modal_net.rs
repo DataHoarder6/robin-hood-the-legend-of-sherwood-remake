@@ -2,6 +2,8 @@ use robin_engine::multiplayer as engine_multiplayer;
 use robin_engine::player_command::{DialogResult, ModalKind, PlayerId};
 use serde::{Deserialize, Serialize};
 
+use crate::observability::EventKind;
+
 pub use engine_multiplayer::ModalPublication;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -179,27 +181,68 @@ impl<'a> ModalNet<'a> {
         let publication =
             self.net
                 .submit_modal_outcome(self.instance, &self.kind, result, self.is_host)?;
-        if publication == ModalPublication::HostDecisionQueued {
-            self.net
-                .complete_modal_instance(&self.kind, self.instance)?;
+        match publication {
+            ModalPublication::HostDecisionQueued => {
+                self.net
+                    .complete_modal_instance(&self.kind, self.instance)?;
+                self.record(EventKind::ModalAcked, "modal decided (host authority)")
+                    .field("result", format!("{result:?}"))
+                    .record();
+            }
+            ModalPublication::ClientProposalQueued => {
+                self.record(EventKind::ModalProposed, "modal outcome proposed to host")
+                    .field("result", format!("{result:?}"))
+                    .record();
+            }
+            ModalPublication::HostVoteQueued => {
+                self.record(
+                    EventKind::ModalProposed,
+                    "host vote recorded; peers still owe an acknowledgement",
+                )
+                .field("result", format!("{result:?}"))
+                .record();
+            }
         }
         Ok(publication)
     }
 
     pub fn poll_remote_dismissal(&self) -> Option<DialogResult> {
         self.net
-            .service_modal_session(self.is_host, u64::from(crate::window::process_uptime_ms()))
+            .service_modal_session(
+                self.is_host,
+                u64::from(crate::window::process_uptime_ms()),
+                // The session records an expiry where it is decided; a surface
+                // that happens to be polling must not own that fact.
+                &mut crate::game_session::record_modal_expiry,
+            )
             .unwrap_or_else(|error| panic!("modal session control failed: {error}"));
         let result = self
             .net
             .modal_decision(self.instance, &self.kind)
             .expect("modal session decision available");
-        if result.is_some() {
+        if let Some(result) = result {
             self.net
                 .complete_modal_instance(&self.kind, self.instance)
                 .unwrap_or_else(|error| panic!("failed to retire modal projection: {error}"));
+            self.record(
+                EventKind::ModalAcked,
+                "modal decision applied from the authoritative host",
+            )
+            .field("result", format!("{result:?}"))
+            .record();
         }
         result
+    }
+
+    /// One session event for this modal occurrence: every modal hook names the
+    /// instance it acted on, so a reader never has to infer which page a line
+    /// belongs to. The seat stays blank: this adapter binds a surface, not a
+    /// participant, and the role names which side decided.
+    fn record(&self, kind: EventKind, message: &str) -> crate::observability::Event {
+        crate::observability::event(kind, message.to_owned())
+            .field("instance", self.instance)
+            .field("modal", format!("{:?}", self.kind))
+            .field("role", if self.is_host { "host" } else { "peer" })
     }
 
     /// Drain acknowledgements for presentation. Story pages still require
@@ -679,6 +722,42 @@ mod tests {
             .unwrap();
         assert_eq!(gate.poll(Some(&modal)), Some(DialogResult::Completed));
         assert_eq!(gate.poll(Some(&modal)), None);
+    }
+
+    #[test]
+    fn an_expired_acknowledgement_is_recorded_with_no_modal_surface_bound() {
+        let (net, _incoming, _outgoing) = fixture();
+        net.set_modal_player_count(2);
+        let kind = ModalKind::MissionState {
+            kind: robin_engine::player_command::MissionStateModalKind::EndState { won: true },
+        };
+        net.modal_effect_admission()
+            .admit(std::slice::from_ref(&kind))
+            .unwrap();
+        let instance = net.present_modal(&kind, true).unwrap();
+        net.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+            .unwrap();
+        let since =
+            crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
+        // No `ModalNet` is constructed: nothing is bound to a modal surface, and
+        // the session still records the page it continued past.
+        net.service_modal_session(true, 1_000, &mut |_, _, _| {})
+            .unwrap();
+        net.service_modal_session(true, 301_000, &mut crate::game_session::record_modal_expiry)
+            .unwrap();
+        let page = crate::observability::events_page(Some(since), crate::observability::MAX_PAGE);
+        let expired: Vec<&serde_json::Value> = page
+            .events
+            .iter()
+            .filter(|event| event["kind"] == "modal_expired")
+            .collect();
+        assert_eq!(expired.len(), 1, "{page:?}");
+        assert!(expired[0]["seat"].is_null(), "{page:?}");
+        assert_eq!(
+            expired[0]["detail"]["missing_seats"],
+            serde_json::json!([1]),
+            "{page:?}"
+        );
     }
 
     #[test]

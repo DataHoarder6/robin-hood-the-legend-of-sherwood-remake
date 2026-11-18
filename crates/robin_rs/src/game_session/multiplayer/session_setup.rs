@@ -174,11 +174,16 @@ pub(super) async fn establish(
                         ));
                     }
                 }
-                tracing::info!(
-                    server = %addr,
-                    nickname = %nickname,
-                    "multiplayer: connected to {addr}"
-                );
+                crate::observability::event(
+                    crate::observability::EventKind::SeatConnected,
+                    format!("multiplayer: connected to {addr}"),
+                )
+                .seat(session.seat)
+                .field("role", "peer")
+                .field("endpoint", addr.to_string())
+                .field("nickname", nickname.clone())
+                .field("mission", welcomed_mission.to_string())
+                .record();
                 // Wait briefly for the AssignedLocalSeat event so
                 // host.transport.local_seat() is correct before the mission
                 // starts emitting outgoing inputs.  Long timeouts
@@ -199,7 +204,14 @@ pub(super) async fn establish(
                                     seat, session.seat,
                                     "assigned seat differs from admitted Welcome"
                                 );
-                                tracing::info!(?seat, "multiplayer: assigned seat");
+                                crate::observability::event(
+                                    crate::observability::EventKind::SeatAssigned,
+                                    format!("multiplayer: assigned seat {}", seat.0),
+                                )
+                                .seat(seat)
+                                .field("role", "peer")
+                                .field("source", "welcome_wait")
+                                .record();
                                 break;
                             }
                             Ok(NetEvent::Note(s)) => tracing::info!(note = %s, "mp note"),
@@ -359,13 +371,20 @@ fn host_session(
                     ticket.payload().relay_url
                 ));
             }
-            tracing::info!(
-                endpoint_id = %handle.endpoint_id(),
-                nickname = %nickname,
-                seed = authoritative_rng_seed,
-                "multiplayer: hosting on iroh endpoint {}",
-                handle.endpoint_id()
-            );
+            crate::observability::event(
+                crate::observability::EventKind::HostStarted,
+                format!(
+                    "multiplayer: hosting on iroh endpoint {}",
+                    handle.endpoint_id()
+                ),
+            )
+            .seat(handle.local_seat)
+            .field("role", "host")
+            .field("endpoint", handle.endpoint_id().to_string())
+            .field("nickname", nickname)
+            .field("mission", authoritative_mission_id.to_string())
+            .field("seed", authoritative_rng_seed)
+            .record();
             let seat = handle.local_seat;
             channels.attach_runtime(handle);
             host.transport.install_session(

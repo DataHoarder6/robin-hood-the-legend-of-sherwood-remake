@@ -158,6 +158,24 @@ impl LaunchError {
             })),
         }
     }
+
+    /// Why the run stopped, in the words `/state`'s `terminal.reason` uses.
+    ///
+    /// A failed shutdown is a shutdown, not a failed launch: a mission that
+    /// succeeded and then failed to drain its services must not be reported as
+    /// a mission that never started.
+    pub(crate) fn terminal_reason(&self) -> String {
+        match &self.0 {
+            LaunchErrorKind::Shutdown(error) => format!("application shutdown: {error}"),
+            LaunchErrorKind::RunAndShutdown { run, shutdown } => {
+                format!(
+                    "{}; application shutdown: {shutdown}",
+                    run.terminal_reason()
+                )
+            }
+            _ => format!("launch failed: {self}"),
+        }
+    }
 }
 
 impl From<MissionError> for LaunchError {

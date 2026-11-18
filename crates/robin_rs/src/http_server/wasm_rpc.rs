@@ -51,25 +51,30 @@ pub async fn rh_rpc(request: JsValue) -> Result<JsValue, JsValue> {
         #[serde(with = "serde_wasm_bindgen::preserve")]
         params: JsValue,
     }
-    let req: Req = serde_wasm_bindgen::from_value(request).map_err(|e| {
+    let Req { method, params } = serde_wasm_bindgen::from_value::<Req>(request).map_err(|e| {
         JsValue::from_str(
             &super::RpcError::invalid_request(format!("bad request: {e}")).to_string(),
         )
     })?;
-    // Pure-introspection methods don't need a live engine — resolve
-    // inline without touching the tick queue.
-    match req.method.as_str() {
+    // Methods answered from the process's own surface resolve inline, without
+    // touching the tick queue: the queue is exactly what stops answering when
+    // the game thread deadlocks or the mission ends.
+    match method.as_str() {
         "info" => {
             return reply_to_js(Ok(ReplyBody::Json(super::info_json())));
         }
         "natives" => {
             return reply_to_js(Ok(ReplyBody::Json(super::list_natives_json())));
         }
+        "state" | "events" => {
+            let params = browser_json(params)?;
+            return reply_to_js(super::diagnostics::observability_reply(&method, params));
+        }
         _ => {}
     }
-    let payload = if req.method == "load-replay" {
+    let payload = if method == "load-replay" {
         use wasm_bindgen::JsCast as _;
-        let data = js_sys::Reflect::get(&req.params, &JsValue::from_str("data"))?;
+        let data = js_sys::Reflect::get(&params, &JsValue::from_str("data"))?;
         let bytes = data
             .dyn_into::<js_sys::Uint8Array>()
             .map_err(|_| JsValue::from_str("load-replay data must be a Uint8Array"))?;
@@ -84,7 +89,7 @@ pub async fn rh_rpc(request: JsValue) -> Result<JsValue, JsValue> {
             &crate::replay_format::LOCAL_CUSTOM_REPLAY_ADMISSION_LIMITS,
         )
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let paused = js_sys::Reflect::get(&req.params, &JsValue::from_str("paused"))?;
+        let paused = js_sys::Reflect::get(&params, &JsValue::from_str("paused"))?;
         let paused = if paused.is_undefined() {
             false
         } else {
@@ -94,13 +99,8 @@ pub async fn rh_rpc(request: JsValue) -> Result<JsValue, JsValue> {
         };
         HttpPayload::LoadReplay { data, paused }
     } else {
-        let params = if req.params.is_undefined() {
-            serde_json::Value::Null
-        } else {
-            serde_wasm_bindgen::from_value(req.params)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?
-        };
-        decode_request(&req.method, params).map_err(|e| JsValue::from_str(&e.to_string()))?
+        let params = browser_json(params)?;
+        decode_request(&method, params).map_err(|e| JsValue::from_str(&e.to_string()))?
     };
     let queue = BROWSER_QUEUE
         .with(|binding| binding.borrow().upgrade())
@@ -130,6 +130,15 @@ pub async fn rh_rpc(request: JsValue) -> Result<JsValue, JsValue> {
         }.fuse() => reply?,
     };
     reply_to_js(reply)
+}
+
+/// Decode an optional JS parameter object into the JSON value the shared
+/// request decoders accept.
+fn browser_json(params: JsValue) -> Result<serde_json::Value, JsValue> {
+    if params.is_undefined() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_wasm_bindgen::from_value(params).map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 fn decode_request(method: &str, params: serde_json::Value) -> Result<HttpPayload, super::RpcError> {

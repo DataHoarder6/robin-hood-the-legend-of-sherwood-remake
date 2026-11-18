@@ -242,7 +242,16 @@ fn finish_application(
     result: Result<i32, LaunchError>,
     shutdown: Result<(), String>,
 ) -> Result<i32, LaunchError> {
-    LaunchError::with_shutdown(result, shutdown)
+    let result = LaunchError::with_shutdown(result, shutdown);
+    // A run that never reached a mission, or died between missions, has no
+    // mission outcome to report. It still stopped, and `/state` must say why:
+    // the process outlives the RPC session that would have asked. One outcome
+    // gets one record; the surface ignores a writer that already reported this
+    // attempt.
+    if let Err(error) = &result {
+        crate::observability::record_terminal(None, error.terminal_reason());
+    }
+    result
 }
 
 /// Resolve the launch route before starting any transport or speculative work.
@@ -1579,6 +1588,19 @@ mod early_replay_tests {
                 "{entry}: replay preparation must follow startup"
             );
         }
+    }
+
+    /// `with_shutdown(Ok, Err)` is a successful mission plus a failed drain.
+    /// Calling that a failed launch overwrote `mission ended` with a statement
+    /// that the mission never ran.
+    #[test]
+    fn a_failed_shutdown_after_a_successful_mission_is_reported_as_a_shutdown() {
+        let error = super::finish_application(Ok(0), Err("drain failed".into()))
+            .expect_err("the shutdown failure still fails the run");
+        assert_eq!(
+            error.terminal_reason(),
+            "application shutdown: drain failed"
+        );
     }
 
     #[test]

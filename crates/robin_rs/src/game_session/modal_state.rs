@@ -198,12 +198,20 @@ impl<S: ModalScreen> ModalBatch<S> {
             && let Some(item) = self.lifecycle.start_next(S::item_kind)
         {
             let kind = S::item_kind(&item);
+            let is_host = host.transport.local_seat() == engine_player_command::PlayerId::HOST;
             if let Some(net) = host.transport.net() {
-                net.present_modal(
-                    &kind,
-                    host.transport.local_seat() == engine_player_command::PlayerId::HOST,
+                net.present_modal(&kind, is_host)
+                    .expect("session admitted the next modal before constructing its surface");
+                // Session-shared pages only: a single-player modal is not a
+                // multiplayer event and must not appear in the ring.
+                crate::observability::event(
+                    crate::observability::EventKind::ModalAnnounced,
+                    format!("multiplayer: modal announced: {kind:?}"),
                 )
-                .expect("session admitted the next modal before constructing its surface");
+                .seat(host.transport.local_seat())
+                .field("modal", format!("{kind:?}"))
+                .field("role", if is_host { "host" } else { "peer" })
+                .record();
             }
             let screen = S::begin(host, ctx, item);
             self.current = Some((kind, screen));

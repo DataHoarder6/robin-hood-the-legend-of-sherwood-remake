@@ -45,17 +45,57 @@ pub struct PendingSnapshotTransition {
     id: robin_engine::multiplayer::SnapshotTransitionId,
     payload: PendingSnapshotTransitionPayload,
     committed: bool,
+    /// Reports an uncommitted drop. A field guard, not `Drop` on the payload
+    /// itself, so `into_payload` can still move the payload out.
+    abandonment: TransitionAbandonment,
+}
+
+/// A prepared transition dropped without a commit leaves its participant in the
+/// old mission: it is exactly the fact a later reader cannot recover from the
+/// replay alone, so the drop announces itself.
+struct TransitionAbandonment {
+    armed: bool,
+    id: robin_engine::multiplayer::SnapshotTransitionId,
+    variant: &'static str,
+}
+
+impl Drop for TransitionAbandonment {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        crate::observability::event(
+            crate::observability::EventKind::TransitionDropped,
+            format!(
+                "multiplayer: prepared snapshot transition dropped without a commit ({})",
+                self.variant
+            ),
+        )
+        .field("id", self.id)
+        .field("payload", self.variant)
+        .warn()
+        .record();
+    }
 }
 
 impl PendingSnapshotTransition {
+    pub(crate) fn kind(&self) -> PendingSnapshotTransitionKind {
+        self.payload.kind()
+    }
     pub(crate) fn new(
         id: robin_engine::multiplayer::SnapshotTransitionId,
         payload: PendingSnapshotTransitionPayload,
     ) -> Self {
+        let variant = payload.kind().variant();
         Self {
             id,
             payload,
             committed: false,
+            abandonment: TransitionAbandonment {
+                armed: true,
+                id,
+                variant,
+            },
         }
     }
     /// Called by the authenticated transport event drain; the prepared payload
@@ -71,6 +111,7 @@ impl PendingSnapshotTransition {
             return Err("snapshot transition was already committed".into());
         }
         self.committed = true;
+        self.abandonment.armed = false;
         Ok(())
     }
 }
@@ -94,6 +135,23 @@ pub enum PendingSnapshotTransitionPayload {
 pub enum PendingSnapshotTransitionKind {
     Save,
     CampaignExit(robin_engine::game_operation::GameCode),
+}
+
+impl PendingSnapshotTransitionKind {
+    /// Variant name shared by the session log, `/state` and the failure bundle.
+    pub(crate) fn variant(self) -> &'static str {
+        match self {
+            Self::Save => "Save",
+            Self::CampaignExit(_) => "CampaignExit",
+        }
+    }
+
+    pub(crate) fn exit_code(self) -> Option<robin_engine::game_operation::GameCode> {
+        match self {
+            Self::Save => None,
+            Self::CampaignExit(code) => Some(code),
+        }
+    }
 }
 
 impl PendingSnapshotTransitionPayload {
@@ -238,16 +296,50 @@ impl HostTransport {
             !self.has_snapshot_transition(),
             "snapshot transition already prepared"
         );
+        crate::observability::event(
+            crate::observability::EventKind::TransitionPrepared,
+            format!(
+                "multiplayer: snapshot transition prepared ({})",
+                pending.kind().variant()
+            ),
+        )
+        .seat(self.local_seat)
+        .field("id", pending.id)
+        .field("payload", pending.kind().variant())
+        .field(
+            "exit_code",
+            pending.kind().exit_code().map(|code| format!("{code:?}")),
+        )
+        .record();
         self.synchronization = TransportSynchronization::Prepared(pending);
     }
     pub(crate) fn commit_snapshot_transition(
         &mut self,
         id: robin_engine::multiplayer::SnapshotTransitionId,
     ) -> Result<(), String> {
-        match &mut self.synchronization {
+        let committed = match &mut self.synchronization {
             TransportSynchronization::Prepared(pending) => pending.commit_authenticated(id),
             _ => Err("snapshot transition commit has no prepared payload".into()),
+        };
+        match &committed {
+            Ok(()) => crate::observability::event(
+                crate::observability::EventKind::TransitionCommitted,
+                "multiplayer: snapshot transition committed",
+            )
+            .seat(self.local_seat)
+            .field("id", id)
+            .record(),
+            Err(reason) => crate::observability::event(
+                crate::observability::EventKind::TransitionAborted,
+                format!("multiplayer: snapshot transition commit refused: {reason}"),
+            )
+            .seat(self.local_seat)
+            .field("id", id)
+            .field("reason", reason.clone())
+            .error()
+            .record(),
         }
+        committed
     }
     #[cfg(feature = "multiplayer")]
     pub(crate) fn retain_distributed_mod(

@@ -153,9 +153,39 @@ pub(crate) fn decompile_class(query: &str) -> Result<Option<String>, RpcError> {
     Ok(class.map(Cow::into_owned))
 }
 
+/// `/events?since=<seq>&limit=<n>`: one page of the session event ring.
+///
+/// `since` is the `next_seq` from the previous page, so a poller never repeats
+/// an event; omitting it returns the oldest retained events first.
+pub(crate) fn events_page(query: &str) -> Result<serde_json::Value, RpcError> {
+    let mut query = QueryParameters::parse(query)?;
+    let since: Option<u64> = query.number("since")?;
+    let limit: Option<usize> = query.number("limit")?;
+    query.finish()?;
+    super::diagnostics::events_document(since, limit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_event_page_query_is_strict_and_names_its_cursor() {
+        let first =
+            crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
+        crate::observability::event(
+            crate::observability::EventKind::SeatConnected,
+            "multiplayer: page cursor marker",
+        )
+        .record();
+        let page = events_page(&format!("since={first}&limit=5")).unwrap();
+        assert_eq!(page["next_seq"], first + 1, "{page}");
+        assert_eq!(page["events"][0]["seq"], first, "{page}");
+        assert!(events_page("limit=0").is_err());
+        for invalid in ["limit=x", "since=-1", "since=1&since=2", "unknown=1"] {
+            assert!(events_page(invalid).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn replay_pause_query_is_strict_and_defaults_to_running() {

@@ -6,38 +6,26 @@
 //! Two transports share the same request/reply enums + per-tick drain:
 //!
 //! - **Native:** an application-owned Hyper listener on `127.0.0.1:<port>` (see
-//!   [`HttpTransport::start`]).  Endpoints are:
-//!
-//!   | Method | Path                | Body / Query                                 | Response                                               |
-//!   |--------|---------------------|----------------------------------------------|--------------------------------------------------------|
-//!   | GET    | `/`                 | —                                            | endpoint listing                                       |
-//!   | GET    | `/natives`          | —                                            | `{natives: [{index, name, return_type, params}]}`     |
-//!   | GET    | `/engine-dump`      | —                                            | full serialized engine for ad-hoc debug                  |
-//!   | GET    | `/level-assets`     | —                                            | level-scoped static assets for ad-hoc debug             |
-//!   | GET    | `/script`           | —                                            | mission-script class & function listing                |
-//!   | GET    | `/script/decompile` | `?class=<name>` (optional)                   | `{source: "..."}` — pseudocode for one or all classes  |
-//!   | POST   | `/native`           | `{op, args, this?}`                          | `{return}` or `{error}`                                |
-//!   | POST   | `/batch`            | `{calls: [{op, args, this?}]}`               | `{results: [...]}`                                     |
-//!   | POST   | `/console`          | `{command: "..."}`                           | `{kind, message?}`                                     |
-//!   | POST   | `/command`          | externally-tagged `PlayerCommand` JSON       | `{ok: true}` or `{error}`                              |
-//!   | GET    | `/screenshot`       | `?frame=&full_map=&w=&h=&hide_ui=&…`          | `image/png` at or after the requested frame            |
-//!
+//!   [`HttpTransport::start`]).
 //! - **Wasm:** no loopback socket inside the browser.  Instead, the
 //!   exported `rh_rpc({ method, params })` async function returns a JS
-//!   Promise. The request lands on the same queue as the native
-//!   transport and is drained on the game tick; JSON replies arrive as
-//!   parsed JS values, and binary replies arrive as
-//!   `{ contentType, data: Uint8Array }`.
+//!   Promise; JSON replies arrive as parsed JS values, and binary replies
+//!   arrive as `{ contentType, data: Uint8Array }`.
+//!
+//! The endpoint set, which endpoints answer off the mission queue, and the
+//! timeout contract live in `docs/JSON_SERVER.md`. That document is their one
+//! description: a second list here went stale the moment an endpoint answered
+//! on the listener thread instead of the queue.
 //!
 //! ### Threading (native)
 //!
 //! A dedicated listener thread owns a Tokio runtime and at most eight HTTP
 //! connection tasks. Shutdown cancels and joins every connection task.
-//! Each request is decoded into a [`HttpRequest`] and pushed onto a
-//! shared FIFO with a single-owner asynchronous reply channel. The game
-//! mission owner drains its queue once per tick and admits eligible requests
-//! before execution. The listener awaits replies without polling and serialises them to JSON (or raw
-//! image/png bytes for `/screenshot`).
+//! Requests that need the engine are decoded into a [`HttpRequest`] and pushed
+//! onto a shared FIFO with a single-owner asynchronous reply channel; the game
+//! mission owner drains that queue once per tick and admits eligible requests
+//! before execution. The listener awaits replies without polling and serialises
+//! them to JSON (or raw `image/png` bytes for `/screenshot`).
 //!
 //! Requests requiring an engine fail immediately between missions. A busy
 //! active mission can defer execution until its next RPC boundary, bounded

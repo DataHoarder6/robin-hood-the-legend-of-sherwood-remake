@@ -516,7 +516,6 @@ mod dispatch_tests {
             let mut ingress = SessionIngress::detached_for_test();
             // Cancellation must occur before taint accounting or mutation.
             drop(ingress.enqueue_for_test(HttpPayload::Console("UNBLIP".into())));
-            let state = ingress.enqueue_for_test(HttpPayload::State);
             let command = ingress.enqueue_for_test(HttpPayload::Command(PlayerCommand::CrouchDown));
             let debug = ingress.enqueue_for_test(HttpPayload::HostDebug);
             let screenshot =
@@ -550,9 +549,6 @@ mod dispatch_tests {
                 commands.commands[0].command,
                 PlayerCommand::CrouchDown
             ));
-            assert!(
-                matches!(state.try_recv().unwrap(), Ok(ReplyBody::Json(value)) if value["frame"] == engine.frame_counter())
-            );
             assert!(
                 matches!(command.try_recv().unwrap(), Ok(ReplyBody::Json(value)) if value == serde_json::json!({"ok": true}))
             );
@@ -646,14 +642,7 @@ mod dispatch_tests {
     fn query_dispatch_has_only_read_authority() {
         // Function-pointer coercion is a compile-time capability proof: adding
         // mutable state, frontend input, or command sinks breaks this contract.
-        let _: fn(
-            QueryRequest,
-            Option<ReplayStatus>,
-            &Engine,
-            &LevelAssets,
-            Option<&crate::host::HostTransport>,
-            Option<SessionFacts>,
-        ) -> Reply = dispatch_query;
+        let _: fn(QueryRequest, &Engine, &LevelAssets) -> Reply = dispatch_query;
         let _: fn(
             &Engine,
             &crate::host::HostFrontend,
@@ -666,7 +655,6 @@ mod dispatch_tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn transport_classification_separates_authority_without_losing_arguments() {
         for payload in [
-            HttpPayload::State,
             HttpPayload::EngineDump,
             HttpPayload::LevelAssets,
             HttpPayload::Script,
@@ -814,7 +802,6 @@ mod dispatch_tests {
             ]),
             "the exact ingress hook must retain every observed mutating lane"
         );
-        assert_eq!(ranked_input_taint(&HttpPayload::State), None);
         assert_eq!(ranked_input_taint(&HttpPayload::GetReplay), None);
     }
 

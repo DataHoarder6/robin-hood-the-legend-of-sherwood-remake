@@ -60,6 +60,13 @@ pub fn attempt_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("Data/Replays/attempts"))
 }
 
+/// Directory holding this install's run logs: one `robin-<stamp>.log` per
+/// process and the append-only `events.jsonl` session narrative. `None` when no
+/// install root exists.
+pub fn log_directory() -> Option<PathBuf> {
+    install_root().map(|root| root.join("logs"))
+}
+
 /// Queue directory for captured diagnostics. `None` when no install root
 /// exists.
 pub fn report_directory() -> Option<PathBuf> {
@@ -120,6 +127,7 @@ mod tests {
         assert_eq!(save_root(), home.path().join("saves"));
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
+        assert_eq!(log_directory(), Some(home.path().join("logs")));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
         assert_eq!(
             session_diagnostics_directory(),
@@ -144,6 +152,7 @@ mod tests {
         assert_eq!(save_root(), saves.path());
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
+        assert_eq!(log_directory(), Some(home.path().join("logs")));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
         assert_eq!(
             session_diagnostics_directory(),
@@ -166,6 +175,7 @@ mod tests {
             assert_eq!(save_root(), PathBuf::from("Data/Savegame/default"));
             assert_eq!(replay_directory(), PathBuf::from("Data/Replays"));
             assert_eq!(attempt_directory(), PathBuf::from("Data/Replays/attempts"));
+            assert_eq!(log_directory(), None);
             assert_eq!(report_directory(), None);
             assert_eq!(session_diagnostics_directory(), None);
             assert_eq!(datadir_file(), None);
@@ -176,6 +186,7 @@ mod tests {
         assert_eq!(save_root(), base.join("saves"));
         assert_eq!(replay_directory(), base.join("replays"));
         assert_eq!(attempt_directory(), base.join("replays/attempts"));
+        assert_eq!(log_directory(), Some(base.join("logs")));
         assert_eq!(report_directory(), Some(base.join("reports")));
         assert_eq!(
             session_diagnostics_directory(),

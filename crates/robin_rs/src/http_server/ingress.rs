@@ -734,10 +734,10 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn idle_rejects_gameplay_but_preserves_process_replay_operations() {
         let router = router();
-        let (state, state_reply) = request(HttpPayload::State);
-        router.lock().unwrap().push_back(state);
+        let (query, query_reply) = request(HttpPayload::EngineDump);
+        router.lock().unwrap().push_back(query);
         assert!(
-            matches!(state_reply.try_recv().unwrap(), Err(error) if error.kind == RpcErrorKind::UnavailableCapability && error.message.contains("engine not ready"))
+            matches!(query_reply.try_recv().unwrap(), Err(error) if error.kind == RpcErrorKind::UnavailableCapability && error.message.contains("engine not ready"))
         );
         let (replay, replay_reply) = request(HttpPayload::GetReplay);
         router.lock().unwrap().push_back(replay);
@@ -933,7 +933,7 @@ mod tests {
         let listener = std::thread::spawn(move || {
             let mut replies = Vec::new();
             for _ in 0..32 {
-                let (request, reply) = request(HttpPayload::State);
+                let (request, reply) = request(HttpPayload::EngineDump);
                 sender.lock().unwrap().push_back(request);
                 replies.push(reply);
             }

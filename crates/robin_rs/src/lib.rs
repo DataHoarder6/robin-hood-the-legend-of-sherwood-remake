@@ -34,6 +34,7 @@ pub mod diagnostic_context;
 pub mod localization;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_game_identity;
+pub mod observability;
 pub mod replay_upgrade;
 pub mod runtime_contract;
 pub(crate) mod touch_input;
@@ -60,14 +61,26 @@ pub fn init_tracing() {
                 .with_ansi(ansi)
                 .with_writer(std::io::stderr)
                 .with_filter(build_env_filter());
+            // The desktop launcher gives the game no terminal, so the run log is
+            // a second copy of exactly what stderr would have shown. It is opened
+            // here, before the subscriber exists, and announced afterwards.
+            let run_log_writer = crate::observability::install_run_log();
+            let run_log_layer = run_log_writer.map(|writer| {
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(writer)
+                    .with_filter(build_env_filter())
+            });
             let replay_file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_writer(ReplayLogMakeWriter)
                 .with_filter(replay_log_filter());
             tracing_subscriber::registry()
                 .with(stderr_layer)
+                .with(run_log_layer)
                 .with(replay_file_layer)
                 .init();
+            crate::observability::announce_run_log();
         }
     });
 }

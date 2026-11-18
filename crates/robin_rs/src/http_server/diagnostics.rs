@@ -1,6 +1,7 @@
 //! Read-only RPC diagnostic builders. No request queue or transport ownership.
 use crate::http_server::ReplayStatus;
 use crate::http_server::SessionFacts;
+use crate::http_server::{Reply, ReplyBody, RpcError};
 use robin_engine::engine::{Engine, LevelAssets};
 #[cfg(any(feature = "script-rpc", target_arch = "wasm32"))]
 use robin_engine::natives as engine_natives;
@@ -21,6 +22,8 @@ pub(crate) fn info_json() -> serde_json::Value {
             {"method": "GET",  "path": "/host-debug",         "desc": "host/UI state for ad-hoc debug, including trajectory preview and mouse hover fields"},
             {"method": "GET",  "path": "/script",             "desc": "mission-script class & function listing"},
             {"method": "GET",  "path": "/script/decompile",   "desc": "decompile to TypeScript-like pseudocode (?class=Foo)"},
+            {"method": "GET",  "path": "/state",              "desc": "last published mission snapshot, terminal block and this run's evidence paths; answered off the mission queue so it survives a deadlocked or finished mission"},
+            {"method": "GET",  "path": "/events",             "desc": "multiplayer session event ring, oldest first (?since=<seq>&limit=<n>) → {events, next_seq}"},
             {"method": "POST", "path": "/native",             "desc": "invoke one native: {op, args, this?}"},
             {"method": "POST", "path": "/batch",              "desc": "invoke many natives on one tick: {calls: [{op, args, this?}]}"},
             {"method": "POST", "path": "/console",            "desc": "run a debug-console command: {command: '...'}"},
@@ -53,6 +56,65 @@ pub(crate) fn list_natives_json() -> serde_json::Value {
     serde_json::json!({"natives": entries})
 }
 
+/// `/state` answered from this process's own surface.
+///
+/// One builder for every transport: the native listener maps its error to a
+/// status, the browser bridge to a rejected promise. Neither goes near the
+/// mission queue, which is exactly what stops answering when the game thread
+/// deadlocks or the mission ends.
+pub(crate) fn state_reply() -> Reply {
+    // No mission has reached an RPC boundary yet; there is no last-known state
+    // to report, and inventing one would be a lie with a timestamp.
+    crate::observability::state_document()
+        .map(ReplyBody::Json)
+        .ok_or_else(|| RpcError::unavailable_capability("engine not ready — no mission state yet"))
+}
+
+/// One `/events` page from the process ring, for every transport.
+///
+/// `limit` defaults to [`crate::observability::DEFAULT_PAGE`] and is capped by
+/// the ring; `since` is the previous page's `next_seq`.
+pub(crate) fn events_document(
+    since: Option<u64>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, RpcError> {
+    let limit = limit.unwrap_or(crate::observability::DEFAULT_PAGE);
+    if limit == 0 {
+        return Err(RpcError::invalid_request("limit must be > 0"));
+    }
+    let page = crate::observability::events_page(since, limit);
+    serde_json::to_value(page).map_err(|error| RpcError::internal(format!("event page: {error}")))
+}
+
+/// The transport-neutral body of a browser `rh_rpc` call for a method that
+/// never queues.
+///
+/// `params` is the already-decoded JS parameter object: `null`/absent for
+/// `/state`, `{since, limit}` for `/events`. The native listener builds the same
+/// two answers from [`state_reply`] and [`events_document`]; only the browser
+/// needs the method dispatch.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn observability_reply(method: &str, params: serde_json::Value) -> Reply {
+    match method {
+        "state" => state_reply(),
+        "events" => {
+            let params: Option<EventsParams> = serde_json::from_value(params)
+                .map_err(|error| RpcError::invalid_request(format!("events params: {error}")))?;
+            let EventsParams { since, limit } = params.unwrap_or_default();
+            events_document(since, limit).map(ReplyBody::Json)
+        }
+        _ => panic!("{method} is not an observability method"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct EventsParams {
+    since: Option<u64>,
+    limit: Option<usize>,
+}
+
 /// Build the stable public state response without acquiring request authority.
 ///
 /// `transport` is the mission's transport when one is admitted; its absence is
@@ -72,7 +134,7 @@ pub(crate) fn snapshot_state(
         })
     });
     let multiplayer = transport.and_then(|transport| {
-        transport.net().map(|_| {
+        transport.net().and_then(|_| {
             let session = session.expect("an admitted transport reports its session facts");
             multiplayer_state(transport, session)
         })
@@ -88,10 +150,19 @@ pub(crate) fn snapshot_state(
 /// Project one admitted session onto the `/state` wire shape. Every value is
 /// read from the live transport, timeline or game operation; nothing here is
 /// derived from log text.
+///
+/// `None` until the host's Welcome has been adopted: channels exist from the
+/// moment a session is admitted, but the roster and the simulation config arrive
+/// with that Welcome. Reporting the block without them — or with a guessed
+/// player count — would describe a session that does not exist yet.
 fn multiplayer_state(
     transport: &crate::host::HostTransport,
     session: SessionFacts,
-) -> serde_json::Value {
+) -> Option<serde_json::Value> {
+    // Channels exist from the moment a session is admitted, but the roster
+    // arrives with the host's Welcome; before it there is no session shape to
+    // report and no player count to guess.
+    let config = transport.mission_sim_config()?;
     let pending_transition = transport.pending_snapshot_transition().map(|(id, kind)| {
         let payload = match kind {
             crate::host::PendingSnapshotTransitionKind::Save => {
@@ -110,14 +181,9 @@ fn multiplayer_state(
                 .unwrap_or_default(),
         })
     });
-    let expected_players = transport
-        .mission_sim_config()
-        .expect("an admitted session retains its simulation config")
-        .coop
-        .players;
-    serde_json::json!({
+    Some(serde_json::json!({
         "local_seat": transport.local_seat().0,
-        "expected_players": expected_players,
+        "expected_players": config.coop.players,
         "admission": session.admission.wire_name(),
         "begin_sim_frame": session.begin_sim_frame,
         "pending_transition": pending_transition,
@@ -127,7 +193,7 @@ fn multiplayer_state(
         "connect_string": transport
             .net()
             .and_then(crate::multiplayer::NetChannels::connect_string),
-    })
+    }))
 }
 
 pub(crate) fn snapshot_host_debug(
