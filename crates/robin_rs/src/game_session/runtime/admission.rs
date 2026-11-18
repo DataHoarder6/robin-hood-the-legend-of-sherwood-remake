@@ -183,6 +183,7 @@ mod tests {
     /// release.
     #[test]
     fn the_start_gate_opens_through_the_state_machine() {
+        let _events = crate::observability::isolate_session_events();
         let barrier = MultiplayerAdmissionEvent::BeginSim {
             frame: 133,
             start_epoch_ms: 1_763_461_265_422,

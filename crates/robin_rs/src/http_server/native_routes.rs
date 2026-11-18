@@ -190,6 +190,7 @@ mod tests {
     /// mission died.
     #[test]
     fn an_events_page_is_served_with_an_empty_queue() {
+        let _events = crate::observability::isolate_session_events();
         let since =
             crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
         crate::observability::event(

@@ -2365,6 +2365,7 @@ mod tests {
     /// participant was removed. A reconnect is its own pair of facts.
     #[test]
     fn a_transport_reconnect_is_not_an_eviction() {
+        let _events = crate::observability::isolate_session_events();
         let (mut host, mut manager, mut assets, incoming, _outgoing) = network_drain_fixture();
         let mut rewind = RewindBuffer::new();
         let mut pending = super::super::runtime::reconciliation::NetworkReconciliation::default();

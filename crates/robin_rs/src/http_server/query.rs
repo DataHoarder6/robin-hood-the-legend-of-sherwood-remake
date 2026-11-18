@@ -171,6 +171,7 @@ mod tests {
 
     #[test]
     fn the_event_page_query_is_strict_and_names_its_cursor() {
+        let _events = crate::observability::isolate_session_events();
         let first =
             crate::observability::events_page(None, crate::observability::MAX_PAGE).next_seq;
         crate::observability::event(
