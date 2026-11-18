@@ -799,7 +799,7 @@ fn drive_leave_mission_prompt(
                     &presentation.renderer,
                     menu_resources,
                     message,
-                    true,
+                    crate::ingame_menu::MissionEndKind::Won,
                     None,
                 ),
                 replay_result,

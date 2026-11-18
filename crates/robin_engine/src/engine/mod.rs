@@ -2648,6 +2648,43 @@ mod campaign_lifecycle_tests {
     }
 
     #[test]
+    fn interrupted_quit_records_an_abandoned_attempt_without_win_rewards() {
+        let sim_context = crate::sim_rng::test_context();
+        let sim = &sim_context;
+        let (mut campaign, assets) = active_historical_mission();
+        campaign.values[CampaignValue::LivingSoldiers] = 7;
+        campaign.values[CampaignValue::DeadSoldiers] = 11;
+        campaign.values[CampaignValue::Score] = 13;
+
+        let mut engine = EngineInner::new_with_campaign(campaign);
+        engine.mission_domain.mission_stat.living_soldier_count = 2;
+        engine.mission_domain.mission_stat.total_soldier_count = 5;
+        engine.apply_quit_mission_updates(
+            TickCtx::new(sim, &assets),
+            GameCode::LevelInterrupted,
+            DifficultyLevel::Medium,
+            None,
+            Some(1),
+        );
+
+        let campaign = engine.campaign();
+        assert_eq!(campaign.missions[0].status, MissionStatus::Lost);
+        assert_eq!(
+            campaign.missions[0]
+                .attempt_history()
+                .latest()
+                .unwrap()
+                .outcome(),
+            crate::campaign_history::MissionAttemptOutcome::Interrupted,
+        );
+        // Abandoning never grants the won-only campaign totals.
+        assert_eq!(campaign.values[CampaignValue::LivingSoldiers], 7);
+        assert_eq!(campaign.values[CampaignValue::DeadSoldiers], 11);
+        assert_eq!(campaign.values[CampaignValue::Score], 13);
+        assert!(engine.mission_achievement_results().is_none());
+    }
+
+    #[test]
     fn successful_quit_updates_keep_original_order_and_state() {
         let sim_context = crate::sim_rng::test_context();
         let sim = &sim_context;

@@ -2850,7 +2850,7 @@ impl SherwoodCtx<'_> {
                                 resources,
                                 ingame_menu::DebriefingContent {
                                     body: text,
-                                    won,
+                                    end: ingame_menu::MissionEndKind::from_won(won),
                                     ..Default::default()
                                 },
                             ),

@@ -532,7 +532,7 @@ impl ModalScreen for DebriefingModalState {
             resources,
             ingame_menu::DebriefingContent {
                 body: item.body,
-                won: item.won,
+                end: ingame_menu::MissionEndKind::from_won(item.won),
                 ..Default::default()
             },
         )
@@ -1563,7 +1563,7 @@ pub(super) async fn drain_pending_debriefings(
                         },
                         ingame_menu::DebriefingContent {
                             body: text,
-                            won: true,
+                            end: ingame_menu::MissionEndKind::Won,
                             ..Default::default()
                         },
                     )
