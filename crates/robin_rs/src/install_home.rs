@@ -66,6 +66,12 @@ pub fn report_directory() -> Option<PathBuf> {
     install_root().map(|root| root.join("reports"))
 }
 
+/// Directory holding pinned per-session diagnostic bundles. `None` when no
+/// install root exists.
+pub fn diagnostics_directory() -> Option<PathBuf> {
+    install_root().map(|root| root.join("diagnostics"))
+}
+
 /// Remembered game-installation choice. `None` when no install root exists.
 pub fn datadir_file() -> Option<PathBuf> {
     install_root().map(|root| root.join("datadir.txt"))
@@ -115,6 +121,10 @@ mod tests {
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
+        assert_eq!(
+            diagnostics_directory(),
+            Some(home.path().join("diagnostics"))
+        );
         assert_eq!(datadir_file(), Some(home.path().join("datadir.txt")));
         assert_eq!(
             identity_key_path(),
@@ -135,6 +145,10 @@ mod tests {
         assert_eq!(replay_directory(), home.path().join("replays"));
         assert_eq!(attempt_directory(), home.path().join("replays/attempts"));
         assert_eq!(report_directory(), Some(home.path().join("reports")));
+        assert_eq!(
+            diagnostics_directory(),
+            Some(home.path().join("diagnostics"))
+        );
         assert_eq!(datadir_file(), Some(home.path().join("datadir.txt")));
         assert_eq!(
             identity_key_path(),
@@ -153,6 +167,7 @@ mod tests {
             assert_eq!(replay_directory(), PathBuf::from("Data/Replays"));
             assert_eq!(attempt_directory(), PathBuf::from("Data/Replays/attempts"));
             assert_eq!(report_directory(), None);
+            assert_eq!(diagnostics_directory(), None);
             assert_eq!(datadir_file(), None);
             assert_eq!(identity_key_path(), None);
             return;
@@ -162,6 +177,7 @@ mod tests {
         assert_eq!(replay_directory(), base.join("replays"));
         assert_eq!(attempt_directory(), base.join("replays/attempts"));
         assert_eq!(report_directory(), Some(base.join("reports")));
+        assert_eq!(diagnostics_directory(), Some(base.join("diagnostics")));
         assert_eq!(datadir_file(), Some(base.join("datadir.txt")));
         assert_eq!(
             identity_key_path(),

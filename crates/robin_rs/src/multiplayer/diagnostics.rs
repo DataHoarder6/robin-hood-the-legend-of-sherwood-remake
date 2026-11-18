@@ -22,23 +22,9 @@ pub(crate) struct SessionBundle {
     pub(crate) written_at: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn data_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("robin_hood"))
-}
-
-pub(crate) fn diagnostics_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("diagnostics"))
-}
-
-pub(crate) fn replays_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("replays"))
-}
-
 /// The most recently modified replay, which is the mission that just stopped.
 pub(crate) fn newest_replay() -> Option<PathBuf> {
-    let dir = replays_dir()?;
-    std::fs::read_dir(dir)
+    std::fs::read_dir(crate::install_home::replay_directory())
         .ok()?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -54,7 +40,8 @@ pub(crate) fn newest_replay() -> Option<PathBuf> {
 pub(crate) fn write_session_bundle(
     mut bundle: SessionBundle,
 ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let dir = diagnostics_dir().ok_or("no data directory for diagnostics")?;
+    let dir =
+        crate::install_home::diagnostics_directory().ok_or("no data directory for diagnostics")?;
     std::fs::create_dir_all(&dir)?;
     // `%:z` → `+HH:MM`; strip the inner colon so the stamp is path-safe.
     let stamp = jiff::Zoned::now()
