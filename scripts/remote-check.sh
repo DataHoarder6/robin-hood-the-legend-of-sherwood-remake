@@ -82,7 +82,15 @@ set -euo pipefail
 mkdir -p ~/$remote_root
 EOF
 
-    rsync -a --delete \
+    # `--no-times` after `-a`: a changed file must arrive with a mtime *now*, not
+    # the mtime it had in the worktree. Cargo decides freshness by comparing a
+    # crate's file times with the fingerprint of its last build, so a file that
+    # is new in content but older in time (a merge commit's checkout is older
+    # than the build that followed it) reads as fresh and the stale rlib is
+    # linked — measured 2026-11-18: the merged engine file existed, the build
+    # insisted `transition_budget` did not. `--checksum` keeps the quick-check
+    # exact, so unchanged files keep their old mtime and are not recompiled.
+    rsync -a --no-times --checksum --delete \
         --exclude target \
         --exclude .worktrees \
         --exclude .git \
