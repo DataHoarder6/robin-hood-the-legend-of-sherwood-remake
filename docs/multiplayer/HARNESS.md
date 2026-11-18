@@ -141,15 +141,22 @@ is `{"frame": N}` in the issuing peer's numbering or `{"barrier": name,
 "after": n}`; `peers[].start` is `"launch"`, `{"join_at_frame": N}` or
 `{"join_at_barrier": name}`; `requires` lists `game-data`, `graphical` or
 `netem` — `netem` names a driver this suite does not have yet, so a row that
-needs one is refused by name and the suite fails until it exists. `expect[].assert` is `hash-equal`, `hash-diverged`,
-`barrier` (`reached|released|absent`), `transition`, `transition-id-equal`,
-`modal`, `log` (`contains|absent`, and exactly one of `count` or `at_least`),
-`final-operation` (a `GameCode` name
-from `crates/robin_engine/src/game_operation.rs`), `count` or `exit`. Transition
-ids are generated per run, so `transition-id-equal` compares peers instead of
-pinning one. `count` on a log line is exact; `at_least` is its floor, for a line
-printed once per retry — a refused handshake prints its reason on every attempt,
-so that line's exact number is a retry schedule, not a contract.
+needs one is refused by name and the suite fails until it exists.
+`expect[].assert` is `hash-equal`, `hash-diverged`, `barrier`
+(`reached|released|absent`), `transition`, `transition-id-equal`, `modal`, `log`
+(`contains|absent`, and exactly one of `count` or `at_least`), `final-operation`
+(a `GameCode` name from `crates/robin_engine/src/game_operation.rs`), `count` or
+`exit`. Transition ids are generated per run, so `transition-id-equal` compares
+peers instead of pinning one. `count` on a log line is exact; `at_least` is its
+floor, for a line printed once per retry — a refused handshake prints its reason
+on every attempt, so that line's exact number is a retry schedule, not a
+contract.
+
+`hash-equal`'s `every` is read off consecutive `/state` samples'
+`last_compared_hash_frame`, not from the engine: it needs at least two compared
+frames, and a step wider than `every` passes only when the peer advanced far
+enough that the samples could not have seen the boundary between; the
+exact-boundary comparison itself is what the row's named Rust test pins.
 
 `transition.payload` is the `SnapshotTransitionPayload` variant the host
 committed — `"Save"` or `{"CampaignExit": "<GameCode>"}` — because the exit code
