@@ -58,6 +58,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `protocols` | `robin_run_types`, `robin_run_protocol`, `robin_replay_format`, `robin_identity_signer` | Wire, bounded replay admission and isolated signer tests |
 | `services` | `robin_highscores`, `robin_replay_verifier` | Server and verifier tests |
 | `parity` | `robin_parity` | Runner unit/contract tests; does not replay licensed corpora |
+| `parity-cross` | Provisioned native `robin` plus the Windows `robin.exe` under wine | One recording replayed by both builds; the per-25-frame state-hash chains must match exactly |
 | `client` | `robin_rs`, default features | Client tests, then a separate `robin` binary build |
 | `client-release` | `robin_rs`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates; audio example check |
 | `tools` | `robin_modding_tools`; `robin_rs` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
@@ -795,6 +796,50 @@ pinned binary built with `--features release`, a game-data root containing
 python-xlib. It does not run on a GitHub-hosted runner: no hosted runner
 provides licensed game data, and the isolation it depends on is an unprivileged
 network namespace with a local X server, as with `native-lifecycle`.
+
+## Linux × Windows replay-hash parity
+
+```sh
+PARITY_LINUX_BIN=/absolute/path/to/robin \
+PARITY_WINDOWS_EXE=/absolute/path/to/robin.exe \
+PARITY_REPLAY=/absolute/path/to/recording.rhrec.jsonl \
+PARITY_DATA_DIR=/absolute/path/to/full-game \
+  bash scripts/check-quality.sh parity-cross
+```
+
+`scripts/validation/parity_check.py` replays one recording on both binaries,
+extracts the state-hash samples the replay runtime already verifies
+(`Replay hash OK @ frame N` from `crates/robin_rs/src/game_session/runtime.rs`,
+`robin_engine::replay::state_hash` every 25th frame), and diffs them. There is no
+second replay format and no second hash function: the gate reads what the client
+already logs at `RUST_LOG=debug`.
+
+It needs a native `robin` and a `robin.exe` from the same commit (both must
+report the same `--version`, whose suffix is the commit), one recording made by
+that commit, a game-data root containing `Data/`, and `wine` with `winepath`.
+Each binary runs from its install directory — its parent by default,
+`--linux-dir`/`--windows-dir` override — which must carry `assets/core-datadir`;
+playback itself is `--headless --no-sound --http-server 0 --replay FILE`.
+
+Exit status: `0` every sampled frame matches, `1` the pair is not proven
+identical (the first divergent frame with both values and the surrounding chain,
+a run that did not finish, a desync against the recording, or two different
+builds), `3` a prerequisite is missing. An empty or truncated chain never
+passes.
+
+This is not a GitHub-runner gate: the Windows release job builds artifacts on a
+Windows runner but replays nothing there, no hosted runner carries licensed game
+data, and wine is not provisioned.
+
+**Limit.** Wine executes the real MSVC-built `robin.exe` through its own loader,
+path and libc mapping. A green run therefore covers the divergence a different
+toolchain, C library, locale or floating-point implementation can introduce in
+the deterministic simulation, and it goes red when the two builds stop agreeing.
+It is not a Windows session: real kernel scheduling and priorities, the
+WinDivert network filter, Windows Known Folder and filesystem APIs, and MSVC CRT
+startup state are not exercised. Treat a green run as "the simulation agrees for
+this build pair under Wine"; only a recorded session on real Windows can prove
+the OS-layer class.
 
 ## Interpreting a refactor baseline
 

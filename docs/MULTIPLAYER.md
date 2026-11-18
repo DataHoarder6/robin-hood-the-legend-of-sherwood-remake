@@ -388,6 +388,12 @@ browser-peer replay refusal. Production QA additionally requires the isolated
 signer origin and exact ticket-selected `/wasm/<commit>` and content catalog
 to be deployed.
 
+The same recorded hash chain is the oracle for cross-build agreement: the
+`parity-cross` gate replays one recording on a native Linux build and on the
+Windows release build under Wine and requires the chains to match. Its inputs,
+exit codes and limit are in `docs/TESTING.md`, "Linux × Windows replay-hash
+parity".
+
 ## Remaining work
 
 Fault and reorder coverage is a contract now, not a wish: the matrix in
