@@ -151,8 +151,9 @@ enum PostInitializeAdmission {
     Pending(bool),
     Running(bool),
     Completed(bool),
-    /// Manual ticks execute both phases together and retain the input policy,
-    /// rather than recording a separately observed deferred initialization.
+    /// A buffered or recorded frame is one complete authoritative transaction:
+    /// the tick admission executes both phases with that input rather than
+    /// recording a separately observed deferred initialization.
     Inline(bool),
 }
 
@@ -268,6 +269,8 @@ impl MissionFrame {
         self.execution.simulation_admitted = true;
     }
 
+    /// Admit one complete reconstructed transaction whose tick executes the
+    /// hourglass and the post-initialize hook together.
     pub(in crate::game_session) fn admit_inline_transaction(&mut self) {
         self.admit_simulation();
         let requested = self.execution.post_initialize_requested_or_completed();
@@ -311,6 +314,14 @@ impl MissionFrame {
         &self,
     ) -> &[robin_engine::player_command::PlayerInput] {
         &self.post_commands.commands
+    }
+
+    /// The post-initialize policy this transaction's admitted input carries.
+    /// An inlined manual transaction reports it instead of observing the hook
+    /// outcome, so its journal and replay record stay consistent with each
+    /// other.
+    pub(in crate::game_session) fn post_initialize_requested(&self) -> bool {
+        self.execution.post_initialize_requested_or_completed()
     }
 
     pub(in crate::game_session) fn external_actions(

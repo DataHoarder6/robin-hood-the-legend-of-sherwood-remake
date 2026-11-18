@@ -174,12 +174,13 @@ request is the acknowledgement the host's barrier waits for: it answers `200`
 with `{"direction":"terminal-modal-dismissal","queued":true}` and never advances
 the host's timeline, because frame stepping stays host-only.
 
-A tick that ends the mission hands the completion to the frame that follows: the
-step stages the campaign update and queues the mission-end page, and the session
-keeps running the page instead of closing the application. That handoff needs a
-frame to apply the completion, so a driver that starts paused must step until the
-page appears; while the page is still pending, a step without a dismissal is
-refused with "mission ended" rather than advancing behind it.
+A tick that ends the mission stages the campaign completion and queues the
+mission-end page, and the session keeps running the page instead of closing the
+application. The step's own transaction hands that completion to the same
+post-initialize stage a live frame uses, so the campaign update is applied once,
+in the frame that ended the mission, and the page settles on the next frame
+without the driver un-pausing. Until the page exists a step without a dismissal
+is refused with "mission ended" rather than advancing behind it.
 
 ```bash
 curl -s -X POST -H 'Content-Type: application/json' \

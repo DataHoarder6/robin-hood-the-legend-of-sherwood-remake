@@ -466,26 +466,51 @@ impl MissionRuntime {
         } = self;
         let requested = frame.begin_post_initialize();
         let initialized = timeline.lifecycle.cross_post_initialize(|| {
-            let application_context = world.host.application_context().clone();
-            let initialized = crate::sim_timeline::run_post_initialize_stage_with_actions(
-                &mut world.host.frontend,
-                &mut world.host.audio,
-                &mut world.host.effects,
-                &application_context,
-                world.host.transport.local_seat(),
-                &world.assets,
+            apply_post_boundary_input(
+                frame,
+                &mut world.host,
                 &mut world.manager.engine,
+                &world.assets,
                 &mut world.dev,
-                frame.unapplied_post_external_actions(),
-                &frame.post_commands.commands,
                 requested,
-            );
-
-            initialized
+            )
         });
         frame.complete_post_initialize(initialized);
         initialized
     }
+}
+
+/// Apply one transaction's deferred post-boundary input — the actions and
+/// commands staged for after the hourglass — at the mission's
+/// PostInitialize stage.
+///
+/// The stage, not the tick, is what applies post commands, so every driver that
+/// stages a command must cross it. `run_post_initialize` is the frame's admitted
+/// request and crosses the one-shot script hook exactly once; a reconstructed
+/// transaction whose admitted input already carried both phases does not call
+/// this at all.
+pub(super) fn apply_post_boundary_input(
+    frame: &mut MissionFrame,
+    host: &mut Host,
+    engine: &mut Engine,
+    assets: &LevelAssets,
+    dev: &mut DevState,
+    run_post_initialize: bool,
+) -> bool {
+    let application_context = host.application_context().clone();
+    crate::sim_timeline::run_post_initialize_stage_with_actions(
+        &mut host.frontend,
+        &mut host.audio,
+        &mut host.effects,
+        &application_context,
+        host.transport.local_seat(),
+        assets,
+        engine,
+        dev,
+        frame.unapplied_post_external_actions(),
+        frame.post_commands(),
+        run_post_initialize,
+    )
 }
 
 /// Borrows admitted at the shared post-tick RPC boundary: host effect domains,

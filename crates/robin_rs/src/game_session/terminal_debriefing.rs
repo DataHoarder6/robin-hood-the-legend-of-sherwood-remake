@@ -261,6 +261,12 @@ impl PendingTerminalDebriefing {
             popup_title,
         }
     }
+
+    /// The campaign sequence the ending tick observed before staging its
+    /// completion; the page opens once the applied sequence has passed it.
+    pub(super) fn previous_attempt_sequence(&self) -> u64 {
+        self.previous_attempt_sequence
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1123,7 +1129,7 @@ pub(super) fn drive_tick_exit_modals(
     if let Some(pending) = context.ui.pending_terminal_debriefing.take() {
         if !terminal_campaign_update_applied(
             context.manager.engine.campaign().mission_attempt_sequence,
-            pending.previous_attempt_sequence,
+            pending.previous_attempt_sequence(),
         ) {
             context.ui.pending_terminal_debriefing = Some(pending);
             return TerminalDebriefingProgress::Pending;

@@ -1997,7 +1997,10 @@ A list of which additional features we have added, which ones we might still wan
   multiplayer and does not stop the shared simulation. HTTP timeline stepping
   accepts typed modal outcomes, defaults to automation-friendly auto-dismiss,
   validates each result against its modal kind, and reports or blocks unresolved
-  UI explicitly. Ordinary keyboard/HTTP timeline movement is disabled during
+  UI explicitly. A step whose tick ends the mission applies the campaign
+  completion in that step's own transaction, at the same post-initialize stage
+  a live frame uses, so a paused session settles the mission-end page without
+  un-pausing. Ordinary keyboard/HTTP timeline movement is disabled during
   multiplayer; explicit host automation must opt into synchronized stepping,
   after which every peer reconnects from the resulting authoritative snapshot.
   Local keyboard and HTTP pause changes are rejected in multiplayer so one peer

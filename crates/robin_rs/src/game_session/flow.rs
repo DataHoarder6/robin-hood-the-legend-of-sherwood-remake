@@ -957,24 +957,18 @@ fn run_interactive_post_initialize(
     dev: &mut robin_engine::engine::DevState,
     frame: &mut MissionFrame,
 ) {
-    let application_context = host.application_context().clone();
     let requested = frame.begin_post_initialize();
     let replay_idle = runtime.replay().playback().is_some() && !frame.has_recorded_input();
     let post_initialized = runtime.lifecycle_mut().cross_post_initialize(|| {
         if replay_idle {
             return false;
         }
-        crate::sim_timeline::run_post_initialize_stage_with_actions(
-            &mut host.frontend,
-            &mut host.audio,
-            &mut host.effects,
-            &application_context,
-            host.transport.local_seat(),
-            assets,
+        super::runtime::apply_post_boundary_input(
+            frame,
+            host,
             &mut manager.engine,
+            assets,
             dev,
-            frame.unapplied_post_external_actions(),
-            frame.post_commands(),
             requested,
         )
     });
