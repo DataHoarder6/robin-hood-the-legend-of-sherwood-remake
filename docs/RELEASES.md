@@ -29,21 +29,26 @@ tag pushed without it is a bet rather than a release.
 2. `bash scripts/remote-check.sh --suites format client-release engine tooling`
    on the build host: one synced tree, all suites, one verdict. Paste the counts
    into the release notes. The scenario corpus validator runs in `tooling`.
-3. Build the release binary on the build host, then
+3. `bash scripts/remote-check.sh parity-cross` on the same tree: the Windows
+   asset replayed under Wine against the native build must produce an identical
+   hash chain. It proves the toolchain/FP/locale class; a real Windows seat is
+   still the only proof of the OS-layer class (`docs/TESTING.md`).
+4. Build the release binary on the build host, then
    `ROBIN_E2E_BINARY=<binary> ROBINHOOD_DATA_DIR=<game root> bash
    scripts/check-quality.sh multiplayer-e2e`; the suite must print `observed`
    with exit 0 and leave its evidence directory.
-4. Install the same tag on two seats and run `robin --version` on both
+5. Install the same tag on two seats and run `robin --version` on both
    (`docs/PLAY.md`); a multiplayer session is joined only by seats naming the
    same commit. This is the step a runner cannot do.
-5. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
+6. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's
    assets against the previous tag before announcing it.
-6. Pin the tag's commit in the machine repo (`services.robin-hood.channel =
+7. Pin the tag's commit in the machine repo (`services.robin-hood.channel =
    "stable"`), which is how the seats receive it.
 
-Cross-OS replay parity is not covered by the list above: a Windows seat exists
-but no parity gate runs yet (#21).
+Cross-OS replay parity is covered for one class only (step 3): Wine is not
+Windows, so MSVC runtime, WinDivert, Known-Folder APIs and the Windows scheduler
+remain unproven until a real Windows seat runs a recorded session.
 
 
