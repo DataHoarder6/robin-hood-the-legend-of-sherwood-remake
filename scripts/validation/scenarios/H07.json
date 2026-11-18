@@ -2,6 +2,10 @@
   "schema": 1,
   "id": "H07",
   "extends": "H01",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game_session::multiplayer::tests::reconnect_adopts_older_host_snapshot_and_discards_prediction_future",
+      "robin_rs::host::transport::transport_lifecycle_tests::reconnect_retains_admitted_identity_metadata_and_channels"
+  ] },
   "peers": [
     { "seat": 0, "role": "host" },
     { "seat": 1, "role": "client" }

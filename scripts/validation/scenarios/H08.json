@@ -1,6 +1,9 @@
 {
   "schema": 1,
   "id": "H08",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game_session::frame_prepare::pre_tick::tests::multiplayer_hash_mismatch_reports_once_and_recovers_from_host_snapshot"
+  ] },
   "peers": [
     { "seat": 0, "role": "host" },
     { "seat": 1, "role": "client" }
@@ -9,8 +12,8 @@
     { "at": { "frame": 50 }, "peer": 1, "fault": "diverge" }
   ],
   "expect": [
-    { "assert": "hash-diverged", "peers": [0, 1] },
+    { "assert": "hash-diverged", "peers": [1] },
     { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" },
-    { "assert": "hash-equal", "peers": [0, 1], "every": 25 }
+    { "assert": "hash-equal", "peers": [1], "every": 25 }
   ]
 }

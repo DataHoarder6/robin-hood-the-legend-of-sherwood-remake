@@ -65,7 +65,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev` |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
-| `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer scenarios from the corpus: real signals, per-install isolation, assertions over `/state` |
+| `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer rows of the scenario corpus: real signals, per-install isolation, assertions over `/state`; core and transport rows name the Rust test that proves them |
 | `gpu` | `robin_rs` Vulkan execution | Explicit ignored GPU test; missing adapter is an error |
 | `gpu-gl` | `robin_rs` GL execution under Xvfb | Same required execution contract using the browser runtime's GL backend family |
 | `host` | `robin_rs`, `hardware-info` | Explicit ignored real-memory query; requires an accessible host backend |
@@ -106,7 +106,8 @@ deliberately red branch. Review branches are not gated; the push that lands them
 is. GitHub Actions is not part of this: no push in this repository has ever
 produced a run (#26), so a workflow gate would be decoration. Editing
 `docs/multiplayer/HARNESS.md` also re-validates the corpus, because that file's
-matrix is what the corpus must cover.
+matrix, its `asserts:` clauses and each row's `proves` binding are what the corpus
+must match.
 
 This repository does not land through the estate's `land` tool, for two
 structural reasons: its `origin` is the upstream project, which only takes pull
@@ -761,17 +762,19 @@ ROBINHOOD_DATA_DIR=/absolute/path/to/full-game \
 ```
 
 This is the process layer of the multiplayer harness contract:
-`docs/multiplayer/HARNESS.md` section 3 fixes the layers, section 5 the
-execution site, evidence layout and exit contract, section 6 the bootstrap. The
-runner (`scripts/validation/multiplayer_e2e.py`) loads
-`scripts/validation/scenarios` through `scenario_corpus.py`, so the schema has
-one definition, and runs only the scenarios the contract forces onto this layer:
-a `log` or `exit` assertion, or `requires: ["graphical"]`. Every other row is
-listed in `summary.json` with its section-3 reason, and a selected row whose
-faults the layer cannot express is refused there by name — nothing is skipped
-silently and there is no skip path. A refusal is a layering decision, not a
-failed assertion: it is named with its reason in `refused` and does not count
-against the suite verdict, which covers exactly the rows that ran.
+`docs/multiplayer/HARNESS.md` section 1 fixes each row's layer, section 2 its
+`proves` binding, section 5 the execution site, evidence layout and exit
+contract, section 6 the bootstrap. The runner
+(`scripts/validation/multiplayer_e2e.py`) loads
+`scripts/validation/scenarios` through `scenario_corpus.py`, so the schema and
+the bindings have one definition, and runs only the rows whose `proves.layer` is
+`process` — the rows that carry a `log` or `exit` assertion. Every other row is
+listed in `summary.json` with the layer that proves it. A process row whose
+faults this layer cannot express (today every `netem` verb: the suite has no
+`netem` driver) is refused there by name, listed under `refused` with its
+reason and again under `harness_gaps`; section 1 still claims that cell, so the
+suite exits 1 rather than reporting a clean run. Nothing is skipped silently and
+there is no skip path.
 
 Each peer is a real `robin` process with a fresh `ROBINHOOD_INSTALL_HOME`, its
 own HTTP port and its own `assets/core-datadir`, inside one loopback-only
@@ -783,14 +786,17 @@ the `exit` status and the peers' stderr. A `log` expectation is a literal
 substring of a peer's stderr (`docs/multiplayer/HARNESS.md` section 2), so a
 line the binary has reworded or never prints fails the row instead of passing
 it by accident. Evidence per run lands in
-`<evidence>/<scenario>/<run>/`: the expanded scenario, `summary.json`,
-`events.jsonl`, one log and one per-peer hash manifest per peer, the host
-recording and the binary's SHA-256.
+`<evidence>/<scenario>/<run>/`: the expanded scenario with its `proves` binding,
+`summary.json`, `events.jsonl`, one log per peer and `hashes.json` — every
+`/state` sample's compared frame and desync count, plus the host recording's path
+and SHA-256 (or the fact that the host died before writing one) — and the
+binary's SHA-256.
 
 Exit status separates a broken machine from a broken game: `0` every expectation
-observed, `1` an assertion failed (named in `summary.json`), `2` the deadline was
-hit — a scenario budget, or a barrier wait bounded by the transition-watchdog
-deadline plus a margin — and `3` a prerequisite is missing. The suite needs the
+observed, `1` an assertion failed or a process row was refused as a harness gap
+(both named in `summary.json`), `2` the deadline was hit — a scenario budget, or
+a barrier wait bounded by the transition-watchdog deadline plus a margin — and
+`3` a prerequisite is missing. The suite needs the
 pinned binary built with `--features release`, a game-data root containing
 `Data/`, the checkout's `assets/core-datadir`, and `unshare`, `ip`, `Xvfb` and
 python-xlib. It does not run on a GitHub-hosted runner: no hosted runner

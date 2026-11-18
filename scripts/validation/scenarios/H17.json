@@ -1,44 +1,24 @@
 {
   "schema": 1,
   "id": "H17",
+  "proves": { "layer": "transport", "tests": [
+      "robin_rs::multiplayer::transport::native::server::tests::disconnected_transition_peer_must_ack_again_after_reconnect",
+      "robin_rs::multiplayer::transport::native::server::tests::snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops"
+  ] },
   "peers": [
-    {
-      "seat": 0,
-      "role": "host"
-    },
-    {
-      "seat": 1,
-      "role": "client"
-    }
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
   ],
   "faults": [
-    {
-      "at": {
-        "barrier": "transition-commit",
-        "after": 0
-      },
-      "peer": 1,
-      "fault": "kill"
-    }
+    { "at": { "barrier": "transition-commit", "after": 0 }, "peer": 1, "fault": "kill" }
   ],
   "expect": [
     {
       "assert": "transition",
-      "payload": {
-        "CampaignExit": "LevelSucceeded"
-      },
-      "acked": [
-        0,
-        1
-      ],
+      "payload": { "CampaignExit": "LevelSucceeded" },
+      "acked": [0, 1],
       "committed": true
     },
-    {
-      "assert": "transition-id-equal",
-      "peers": [
-        0,
-        1
-      ]
-    }
+    { "assert": "transition-id-equal", "peers": [0, 1] }
   ]
 }
