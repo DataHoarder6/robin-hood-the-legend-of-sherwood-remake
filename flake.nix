@@ -92,6 +92,11 @@
               pkgs.cmake
               pkgs.curl
               pkgs.python3
+              # The validation drivers inject input through python-xlib, confined
+              # to the local X namespace (scripts/validation/namespace_x11.py).
+              # Without it the process-layer suites exit 3 on a missing
+              # prerequisite instead of skipping.
+              pkgs.python3Packages.python-xlib
               pkgs.xvfb
               pkgs.ffmpeg
             ]

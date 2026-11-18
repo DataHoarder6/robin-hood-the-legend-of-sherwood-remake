@@ -64,6 +64,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev` |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
+| `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer scenarios from the corpus: real signals, per-install isolation, assertions over `/state` |
 | `gpu` | `robin_rs` Vulkan execution | Explicit ignored GPU test; missing adapter is an error |
 | `gpu-gl` | `robin_rs` GL execution under Xvfb | Same required execution contract using the browser runtime's GL backend family |
 | `host` | `robin_rs`, `hardware-info` | Explicit ignored real-memory query; requires an accessible host backend |
@@ -717,6 +718,46 @@ bash scripts/check-quality.sh browser-audio
 The browser CI matrix provisions a matching browser/driver and installs the
 test runner version selected by Cargo.lock. It retains machine-readable
 results, the tested WASM module, and runner output even on failure.
+
+## Process-layer multiplayer suite
+
+```sh
+ROBIN_E2E_BINARY=/absolute/path/to/robin \
+ROBINHOOD_DATA_DIR=/absolute/path/to/full-game \
+  bash scripts/check-quality.sh multiplayer-e2e
+```
+
+This is the process layer of the multiplayer harness contract:
+`docs/multiplayer/HARNESS.md` section 3 fixes the layers, section 5 the
+execution site, evidence layout and exit contract, section 6 the bootstrap. The
+runner (`scripts/validation/multiplayer_e2e.py`) loads
+`scripts/validation/scenarios` through `scenario_corpus.py`, so the schema has
+one definition, and runs only the scenarios the contract forces onto this layer:
+a `log` or `exit` assertion, or `requires: ["graphical"]`. Every other row is
+listed in `summary.json` with its section-3 reason, and a selected row whose
+faults the layer cannot express is refused there by name — nothing is skipped
+silently and there is no skip path.
+
+Each peer is a real `robin` process with a fresh `ROBINHOOD_INSTALL_HOME`, its
+own HTTP port and its own `assets/core-datadir`, inside one loopback-only
+`unshare --user --map-root-user --net` namespace with its own Xvfb. Faults are
+real signals (`SIGKILL`, `SIGSTOP`/`SIGCONT`, or a relaunch with the same or a
+fresh identity), the running session's story scroll is dismissed by pressing
+Return on the real window, and assertions read `/state`'s `multiplayer` block,
+the `exit` status and the peers' stderr. Evidence per run lands in
+`<evidence>/<scenario>/<run>/`: the expanded scenario, `summary.json`,
+`events.jsonl`, one log and one per-peer hash manifest per peer, the host
+recording and the binary's SHA-256.
+
+Exit status separates a broken machine from a broken game: `0` every expectation
+observed, `1` an assertion failed (named in `summary.json`), `2` the deadline was
+hit — a scenario budget, or a barrier wait bounded by the transition-watchdog
+deadline plus a margin — and `3` a prerequisite is missing. The suite needs the
+pinned binary built with `--features release`, a game-data root containing
+`Data/`, the checkout's `assets/core-datadir`, and `unshare`, `ip`, `Xvfb` and
+python-xlib. It does not run on a GitHub-hosted runner: no hosted runner
+provides licensed game data, and the isolation it depends on is an unprivileged
+network namespace with a local X server, as with `native-lifecycle`.
 
 ## Interpreting a refactor baseline
 

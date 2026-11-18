@@ -7,7 +7,7 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format core scripting-llvm engine assets protocols services parity client client-release tools wasm browser-audio native-lifecycle tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
+    printf 'suites: format core scripting-llvm engine assets protocols services parity client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
     exit 2
 fi
 
@@ -67,6 +67,18 @@ case "$1" in
         # shell reader while a long compilation/runtime command is executing.
         exec python3 scripts/validation/lifecycle_gate.py "$1"
         ;;
+    multiplayer-e2e)
+        # Section 5 of docs/multiplayer/HARNESS.md: provisioned host only, real
+        # processes and real signals. Exit 3 (a missing prerequisite) is a suite
+        # failure here too — a broken machine must never read as a green run.
+        : "${ROBIN_E2E_BINARY:?Set ROBIN_E2E_BINARY to a robin built with --features release}"
+        : "${ROBINHOOD_DATA_DIR:?Set ROBINHOOD_DATA_DIR to the game root containing Data/}"
+        evidence=${ROBIN_E2E_EVIDENCE:-$(mktemp -d "${TMPDIR:-/tmp}/robin-multiplayer-e2e.XXXXXX")}
+        printf 'multiplayer-e2e evidence: %s\n' "$evidence" >&2
+        exec python3 scripts/validation/multiplayer_e2e.py \
+            --binary "$ROBIN_E2E_BINARY" --data "$ROBINHOOD_DATA_DIR" \
+            --snapshot "$(git rev-parse HEAD)" --evidence "$evidence"
+        ;;
     gpu)
         # This test also invokes renderer::verify_offscreen_gpu_contract.
         WGPU_BACKEND=vulkan cargo test --locked -p robin_rs --lib gpu_upscale::tests::headless_downlevel_device_executes_every_multipass_profile -- --ignored --exact
@@ -92,6 +104,7 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p namespace_x11_test.py
         python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py
         python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
+        python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py
         bash scripts/test_parity_orchestration.sh
         bash scripts/test_release.sh
         bash scripts/test_doctor.sh
