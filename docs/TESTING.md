@@ -98,12 +98,14 @@ crates recompiled). The copy is the thing to keep warm.
 The push that updates the integration branch is gated by
 `.githooks/pre-push`: it runs `format` and `client-release` when anything under
 `crates/` or a gate script changed, `engine` when engine crates did, `tooling`
-when anything under `scripts/` or `tools/` did, on the build host through one
+when anything under `scripts/`, `tools/` or `.githooks/` did, on the build host through one
 `scripts/remote-check.sh --suites` call over a single synced copy, and refuses
 the push on the first failure. `SKIP_PUSH_GATE=1` exists for a
 deliberately red branch. Review branches are not gated; the push that lands them
 is. GitHub Actions is not part of this: no push in this repository has ever
-produced a run (#26), so a workflow gate would be decoration.
+produced a run (#26), so a workflow gate would be decoration. Editing
+`docs/multiplayer/HARNESS.md` also re-validates the corpus, because that file's
+matrix is what the corpus must cover.
 
 This repository does not land through the estate's `land` tool, for two
 structural reasons: its `origin` is the upstream project, which only takes pull

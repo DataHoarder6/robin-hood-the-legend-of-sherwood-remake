@@ -64,7 +64,7 @@ engine_changed=0
 tools_changed=0
 printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
 printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
-printf '%s\n' "$paths" | grep -qE '^(scripts|tools)/' && tools_changed=1
+printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_changed=1
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
@@ -82,7 +82,7 @@ fi
 # The scenario corpus keeps its own cheap gate beside `tooling`: this runs the
 # real corpus against docs/multiplayer/HARNESS.md, where the suite's unit tests
 # only exercise the checker on synthetic contracts.
-if printf '%s\n' "$paths" | grep -qE '^scripts/validation/(scenarios/|scenario_corpus\.py)'; then
+if printf '%s\n' "$paths" | grep -qE '^(scripts/validation/(scenarios/|scenario_corpus\.py)|docs/multiplayer/HARNESS\.md)'; then
     printf 'pre-push: scenario corpus\n' >&2
     python3 scripts/validation/scenario_corpus.py || {
         printf 'pre-push: the corpus does not match docs/multiplayer/HARNESS.md.\n' >&2
