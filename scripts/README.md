@@ -99,7 +99,7 @@ proof of dead code. Most require external game data or Python imaging packages.
 - `client_modal_flow.py`, `client_soak.py`: modal workflows and sustained runs.
 - `input_worker.py`: input injection helper.
 - `lifecycle_gate.py`, `window_close.py`: startup/shutdown lifecycle checks.
-- `multiplayer_live.py`: multiplayer scenarios.
+- `multiplayer_e2e.py`: the process layer of the multiplayer scenario corpus.
 - `parity_sweep.py`: bounded client replay sweep.
 - `replay_history_fixture.py`: replay-history fixture generation.
 - `runtime_evidence.py`: runtime evidence capture/verification.

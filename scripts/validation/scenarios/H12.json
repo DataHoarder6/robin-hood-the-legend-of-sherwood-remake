@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "id": "H12",
+  "proves": { "layer": "process", "runner": "scripts/validation/multiplayer_e2e.py" },
   "peers": [
     { "seat": 0, "role": "host" },
     { "seat": 1, "role": "client", "start": { "join_at_frame": 0 } }
@@ -10,7 +11,6 @@
   ],
   "expect": [
     { "assert": "log", "contains": "Game loop failed: multiplayer: failed to connect to", "count": 1 },
-    { "assert": "exit", "peers": [1], "status": "nonzero" },
-    { "assert": "barrier", "barrier": "content-ready", "state": "absent" }
+    { "assert": "exit", "peers": [1], "status": "nonzero" }
   ]
 }

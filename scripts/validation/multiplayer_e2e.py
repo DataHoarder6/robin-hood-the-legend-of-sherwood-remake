@@ -2,28 +2,31 @@
 """Gated process-layer multiplayer end-to-end suite (issue #6).
 
 The contract is `docs/multiplayer/HARNESS.md`: section 2 owns the scenario
-schema and the fault vocabulary, section 3 owns which layer runs a scenario,
-section 5 owns this layer's execution site, evidence layout and exit contract,
-section 6 owns the bootstrap. Section 1's corpus table is the coverage floor.
+schema, the fault vocabulary and each row's `proves` binding, section 5 owns this
+layer's execution site, evidence layout and exit contract, section 6 owns the
+bootstrap. Section 1's corpus table is the coverage floor and names which rows
+this layer proves.
 
-This is section 3's process layer: real `robin` binaries, real signals, real
+This is section 2's process layer: real `robin` binaries, real signals, real
 per-install state, driven and asserted over loopback HTTP. The corpus is loaded
-through `scenario_corpus` (one schema, one expansion) and only the scenarios the
-contract forces onto this layer run here — a `log` or `exit` assertion, or
-`requires: ["graphical"]`. Every other scenario is listed in `summary.json` with
-the section-3 reason it stayed below the process layer, so nothing is dropped
-silently.
+through `scenario_corpus` (one schema, one expansion) and only the rows whose
+`proves.layer` is `process` run here — a `log` or `exit` assertion is what makes
+a row one. Every other scenario is listed in `summary.json` with the layer its
+`proves` names, so nothing is dropped silently.
 
 Exit status (section 5):
 
   0  every `expect` of every selected scenario was observed
-  1  an assertion failed, or a selected scenario cannot be expressed at this
-     layer; the scenario and the expectation are named in `summary.json`
+  1  an assertion failed, or a selected row was refused because this layer
+     cannot express its faults. A refusal is a harness gap, not a clean run:
+     the row is listed under `refused` in `summary.json` and keeps the suite red
+     while section 1 still claims that cell
   2  the deadline was hit: a scenario budget, a barrier wait bounded by the
      transition-watchdog deadline plus a margin, or a settle window that covers
      the transport's idle timeout and the client's reconnect budget. Exit 2
      means a promised state was missed, never that the machine was slow
-  3  a prerequisite is missing and nothing about the game was proved
+  3  a prerequisite is missing, the corpus or its contract cannot be read, and
+     nothing about the game was proved
 
 Nothing is installed and nothing is skipped.
 
@@ -113,17 +116,20 @@ MAX_DISMISSALS = 8
 DEFAULT_BUDGET_S = 600
 BOOT_S = 120
 
-# Section 3: what forces a scenario onto this layer.
-PROCESS_ASSERTIONS = frozenset({"log", "exit"})
-GRAPHICAL = "graphical"
-NETEM = "netem"
+# Section 2: the layer this suite is, named by each row's `proves`.
+PROCESS_LAYER = "process"
 
 # Section 2's process column, and the verbs it cannot express from a scenario
 # file: `truncate` is marked unsupported there, while `diverge` ("POST /native
 # on that peer alone") and `stall-surface` ("same") need a native op or a
-# surface deadline the fault schema does not carry.
+# surface deadline the fault schema does not carry. The `netem` verbs are the
+# fourth: the table names `netem` for them, but this runner applies faults with
+# signals and relaunches only, so selection refuses them by name instead of
+# letting `apply` read a harness gap as a game failure.
 PROCESS_FAULTS = frozenset({"kill", "stop", "continue", "restart"})
 NETEM_FAULTS = frozenset({"duplicate", "drop", "reorder", "delay"})
+NETEM_GAP = ("section 2 names `netem {verb}` for the process layer and this suite has no "
+             "netem driver, so the row is a harness gap")
 UNEXPRESSIBLE_FAULTS = {
     "diverge": "section 2's process meaning is `POST /native` on that peer alone, and a "
                "fault names no native op or arguments to post",
@@ -134,11 +140,25 @@ UNEXPRESSIBLE_FAULTS = {
 # Admission phases `/state` reports (.../game_session/runtime/admission.rs
 # wire_name). Section 1 names barriers while `/state` names phases, so this is
 # the one mapping between them; `modal-ack` has no phase or field at all and is
-# therefore unprovable here.
-CLIENT_CONTENT_PHASES = frozenset(
-    {"peer_waiting_for_snapshot", "peer_waiting_for_begin", "waiting_for_start", "running"}
+# therefore unprovable here. A barrier is *reached* when the peer is at it and
+# *released* when it is past it, so `running` is never a reached content or
+# snapshot barrier — it means the peer has moved on.
+#
+# The two admission phases are transient: a joining peer's snapshot and
+# `BeginSim` arrive in the same handful of frames, so a 100 ms sample can miss
+# both (a run watched `peer_waiting_for_snapshot` → `waiting_for_start` with no
+# sample between, and a row that anchored a fault on `content-ready` waited out
+# its whole deadline). A fault may therefore be scheduled only on a fact that
+# persists — a frame counter, a set `begin_sim_frame`, a seat — and a pre-ack
+# drop is proved at transport, where it is applied in process.
+CLIENT_PHASE_ORDER = (
+    "peer_waiting_for_snapshot",
+    "peer_waiting_for_begin",
+    "waiting_for_start",
+    "running",
 )
-CLIENT_SNAPSHOT_PHASES = frozenset({"peer_waiting_for_begin", "waiting_for_start", "running"})
+CLIENT_CONTENT_PHASE = "peer_waiting_for_snapshot"
+CLIENT_SNAPSHOT_PHASE = "peer_waiting_for_begin"
 RUNNING_PHASES = frozenset({"running"})
 POSITIVE_ASSERTIONS = frozenset({"exit", "barrier", "final-operation"})
 # `exit` states a peer is gone: zero or nonzero. `running` states it is still
@@ -148,7 +168,8 @@ EXIT_RUNNING = "running"
 
 # Section 5 evidence per run. `binary.sha256` is repeated inside each run so a
 # single scenario directory is a complete record on its own.
-EVIDENCE_FILES = ("scenario.json", "summary.json", "events.jsonl", "binary.sha256")
+EVIDENCE_FILES = ("scenario.json", "summary.json", "events.jsonl", "hashes.json",
+                  "binary.sha256")
 
 
 class PrerequisiteMissing(RuntimeError):
@@ -166,23 +187,6 @@ class Unprovable(RuntimeError):
 # ── Contract reading and selection (pure) ────────────────────────────────
 
 
-def contract_requirements(scenarios, identifier):
-    """`requires` of a scenario composed with its `extends` chain."""
-    return frozenset(
-        item
-        for step in scenario_corpus.chain(identifier, scenarios)
-        for item in scenarios[step][1].get("requires", [])
-    )
-
-
-def contract_expectations(scenarios, identifier):
-    return [
-        expectation
-        for step in scenario_corpus.chain(identifier, scenarios)
-        for expectation in scenarios[step][1].get("expect", [])
-    ]
-
-
 def contract_faults(scenarios, identifier):
     return [
         fault
@@ -191,52 +195,56 @@ def contract_faults(scenarios, identifier):
     ]
 
 
-def unexpressible(faults, requires):
+def unexpressible(faults):
     """Why the process layer cannot express these faults, or `None`."""
     for fault in faults:
         verb = fault["fault"]
         if verb in PROCESS_FAULTS:
             continue
         if verb in NETEM_FAULTS:
-            if NETEM not in requires:
-                return (
-                    f"section 2 gives the process layer `netem {verb}` for `{verb}`, and "
-                    f"section 5 requires the scenario to declare `requires: [\"netem\"]`; "
-                    f"it declares {sorted(requires)}"
-                )
-            continue
+            return NETEM_GAP.format(verb=verb)
         if verb in UNEXPRESSIBLE_FAULTS:
             return UNEXPRESSIBLE_FAULTS[verb]
         return f"unknown fault verb `{verb}`"
     return None
 
 
-def select(scenarios):
-    """Split the corpus by the contract's own rule (section 3).
+def proves_layer(scenarios, identifier):
+    """The layer the row's `proves` names (the corpus gate has checked it)."""
+    try:
+        return scenarios[identifier][1]["proves"]["layer"]
+    except (KeyError, TypeError) as error:
+        raise scenario_corpus.ContractError(
+            f"{scenarios[identifier][0]}: no `proves` binding, so nothing proves it"
+        ) from error
 
-    Returns `(run, skipped, refused)`. Both non-running lists carry the contract
-    reason, so a scenario is never dropped silently.
+
+def select(scenarios):
+    """Split the corpus by the binding its own row declares (section 2).
+
+    Returns `(run, skipped, refused)`. Both non-running lists carry the reason, so
+    a scenario is never dropped silently. A refused row is a harness gap: it is
+    proved by this suite, which cannot express it, and section 1 still claims the
+    cell, so it keeps the suite red until one side changes.
     """
     run, skipped, refused = [], [], []
     for identifier in sorted(scenarios):
-        verbs = {item["assert"] for item in contract_expectations(scenarios, identifier)}
-        requires = contract_requirements(scenarios, identifier)
-        forced = bool(PROCESS_ASSERTIONS & verbs) or GRAPHICAL in requires
-        if not forced:
+        layer = proves_layer(scenarios, identifier)
+        if layer != PROCESS_LAYER:
             skipped.append({
                 "id": identifier,
+                "prover": layer,
                 "reason": (
-                    "section 3 keeps it below the process layer: no log/exit "
-                    f"assertion (found {sorted(verbs)}) and no graphical requirement "
-                    f"(requires {sorted(requires)})"
+                    f"section 1 binds {identifier} to {layer!r} and its `proves` names the "
+                    "Rust test that executes it; this suite runs only process rows"
                 ),
             })
             continue
-        reason = unexpressible(contract_faults(scenarios, identifier), requires)
+        reason = unexpressible(contract_faults(scenarios, identifier))
         if reason is None:
             run.append(identifier)
         else:
-            refused.append({"id": identifier, "reason": reason})
+            refused.append({"id": identifier, "kind": "harness-gap", "reason": reason})
     return run, skipped, refused
 
 
@@ -245,7 +253,40 @@ def exit_code(verdicts):
     return 0 if verdicts and all(verdict == "observed" for verdict in verdicts.values()) else 1
 
 
+def suite_verdict(prerequisites_missing, interrupted, hangs, refused, verdicts):
+    """The suite's one verdict, worst first.
+
+    A refused row never ran, but section 1 still claims its cell with this suite
+    as the prover, so a refusal is a harness gap and is never a clean run.
+    """
+    if prerequisites_missing:
+        return "prerequisite-missing"
+    if interrupted:
+        return "interrupted"
+    if hangs:
+        return "hang"
+    if refused:
+        return "harness-gap"
+    return "observed" if exit_code(verdicts) == 0 and verdicts else "failed"
+
+
+SUITE_EXIT = {"prerequisite-missing": 3, "interrupted": 2, "hang": 2}
+
+
+def suite_exit_code(verdict):
+    """Section 5's exit contract, from the verdict alone."""
+    return SUITE_EXIT.get(verdict, 0 if verdict == "observed" else 1)
+
+
 # ── Barrier observations (pure) ──────────────────────────────────────────
+
+
+def _phase_after(admission, phase):
+    """Whether `admission` is past `phase` in the client's admission order."""
+    try:
+        return CLIENT_PHASE_ORDER.index(admission) > CLIENT_PHASE_ORDER.index(phase)
+    except ValueError:
+        return False
 
 
 def barrier_reached(name, peer, sample):
@@ -255,9 +296,9 @@ def barrier_reached(name, peer, sample):
     if name == "begin-sim":
         return multiplayer.get("begin_sim_frame") is not None
     if name == "content-ready":
-        return peer["role"] == "client" and admission in CLIENT_CONTENT_PHASES
+        return peer["role"] == "client" and admission == CLIENT_CONTENT_PHASE
     if name == "snapshot-adopt":
-        return peer["role"] == "client" and admission in CLIENT_SNAPSHOT_PHASES
+        return peer["role"] == "client" and admission == CLIENT_SNAPSHOT_PHASE
     if name == "transition-commit":
         return multiplayer.get("pending_transition") is not None
     if name == "modal-ack":
@@ -269,15 +310,20 @@ def barrier_reached(name, peer, sample):
 
 
 def barrier_released(name, peer, sample):
-    """Whether one sample shows the barrier released (it must be reached too)."""
-    if not barrier_reached(name, peer, sample):
-        return False
+    """Whether one sample shows the barrier released: the peer is past it."""
     multiplayer = sample.get("multiplayer") or {}
+    admission = multiplayer.get("admission")
     if name == "begin-sim":
-        return multiplayer.get("admission") in RUNNING_PHASES
+        return (barrier_reached(name, peer, sample)
+                and multiplayer.get("admission") in RUNNING_PHASES)
+    if name == "content-ready":
+        return peer["role"] == "client" and _phase_after(admission, CLIENT_CONTENT_PHASE)
+    if name == "snapshot-adopt":
+        return peer["role"] == "client" and _phase_after(admission, CLIENT_SNAPSHOT_PHASE)
     if name == "transition-commit":
-        return not (multiplayer.get("pending_transition") or {}).get("awaiting")
-    return True
+        pending = multiplayer.get("pending_transition")
+        return pending is not None and not pending.get("awaiting")
+    raise Unprovable(f"unknown barrier `{name}`")
 
 
 def barrier_samples(name, state, trace, peer_seat=None):
@@ -352,30 +398,85 @@ def evaluate_final_operation(expectation, record):
     return ok, f"final operation {expectation['operation']}: {observed}", observed
 
 
+def multiplayer_samples(record, seat):
+    """Every `(frame, multiplayer block)` of one seat, in sampling order."""
+    return [(sample.get("frame"), sample.get("multiplayer") or {})
+            for peer, sample in record["trace"] if peer["seat"] == seat]
+
+
+def hash_cadence(samples, every):
+    """Why one seat's compared frames do not honour a `every`-frame cadence.
+
+    `/state` reports only `last_compared_hash_frame`, so the cadence is read off
+    consecutive samples: every compared frame is on the declared boundary, the
+    counter never runs backwards, and when the peer advanced by less than two
+    boundaries the counter must advance by exactly one. A larger step is only
+    honest if the peer advanced far enough that the samples could not have seen
+    the boundary in between, which is why the sampling interval is bounded here
+    rather than assumed.
+    """
+    problems = []
+    if not samples:
+        return ["no /state sample"]
+    frames = [frame for frame, _ in samples]
+    compared = [multiplayer.get("last_compared_hash_frame") for _, multiplayer in samples]
+    for value in compared:
+        if value is not None and value % every:
+            problems.append(f"compared frame {value} is not a multiple of {every}")
+    seen = sorted({value for value in compared if value is not None})
+    if not seen:
+        return problems + ["no hash comparison was ever observed"]
+    if len(seen) < 2:
+        problems.append(
+            f"only one compared frame ({seen[0]}) was observed, so the {every}-frame "
+            "cadence is unobservable")
+    for index in range(1, len(samples)):
+        before, after = compared[index - 1], compared[index]
+        if before is None or after is None or after <= before:
+            continue
+        step = after - before
+        if step % every:
+            problems.append(
+                f"compared frames jumped {before} -> {after}, a step that is not a "
+                f"multiple of {every}")
+        elif (frames[index] is not None and frames[index - 1] is not None
+              and frames[index] - frames[index - 1] < 2 * every and step != every):
+            problems.append(
+                f"compared frames jumped {before} -> {after} while the peer advanced only "
+                f"{frames[index] - frames[index - 1]} frames")
+    return problems
+
+
 def evaluate_hash_equal(expectation, record):
-    """Section 1's oracle: both peers compared a frame and neither desynced."""
-    peers = expectation["peers"]
-    observed = {
-        seat: {
-            "last_compared_hash_frame": (((record["latest"].get(seat) or {})
-                                          .get("multiplayer") or {}).get("last_compared_hash_frame")),
-            "desync_count": (((record["latest"].get(seat) or {})
-                              .get("multiplayer") or {}).get("desync_count")),
-        }
-        for seat in peers
-    }
-    ok = all(item["last_compared_hash_frame"] is not None and item["desync_count"] == 0
-             for item in observed.values())
-    return ok, f"hash agreement for seats {peers}: {observed}", observed
+    """Section 1's oracle: the peers stay equal on the declared hash cadence."""
+    peers, every = expectation["peers"], expectation["every"]
+    observed, problems = {}, []
+    for seat in peers:
+        samples = multiplayer_samples(record, seat)
+        desync = max((multiplayer.get("desync_count") or 0
+                      for _, multiplayer in samples), default=0)
+        compared = sorted({multiplayer.get("last_compared_hash_frame")
+                           for _, multiplayer in samples
+                           if multiplayer.get("last_compared_hash_frame") is not None})
+        observed[seat] = {"last_compared_hash_frame": compared[-1] if compared else None,
+                          "compared_frames": len(compared),
+                          "desync_count": desync}
+        if desync:
+            problems.append(f"seat {seat}: {desync} desync(s) observed")
+        problems += [f"seat {seat}: {problem}" for problem in hash_cadence(samples, every)]
+    detail = (f"hash agreement for seats {peers} every {every}: {observed}"
+              + ("" if not problems else "; " + "; ".join(problems)))
+    return not problems, detail, observed
 
 
 def evaluate_hash_diverged(expectation, record):
     peers = expectation["peers"]
     observed = {
-        seat: (((record["latest"].get(seat) or {}).get("multiplayer") or {}).get("desync_count"))
+        seat: max((multiplayer.get("desync_count") or 0
+                   for _, multiplayer in multiplayer_samples(record, seat)), default=0)
         for seat in peers
     }
-    ok = all(count is not None and count >= 1 for count in observed.values())
+    ok = all(count >= 1 for count in observed.values())
     return ok, f"hash divergence counted on seats {peers}: {observed}", observed
 
 
@@ -414,6 +515,44 @@ def run_directory(evidence, identifier):
     path = root / str(run)
     path.mkdir()
     return path
+
+
+def peer_summaries(scenario):
+    """One entry per peer process: where it ran and how it ended."""
+    return [
+        {"name": peer.name, "seat": peer.seat, "role": peer.role, "port": peer.port,
+         "install": str(peer.install), "log": str(peer.log),
+         "samples": str(peer.samples), "launches": peer.launches,
+         "exit": peer.exit_status()}
+        for peer in scenario.peers
+    ]
+
+
+def hash_manifest(scenario):
+    """Section 5's per-peer hash manifest, from the samples already collected.
+
+    `/state` carries the compared frame and the desync count, not the hash value,
+    so that is what a manifest can honestly record; the host replay's path and
+    digest travel beside it because the recorder may not have written one (a host
+    killed at frame zero never does).
+    """
+    trace = scenario.record()["trace"] if scenario is not None else []
+    replay = Path(scenario.record_path) if scenario is not None else None
+    return {
+        "schema": 1,
+        "samples": [
+            {"seat": peer["seat"],
+             "frame": sample.get("frame"),
+             "compared_frame": (sample.get("multiplayer") or {}).get("last_compared_hash_frame"),
+             "desync_count": (sample.get("multiplayer") or {}).get("desync_count")}
+            for peer, sample in trace
+        ],
+        "replay": None if replay is None else {
+            "path": replay.name,
+            "exists": replay.is_file(),
+            "sha256": digest(replay) if replay.is_file() else None,
+        },
+    }
 
 
 def require_empty(path):
@@ -998,13 +1137,7 @@ def run_scenario(identifier, expanded, options, evidence):
         summary["failures"] = failures
         summary["trace_samples"] = len(scenario.trace)
         summary["faults_fired"] = scenario.fired
-        summary["peers"] = [
-            {"name": peer.name, "seat": peer.seat, "role": peer.role, "port": peer.port,
-             "install": str(peer.install), "log": str(peer.log),
-             "samples": str(peer.samples), "launches": peer.launches,
-             "exit": peer.exit_status()}
-            for peer in scenario.peers
-        ]
+        summary["peers"] = peer_summaries(scenario)
         after = snapshot_facts(installed)
         summary["install_isolation"] = {"before": before, "after": after,
                                         "unchanged": before == after}
@@ -1030,13 +1163,8 @@ def run_scenario(identifier, expanded, options, evidence):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if scenario is not None:
-            summary.setdefault("peers", [
-                {"name": peer.name, "seat": peer.seat, "role": peer.role, "port": peer.port,
-                 "install": str(peer.install), "log": str(peer.log),
-                 "samples": str(peer.samples), "launches": peer.launches,
-                 "exit": peer.exit_status()}
-                for peer in scenario.peers
-            ])
+            summary.setdefault("peers", peer_summaries(scenario))
+        (run / "hashes.json").write_text(json.dumps(hash_manifest(scenario), indent=2) + "\n")
         summary["elapsed_s"] = round(time.monotonic() - events.started, 3)
         finish_children(children, summary)
         (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -1090,6 +1218,13 @@ def main(argv=None):
             print(f"multiplayer-e2e: corpus: {problem}", file=sys.stderr)
         return 3
     selected, skipped, refused = select(scenarios)
+    promised = sorted(identifier for identifier in scenarios
+                      if proves_layer(scenarios, identifier) == PROCESS_LAYER)
+    if sorted(set(selected) | {item["id"] for item in refused}) != promised:
+        print("multiplayer-e2e: a process row has no outcome in this suite: "
+              f"{sorted(set(promised) ^ (set(selected) | {item['id'] for item in refused}))}",
+              file=sys.stderr)
+        return 3
     if options.only:
         unknown = sorted(set(options.only) - set(selected))
         if unknown:
@@ -1126,28 +1261,17 @@ def main(argv=None):
 
     hangs = sorted(identifier for identifier, document in suite["scenarios"].items()
                    if document["verdict"] == "hang")
-    # Section 5 counts selected scenarios only: a refused row never ran — its
-    # reason is in `refused`, beside `skipped` — so it cannot turn the suite red.
-    suite["verdict"] = (
-        "prerequisite-missing" if suite.get("prerequisites_missing")
-        else "interrupted" if suite.get("interrupted")
-        else "hang" if hangs
-        else "observed" if exit_code(suite["verdicts"]) == 0 and suite["scenarios"]
-        else "failed"
-    )
+    suite["harness_gaps"] = [item["id"] for item in refused]
+    suite["verdict"] = suite_verdict(bool(suite.get("prerequisites_missing")),
+                                     bool(suite.get("interrupted")), hangs, refused,
+                                     suite["verdicts"])
     suite["elapsed_s"] = round(time.monotonic() - started, 3)
     (evidence / "summary.json").write_text(json.dumps(suite, indent=2) + "\n")
     print(json.dumps({"verdict": suite["verdict"], "verdicts": suite["verdicts"],
                       "refused": [item["id"] for item in refused],
                       "skipped": [item["id"] for item in skipped]}, indent=2), flush=True)
 
-    if suite.get("prerequisites_missing"):
-        return 3
-    if hangs:
-        return 2
-    if suite.get("interrupted"):
-        return 2
-    return 0 if suite["verdict"] == "observed" else 1
+    return suite_exit_code(suite["verdict"])
 
 
 if __name__ == "__main__":

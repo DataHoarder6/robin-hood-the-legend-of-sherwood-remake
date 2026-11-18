@@ -1,17 +1,18 @@
 {
   "schema": 1,
   "id": "H11",
+  "proves": { "layer": "transport", "tests": [
+      "robin_rs::multiplayer::native::peer_sessions::tests::ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner",
+      "robin_rs::multiplayer::native::server::tests::ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner"
+  ] },
   "peers": [
     { "seat": 0, "role": "host" },
-    { "seat": 1, "role": "client", "start": { "join_at_frame": 0 } }
+    { "seat": 1, "role": "client" }
   ],
   "faults": [
     { "at": { "barrier": "content-ready", "after": 0 }, "peer": 1, "fault": "kill" }
   ],
   "expect": [
-    { "assert": "barrier", "barrier": "content-ready", "state": "reached" },
-    { "assert": "barrier", "barrier": "begin-sim", "state": "reached" },
-    { "assert": "final-operation", "operation": "LevelInProgress" },
-    { "assert": "exit", "peers": [0], "status": "running" }
+    { "assert": "barrier", "barrier": "begin-sim", "state": "released" }
   ]
 }

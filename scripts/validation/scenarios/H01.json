@@ -1,12 +1,17 @@
 {
   "schema": 1,
   "id": "H01",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game_session::multiplayer::story_regression::startup_without_periodic_hash_allows_client_progress",
+      "robin_rs::game_session::runtime::tests::delayed_hash_comparison_uses_exact_frame_and_invalidates_rollback_future"
+  ] },
   "peers": [
     { "seat": 0, "role": "host" },
     { "seat": 1, "role": "client" }
   ],
   "expect": [
     { "assert": "hash-equal", "peers": [0, 1], "every": 25 },
-    { "assert": "barrier", "barrier": "begin-sim", "state": "released" }
+    { "assert": "barrier", "barrier": "begin-sim", "state": "released" },
+    { "assert": "count", "subject": "barrier", "name": "begin-sim", "times": 1 }
   ]
 }

@@ -1,45 +1,28 @@
 {
   "schema": 1,
   "id": "H13",
+  "proves": { "layer": "transport", "tests": [
+      "robin_rs::host::transport::transport_lifecycle_tests::committed_payload_is_consumed_once_and_keeps_simulation_held"
+  ] },
   "peers": [
-    {
-      "seat": 0,
-      "role": "host"
-    },
-    {
-      "seat": 1,
-      "role": "client"
-    }
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
   ],
   "faults": [
     {
-      "at": {
-        "barrier": "transition-commit",
-        "after": 0
-      },
+      "at": { "barrier": "transition-commit", "after": 0 },
       "peer": 1,
       "fault": "drop",
-      "message": "CommitSnapshotTransition"
+      "message": "SnapshotTransitionReady"
     }
   ],
   "expect": [
     {
       "assert": "transition",
-      "payload": {
-        "CampaignExit": "LevelSucceeded"
-      },
-      "acked": [
-        0,
-        1
-      ],
+      "payload": { "CampaignExit": "LevelSucceeded" },
+      "acked": [0, 1],
       "committed": false
     },
-    {
-      "assert": "transition-id-equal",
-      "peers": [
-        0,
-        1
-      ]
-    }
+    { "assert": "transition-id-equal", "peers": [0, 1] }
   ]
 }

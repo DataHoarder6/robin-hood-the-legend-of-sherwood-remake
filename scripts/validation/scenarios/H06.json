@@ -1,6 +1,9 @@
 {
   "schema": 1,
   "id": "H06",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game::tests::process_quit_returns_quit"
+  ] },
   "peers": [
     {
       "seat": 0,

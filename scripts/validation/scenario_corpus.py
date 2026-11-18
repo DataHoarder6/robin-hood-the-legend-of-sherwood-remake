@@ -2,11 +2,19 @@
 """Validate the multiplayer transition scenario corpus.
 
 The contract is `docs/multiplayer/HARNESS.md`: section 1 owns the coverage
-matrix and the corpus table (which id covers which cell, at which layer),
-section 2 owns the scenario schema, the fault vocabulary and the assertion
-vocabulary. This module reads that document rather than restating it, so the
-matrix and the corpus cannot drift apart: every `Hnn` cell in the matrix must
-resolve to a file in the corpus directory.
+matrix and the corpus table (which id covers which cell, at which layer, which
+assertions prove it), section 2 owns the scenario schema, the fault vocabulary
+and the assertion vocabulary. This module reads that document rather than
+restating it, so the matrix and the corpus cannot drift apart:
+
+* every `Hnn` cell in the matrix must resolve to a file in the corpus
+  directory;
+* every row's `must assert` cell carries an `asserts:` clause whose canonical
+  tokens must all appear in that row's expanded `expect` list, so a cell the
+  matrix claims is a cell the corpus declares;
+* every row's `proves` object must name the layer section 1 gives it and an
+  executor that exists: a `module::test_name` that is a real `#[test]` in a
+  workspace crate, or the process suite itself.
 
 Run `python3 scripts/validation/scenario_corpus.py` (or `--check`) to validate,
 `--print H05` to see one scenario expanded through its `extends` chain.
@@ -15,21 +23,21 @@ Exit status follows the harness convention in section 5: 0 the corpus is
 consistent, 1 the corpus is broken, 3 the contract or its sources cannot be
 read (a broken checkout must never read as a broken corpus).
 
-Three places where the document is narrower than a validator would like, and
-what this file does about each:
+Two places where the document is narrower than a validator would like, and what
+this file does about each:
 
-* Section 3 says a scenario names no layer and the runner picks the lowest
-  layer that can express it. Section 2 says the runner rejects "a fault verb
-  its layer cannot express". A verb's meaning is per layer (`kill` drops
-  channels at core, shuts the runtime at transport), so a verb cannot be
-  checked without a layer. This validator takes the layer from section 1's
-  corpus table — the document's own per-row label — and rejects a fault verb
-  that column has no entry for. Assertions are not layer-bound here: section 3
-  lets the runner climb, and section 5 makes the run report where it ran.
+* A fault verb's meaning is per layer (`kill` drops channels at core, shuts the
+  runtime at transport), so it cannot be checked without a layer. This validator
+  takes the layer from section 1's corpus table — the document's own per-row
+  label — and rejects a fault verb that column has no entry for. A row may only
+  claim a `log` or `exit` assertion, or `requires: ["graphical"]`, when that
+  column says `process`: those are the assertions no Rust test makes, which is
+  why section 2 gives them to the suite alone.
 * Section 2 fixes the shape of `hash-equal`, `transition` and
   `transition-id-equal` by example. `barrier`, `modal`, `log`, `final-operation`
   and `exit` are named with their values but not their keys, so the shapes
-  below are the smallest ones the prose supports.
+  below are the smallest ones the prose supports. `seat` states `selected`,
+  `owns` or both: a refused claim has no selection to name.
 * `transition.payload` is not checked against `SnapshotTransitionPayload`:
   the document's own example names `LoadRestart`, which is a terminal
   debriefing action, not a payload variant. The runner resolves payload names;
@@ -40,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import functools
 import json
 import re
 import sys
@@ -96,15 +105,23 @@ EXPECT_FIELDS = {
     "final-operation": ({"operation"}, set()),
     "exit": ({"peers", "status"}, set()),
     "count": ({"subject", "name", "times"}, set()),
-    "seat": ({"seat", "selected", "owns"}, set()),
+    "seat": ({"seat"}, {"selected", "owns"}),
 }
 COUNT_SUBJECTS = ("barrier", "transition", "operation", "reconnect")
 
 REQUIRES = frozenset({"game-data", "graphical", "netem"})
 EXIT_STATUS = ("zero", "nonzero", "running")
 
+# Section 2: the process layer's own assertions. No Rust test in the tree reports
+# stderr text or a process exit code, so a row carrying one is a process row.
+PROCESS_ASSERTIONS = frozenset({"log", "exit"})
+PROVES_FIELDS = {"layer", "tests", "runner"}
+RUST_CRATES = {"core": frozenset({"robin_engine", "robin_rs"}),
+               "transport": frozenset({"robin_rs"})}
+PROCESS_RUNNER = "scripts/validation/multiplayer_e2e.py"
+
 DEFAULTS_FIELDS = {"schema", "mission", "seed", "expected_players", "peer_count"}
-SCENARIO_FIELDS = {"schema", "id", "extends", "peers", "faults", "expect", "requires", "budget_s"}
+SCENARIO_FIELDS = {"schema", "id", "extends", "proves", "peers", "faults", "expect", "requires", "budget_s"}
 PEER_FIELDS = {"seat", "role", "start", "timeline"}
 TIMELINE_FIELDS = {"at", "command"}
 AT_FIELDS = {"frame"}
@@ -118,17 +135,137 @@ SEPARATOR = re.compile(r"^\|[\s:|-]+\|\s*$")
 SCENARIO_ID = re.compile(r"\bH\d{2}\b")
 
 
+ASSERTS_CLAUSE = re.compile(r"asserts:\s*(.+)")
+
+
 class ContractError(RuntimeError):
     """The document or the sources it points at cannot be read."""
 
 
 @dataclasses.dataclass(frozen=True)
 class Contract:
-    """What the document promises: covered cells, per-id layers, GameCode names."""
+    """What the document promises: covered cells, layers, assertions, GameCodes."""
 
     covered: frozenset
     layers: dict
     game_codes: frozenset
+    asserts: dict
+
+
+def seats(values):
+    """A seat list as the canonical token writes it."""
+    return ",".join(str(value) for value in values)
+
+
+def payload_name(payload):
+    if isinstance(payload, str):
+        return payload
+    return "CampaignExit(" + payload["CampaignExit"] + ")"
+
+
+def canonical(expectation):
+    """One expectation as the exact token section 1's `asserts:` clause carries.
+
+    Both sides are written by this function's counterpart: the document quotes
+    the token, the corpus derives it from the JSON, and the gate compares them
+    modulo whitespace, so a verb's shape is defined once, here.
+    """
+    verb = expectation["assert"]
+    if verb in ("hash-equal", "hash-diverged", "transition-id-equal"):
+        tail = seats(expectation["peers"])
+        if verb == "hash-equal":
+            tail += ",every=" + str(expectation["every"])
+        return f"{verb}(peers={tail})"
+    if verb == "barrier":
+        return f"barrier(name={expectation['barrier']},state={expectation['state']})"
+    if verb == "transition":
+        return (f"transition(payload={payload_name(expectation['payload'])},"
+                f"acked={seats(expectation['acked'])},"
+                f"committed={str(expectation['committed']).lower()})")
+    if verb == "modal":
+        return f"modal(count={expectation['count']})"
+    if verb == "log":
+        needle = "contains" if "contains" in expectation else "absent"
+        cardinality = (f"count={expectation['count']}" if "count" in expectation
+                       else f"at_least={expectation['at_least']}")
+        return f"log({needle}={expectation[needle]},{cardinality})"
+    if verb == "final-operation":
+        return f"final-operation(operation={expectation['operation']})"
+    if verb == "count":
+        return (f"count(subject={expectation['subject']},name={expectation['name']},"
+                f"times={expectation['times']})")
+    if verb == "seat":
+        fields = [f"seat={expectation['seat']}"]
+        if "owns" in expectation:
+            fields.append(f"owns={str(expectation['owns']).lower()}")
+        if "selected" in expectation:
+            fields.append("selected=" + "|".join(expectation["selected"]))
+        return "seat(" + ",".join(fields) + ")"
+    if verb == "exit":
+        return f"exit(peers={seats(expectation['peers'])},status={expectation['status']})"
+    raise ContractError(f"no canonical token for assertion {verb!r}")
+
+
+def normalise(token):
+    return re.sub(r"\s+", "", token)
+
+
+@functools.cache
+def _rust_index(root=ROOT):
+    """`crate` -> {(module path, test name): file} for every `#[test]` fn.
+
+    A Rust test is named `crate::module::path::test_name`; the module path is the
+    file it lives in, so `a/b.rs` and `a/b/mod.rs` both resolve to `a::b`, and an
+    inline `mod tests { … }` in `a/b.rs` is `a::b::tests`.
+    """
+    index = {}
+    for crate in RUST_CRATES["core"]:
+        src = root / "crates" / crate / "src"
+        if not src.is_dir():
+            continue
+        modules = {}
+        for path in src.rglob("*.rs"):
+            parts = list(path.relative_to(src).with_suffix("").parts)
+            if parts[-1] == "mod":
+                parts = parts[:-1]
+            modules[tuple(parts)] = path
+        tests = {}
+        for module, path in modules.items():
+            text = path.read_text(errors="replace")
+            lines = text.splitlines()
+            for number, line in enumerate(lines):
+                match = re.match(r"\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
+                if match is None:
+                    continue
+                window = lines[max(0, number - 6):number]
+                if any(re.match(r"\s*#\[test\]\s*$", attribute) for attribute in window):
+                    tests[(module, match.group(1))] = path
+        index[crate] = tests
+    return index
+
+
+def _declares_submodule(path, name):
+    return re.search(rf"\bmod\s+{re.escape(name)}\b", path.read_text(errors="replace")) is not None
+
+
+def rust_test(crate, module_path, name, root=ROOT):
+    """The file holding `#[test] fn name` under `crate::module_path`.
+
+    A module segment that is not a file of its own must be an inline `mod` the
+    file declares, so a path cannot borrow a test from an unrelated neighbour.
+    """
+    tests = _rust_index(root).get(crate, {})
+    if not tests:
+        raise ContractError(f"crates/{crate}/src has no Rust tests to resolve")
+    module = tuple(module_path.split("::")) if module_path else ()
+    for candidate in (module, module[:-1] if module else ()):
+        found = tests.get((candidate, name))
+        if found is None:
+            continue
+        if candidate != module and not _declares_submodule(found, module[-1]):
+            continue
+        return found
+    return None
 
 
 def _tables(text):
@@ -162,15 +299,18 @@ def load_contract(harness=HARNESS, game_operation=GAME_OPERATION) -> Contract:
         raise ContractError(f"{error}") from error
 
     matrix = corpus = None
+    corpus_header = None
     for header, rows in _tables(text):
         if header[:1] == ["Transition"]:
             matrix = rows
         elif header[:2] == ["id", "layer"]:
-            corpus = rows
+            corpus, corpus_header = rows, header
     if matrix is None:
         raise ContractError(f"{harness}: no coverage matrix table")
     if corpus is None:
         raise ContractError(f"{harness}: no corpus table")
+    if "must assert" not in corpus_header:
+        raise ContractError(f"{harness}: the corpus table has no 'must assert' column")
 
     covered = frozenset(
         scenario for row in matrix for cell in row[1:] for scenario in SCENARIO_ID.findall(cell)
@@ -178,12 +318,23 @@ def load_contract(harness=HARNESS, game_operation=GAME_OPERATION) -> Contract:
     if not covered:
         raise ContractError(f"{harness}: the coverage matrix names no scenario")
 
-    layers = {}
+    layers, asserts = {}, {}
+    must_assert = corpus_header.index("must assert")
     for row in corpus:
         identifier, layer = row[0], row[1]
         if layer not in LAYERS:
             raise ContractError(f"{harness}: {identifier} has unknown layer {layer!r}")
         layers[identifier] = layer
+        clause = ASSERTS_CLAUSE.search(row[must_assert])
+        if clause is None:
+            raise ContractError(
+                f"{harness}: {identifier} has no `asserts:` clause, so its claim is unreadable")
+        tokens = [token.strip().strip("`").strip()
+                  for token in clause.group(1).split(";")]
+        tokens = [token for token in tokens if token]
+        if not tokens or any("(" not in token or not token.endswith(")") for token in tokens):
+            raise ContractError(f"{harness}: {identifier} `asserts:` is not a token list")
+        asserts[identifier] = frozenset(tokens)
 
     missing = sorted(covered - set(layers))
     if missing:
@@ -195,7 +346,7 @@ def load_contract(harness=HARNESS, game_operation=GAME_OPERATION) -> Contract:
     game_codes = frozenset(re.findall(r"^\s{4}([A-Za-z_][A-Za-z0-9_]*)", match.group(1), re.M))
     if not game_codes:
         raise ContractError(f"{game_operation}: GameCode has no variants")
-    return Contract(covered, layers, game_codes)
+    return Contract(covered, layers, game_codes, asserts)
 
 
 def load_corpus(directory=SCENARIO_DIRECTORY):
@@ -286,11 +437,56 @@ class Checker:
                 self.fail(where, f"requires must be a list of {sorted(REQUIRES)}")
             elif len(set(required)) != len(required):
                 self.fail(where, "requires repeats an entry")
+        self.proves(where, identifier, document)
         seats = self.peers(where, document)
         if seats is None:
             return
         self.faults(where, identifier, document, seats)
         self.expect(where, document, seats)
+
+    def proves(self, where, identifier, document):
+        """Section 1/2: the row names the layer section 1 gives it and its prover."""
+        if "proves" not in document:
+            return self.fail(where, "must name what proves it in `proves`")
+        at = f"{where}: proves"
+        proves = document["proves"]
+        if not self.fields(at, proves, PROVES_FIELDS, {"layer"}):
+            return
+        layer = proves["layer"]
+        if layer not in LAYERS:
+            return self.fail(at, f"unknown layer {layer!r}")
+        claimed = self.contract.layers.get(identifier)
+        if claimed is not None and layer != claimed:
+            self.fail(at, f"claims {layer!r} but section 1 gives {identifier} {claimed!r}")
+        if layer == "process":
+            if "tests" in proves:
+                self.fail(at, "a process row names a runner, not Rust tests")
+            if not isinstance(proves.get("runner"), str):
+                return self.fail(at, f"a process row must name `runner`: {PROCESS_RUNNER}")
+            if proves["runner"] != PROCESS_RUNNER:
+                self.fail(at, f"runner must be {PROCESS_RUNNER}")
+            elif not (ROOT / PROCESS_RUNNER).is_file():
+                raise ContractError(f"{PROCESS_RUNNER} is missing from this checkout")
+            return
+        if "runner" in proves:
+            self.fail(at, "a core or transport row names Rust tests, not a process runner")
+        tests = proves.get("tests")
+        if not isinstance(tests, list) or not tests:
+            return self.fail(at, "must name at least one Rust test")
+        allowed = RUST_CRATES[layer]
+        for index, name in enumerate(tests):
+            here = f"{at}.tests[{index}]"
+            if not isinstance(name, str) or name.count("::") < 2:
+                self.fail(here, "must be `crate::module::test_name`")
+                continue
+            crate = name.split("::")[0]
+            module_path, test_name = "::".join(name.split("::")[1:-1]), name.rsplit("::", 1)[-1]
+            if crate not in allowed:
+                self.fail(here, f"{crate} is not one of {sorted(allowed)} for a {layer} row")
+                continue
+            found = rust_test(crate, module_path, test_name)
+            if found is None:
+                self.fail(here, f"{name} is not a `#[test]` in crates/{crate}")
 
     def peers(self, where, document):
         peers = document["peers"]
@@ -446,6 +642,8 @@ class Checker:
                     self.fail(at, "times must be a non-negative integer")
             elif verb == "seat":
                 self.seats(f"{at}.seat", [expectation["seat"]], seats)
+                if not ({"selected", "owns"} & set(expectation)):
+                    self.fail(at, "seat must state selected, owns, or both")
                 selected = expectation.get("selected")
                 if selected is not None and (
                     not isinstance(selected, list)
@@ -507,6 +705,14 @@ def chain(identifier, scenarios):
         current = parent
 
 
+def _canonical(expectation):
+    """`canonical`, or `None` when the expectation is too broken to tokenise."""
+    try:
+        return canonical(expectation)
+    except (ContractError, KeyError, TypeError):
+        return None
+
+
 def validate(defaults, scenarios, contract):
     """Every reason the corpus breaks the contract, in a stable order."""
     checker = Checker(contract, defaults)
@@ -529,10 +735,36 @@ def validate(defaults, scenarios, contract):
 
     for identifier in sorted(scenarios):
         try:
-            chain(identifier, scenarios)
+            order = chain(identifier, scenarios)
         except ValueError as error:
             checker.fail(scenarios[identifier][0], str(error))
+            continue
+        composed = [item for step in order for item in scenarios[step][1].get("expect", [])]
+        requires = {item for step in order for item in scenarios[step][1].get("requires", [])}
+        layer = contract.layers.get(identifier)
+        verbs = {item["assert"] for item in composed}
+        if layer is not None and layer != "process" and (
+                verbs & PROCESS_ASSERTIONS or "graphical" in requires):
+            checker.fail(
+                scenarios[identifier][0],
+                f"a log/exit assertion or `requires: [\"graphical\"]` makes this a process row, "
+                f"but section 1 gives it {layer!r}",
+            )
+        have = {
+            normalise(canonical(item)) for item in composed
+            if item.get("assert") in EXPECT_FIELDS and _canonical(item) is not None
+        }
+        missing = sorted(token for token in contract.asserts.get(identifier, frozenset())
+                         if normalise(token) not in have)
+        if missing:
+            checker.fail(
+                scenarios[identifier][0],
+                f"section 1 lists {missing} in `must assert`, which this row does not declare",
+            )
 
+    missing = sorted(set(contract.layers) - set(scenarios))
+    if missing:
+        checker.fail("corpus", f"corpus rows without a scenario: {', '.join(missing)}")
     missing = sorted(contract.covered - set(scenarios))
     if missing:
         checker.fail("corpus", f"matrix cells without a scenario: {', '.join(missing)}")
@@ -554,6 +786,8 @@ def expanded(identifier, scenarios, defaults, contract):
         "faults": document.get("faults", []),
         "expect": [item for step in order for item in scenarios[step][1].get("expect", [])],
     }
+    if "proves" in document:
+        result["proves"] = document["proves"]
     if "requires" in document:
         result["requires"] = document["requires"]
     if "budget_s" in document:
@@ -591,7 +825,13 @@ def main(argv=None):
             print(f"scenario corpus: {error}", file=sys.stderr)
             return 1
         return 0
-    print(f"scenario corpus: {len(scenarios)} scenarios cover {len(contract.covered)} matrix cells")
+    by_layer = {}
+    for identifier in scenarios:
+        by_layer[contract.layers[identifier]] = by_layer.get(contract.layers[identifier], 0) + 1
+    split = ", ".join(f"{count} {layer}" for layer, count in sorted(by_layer.items()))
+    tokens = sum(len(tokens) for tokens in contract.asserts.values())
+    print(f"scenario corpus: {len(scenarios)} scenarios ({split}) prove "
+          f"{len(contract.covered)} matrix cells with {tokens} machine-checked assertions")
     return 0
 
 

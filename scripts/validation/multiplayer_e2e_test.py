@@ -23,36 +23,41 @@ def load():
     return contract, defaults, scenarios
 
 
+PROCESS_PROVES = {"layer": "process", "runner": "scripts/validation/multiplayer_e2e.py"}
+
+
+def row(identifier, **fields):
+    document = {"schema": 1, "id": identifier, "proves": PROCESS_PROVES,
+                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
+                "expect": [{"assert": "log", "contains": "anything", "count": 1}]}
+    document.update(fields)
+    return (".json", document)
+
+
 class SelectionTest(unittest.TestCase):
     def setUp(self):
         self.contract, self.defaults, self.scenarios = load()
         self.run, self.skipped, self.refused = suite.select(self.scenarios)
 
-    def test_log_and_exit_assertions_force_the_process_layer(self):
-        process = set(self.run) | {item["id"] for item in self.refused}
-        forced = {
-            identifier for identifier, (_, document) in self.scenarios.items()
-            if any(item["assert"] in suite.PROCESS_ASSERTIONS for item in document["expect"])
-        }
-        self.assertTrue(forced <= process)
-        self.assertEqual({"H11", "H12", "H19"} <= process, True)
+    def test_only_rows_whose_prover_is_this_suite_run_here(self):
+        process = {identifier for identifier, (_, document) in self.scenarios.items()
+                   if document["proves"]["layer"] == "process"}
+        self.assertEqual(set(self.run) | {item["id"] for item in self.refused}, process)
+        self.assertEqual({"H12", "H14", "H19"}, process)
+        for item in self.skipped:
+            self.assertNotIn(item["id"], process)
 
-    def test_a_graphical_requirement_forces_the_process_layer(self):
-        scenarios = {
-            "H99": (".json", {
-                "schema": 1, "id": "H99",
-                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
-                "requires": ["graphical"],
-                "expect": [{"assert": "barrier", "barrier": "begin-sim", "state": "reached"}],
-            })
-        }
+    def test_a_process_row_is_selected_even_without_a_log_assertion(self):
+        scenarios = {"H99": row("H99", expect=[
+            {"assert": "barrier", "barrier": "begin-sim", "state": "reached"}])}
         run, skipped, refused = suite.select(scenarios)
         self.assertEqual(run, ["H99"])
         self.assertEqual((skipped, refused), ([], []))
 
-    def test_every_unselected_scenario_carries_the_section_three_reason(self):
+    def test_every_unselected_scenario_names_the_layer_that_proves_it(self):
         for item in self.skipped:
-            self.assertIn("section 3", item["reason"])
+            self.assertIn("section 1 binds", item["reason"])
+            self.assertIn(item["prover"], ("core", "transport"))
             self.assertIn(item["id"], self.scenarios)
         self.assertEqual(
             sorted([item["id"] for item in self.skipped] + self.run
@@ -61,51 +66,29 @@ class SelectionTest(unittest.TestCase):
         )
 
     def test_a_fault_the_process_layer_cannot_express_is_refused_by_name(self):
-        scenarios = {
-            "H98": (".json", {
-                "schema": 1, "id": "H98",
-                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
-                "faults": [{"at": {"frame": 1}, "peer": 1, "fault": "drop",
-                            "message": "Input"}],
-                "expect": [{"assert": "log", "contains": "anything", "count": 1}],
-            })
-        }
+        scenarios = {"H98": row("H98", faults=[{"at": {"frame": 1}, "peer": 1,
+                                                "fault": "drop", "message": "Input"}])}
         run, _, refused = suite.select(scenarios)
         self.assertEqual(run, [])
         self.assertEqual([item["id"] for item in refused], ["H98"])
+        self.assertEqual(refused[0]["kind"], "harness-gap")
         self.assertIn("netem drop", refused[0]["reason"])
 
-    def test_a_declared_netem_requirement_makes_a_netem_fault_expressible(self):
-        scenarios = {
-            "H97": (".json", {
-                "schema": 1, "id": "H97",
-                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
-                "requires": ["netem"],
-                "faults": [{"at": {"frame": 1}, "peer": 1, "fault": "drop",
-                            "message": "Input"}],
-                "expect": [{"assert": "log", "contains": "anything", "count": 1}],
-            })
-        }
+    def test_declaring_netem_does_not_make_a_netem_fault_expressible(self):
+        """Section 2 names netem; this suite has no driver, so the row is a gap."""
+        scenarios = {"H97": row("H97", requires=["netem"],
+                                faults=[{"at": {"frame": 1}, "peer": 1,
+                                         "fault": "drop", "message": "Input"}])}
         run, _, refused = suite.select(scenarios)
-        self.assertEqual((run, refused), (["H97"], []))
+        self.assertEqual((run, [item["id"] for item in refused]), ([], ["H97"]))
+        self.assertIn("no netem driver", refused[0]["reason"])
 
     def test_the_container_extension_problem_is_absent(self):
         """`extended` scenarios contribute their parent's faults and expectations."""
-        contract, defaults, scenarios = load()
-        parent = {
-            "H90": (".json", {
-                "schema": 1, "id": "H90",
-                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
-                "expect": [{"assert": "log", "contains": "parent wording", "count": 1}],
-            })
-        }
-        child = {
-            "H91": (".json", {
-                "schema": 1, "id": "H91", "extends": "H90",
-                "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
-                "expect": [{"assert": "barrier", "barrier": "begin-sim", "state": "reached"}],
-            })
-        }
+        parent = {"H90": row("H90", expect=[
+            {"assert": "log", "contains": "parent wording", "count": 1}])}
+        child = {"H91": row("H91", extends="H90", expect=[
+            {"assert": "barrier", "barrier": "begin-sim", "state": "reached"}])}
         run, skipped, refused = suite.select({**parent, **child})
         self.assertEqual(run, ["H90", "H91"])
         self.assertEqual((skipped, refused), ([], []))
@@ -153,6 +136,22 @@ class BarrierTest(unittest.TestCase):
         self.assertFalse(suite.barrier_reached("snapshot-adopt", client, observed))
         adopted = self.sample("client", "peer_waiting_for_begin")
         self.assertTrue(suite.barrier_reached("snapshot-adopt", *adopted))
+
+    def test_running_is_past_the_client_barriers_rather_than_at_them(self):
+        client, observed = self.sample("client", "running")
+        self.assertFalse(suite.barrier_reached("content-ready", client, observed))
+        self.assertFalse(suite.barrier_reached("snapshot-adopt", client, observed))
+        self.assertTrue(suite.barrier_released("content-ready", client, observed))
+        self.assertTrue(suite.barrier_released("snapshot-adopt", client, observed))
+
+    def test_the_middle_phase_reaches_content_and_releases_it(self):
+        client, waiting = self.sample("client", "peer_waiting_for_snapshot")
+        self.assertTrue(suite.barrier_reached("content-ready", client, waiting))
+        self.assertFalse(suite.barrier_released("content-ready", client, waiting))
+        adopted, observed = self.sample("client", "peer_waiting_for_begin")
+        self.assertTrue(suite.barrier_released("content-ready", adopted, observed))
+        self.assertTrue(suite.barrier_reached("snapshot-adopt", adopted, observed))
+        self.assertFalse(suite.barrier_released("snapshot-adopt", adopted, observed))
 
     def test_modal_ack_is_unprovable_rather_than_guessed(self):
         host, observed = self.sample("host", "running", begin_sim=1)
@@ -281,6 +280,93 @@ class AssertionTest(unittest.TestCase):
                 self.record({}))
 
 
+class HashCadenceTest(unittest.TestCase):
+    """`hash-equal` reads the cadence off `/state`, not off one compared frame."""
+
+    def record(self, traces):
+        record = {"texts": {}, "peers": [{"seat": seat, "role": "host" if seat == 0 else "client"}
+                                         for seat in traces],
+                  "trace": [], "statuses": {}, "latest": {}}
+        for seat, samples in traces.items():
+            for frame, compared, desync in samples:
+                record["trace"].append((
+                    {"seat": seat, "role": "host" if seat == 0 else "client"},
+                    {"frame": frame, "multiplayer": {
+                        "last_compared_hash_frame": compared, "desync_count": desync}}))
+        return record
+
+    def evaluate(self, traces, peers=(0, 1), every=25):
+        return suite.evaluate_expectation(
+            {"assert": "hash-equal", "peers": list(peers), "every": every},
+            self.record(traces))
+
+    def test_a_cadence_on_every_boundary_passes(self):
+        samples = [(0, None, 0), (10, 0, 0), (20, 0, 0), (26, 25, 0), (35, 25, 0),
+                   (51, 50, 0), (70, 50, 0)]
+        ok, detail, observed = self.evaluate({0: samples, 1: samples})
+        self.assertTrue(ok, detail)
+        self.assertEqual(observed[0]["compared_frames"], 3)
+
+    def test_one_compared_frame_is_not_a_cadence(self):
+        samples = [(0, None, 0), (10, 0, 0), (20, 0, 0)]
+        ok, detail, _ = self.evaluate({0: samples, 1: samples})
+        self.assertFalse(ok)
+        self.assertIn("unobservable", detail)
+
+    def test_a_skipped_boundary_fails_when_the_samples_could_have_seen_it(self):
+        samples = [(0, 25, 0), (6, 75, 0)]
+        ok, detail, _ = self.evaluate({0: samples, 1: samples})
+        self.assertFalse(ok)
+        self.assertIn("jumped 25 -> 75", detail)
+
+    def test_a_wide_step_is_allowed_when_the_peer_advanced_far_enough(self):
+        samples = [(0, 25, 0), (120, 75, 0)]
+        ok, detail, _ = self.evaluate({0: samples, 1: samples})
+        self.assertTrue(ok, detail)
+
+    def test_a_compared_frame_off_the_boundary_fails(self):
+        samples = [(0, 30, 0), (10, 30, 0)]
+        ok, detail, _ = self.evaluate({0: samples, 1: samples})
+        self.assertFalse(ok)
+        self.assertIn("not a multiple of 25", detail)
+
+    def test_a_desync_anywhere_in_the_run_fails_even_if_the_read_was_clean(self):
+        # The rule cannot pass a row merely because its final sample is quiet.
+        samples = [(0, 0, 0), (10, 0, 1), (35, 25, 1)]
+        ok, detail, _ = self.evaluate({0: samples, 1: samples})
+        self.assertFalse(ok)
+        self.assertIn("1 desync(s) observed", detail)
+
+    def test_divergence_is_read_from_every_sample_not_only_the_latest(self):
+        samples = [(0, 0, 0), (10, 0, 1), (35, 25, 1)]
+        ok, _, observed = suite.evaluate_expectation(
+            {"assert": "hash-diverged", "peers": [1]}, self.record({1: samples}))
+        self.assertTrue(ok)
+        self.assertEqual(observed, {1: 1})
+        ok, _, _ = suite.evaluate_expectation(
+            {"assert": "hash-diverged", "peers": [1]},
+            self.record({1: [(0, 0, 0), (10, 0, 0)]}))
+        self.assertFalse(ok)
+
+
+class VerdictTest(unittest.TestCase):
+    def test_a_refused_row_keeps_the_suite_red(self):
+        self.assertEqual(suite.suite_verdict(False, False, [], [{"id": "H10"}],
+                                             {"H11": "observed"}), "harness-gap")
+        self.assertEqual(suite.suite_exit_code("harness-gap"), 1)
+
+    def test_the_worst_verdict_wins(self):
+        self.assertEqual(suite.suite_verdict(True, False, [], [], {}), "prerequisite-missing")
+        self.assertEqual(suite.suite_verdict(False, True, [], [], {}), "interrupted")
+        self.assertEqual(suite.suite_verdict(False, False, ["H11"], [], {}), "hang")
+        self.assertEqual(suite.suite_exit_code("hang"), 2)
+        self.assertEqual(suite.suite_exit_code("observed"), 0)
+        self.assertEqual(suite.suite_exit_code("failed"), 1)
+
+    def test_an_empty_selection_is_never_observed(self):
+        self.assertEqual(suite.suite_verdict(False, False, [], [], {}), "failed")
+
+
 class EvidenceLayoutTest(unittest.TestCase):
     def test_each_run_gets_a_fresh_directory_below_its_scenario(self):
         with tempfile.TemporaryDirectory() as root:
@@ -304,9 +390,37 @@ class EvidenceLayoutTest(unittest.TestCase):
             suite.require_empty(Path(root) / "absent")
             suite.require_empty(Path(root))
 
+    def test_the_hash_manifest_records_the_samples_and_the_replay(self):
+        with tempfile.TemporaryDirectory() as root:
+            replay = Path(root) / "host.rhrec.jsonl"
+            replay.write_text("{}\n")
+            scenario = type("S", (), {
+                "record_path": replay,
+                "record": lambda self: {"trace": [
+                    ({"seat": 0, "role": "host"},
+                     {"frame": 10, "multiplayer": {"last_compared_hash_frame": 0,
+                                                   "desync_count": 0}}),
+                    ({"seat": 1, "role": "client"},
+                     {"frame": 11, "multiplayer": {"last_compared_hash_frame": None,
+                                                   "desync_count": 0}}),
+                ]},
+            })()
+            manifest = suite.hash_manifest(scenario)
+        self.assertEqual(manifest["samples"][0],
+                         {"seat": 0, "frame": 10, "compared_frame": 0, "desync_count": 0})
+        self.assertEqual([sample["seat"] for sample in manifest["samples"]], [0, 1])
+        self.assertEqual(manifest["replay"]["path"], "host.rhrec.jsonl")
+        self.assertTrue(manifest["replay"]["exists"])
+        self.assertEqual(len(manifest["replay"]["sha256"]), 64)
+
+    def test_a_run_that_never_started_still_has_a_manifest(self):
+        manifest = suite.hash_manifest(None)
+        self.assertEqual((manifest["samples"], manifest["replay"]), ([], None))
+
     def test_the_required_evidence_names_are_declared(self):
         self.assertEqual(suite.EVIDENCE_FILES,
-                         ("scenario.json", "summary.json", "events.jsonl", "binary.sha256"))
+                         ("scenario.json", "summary.json", "events.jsonl", "hashes.json",
+                          "binary.sha256"))
 
 
 class PrerequisiteTest(unittest.TestCase):

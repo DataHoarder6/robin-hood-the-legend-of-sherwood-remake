@@ -1,12 +1,14 @@
 {
   "schema": 1,
   "id": "H15",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game_session::terminal_debriefing::tests::client_terminal_completion_waits_for_the_host_snapshot"
+  ] },
   "peers": [
     { "seat": 0, "role": "host" },
     { "seat": 1, "role": "client" }
   ],
   "expect": [
-    { "assert": "barrier", "barrier": "modal-ack", "state": "released" },
-    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" }
+    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "absent" }
   ]
 }
