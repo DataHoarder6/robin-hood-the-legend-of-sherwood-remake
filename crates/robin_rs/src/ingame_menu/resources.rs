@@ -594,6 +594,10 @@ static DEFAULT_FALLBACKS: &[(usize, &str)] = &[
         "Do you really want to abort the mission?",
     ),
     (
+        MT_MSG_LEAVE_MISSION_NOW,
+        "You've won the mission. Do you want to leave now?",
+    ),
+    (
         MT_MSG_REALLY_CONVERT_PEASANTS,
         "Do you really want to convert your peasants into blazons?",
     ),
@@ -2308,7 +2312,7 @@ mod tests {
         for (key, text) in DEFAULT_FALLBACKS {
             assert_eq!(map.get(key), Some(text));
         }
-        assert_eq!(DEFAULT_FALLBACKS.len(), 241);
+        assert_eq!(DEFAULT_FALLBACKS.len(), 242);
         assert_eq!(map.get(&MT_BTN_START_GAME), Some(&"Start Game"));
         assert_eq!(map.get(&MT_BTN_SHOW_CREDITS), Some(&"Show Credits"));
         assert_eq!(map.get(&MT_STR_KEY_PAUSE), Some(&"Pause"));

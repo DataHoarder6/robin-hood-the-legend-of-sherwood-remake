@@ -127,7 +127,7 @@ use crate::gfx_types::GameEvent;
 use crate::host::ApplicationContext;
 use crate::host::Host;
 use crate::host::PrintScreenRequest;
-use crate::ingame_menu::resources::{MT_MSG_LEAVE_MISSION_NOW, MT_MSG_REALLY_LOAD_QUICKSAVE};
+use crate::ingame_menu::resources::MT_MSG_REALLY_LOAD_QUICKSAVE;
 use crate::ingame_menu::{
     DebriefingOutcome, IngameMenuResources, MissionStatePopupState, PauseMenu, SaveLoadMode,
     SaveLoadOutcome,

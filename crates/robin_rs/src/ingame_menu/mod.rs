@@ -91,7 +91,10 @@ pub enum ModalScreenOutcome<T> {
 
 use robin_engine::game_operation::GameCode;
 
-use resources::{MT_TTL_MISSION_ABORTED, MT_TTL_MISSION_LOST, MT_TTL_MISSION_WON};
+use resources::{
+    MT_MSG_LEAVE_MISSION_NOW, MT_MSG_REALLY_ABORT_MISSION, MT_TTL_MISSION_ABORTED,
+    MT_TTL_MISSION_LOST, MT_TTL_MISSION_WON,
+};
 
 /// Which original mission-end page a mission presents.
 ///
@@ -143,6 +146,17 @@ impl MissionEndKind {
         }
     }
 
+    /// Retail menu-text id of the question asked when the player asks to
+    /// leave a live mission. Leaving a mission already won is the courtesy
+    /// question (#235); anything else is an abort the player must confirm
+    /// (#238).
+    pub fn leave_prompt_id(self) -> usize {
+        match self {
+            Self::Won => MT_MSG_LEAVE_MISSION_NOW,
+            Self::Lost | Self::Aborted => MT_MSG_REALLY_ABORT_MISSION,
+        }
+    }
+
     /// Line shown in the mission-state confirmation before the debriefing.
     pub fn popup_message(self) -> &'static str {
         match self {
@@ -183,5 +197,12 @@ mod tests {
         assert_eq!(MissionEndKind::Lost.title_id(), 25);
         assert_eq!(MissionEndKind::Aborted.title_id(), 26);
         assert!(!MissionEndKind::Aborted.is_won());
+    }
+
+    #[test]
+    fn leave_prompt_ids_are_the_retail_questions() {
+        assert_eq!(MissionEndKind::Won.leave_prompt_id(), 235);
+        assert_eq!(MissionEndKind::Lost.leave_prompt_id(), 238);
+        assert_eq!(MissionEndKind::Aborted.leave_prompt_id(), 238);
     }
 }

@@ -660,6 +660,24 @@ pub(super) enum ActiveModalOutcome {
 use super::session_policy::ModalScreenAdmission;
 pub(super) use super::session_policy::{ReplayModalDismissals, pop_matching_dismissal};
 
+/// Command a dismissed mission-state confirmation produces: only a confirmed
+/// leave/abort (`Completed`) dispatches `QuitMissionRequested`; cancelling
+/// leaves the mission running.
+fn mission_state_outcome(result: engine_player_command::DialogResult) -> ActiveModalOutcome {
+    use engine_player_command::DialogResult;
+    match result {
+        DialogResult::Completed => ActiveModalOutcome::QuitMissionRequested,
+        DialogResult::Aborted => ActiveModalOutcome::None,
+        DialogResult::Restart | DialogResult::Load { .. } => {
+            tracing::warn!(
+                ?result,
+                "mission-state replay result is only yes/no; treating as aborted"
+            );
+            ActiveModalOutcome::None
+        }
+    }
+}
+
 fn debriefing_replay_result(result: engine_player_command::DialogResult) -> DebriefingOutcome {
     match result {
         engine_player_command::DialogResult::Completed => DebriefingOutcome::Ok,
@@ -1122,20 +1140,7 @@ pub(super) fn tick_active_modal(
                         result,
                     });
                 *active_modal = None;
-                return match result {
-                    engine_player_command::DialogResult::Completed => {
-                        ActiveModalOutcome::QuitMissionRequested
-                    }
-                    engine_player_command::DialogResult::Aborted => ActiveModalOutcome::None,
-                    engine_player_command::DialogResult::Restart
-                    | engine_player_command::DialogResult::Load { .. } => {
-                        tracing::warn!(
-                            ?result,
-                            "mission-state replay result is only yes/no; treating as aborted"
-                        );
-                        ActiveModalOutcome::None
-                    }
-                };
+                return mission_state_outcome(result);
             }
             if dismissal.is_pending() {
                 return ActiveModalOutcome::None;
@@ -1705,6 +1710,23 @@ mod tests {
                 assert_eq!(projected_trading, trading);
             }
         }
+    }
+
+    #[test]
+    fn mission_state_confirmation_only_quits_on_a_confirmed_leave() {
+        use robin_engine::player_command::DialogResult;
+        assert_eq!(
+            super::mission_state_outcome(DialogResult::Completed),
+            super::ActiveModalOutcome::QuitMissionRequested
+        );
+        assert_eq!(
+            super::mission_state_outcome(DialogResult::Aborted),
+            super::ActiveModalOutcome::None
+        );
+        assert_eq!(
+            super::mission_state_outcome(DialogResult::Load { slot: 3 }),
+            super::ActiveModalOutcome::None
+        );
     }
 
     #[test]

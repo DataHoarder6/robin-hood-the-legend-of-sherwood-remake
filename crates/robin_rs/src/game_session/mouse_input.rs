@@ -2018,9 +2018,11 @@ pub(super) fn handle_sherwood_hud_buttons(
                 }
                 Some(SherwoodButton::QuitMission) => {
                     // Abandoning a live mission: the shared mission-state
-                    // popup asks for confirmation, and its Completed result
-                    // dispatches `QuitMissionRequested` through the same
-                    // path the scripted leave prompt uses.
+                    // popup asks for confirmation in the question of the
+                    // state it opens in (abort while unfinished, leave once
+                    // won), and its Completed result dispatches
+                    // `QuitMissionRequested` through the same path the
+                    // scripted leave prompt uses.
                     host.effects
                         .request_signal(crate::host::HostSignal::MissionStatePopup);
                     return HandlerAction::Continue;
