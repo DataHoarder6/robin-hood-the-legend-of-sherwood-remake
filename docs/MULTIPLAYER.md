@@ -1,9 +1,11 @@
 # Multiplayer architecture
 
-Updated 2026-08-30. Multiplayer uses a server-ordered input stream with a
+Updated 2026-11-18. Multiplayer uses a server-ordered input stream with a
 small scheduling delay, predictive simulation, rollback for late inputs,
-periodic state-hash verification, and authoritative snapshots for joins. The
-wire protocol is version 53; older protocol compatibility is unsupported.
+periodic state-hash verification, and authoritative snapshots for joins. A peer
+states its wire protocol version in its join and a mismatch refuses it; the
+version is `NET_PROTOCOL_VERSION` in `crates/robin_run_types/src/lib.rs`, never
+a number restated here, and compatibility with older protocols is unsupported.
 
 ## Seat model
 
