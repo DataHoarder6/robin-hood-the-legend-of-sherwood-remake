@@ -154,7 +154,7 @@ async fn choose_recovery(
         draw_diagnostic(renderer, resources, transform, &message, &mut dialog.scroll);
         widget_bridge::draw_frame_buttons(renderer, resources, transform, &dialog.frame);
         if let Some(cursor) = cursor {
-            cursor.draw(renderer, transform, &dialog.input);
+            cursor.draw(renderer, &dialog.input);
         }
         renderer.present();
         crate::window::sleep_ui_frame().await;
@@ -293,7 +293,7 @@ impl ErrorNotice {
         );
         widget_bridge::draw_frame_buttons(renderer, resources, transform, frame);
         if let Some(cursor) = cursor {
-            cursor.draw(renderer, transform, &self.input);
+            cursor.draw(renderer, &self.input);
         }
         renderer.present();
         false

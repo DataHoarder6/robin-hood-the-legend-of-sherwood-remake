@@ -208,7 +208,7 @@ impl YesNoModalState {
         dim_screen(renderer);
         self.draw_content(renderer, resources);
         if let Some(c) = cursor {
-            c.draw(renderer, self.transform, &self.input_state);
+            c.draw(renderer, &self.input_state);
         }
     }
 

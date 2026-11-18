@@ -220,6 +220,30 @@ impl MenuTransform {
     }
 }
 
+/// Keep a child window fully on screen.
+///
+/// `requested` and the returned origin are virtual menu coordinates;
+/// `transform` places that menu on the screen, so the bounds are derived from
+/// the screen and not from the 640x480 menu surface hosting the window. A
+/// window requested near an edge slides back until its whole rect is visible;
+/// a window larger than the screen pins its top-left corner on screen instead
+/// of collapsing to a negative origin.
+pub fn place_window_on_screen(
+    transform: MenuTransform,
+    screen: (i32, i32),
+    requested: (i32, i32),
+    size: (i32, i32),
+) -> (i32, i32) {
+    let min_x = -transform.origin_x;
+    let min_y = -transform.origin_y;
+    let max_x = (screen.0 - transform.origin_x - size.0).max(min_x);
+    let max_y = (screen.1 - transform.origin_y - size.1).max(min_y);
+    (
+        requested.0.clamp(min_x, max_x),
+        requested.1.clamp(min_y, max_y),
+    )
+}
+
 /// Drain window events, synchronize native presentation/logical dimensions,
 /// and return the transform that matches those events' pointer coordinates.
 ///

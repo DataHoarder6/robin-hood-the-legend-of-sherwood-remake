@@ -254,7 +254,7 @@ impl ScreenFrame {
     /// Draw the modal cursor (when present) and present the frame.
     pub fn finish(&self, io: &mut ModalScreenIo<'_, '_>, input: &ModalInputState) {
         if let Some(cursor) = io.cursor {
-            cursor.draw(io.renderer, self.transform, input);
+            cursor.draw(io.renderer, input);
         }
         io.renderer.present();
     }
@@ -688,6 +688,11 @@ pub struct ModalInputState {
     pub virt_x: f32,
     pub virt_y: f32,
     pub buttons: MouseButtons,
+    /// Latest pointer position in screen pixels, kept unclamped so the
+    /// software cursor can follow the OS pointer anywhere in the window.
+    /// `virt_x`/`virt_y` are the same position through the caller's menu
+    /// mapping; that mapping may put it outside the caller's own surface.
+    pointer_screen: Option<(i32, i32)>,
     keyboard: UiKeyboard,
     /// Raw physical-key pressed-state set; `KeyDown`/`KeyUp` events
     /// toggle entries here and [`refresh_keyboard`](Self::refresh_keyboard)
@@ -723,6 +728,7 @@ impl Default for ModalInputState {
             virt_x: -1.0,
             virt_y: -1.0,
             buttons: MouseButtons::empty(),
+            pointer_screen: None,
             keyboard: UiKeyboard::default(),
             raw_keyboard: KeyboardState::default(),
             start_time: web_time::Instant::now(),
@@ -765,22 +771,21 @@ impl<'a> ModalCursor<'a> {
         }
     }
 
-    /// Draw the cursor at the current modal input position (virtual → screen).
-    /// Skips rendering until the first mouse event seeds `input.virt_x/y`.
-    pub fn draw(
-        &self,
-        renderer: &mut Renderer,
-        transform: super::layout::MenuTransform,
-        input: &ModalInputState,
-    ) {
-        if input.virt_x < 0.0 || input.virt_y < 0.0 {
+    /// Draw the cursor at the last screen-space pointer position.
+    ///
+    /// The cursor is the OS pointer made visible again, so its position is
+    /// never filtered through the caller's virtual surface: a screen whose
+    /// mapping covers only part of the window (the classic campaign map)
+    /// must not park the pointer on its own edges. Skips rendering until the
+    /// first mouse event has seeded the position.
+    pub fn draw(&self, renderer: &mut Renderer, input: &ModalInputState) {
+        let Some((x, y)) = input.cursor_screen_position() else {
             return;
-        }
-        let (sx, sy) = transform.to_screen(input.virt_x as i32, input.virt_y as i32);
+        };
         self.cursor.render(
             renderer,
-            sx as f32,
-            sy as f32,
+            x as f32,
+            y as f32,
             self.opacity,
             self.shadow_color,
         );
@@ -838,11 +843,13 @@ impl ModalInputState {
                 let (vx, vy) = transform.from_screen(*x, *y);
                 self.virt_x = vx as f32;
                 self.virt_y = vy as f32;
+                self.pointer_screen = Some((*x, *y));
             }
             GameEvent::MouseDown(x, y, btn, clicks) => {
                 let (vx, vy) = transform.from_screen(*x, *y);
                 self.virt_x = vx as f32;
                 self.virt_y = vy as f32;
+                self.pointer_screen = Some((*x, *y));
                 if *btn == 1 {
                     self.buttons |= MouseButtons::LEFT_DOWN;
                     self.pending_double_click_left = *clicks >= 2;
@@ -855,6 +862,7 @@ impl ModalInputState {
                 let (vx, vy) = transform.from_screen(*x, *y);
                 self.virt_x = vx as f32;
                 self.virt_y = vy as f32;
+                self.pointer_screen = Some((*x, *y));
                 if *btn == 1 {
                     let matched_down = self.buttons.contains(MouseButtons::LEFT_DOWN);
                     self.buttons.remove(MouseButtons::LEFT_DOWN);
@@ -938,16 +946,34 @@ impl ModalInputState {
     /// widget never saw Left/Right/Home/End/Backspace/Enter/Esc in the
     /// modal path.
     pub fn as_widget_input(&mut self) -> WidgetInput<'_> {
+        let position = engine_coordinates::ScreenPoint::new(self.virt_x, self.virt_y);
+        self.as_widget_input_at(position)
+    }
+
+    /// [`as_widget_input`](Self::as_widget_input) with the pointer at
+    /// `position`. A screen that maps the pointer itself uses this to keep a
+    /// position outside its own surface from hitting anything inside it,
+    /// instead of discarding the event before it reaches the screen.
+    pub fn as_widget_input_at(
+        &mut self,
+        position: engine_coordinates::ScreenPoint,
+    ) -> WidgetInput<'_> {
         let now_ms = self.start_time.elapsed().as_millis() as u32;
         self.keyboard.refresh(&self.raw_keyboard, now_ms);
         WidgetInput {
-            mouse_position: engine_coordinates::ScreenPoint::new(self.virt_x, self.virt_y),
+            mouse_position: position,
             mouse_z: 0,
             mouse_button: self.buttons,
             keyboard: &self.keyboard,
             text_input: &self.text_input,
             capture: Some(&self.capture),
         }
+    }
+
+    /// Latest pointer position in screen pixels, before the callers' virtual
+    /// mapping. `None` until the first mouse event.
+    pub fn cursor_screen_position(&self) -> Option<(i32, i32)> {
+        self.pointer_screen
     }
 
     /// Widget currently requesting mouse capture (if any). Set via
@@ -979,6 +1005,7 @@ impl ModalInputState {
         let (vx, vy) = transform.from_screen(mx, my);
         self.virt_x = vx as f32;
         self.virt_y = vy as f32;
+        self.pointer_screen = Some((mx, my));
     }
 }
 
@@ -1015,6 +1042,27 @@ fn first_modal_frame_observes_a_new_key_press() {
             .get_state_of_key(winit::keyboard::KeyCode::Enter),
         crate::ui::KeyState::KeyDown,
     );
+}
+
+#[test]
+fn cursor_keeps_the_screen_pointer_when_the_surface_mapping_excludes_it() {
+    let transform = MenuTransform::centered(2259, 1271);
+    let mut input = ModalInputState::new();
+    assert_eq!(input.cursor_screen_position(), None);
+
+    // A pointer in the empty screen around a centred 640x480 panel maps to a
+    // virtual position the panel never covers.
+    input.update_from_event(
+        &GameEvent::MouseMove {
+            x: 2200,
+            y: 1200,
+            xrel: 0,
+            yrel: 0,
+        },
+        transform,
+    );
+    assert!(input.virt_x > 640.0 && input.virt_y > 480.0);
+    assert_eq!(input.cursor_screen_position(), Some((2200, 1200)));
 }
 
 // ─── Rendering bridge ───────────────────────────────────────────────

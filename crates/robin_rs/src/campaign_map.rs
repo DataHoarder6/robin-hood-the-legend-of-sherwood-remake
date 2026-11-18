@@ -17,12 +17,13 @@ use crate::menu::{CampaignMapState, LOCATION_POSITIONS, mission_location_from_in
 use crate::native_font::{self, Font};
 use crate::renderer::Renderer;
 use crate::scroll_view::ScrollView;
-use crate::ui::UiState;
+use crate::ui::{UiMsg, UiState};
 use crate::ui_screens::MissionDescriptionScreen;
 use crate::widget::FrameWnd;
 use robin_assets::resource_manager::ResourceManager;
 use robin_assets::shipping_datadir as assets_shipping_datadir;
 use robin_engine::campaign::Campaign;
+use robin_engine::coordinates as engine_coordinates;
 use robin_engine::coordinates::ScreenBBox;
 use robin_engine::gameplay_config::CampaignPresentationMode;
 use robin_engine::profiles as engine_profiles;
@@ -480,7 +481,7 @@ impl CampaignMapModalState {
         #[cfg(not(target_arch = "wasm32"))]
         self.draw_registration(renderer, transform);
         if let Some(cursor) = cursor {
-            cursor.draw(renderer, transform, &self.input);
+            cursor.draw(renderer, &self.input);
         }
         renderer.present();
         choice.map(|choice| {
@@ -565,7 +566,7 @@ impl CampaignMapModalState {
         #[cfg(not(target_arch = "wasm32"))]
         self.draw_registration(renderer, transform);
         if let Some(cursor) = &cursor {
-            cursor.draw(renderer, transform, &self.input);
+            cursor.draw(renderer, &self.input);
         }
         renderer.present();
 
@@ -1244,6 +1245,19 @@ impl CampaignMapModalState {
         EventFlow::Continue
     }
 
+    /// The classic map's pointer mapping: the virtual cursor while it is over
+    /// the map surface, and `None` while it is anywhere else in the window.
+    ///
+    /// Positions outside the panel are ignored for hit-testing. They are not
+    /// clamped onto an edge pin, and they are not dropped before the map sees
+    /// them: the cursor keeps following the OS pointer across the whole window
+    /// while the map is open.
+    fn classic_pointer(&self) -> Option<(i32, i32)> {
+        let x = self.input.virt_x as i32;
+        let y = self.input.virt_y as i32;
+        ((0..MAP_W).contains(&x) && (0..MAP_H).contains(&y)).then_some((x, y))
+    }
+
     fn handle_mouse_click(
         &mut self,
         x: i32,
@@ -1406,7 +1420,15 @@ impl CampaignMapModalState {
             self.sync_scroll_views(true);
         }
         if self.presentation == CampaignPresentationMode::ClassicMap {
-            let widget_input = self.input.as_widget_input();
+            // The classic map paints a 640x480 panel inside the window. Feed
+            // the widget frame through the panel's own pointer mapping so a
+            // pointer outside it hits nothing, while the event itself still
+            // reached the map and moved the cursor.
+            let position = self.classic_pointer().map_or_else(
+                || engine_coordinates::ScreenPoint::new(-1.0, -1.0),
+                |(x, y)| engine_coordinates::ScreenPoint::new(x as f32, y as f32),
+            );
+            let widget_input = self.input.as_widget_input_at(position);
             let events = self.frame.process_input(&widget_input);
             self.input.end_frame();
 
@@ -1420,7 +1442,19 @@ impl CampaignMapModalState {
                 }
             }
 
-            if let Some(id) = widget_bridge::find_activated(&events) {
+            // The decorative pictures on the panel report an activation for a
+            // click anywhere on it, and they are added before the pins. Resolve
+            // the action by widget id so a pin click is not lost behind the
+            // artwork that carries it.
+            let activated = events
+                .iter()
+                .filter(|event| event.msg_type == UiMsg::WidgetActivated)
+                .map(|event| event.origin_widget_id)
+                .find(|id| {
+                    *id == CLOSE_WIDGET_ID
+                        || self.items.iter().any(|item| item.loc_idx as u32 == *id)
+                });
+            if let Some(id) = activated {
                 if id == CLOSE_WIDGET_ID {
                     return Some(CampaignMapChoice::Quit);
                 }
@@ -3182,6 +3216,11 @@ fn render_tooltip(renderer: &mut Renderer, transform: MenuTransform, view: Toolt
         profiles,
         item,
         input,
+        transform,
+        (
+            renderer.screen_width() as i32,
+            renderer.screen_height() as i32,
+        ),
         assets,
         show_achievement_badges,
     );
@@ -3289,23 +3328,51 @@ fn short_description(
 }
 
 impl ShortMissionDescriptionWindow {
+    const WIDTH: i32 = 220;
+
+    /// Tooltip origin for the current pointer: 25 pixels down-right of it,
+    /// slid back until the whole window is on screen. The map panel anchors
+    /// the tooltip; it does not bound it.
+    fn origin(
+        transform: MenuTransform,
+        screen: (i32, i32),
+        pointer: (i32, i32),
+        height: i32,
+    ) -> (i32, i32) {
+        layout::place_window_on_screen(
+            transform,
+            screen,
+            (pointer.0 + 25, pointer.1 + 25),
+            (Self::WIDTH, height),
+        )
+    }
+
     fn new(
         campaign: &Campaign,
         profiles: &engine_profiles::ProfileManager,
         item: &CampaignMapItem,
         input: &ModalInputState,
+        transform: MenuTransform,
+        screen: (i32, i32),
         assets: &CampaignMapAssets,
         show_achievement_badges: bool,
     ) -> Self {
-        let mut x = input.virt_x as i32 + 25;
-        let mut y = input.virt_y as i32 + 25;
-        x = x.clamp(0, MAP_W - 220);
         let height = if show_achievement_badges { 344 } else { 100 };
-        y = y.clamp(0, MAP_H - height);
+        let (x, y) = Self::origin(
+            transform,
+            screen,
+            (input.virt_x as i32, input.virt_y as i32),
+            height,
+        );
 
         let mut frame = FrameWnd::new(
             "Short mission description",
-            ScreenBBox::from_coords(x as f32, y as f32, (x + 220) as f32, (y + height) as f32),
+            ScreenBBox::from_coords(
+                x as f32,
+                y as f32,
+                (x + Self::WIDTH) as f32,
+                (y + height) as f32,
+            ),
             0,
         );
         frame.add_widget_absolute(widget_bridge::make_picture_with_resource(
@@ -4579,6 +4646,172 @@ mod availability_tests {
         let mission_idx = items[locked].mission_idx;
         assert!(!campaign.is_mission_accessible(mission_idx));
         assert!(!campaign.is_mission_replayable(mission_idx));
+    }
+
+    /// Screen corners and edge midpoints, where a pointer-driven child window
+    /// has to be slid back into view.
+    fn screen_anchors(width: i32, height: i32) -> [(i32, i32); 9] {
+        [
+            (0, 0),
+            (width / 2, 0),
+            (width, 0),
+            (0, height / 2),
+            (width / 2, height / 2),
+            (width, height / 2),
+            (0, height),
+            (width / 2, height),
+            (width, height),
+        ]
+    }
+
+    #[test]
+    fn short_description_window_stays_on_screen_at_every_edge_and_viewport() {
+        for (width, height) in [(2259, 1271), (800, 600)] {
+            let transform = MenuTransform::centered(width, height);
+            for anchor in screen_anchors(width, height) {
+                let pointer = transform.from_screen(anchor.0, anchor.1);
+                for window_height in [100, 344] {
+                    let (x, y) = ShortMissionDescriptionWindow::origin(
+                        transform,
+                        (width, height),
+                        pointer,
+                        window_height,
+                    );
+                    let (sx, sy) = transform.to_screen(x, y);
+                    assert!(
+                        sx >= 0 && sy >= 0,
+                        "{width}x{height} anchor {anchor:?}: window at ({sx}, {sy}) starts off screen"
+                    );
+                    assert!(
+                        sx + ShortMissionDescriptionWindow::WIDTH <= width,
+                        "{width}x{height} anchor {anchor:?}: window crosses the right edge"
+                    );
+                    assert!(
+                        sy + window_height <= height,
+                        "{width}x{height} anchor {anchor:?}: window crosses the bottom edge"
+                    );
+                }
+            }
+        }
+
+        // The window is not held inside the map panel: on a wide window a
+        // pointer near the right screen edge puts it past the panel's edge.
+        let transform = MenuTransform::centered(2259, 1271);
+        let pointer = transform.from_screen(2258, 600);
+        let (x, _) = ShortMissionDescriptionWindow::origin(transform, (2259, 1271), pointer, 100);
+        assert!(transform.to_screen(x, 0).0 > transform.origin_x + MAP_W);
+    }
+
+    #[test]
+    fn classic_pointer_ignores_positions_outside_the_map_panel() {
+        let (campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        let mut state = classic_state(items, &campaign, &profiles);
+
+        for (x, y) in [
+            (0, 0),
+            (MAP_W - 1, 0),
+            (0, MAP_H - 1),
+            (MAP_W - 1, MAP_H - 1),
+        ] {
+            state.input.virt_x = x as f32;
+            state.input.virt_y = y as f32;
+            assert_eq!(
+                state.classic_pointer(),
+                Some((x, y)),
+                "the panel edge ({x}, {y}) is inside the map"
+            );
+        }
+        for (x, y) in [
+            (-1, 0),
+            (0, -1),
+            (MAP_W, 0),
+            (0, MAP_H),
+            (MAP_W, MAP_H),
+            (-400, -400),
+        ] {
+            state.input.virt_x = x as f32;
+            state.input.virt_y = y as f32;
+            assert_eq!(
+                state.classic_pointer(),
+                None,
+                "({x}, {y}) is outside the map panel and must not be clamped onto it"
+            );
+        }
+    }
+
+    #[test]
+    fn click_outside_the_map_panel_hits_no_pin_and_keeps_the_pointer() {
+        let (campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        let ready = items
+            .iter()
+            .position(|item| item.availability.starts_mission())
+            .expect("ready pin");
+        let mut state = classic_state(items.clone(), &campaign, &profiles);
+        let transform = MenuTransform::centered(2259, 1271);
+        // Start on a pin the hover must move away from.
+        state.selected_classic = (ready + 1) % items.len();
+
+        let (px, py) = LOCATION_POSITIONS[items[ready].loc_idx];
+        let inside = transform.to_screen(px as i32 + 2, py as i32 + 2);
+        assert_eq!(
+            state.handle_events(
+                vec![GameEvent::MouseMove {
+                    x: inside.0,
+                    y: inside.1,
+                    xrel: 0,
+                    yrel: 0,
+                }],
+                transform,
+                false
+            ),
+            None
+        );
+        assert_eq!(state.selected_classic, ready, "hovering the pin selects it");
+
+        // A click in the empty screen around the panel is not swallowed: it
+        // reaches the map, keeps the real pointer position (so the cursor keeps
+        // moving) and activates nothing.
+        let outside = (2259 - 4, 1271 - 4);
+        assert_eq!(
+            state.handle_events(
+                vec![
+                    GameEvent::MouseDown(outside.0, outside.1, 1, 1),
+                    GameEvent::MouseUp(outside.0, outside.1, 1),
+                ],
+                transform,
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            transform.from_screen(outside.0, outside.1),
+            (state.input.virt_x as i32, state.input.virt_y as i32),
+            "the pointer position outside the panel is kept, not clamped or dropped"
+        );
+        assert_eq!(state.input.cursor_screen_position(), Some(outside));
+        assert_eq!(state.selected_classic, ready);
+
+        // Back inside, the same click still starts the ready mission. A menu
+        // button needs one hovered frame before it accepts the press.
+        assert_eq!(
+            state.handle_events(
+                vec![
+                    GameEvent::MouseMove {
+                        x: inside.0,
+                        y: inside.1,
+                        xrel: 0,
+                        yrel: 0,
+                    },
+                    GameEvent::MouseDown(inside.0, inside.1, 1, 1),
+                    GameEvent::MouseUp(inside.0, inside.1, 1),
+                ],
+                transform,
+                false
+            ),
+            Some(CampaignMapChoice::SelectMission(items[ready].mission_idx))
+        );
     }
 }
 
