@@ -221,7 +221,9 @@ class CorpusValidationTests(unittest.TestCase):
         contract = corpus.load_contract()
         self.assertEqual(corpus.validate(defaults, scenarios, contract), [])
         self.assertLessEqual(contract.covered, set(scenarios))
-        self.assertEqual(len(scenarios), 19)
+        # One scenario per corpus row; a row without a file, or a file without a
+        # row, is the mismatch that matters — not the count on the day.
+        self.assertEqual(len(scenarios), len(contract.layers))
         layers = [contract.layers[identifier] for identifier in scenarios]
         for layer in corpus.LAYERS:
             self.assertIn(layer, layers)

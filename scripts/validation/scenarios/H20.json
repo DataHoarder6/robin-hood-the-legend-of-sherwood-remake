@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "H20",
+  "proves": { "layer": "core", "tests": [
+      "robin_rs::game_session::multiplayer::story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim"
+  ] },
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    {
+      "at": { "barrier": "transition-commit", "after": 0 },
+      "peer": 1,
+      "fault": "drop",
+      "message": "CommitSnapshotTransition"
+    }
+  ],
+  "expect": [
+    { "assert": "barrier", "barrier": "snapshot-adopt", "state": "reached" },
+    { "assert": "barrier", "barrier": "begin-sim", "state": "released" }
+  ]
+}

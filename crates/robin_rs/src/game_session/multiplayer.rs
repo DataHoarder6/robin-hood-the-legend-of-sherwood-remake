@@ -81,6 +81,15 @@ pub(crate) enum SessionProtocolFailure {
         full_mod_sha256: [u8; 32],
         offset: u64,
     },
+    /// A prepared transition outlived its own acknowledge-and-commit budget.
+    #[error(
+        "fatal multiplayer session error: snapshot transition {id:?} stayed prepared for {age_ms} ms, past its {budget_ms} ms budget"
+    )]
+    TransitionExpired {
+        id: robin_engine::multiplayer::SnapshotTransitionId,
+        age_ms: u64,
+        budget_ms: u64,
+    },
     /// An admission phase never received the message that would release it.
     #[error(
         "fatal multiplayer session error: no admission progress for {waited_ms} ms in {}",
@@ -740,11 +749,21 @@ impl NetDrain<'_> {
                 frame,
                 start_epoch_ms,
             } => {
-                if self.host.transport.has_snapshot_transition() {
-                    // A reconnect can carry a cached start barrier after the
-                    // transition prepare. Only its matching commit may release
-                    // the prepared payload; this old mission must stay paused.
-                    tracing::debug!(frame, "ignoring cached BeginSim during snapshot transition");
+                if let Some(transition) = self.host.transport.pending_snapshot_transition() {
+                    // Only a transition that is still live may hold the start
+                    // barrier, and only the barrier that belongs to the mission
+                    // the transition is about to replace. A prepare whose commit
+                    // can never arrive is dropped at its transport-generation
+                    // boundary (`HostTransport::await_authoritative_snapshot`),
+                    // so this line names a real hold rather than the #43
+                    // deadlock. It is never silent and never unbounded: the
+                    // transition expires on its own budget.
+                    tracing::warn!(
+                        frame,
+                        transition = ?transition.0,
+                        payload = ?transition.1,
+                        "multiplayer: holding BeginSim for a prepared snapshot transition"
+                    );
                     return Ok(());
                 }
                 self.host.transport.begin_simulation();
@@ -982,6 +1001,7 @@ impl NetDrain<'_> {
     ) -> Result<(), MultiplayerSessionError> {
         let host = &mut *self.host;
         let assets = &*self.assets;
+        let wire_bytes = payload.payload_bytes();
         require_protocol(
             host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST,
             "authoritative host received its own snapshot transition prepare",
@@ -1056,7 +1076,9 @@ impl NetDrain<'_> {
             }
         };
         host.transport
-            .prepare_snapshot_transition(crate::host::PendingSnapshotTransition::new(id, payload));
+            .prepare_snapshot_transition(crate::host::PendingSnapshotTransition::new(
+                id, payload, wire_bytes,
+            ));
         host.transport
             .net()
             .expect("prepared transition retains session")
@@ -1353,6 +1375,33 @@ pub(super) fn drain_mission_network(
             ms_until_next_frame,
             local_frame,
         );
+    }
+
+    // A prepared transition belongs to one transport generation and one payload
+    // budget. A peer still holding one past that budget is waiting for a commit
+    // that will never arrive, so fail the session by name here instead of
+    // letting the admission watchdog discover the stall two budgets later. The
+    // host is excluded: its prepared payload is what its peers are acknowledging,
+    // and the server-side eviction deadline already bounds that wait.
+    if local_is_peer
+        && let Some(expired) = host
+            .transport
+            .expire_snapshot_transition(web_time::Instant::now())
+    {
+        let (seat, session_id) = session_identity(host);
+        let error: MultiplayerSessionError = SessionProtocolFailure::TransitionExpired {
+            id: expired.id,
+            age_ms: expired.age_ms,
+            budget_ms: expired.budget_ms,
+        }
+        .into();
+        crate::multiplayer::diagnostics::record_session_failure(
+            &error.to_string(),
+            Some(timeline.multiplayer().admission().label()),
+            seat,
+            session_id,
+        );
+        return Err(error);
     }
 
     let admission_pause = match timeline
@@ -2054,6 +2103,7 @@ mod tests {
                     exit_code: GameCode::LevelSucceeded,
                     engine: None,
                 },
+                0,
             ));
         incoming
             .send(NetEvent::BeginSim {

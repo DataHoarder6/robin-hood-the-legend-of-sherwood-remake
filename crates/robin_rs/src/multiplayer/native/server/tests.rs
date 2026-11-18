@@ -831,11 +831,11 @@ fn transition_budget_scales_with_payload_size() {
     };
     assert_eq!(
         super::super::server_protocol::transition_budget_ms(&empty),
-        super::super::server_protocol::TRANSITION_COMMIT_MS
+        robin_engine::multiplayer::TRANSITION_COMMIT_MS
     );
     assert!(
         super::super::server_protocol::transition_budget_ms(&large)
-            > super::super::server_protocol::TRANSITION_COMMIT_MS
+            > robin_engine::multiplayer::TRANSITION_COMMIT_MS
     );
 }
 

@@ -290,6 +290,7 @@ mod tests {
                 PendingSnapshotTransitionPayload::Save {
                     load: SnapshotSave::Remote(Box::new(save)),
                 },
+                0,
             ));
         host.transport.commit_snapshot_transition(id).unwrap();
         let prepared = crate::main_entry::PreparedLoad::from_committed_snapshot(

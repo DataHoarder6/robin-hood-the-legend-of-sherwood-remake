@@ -80,6 +80,7 @@ pub(super) fn begin_deferred_campaign_exit(
         "campaign exit cannot overwrite another pending save/load request"
     );
     let engine_bytes = engine.encode_native_snapshot();
+    let wire_bytes = engine_bytes.len() as u64;
     let id = transport
         .net()
         .expect("deferred multiplayer campaign exit lost its transport")
@@ -91,6 +92,7 @@ pub(super) fn begin_deferred_campaign_exit(
             exit_code: GameCode::LevelInterrupted,
             engine: None,
         },
+        wire_bytes,
     ));
     Some((
         SaveLoadRequest::Sherwood {
@@ -121,6 +123,7 @@ mod tests {
                 exit_code: GameCode::LevelInterrupted,
                 engine: replacement.map(Box::new),
             },
+            0,
         );
         pending.commit_authenticated(id).unwrap();
         let mut transport = HostTransport::default();

@@ -272,6 +272,7 @@ mod tests {
             PendingSnapshotTransitionPayload::Save {
                 load: SnapshotSave::Local(load),
             },
+            0,
         );
         pending.commit_authenticated(id).unwrap();
         host.transport.prepare_snapshot_transition(pending);
@@ -358,6 +359,7 @@ mod tests {
                 PendingSnapshotTransitionPayload::Save {
                     load: SnapshotSave::Remote(Box::new(save)),
                 },
+                0,
             ));
         assert!(
             host.transport

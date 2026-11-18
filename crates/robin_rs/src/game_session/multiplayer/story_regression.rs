@@ -600,6 +600,7 @@ fn completed_mission_snapshot_commits_the_hosts_campaign_before_rebuilding() {
                     exit_code,
                     engine: None,
                 },
+                bytes.len() as u64,
             ));
         client
             .incoming
@@ -646,6 +647,91 @@ fn completed_mission_snapshot_commits_the_hosts_campaign_before_rebuilding() {
         );
         assert!(client.host.transport.reconnecting());
     }
+}
+
+/// The restart deadlock (#43): the host commits a transition and immediately
+/// rebuilds its mission transport, so a peer that acknowledged the prepare can
+/// lose the commit frame with the generation that prepared it. The replacement
+/// mission's `BeginSim` must then be accepted: a prepared transition belongs to
+/// the transport generation that prepared it, never to the next one.
+#[test]
+fn a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim() {
+    use crate::game_session::runtime::MultiplayerAdmission;
+    use crate::host::{PendingSnapshotTransition, PendingSnapshotTransitionPayload};
+    use robin_engine::game_operation::GameCode;
+    use robin_engine::multiplayer::SnapshotTransitionPayload;
+
+    let mut host = Peer::new(PlayerId::HOST);
+    let mut client = Peer::new(PlayerId(1));
+    let failed_engine = host.manager.engine.encode_native_snapshot();
+    let id = host
+        .net()
+        .begin_campaign_exit_transition(GameCode::LevelFailed, failed_engine.clone())
+        .unwrap();
+    host.host
+        .transport
+        .prepare_snapshot_transition(PendingSnapshotTransition::new(
+            id,
+            PendingSnapshotTransitionPayload::CampaignExit {
+                exit_code: GameCode::LevelFailed,
+                engine: None,
+            },
+            failed_engine.len() as u64,
+        ));
+    client
+        .incoming
+        .send(NetEvent::PrepareSnapshotTransition {
+            id,
+            payload: SnapshotTransitionPayload::CampaignExit {
+                exit_code: GameCode::LevelFailed,
+                engine_bytes: failed_engine.clone(),
+            },
+        })
+        .unwrap();
+    client.drain();
+    assert!(
+        matches!(
+            client.outgoing.try_recv().unwrap(),
+            NetOutbound::SnapshotTransitionReady { id: ready } if ready == id
+        ),
+        "the peer must acknowledge the prepare before the generation ends"
+    );
+    assert!(client.host.transport.has_snapshot_transition());
+
+    // The host committed and tore the old mission transport down; the commit
+    // frame died with it.
+    client.incoming.send(NetEvent::Disconnected).unwrap();
+    assert!(client.drain(), "a lost generation holds simulation");
+    client.incoming.send(NetEvent::Reconnected).unwrap();
+    client.drain();
+
+    let replacement = Peer::new_at(PlayerId::HOST, 0);
+    client
+        .incoming
+        .send(NetEvent::InitialSnapshot {
+            frame: 0,
+            engine_bytes: replacement.manager.engine.encode_native_snapshot(),
+        })
+        .unwrap();
+    client.drain();
+    assert_eq!(
+        client.timeline.multiplayer().admission(),
+        MultiplayerAdmission::PeerWaitingForBegin { snapshot_frame: 0 },
+        "the adopted replacement snapshot waits for its own start barrier"
+    );
+    client
+        .incoming
+        .send(NetEvent::BeginSim {
+            frame: 0,
+            start_epoch_ms: 0,
+        })
+        .unwrap();
+    client.drain();
+    assert_eq!(
+        client.timeline.multiplayer().admission(),
+        MultiplayerAdmission::Running,
+        "the replacement mission's BeginSim must release this peer"
+    );
 }
 
 #[test]

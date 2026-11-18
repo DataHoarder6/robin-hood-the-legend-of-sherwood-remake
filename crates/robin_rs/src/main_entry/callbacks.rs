@@ -856,6 +856,7 @@ fn begin_multiplayer_snapshot_transition(
     let save_bytes = serde_json::to_vec(&save).map_err(|error| {
         MissionError::save(format!("encode multiplayer snapshot transition: {error}"))
     })?;
+    let wire_bytes = save_bytes.len() as u64;
     // TODO(10/F11): leaf returns String (engine snapshot-transition channel).
     let id = net
         .begin_snapshot_transition(mission_id, save_bytes)
@@ -866,6 +867,7 @@ fn begin_multiplayer_snapshot_transition(
             crate::host::PendingSnapshotTransitionPayload::Save {
                 load: crate::host::SnapshotSave::Local(load),
             },
+            wire_bytes,
         ));
     tracing::info!(
         ?id,

@@ -256,6 +256,40 @@ pub enum SnapshotTransitionPayload {
     },
 }
 
+/// Base budget for a host-authored transition commit.
+pub const TRANSITION_COMMIT_MS: u64 = 60_000;
+/// Payload transfer allowance added on top of the base commit budget.
+pub const TRANSITION_PAYLOAD_BYTES_PER_SECOND: u64 = 64 * 1024;
+
+impl SnapshotTransitionPayload {
+    pub fn payload_bytes(&self) -> u64 {
+        match self {
+            Self::Save { save_bytes, .. } => save_bytes.len() as u64,
+            Self::CampaignExit { engine_bytes, .. } => engine_bytes.len() as u64,
+        }
+    }
+
+    /// Total time a transition may stay prepared before it must fail the
+    /// session instead of being discovered by a later admission budget.
+    ///
+    /// The base budget covers round trips and validation; the payload term
+    /// covers the bytes a peer must receive, validate and retain before it can
+    /// acknowledge. The host enforces this as its eviction deadline and a peer
+    /// enforces the same number on the transition it prepared, so both ends of
+    /// one barrier expire together.
+    pub fn budget(&self) -> std::time::Duration {
+        transition_budget(self.payload_bytes())
+    }
+}
+
+/// The acknowledge-and-commit budget for a transition carrying `wire_bytes`.
+pub fn transition_budget(wire_bytes: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(
+        TRANSITION_COMMIT_MS
+            + wire_bytes.saturating_mul(1000) / TRANSITION_PAYLOAD_BYTES_PER_SECOND,
+    )
+}
+
 /// Stable identity for one occurrence of a multiplayer modal.
 ///
 /// `opened_frame` identifies the authoritative timeline boundary at which the
