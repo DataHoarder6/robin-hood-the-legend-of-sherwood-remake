@@ -99,10 +99,7 @@ impl std::io::Write for TeeWriter {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn default_replay_path() -> String {
-    use std::path::PathBuf;
-    let dir = dirs::data_dir()
-        .map(|d| d.join("robin_hood").join("replays"))
-        .unwrap_or_else(|| PathBuf::from("Data/Replays"));
+    let dir = crate::install_home::replay_directory();
     // `%:z` → `+HH:MM`; we strip the inner colon so the whole stamp is
     // filesystem-safe (e.g. `2026-04-17T09-32-15+02-00`).
     let stamp = jiff::Zoned::now()

@@ -17,15 +17,11 @@ pub(crate) fn durable_game_identity_seed() -> Result<[u8; 32], String> {
 }
 
 fn identity_key_path() -> Result<PathBuf, String> {
-    if let Ok(dir) = std::env::var("ROBINHOOD_SAVE_DIR") {
-        return Ok(PathBuf::from(dir).join(IDENTITY_KEY_FILE));
-    }
-    if let Some(data_dir) = dirs::data_dir() {
-        return Ok(data_dir.join("robin_hood").join(IDENTITY_KEY_FILE));
-    }
-    Err(format!(
-        "no data directory available to store the game identity key `{IDENTITY_KEY_FILE}`"
-    ))
+    crate::install_home::identity_key_path().ok_or_else(|| {
+        format!(
+            "no install directory available to store the game identity key `{IDENTITY_KEY_FILE}`"
+        )
+    })
 }
 
 fn load_or_create_seed_at(path: &Path) -> Result<[u8; 32], String> {

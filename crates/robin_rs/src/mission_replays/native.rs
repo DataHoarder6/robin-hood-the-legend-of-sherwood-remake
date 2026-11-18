@@ -338,10 +338,7 @@ fn stage_recording_link(
 }
 
 pub(crate) fn default_directory() -> PathBuf {
-    if let Some(dir) = dirs::data_dir() {
-        return dir.join("robin_hood/replays/attempts");
-    }
-    PathBuf::from("Data/Replays/attempts")
+    crate::install_home::attempt_directory()
 }
 
 fn find_in(

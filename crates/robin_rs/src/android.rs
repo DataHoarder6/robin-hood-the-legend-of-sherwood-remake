@@ -144,10 +144,10 @@ fn finish_activity_from_java_thread(app: &AndroidApp, exit_code: i32) -> Result<
 }
 
 fn install_android_paths(app: &AndroidApp) {
-    if std::env::var_os("ROBINHOOD_SAVE_DIR").is_none()
+    if std::env::var_os("ROBINHOOD_INSTALL_HOME").is_none()
         && let Some(dir) = app.internal_data_path()
     {
-        set_env("ROBINHOOD_SAVE_DIR", dir.join("saves"));
+        set_env("ROBINHOOD_INSTALL_HOME", dir);
     }
 
     if std::env::var_os("ROBINHOOD_DATA_DIR").is_some() {
