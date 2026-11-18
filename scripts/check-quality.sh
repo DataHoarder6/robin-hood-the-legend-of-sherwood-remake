@@ -80,23 +80,40 @@ case "$1" in
             --snapshot "$(git rev-parse HEAD)" --evidence "$evidence"
         ;;
     parity-cross)
-        # Linux x Windows replay-hash parity: one recording, one data root, the
-        # native binary and the Windows release binary under wine. Provisioned
-        # only (licensed data and wine); exit 3 (a missing prerequisite) is a
-        # suite failure here, never a green run. Wine is not Windows; see
-        # docs/TESTING.md for the limit this proves and the one it does not.
+        # Linux x Windows replay-hash parity: every recording in the tracked
+        # corpus plus any PARITY_REPLAY, one data root, the native binary and the
+        # Windows release binary under wine. Provisioned only (licensed data and
+        # wine); exit 3 (a missing prerequisite) is a suite failure here, never a
+        # green run. Wine is not Windows; see docs/TESTING.md for the limit this
+        # proves and the one it does not.
         : "${PARITY_LINUX_BIN:?Set PARITY_LINUX_BIN to a native robin built from the target commit}"
         : "${PARITY_WINDOWS_EXE:?Set PARITY_WINDOWS_EXE to the robin.exe from that commit}"
-        : "${PARITY_REPLAY:?Set PARITY_REPLAY to a recording made by that commit}"
         : "${PARITY_DATA_DIR:?Set PARITY_DATA_DIR to the game root containing Data/}"
+        corpus=scripts/validation/parity_corpus
+        mapfile -t replays < <(find "$corpus" -type f \
+            \( -name '*.rhrec.jsonl' -o -name '*.rhrec' \) | sort)
+        [[ -z "${PARITY_REPLAY:-}" ]] || replays+=("$PARITY_REPLAY")
+        if (( ${#replays[@]} == 0 )); then
+            printf 'parity-cross: no recorded corpus in %s\n' "$corpus" >&2
+            exit 3
+        fi
         # Each binary runs from its install directory, which must carry
         # assets/core-datadir. Defaults to the binary's own directory; set these
         # when the binary lives in target/release of a checkout.
         args=(--linux "$PARITY_LINUX_BIN" --windows "$PARITY_WINDOWS_EXE"
-              --replay "$PARITY_REPLAY" --data-dir "$PARITY_DATA_DIR")
+              --data-dir "$PARITY_DATA_DIR")
         [[ -n "${PARITY_LINUX_DIR:-}" ]] && args+=(--linux-dir "$PARITY_LINUX_DIR")
         [[ -n "${PARITY_WINDOWS_DIR:-}" ]] && args+=(--windows-dir "$PARITY_WINDOWS_DIR")
-        exec python3 scripts/validation/parity_check.py "${args[@]}"
+        status=0
+        for replay in "${replays[@]}"; do
+            printf 'parity-cross: %s\n' "$replay"
+            rc=0
+            python3 scripts/validation/parity_check.py "${args[@]}" --replay "$replay" || rc=$?
+            if (( rc != 0 && status == 0 )); then
+                status=$rc
+            fi
+        done
+        exit "$status"
         ;;
     gpu)
         # This test also invokes renderer::verify_offscreen_gpu_contract.
