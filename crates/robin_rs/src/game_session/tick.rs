@@ -1117,8 +1117,8 @@ pub(super) fn run_forward_ticks_with_session_modals(
                         engine.sim_config().difficulty,
                         engine.campaign().mission_attempt_sequence,
                     );
-                let popup_title =
-                    crate::ingame_menu::mission_state_text(code).map(|(title, _)| title.to_owned());
+                let popup_title = crate::ingame_menu::MissionEndKind::from_exit_code(code)
+                    .map(|end| end.popup_message().to_owned());
                 *handoff = Some(super::terminal_debriefing::PendingTerminalDebriefing::new(
                     code,
                     terminal_mission_id,
