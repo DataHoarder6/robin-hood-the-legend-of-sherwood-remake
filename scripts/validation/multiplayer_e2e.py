@@ -78,11 +78,13 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 TRANSITION_WATCHDOG_S = 60
 WATCHDOG_MARGIN_S = 30
 BARRIER_DEADLINE_S = TRANSITION_WATCHDOG_S + WATCHDOG_MARGIN_S
-# A run settles once no peer has advanced a frame or written a log line for
+# A run settles once no peer has advanced a frame or its admission phase for
 # this long: longer than INITIAL_CONNECT_TIMEOUT (15 s,
-# crates/robin_rs/src/multiplayer/client_session.rs), so a peer silently
-# retrying its first handshake is not read as settled.
-QUIET_S = 20
+# crates/robin_rs/src/multiplayer/client_session.rs), so a peer that is silently
+# retrying its first handshake has spent its budget and said so before the
+# driver calls the session settled. Log growth is not a progress signal: a
+# reconnecting peer writes a schedule line per second forever.
+QUIET_S = 25
 # A running session that has not advanced a frame for this long is holding a
 # story scroll: the driver presses Return on the real window again.
 SURFACE_RETRY_S = 4
@@ -573,6 +575,7 @@ class ScenarioRun:
         self.faults = list(expanded["faults"])
         self.fired = []
         self.activity = {}
+        self.last_change = time.monotonic()
         self.last_frame = None
         self.last_presented = time.monotonic()
         self.dismissals = 0
@@ -592,7 +595,6 @@ class ScenarioRun:
                                      **record}) + "\n")
         self.trace.append(({"seat": peer.seat, "role": peer.role}, record))
         self.latest[peer.seat] = record
-        self.activity[peer.seat] = (record["frame"], peer.size())
 
     def poll(self):
         for peer in self.peers:
@@ -604,6 +606,7 @@ class ScenarioRun:
                 continue
             if isinstance(state, dict) and "frame" in state:
                 self.sample(peer, state)
+        self.seconds_since_change()
         self.keep_moving()
 
     def keep_moving(self):
@@ -645,16 +648,20 @@ class ScenarioRun:
         self.events.event("surface_dismissed", attempt=self.dismissals, frame=frame,
                           windows=windows)
 
-    def idle(self):
-        """No live peer has advanced a frame or written a log line since the last poll."""
+    def seconds_since_change(self):
+        """Seconds since any live peer last advanced its frame or admission phase."""
+        changed = False
         for peer in self.peers:
             if not peer.alive():
                 continue
-            frame, size = self.activity.get(peer.seat, (None, 0))
-            current = (self.latest.get(peer.seat) or {}).get("frame")
-            if current != frame or peer.size() != size:
-                return False
-        return True
+            state = self.latest.get(peer.seat) or {}
+            marker = (state.get("frame"), (state.get("multiplayer") or {}).get("admission"))
+            if self.activity.get(peer.seat) != marker:
+                self.activity[peer.seat] = marker
+                changed = True
+        if changed:
+            self.last_change = time.monotonic()
+        return time.monotonic() - self.last_change
 
     def record(self):
         return {
@@ -690,8 +697,10 @@ class ScenarioRun:
 
         Positive expectations (`exit`, a reached barrier, a final operation) are
         waited for. When no peer is moving any more the run is over even if a
-        promise was missed, which is an assertion failure (exit 1), not a hang;
-        the deadline only fires while the session is still moving.
+        promise was missed, which is an assertion failure (exit 1): an unmet
+        promise in a session where nothing moves is a failed assertion, not a
+        hang. The deadline only fires while the session is still moving and a
+        barrier never releases.
         """
         positives = [
             expectation for expectation in self.expanded["expect"]
@@ -699,21 +708,15 @@ class ScenarioRun:
             and expectation.get("state") != "absent"
         ]
         deadline = time.monotonic() + BARRIER_DEADLINE_S
-        idle_since = None
         while time.monotonic() < deadline:
             self.poll()
             self.dispatch_faults()
             if positives and all(self.holds(item) for item in positives):
                 self.events.event("settled", description="every positive expectation observed")
                 return
-            if self.idle():
-                idle_since = idle_since or time.monotonic()
-                if time.monotonic() - idle_since >= QUIET_S:
-                    self.events.event("settled", description="no peer is moving",
-                                      quiet_s=QUIET_S)
-                    return
-            else:
-                idle_since = None
+            if self.seconds_since_change() >= QUIET_S:
+                self.events.event("settled", description="no peer is moving", quiet_s=QUIET_S)
+                return
             time.sleep(0.1)
         raise ScenarioDeadline(
             f"timed out after {BARRIER_DEADLINE_S}s settling the session; "
