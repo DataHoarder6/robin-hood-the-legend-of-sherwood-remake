@@ -231,9 +231,6 @@ impl HeadlessMission {
             }
         }
 
-        if self.policy.auto_dismiss_modals && self.runtime.timeline.replay().playback().is_none() {
-            let _ = self.runtime.world.dismiss_pending_modals();
-        }
         self.runtime
             .timeline
             .lifecycle_mut()
@@ -405,6 +402,11 @@ impl HeadlessMission {
         Ok(result)
     }
 
+    /// The headless driver's only modal sink: every dismissal it performs is
+    /// journaled into `frame.modal_dismissals` (and answered from the recorded
+    /// queue during playback). That includes a modal a previous frame's
+    /// `PostInitialize` queued after its own drain had already run — the
+    /// recording is what tells playback when to reopen it.
     fn drain_headless_modals(
         &mut self,
         frame: &mut super::runtime::MissionFrame,
@@ -552,6 +554,129 @@ mod tests {
 
         assert!(policy.auto_dismiss_modals);
         assert!(policy.exit_when_replay_finishes);
+    }
+
+    /// A modal queued at a frame boundary — `PostInitialize` runs after the
+    /// frame's own modal drain — is dismissed by the next frame's driver. That
+    /// dismissal must be journaled like any other: it is the record of what the
+    /// session did. Dropping it silently leaves playback to reopen the modal
+    /// with no acknowledgement to consume, and the *next* recorded dismissal is
+    /// then orphaned (#45).
+    #[test]
+    fn boundary_modal_dismissal_is_journaled_for_playback() {
+        use robin_engine::player_command::ModalKind;
+
+        let (engine, assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        let directory = tempfile::tempdir().expect("temp dir");
+        let recording = directory.path().join("boundary.rhrec.jsonl");
+        let assets_descriptor = robin_engine::mission_assets::MissionAssetDescriptor::built_in(
+            "headless-boundary",
+            "headless-boundary",
+            "headless-boundary",
+        )
+        .expect("valid built-in test mission descriptor");
+        let recorder = robin_engine::replay::ReplayRecorder::new(
+            recording.to_str().expect("UTF-8 temp path"),
+            "headless-boundary".to_owned(),
+            assets_descriptor,
+            3,
+            engine.sim_config(),
+            engine.campaign(),
+        )
+        .expect("create live recorder");
+        let recorder = crate::replay_recording::SharedReplayRecorder::from(recorder);
+        let manager = EngineManager::new(engine);
+        let control = MissionControl::new(
+            false,
+            manager.engine.weather().night_color,
+            manager.engine.weather().ambiance,
+        );
+        let timeline = TimelineRuntime::new(
+            ReplayAndRollback {
+                recording_control: Arc::<crate::replay_service::ReplayService>::default()
+                    .recording(),
+                recorder: Some(recorder),
+                player: None,
+                rollback_checker: None,
+                rewind_buffer: RewindBuffer::new(),
+                start_paused: false,
+            },
+            FrameContract::Headless,
+            false,
+            true,
+        );
+        let runtime = MissionRuntime::new(
+            crate::http_server::SessionIngress::detached_for_test(),
+            MissionWorld::new(
+                Host::scratch(640.0, 480.0),
+                Game::default(),
+                manager,
+                Arc::new(assets),
+                DevState::default(),
+            ),
+            timeline,
+            control,
+            None,
+        );
+        let mut mission = HeadlessMission {
+            runtime,
+            policy: HeadlessPolicy {
+                auto_dismiss_modals: true,
+                exit_when_replay_finishes: false,
+            },
+            modals: SessionModalScheduler::default(),
+            scenario: None,
+        };
+        let request = crate::main_entry::MissionRequest::default();
+        mission.run_frame(&request).expect("first frame");
+        // The state a mission's PostInitialize leaves behind: a popup in the
+        // host queue after this frame's modal drain has already run.
+        mission
+            .runtime
+            .world
+            .host_phase()
+            .host
+            .effects
+            .extend_popup_texts([34]);
+        mission.run_frame(&request).expect("second frame");
+
+        assert_eq!(
+            mission.runtime.world.view().host.effects.popup_text_count(),
+            0,
+            "the headless driver must dismiss a boundary modal, not leave it pending"
+        );
+        let replay = std::fs::read_to_string(&recording).expect("recorded chunk");
+        let mut dismissals: Vec<ModalKind> = Vec::new();
+        for line in replay.lines() {
+            let row: serde_json::Value = serde_json::from_str(line).expect("recorded row");
+            let Some(controls) = row
+                .get("i")
+                .and_then(|input| input.get("host_controls"))
+                .and_then(serde_json::Value::as_array)
+            else {
+                continue;
+            };
+            for control in controls {
+                assert_eq!(
+                    control.get("kind").and_then(serde_json::Value::as_str),
+                    Some("modal_dismiss"),
+                    "unexpected recorded host control: {control}"
+                );
+                assert_eq!(
+                    control.get("result").and_then(serde_json::Value::as_str),
+                    Some("Completed")
+                );
+                dismissals.push(
+                    serde_json::from_value(control.get("modal").expect("modal kind").clone())
+                        .expect("recorded modal kind"),
+                );
+            }
+        }
+        assert_eq!(
+            dismissals,
+            [ModalKind::PopupText { text_id: 34 }],
+            "a boundary modal's dismissal must be recorded for playback"
+        );
     }
 
     #[test]

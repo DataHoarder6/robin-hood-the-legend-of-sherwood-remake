@@ -808,21 +808,24 @@ network namespace with a local X server, as with `native-lifecycle`.
 ```sh
 PARITY_LINUX_BIN=/absolute/path/to/robin \
 PARITY_WINDOWS_EXE=/absolute/path/to/robin.exe \
-PARITY_REPLAY=/absolute/path/to/recording.rhrec.jsonl \
 PARITY_DATA_DIR=/absolute/path/to/full-game \
   bash scripts/check-quality.sh parity-cross
 ```
 
-`scripts/validation/parity_check.py` replays one recording on both binaries,
-extracts the state-hash samples the replay runtime already verifies
-(`Replay hash OK @ frame N` from `crates/robin_rs/src/game_session/runtime.rs`,
-`robin_engine::replay::state_hash` every 25th frame), and diffs them. There is no
-second replay format and no second hash function: the gate reads what the client
-already logs at `RUST_LOG=debug`.
+The suite replays every recording in `scripts/validation/parity_corpus/` — that
+directory's `README.md` gives each case, what it covers and how to re-record it —
+plus one more named by `PARITY_REPLAY`, and fails on the first recording that is
+not proven identical. `scripts/validation/parity_check.py` replays a recording
+on both binaries, extracts the state-hash samples the replay runtime already
+verifies (`Replay hash OK @ frame N` from
+`crates/robin_rs/src/game_session/runtime.rs`, `robin_engine::replay::state_hash`
+every 25th frame), and diffs them. There is no second replay format and no
+second hash function: the gate reads what the client already logs at
+`RUST_LOG=debug`.
 
 It needs a native `robin` and a `robin.exe` from the same commit (both must
-report the same `--version`, whose suffix is the commit), one recording made by
-that commit, a game-data root containing `Data/`, and `wine` with `winepath`.
+report the same `--version`, whose suffix is the commit), the recorded corpus, a
+game-data root containing `Data/`, and `wine` with `winepath`.
 Each binary runs from its install directory — its parent by default,
 `--linux-dir`/`--windows-dir` or the suite's `PARITY_LINUX_DIR`/`PARITY_WINDOWS_DIR`
 override — which must carry `assets/core-datadir`. A binary in a checkout's

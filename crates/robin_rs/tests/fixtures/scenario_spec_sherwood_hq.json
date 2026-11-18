@@ -1,0 +1,8 @@
+{
+  "frames": 240,
+  "commands": [
+    { "frame": 30, "command": "SelectAllPcs" },
+    { "frame": 120, "command": "CrouchDown" },
+    { "frame": 200, "command": "StandUp" }
+  ]
+}
