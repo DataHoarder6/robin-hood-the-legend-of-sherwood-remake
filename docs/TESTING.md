@@ -240,6 +240,22 @@ separately: blindly selecting every ignored test would combine incompatible
 fixture requirements, GPU execution, and other opt-in integration scenarios.
 No licensed data is fetched or assumed present on public CI.
 
+The Sherwood speed mapping has its own data-gated pair, outside the fixture
+gates. Both build the retail HQ mission, press the rail's `GoToExit` message
+and record the selected PC's order per frame:
+
+```sh
+ROBINHOOD_DATA_DIR=/absolute/path/to/full-game cargo test -p robin_rs --lib \
+  --no-default-features --features release sherwood_deployment -- --ignored
+```
+
+`the_deployment_message_records_a_running_move` requires `RunningUpright` with
+`MovingFast`; `the_full_deployment_zone_records_a_walking_move` requires the
+zone's own `RecordMove(..., 0)` to install `WalkingUpright` with `Moving`. The
+fixture fills the mission team so the deployment zone walks the arriving PC
+back out, which is what supplies the style-0 call site. Neither test covers
+rendered animation or other movement call sites.
+
 The regular font tests read the checked-in Arial fixture relative to
 `CARGO_MANIFEST_DIR`, so their behavior does not depend on the shell directory.
 
