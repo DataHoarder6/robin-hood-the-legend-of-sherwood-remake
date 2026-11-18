@@ -287,10 +287,15 @@ mod tests {
             .iter()
             .find(|event| event["kind"] == "desync")
             .expect("the event recorded after the cursor is served");
-        assert_eq!(
-            desync["seq"].as_u64().unwrap(),
-            mark,
-            "the event lands at the cursor that preceded it"
+        let desync_seq = desync["seq"].as_u64().unwrap();
+        // The ring is process-global and other tests record into it, so this
+        // surface can only state ordering: the page starts at or after the
+        // cursor, and the next cursor follows the last event served. Exact
+        // adjacency of two records is pinned on a private ring in
+        // `observability::events`.
+        assert!(
+            desync_seq >= mark,
+            "an event recorded after the cursor is never served below it"
         );
         assert!(
             page.events
@@ -298,7 +303,10 @@ mod tests {
                 .all(|event| event["seq"].as_u64().unwrap() >= mark),
             "{page:?}"
         );
-        assert_eq!(page.next_seq, mark + 1);
+        assert!(
+            page.next_seq > desync_seq,
+            "the next cursor follows the last event this page served"
+        );
         assert!(
             events_page(Some(u64::MAX), MAX_PAGE).events.is_empty(),
             "a cursor past every event serves nothing"
