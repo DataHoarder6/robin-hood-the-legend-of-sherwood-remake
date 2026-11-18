@@ -744,7 +744,10 @@ own HTTP port and its own `assets/core-datadir`, inside one loopback-only
 real signals (`SIGKILL`, `SIGSTOP`/`SIGCONT`, or a relaunch with the same or a
 fresh identity), the running session's story scroll is dismissed by pressing
 Return on the real window, and assertions read `/state`'s `multiplayer` block,
-the `exit` status and the peers' stderr. Evidence per run lands in
+the `exit` status and the peers' stderr. A `log` expectation is a literal
+substring of a peer's stderr (`docs/multiplayer/HARNESS.md` section 2), so a
+line the binary has reworded or never prints fails the row instead of passing
+it by accident. Evidence per run lands in
 `<evidence>/<scenario>/<run>/`: the expanded scenario, `summary.json`,
 `events.jsonl`, one log and one per-peer hash manifest per peer, the host
 recording and the binary's SHA-256.
