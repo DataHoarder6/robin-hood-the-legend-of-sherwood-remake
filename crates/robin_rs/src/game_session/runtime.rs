@@ -270,10 +270,6 @@ impl MissionWorld {
             dev: &self.dev,
         }
     }
-
-    pub(super) fn dismiss_pending_modals(&mut self) -> usize {
-        super::dismiss_pending_modals(&mut self.host)
-    }
 }
 
 /// Mission-lifetime host controls which are neither deterministic Engine state

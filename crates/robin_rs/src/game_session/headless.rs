@@ -231,9 +231,6 @@ impl HeadlessMission {
             }
         }
 
-        if self.policy.auto_dismiss_modals && self.runtime.timeline.replay().playback().is_none() {
-            let _ = self.runtime.world.dismiss_pending_modals();
-        }
         self.runtime
             .timeline
             .lifecycle_mut()
@@ -405,6 +402,11 @@ impl HeadlessMission {
         Ok(result)
     }
 
+    /// The headless driver's only modal sink: every dismissal it performs is
+    /// journaled into `frame.modal_dismissals` (and answered from the recorded
+    /// queue during playback). That includes a modal a previous frame's
+    /// `PostInitialize` queued after its own drain had already run — the
+    /// recording is what tells playback when to reopen it.
     fn drain_headless_modals(
         &mut self,
         frame: &mut super::runtime::MissionFrame,
