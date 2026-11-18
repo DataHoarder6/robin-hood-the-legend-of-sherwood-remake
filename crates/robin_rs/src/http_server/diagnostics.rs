@@ -134,9 +134,9 @@ pub(crate) fn snapshot_state(
         })
     });
     let multiplayer = transport.and_then(|transport| {
-        transport.net().and_then(|_| {
+        transport.net().map(|net| {
             let session = session.expect("an admitted transport reports its session facts");
-            multiplayer_state(transport, session)
+            multiplayer_state(transport, net, session)
         })
     });
     serde_json::json!({
@@ -157,6 +157,7 @@ pub(crate) fn snapshot_state(
 /// player count — would describe a session that does not exist yet.
 fn multiplayer_state(
     transport: &crate::host::HostTransport,
+    net: &crate::multiplayer::NetChannels,
     session: SessionFacts,
 ) -> Option<serde_json::Value> {
     // Channels exist from the moment a session is admitted, but the roster
@@ -169,16 +170,13 @@ fn multiplayer_state(
                 serde_json::json!("Save")
             }
             crate::host::PendingSnapshotTransitionKind::CampaignExit(exit_code) => {
-                serde_json::json!({"CampaignExit": format!("{exit_code:?}")})
+                serde_json::json!({"CampaignExit": exit_code.wire_name()})
             }
         };
         serde_json::json!({
             "id": serde_json::to_value(id).expect("snapshot transition id serializes"),
             "payload": payload,
-            "awaiting": transport
-                .net()
-                .map(crate::multiplayer::NetChannels::transition_awaiting_seats)
-                .unwrap_or_default(),
+            "awaiting": net.transition_awaiting_seats(),
         })
     });
     Some(serde_json::json!({
@@ -189,10 +187,8 @@ fn multiplayer_state(
         "pending_transition": pending_transition,
         "last_compared_hash_frame": session.last_compared_hash_frame,
         "desync_count": session.desync_count,
-        "final_operation": format!("{:?}", session.final_operation),
-        "connect_string": transport
-            .net()
-            .and_then(crate::multiplayer::NetChannels::connect_string),
+        "final_operation": session.final_operation.wire_name(),
+        "connect_string": net.connect_string(),
     }))
 }
 
@@ -921,7 +917,7 @@ mod tests {
                     "pending_transition": null,
                     "last_compared_hash_frame": 50,
                     "desync_count": 1,
-                    "final_operation": "Quit",
+                    "final_operation": "quit",
                     "connect_string": null,
                 },
             })
@@ -970,7 +966,7 @@ mod tests {
             state["multiplayer"]["pending_transition"],
             serde_json::json!({
                 "id": serde_json::to_value(id).unwrap(),
-                "payload": {"CampaignExit": "LevelFailed"},
+                "payload": {"CampaignExit": "level_failed"},
                 "awaiting": [],
             })
         );

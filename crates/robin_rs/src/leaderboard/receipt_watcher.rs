@@ -960,21 +960,20 @@ pub fn now_unix_ms() -> Result<u64, ReceiptWatcherError> {
         })
 }
 
-fn pending_store_path() -> PathBuf {
-    super::store::display_path(PENDING_STORE_FILE, BROWSER_PENDING_STORE_KEY)
+fn pending_store_path() -> Result<PathBuf, ReceiptWatcherError> {
+    Ok(super::store::display_path(
+        PENDING_STORE_FILE,
+        BROWSER_PENDING_STORE_KEY,
+    )?)
 }
 
 fn load_pending_store() -> Result<PendingSubmissionReceiptStore, ReceiptWatcherError> {
+    let path = pending_store_path()?;
     let Some(encoded) = read_pending_store()? else {
         return Ok(PendingSubmissionReceiptStore::default());
     };
-    let store =
-        serde_json::from_str::<PendingSubmissionReceiptStore>(&encoded).map_err(|source| {
-            ReceiptWatcherError::Decode {
-                path: pending_store_path(),
-                source,
-            }
-        })?;
+    let store = serde_json::from_str::<PendingSubmissionReceiptStore>(&encoded)
+        .map_err(|source| ReceiptWatcherError::Decode { path, source })?;
     store.validate()?;
     Ok(store)
 }

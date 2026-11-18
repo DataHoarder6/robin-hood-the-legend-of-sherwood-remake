@@ -443,8 +443,10 @@ isolation rule):
 - `GET /state`, which keeps answering after the mission ends: the last published
   snapshot plus a `terminal` block naming the operation and why it stopped;
 
-and, when a session fails, a pinned bundle under `diagnostics/` that names the
-reason, the phase, the seat, the session, the newest replay and this run's log.
+and, when a session fails, a pinned bundle under `diagnostics/` named for its
+session — `session-<session id>.json`, or the write time when the failure
+predates a session identity — that names the reason, the phase, the seat, the
+session, the newest replay's path and modification time, and this run's log.
 
 One install home therefore reconstructs a session without the game: the replay
 carries the inputs and hash chain, the run log carries everything traced, and

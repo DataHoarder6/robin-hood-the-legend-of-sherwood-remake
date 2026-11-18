@@ -118,7 +118,7 @@ class BarrierTest(unittest.TestCase):
                     "pending_transition": pending,
                     "last_compared_hash_frame": None,
                     "desync_count": 0,
-                    "final_operation": "LevelInProgress",
+                    "final_operation": "level_in_progress",
                 }})
 
     def test_begin_sim_is_reached_when_the_frame_is_accepted(self):
@@ -265,13 +265,13 @@ class AssertionTest(unittest.TestCase):
 
     def test_final_operation_is_read_from_every_peer(self):
         latest = {
-            0: {"multiplayer": {"final_operation": "Quit"}},
-            1: {"multiplayer": {"final_operation": "Quit"}},
+            0: {"multiplayer": {"final_operation": "quit"}},
+            1: {"multiplayer": {"final_operation": "quit"}},
         }
         ok, _, observed = suite.evaluate_expectation(
-            {"assert": "final-operation", "operation": "Quit"}, self.record({}, latest=latest))
+            {"assert": "final-operation", "operation": "quit"}, self.record({}, latest=latest))
         self.assertTrue(ok)
-        self.assertEqual(set(observed.values()), {"Quit"})
+        self.assertEqual(set(observed.values()), {"quit"})
 
     def test_an_unimplemented_assertion_is_unprovable(self):
         with self.assertRaises(suite.Unprovable):

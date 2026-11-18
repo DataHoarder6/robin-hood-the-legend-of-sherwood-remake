@@ -614,10 +614,16 @@ async fn resolve_reconnect_prelude<T: ClientTransport>(
 
 // ─── Connection lifecycle ────────────────────────────────────────
 
-/// A dropped session may keep retrying until its budget is spent. A session
-/// that has not dropped has no budget open.
-fn reconnect_expired(opened: bool, waited: Duration, budget: Duration) -> bool {
-    opened && waited >= budget
+/// The fatal timeout a dropped session publishes once its reconnect budget is
+/// spent. `None` while it may still retry, and for a session that never
+/// dropped — a live session has no budget open.
+fn reconnect_gave_up(
+    started: Option<web_time::Instant>,
+    budget: Duration,
+) -> Option<MultiplayerError> {
+    started
+        .is_some_and(|started| started.elapsed() >= budget)
+        .then(|| MultiplayerError::timeout("reconnecting to the host", budget))
 }
 
 /// Drive one connection: initial handshake and content admission, then each
@@ -729,22 +735,6 @@ pub(super) async fn run_client_io<T: ClientTransport>(
 
     let mut backoff = RECONNECT_BACKOFF;
     let mut reconnect_started: Option<web_time::Instant> = None;
-    // A drop opens the reconnect budget; a successful reconnect closes it.
-    let reconnected_too_long = |started: &Option<web_time::Instant>| {
-        reconnect_expired(
-            started.is_some(),
-            started.map(|started| started.elapsed()).unwrap_or_default(),
-            T::TIMINGS.reconnect_budget,
-        )
-    };
-    let give_up = |incoming: &Sender<NetEvent>| {
-        let error = MultiplayerError::Timeout {
-            phase: "reconnecting to the host".into(),
-            after: T::TIMINGS.reconnect_budget,
-        };
-        tracing::warn!(%error, "multiplayer: giving up on reconnection");
-        let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
-    };
     loop {
         match run_session(transport, session, outbound, &incoming).await {
             SessionEnd::Drop(reason) => {
@@ -756,9 +746,14 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                         "multiplayer: discarded outbound commands from abandoned prediction session"
                     );
                 }
+                // A drop opens the reconnect budget; a successful reconnect
+                // closes it.
                 reconnect_started.get_or_insert_with(web_time::Instant::now);
-                if reconnected_too_long(&reconnect_started) {
-                    give_up(&incoming);
+                if let Some(error) =
+                    reconnect_gave_up(reconnect_started, T::TIMINGS.reconnect_budget)
+                {
+                    tracing::warn!(%error, "multiplayer: giving up on reconnection");
+                    let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
                     return;
                 }
                 if deliver_lifecycle(
@@ -865,8 +860,9 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                 }
                 Err(error) => ("transport", error),
             };
-            if reconnected_too_long(&reconnect_started) {
-                give_up(&incoming);
+            if let Some(error) = reconnect_gave_up(reconnect_started, T::TIMINGS.reconnect_budget) {
+                tracing::warn!(%error, "multiplayer: giving up on reconnection");
+                let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
                 return;
             }
             tracing::warn!("reconnect {failure_kind} failed: {error}; will retry in {backoff:?}");
@@ -1023,21 +1019,23 @@ pub(super) mod tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn reconnect_budget_expires_only_after_a_drop_spends_it() {
+    fn a_spent_reconnect_budget_ends_the_session_with_the_timeout() {
         assert!(
-            !reconnect_expired(false, Duration::from_secs(600), RECONNECT_BUDGET),
+            reconnect_gave_up(None, RECONNECT_BUDGET).is_none(),
             "a live session has no reconnect budget open"
         );
-        assert!(!reconnect_expired(
-            true,
-            Duration::from_secs(59),
-            RECONNECT_BUDGET
-        ));
-        assert!(reconnect_expired(true, RECONNECT_BUDGET, RECONNECT_BUDGET));
-        assert!(reconnect_expired(
-            true,
-            Duration::from_secs(61),
-            RECONNECT_BUDGET
+        assert!(
+            reconnect_gave_up(Some(web_time::Instant::now()), RECONNECT_BUDGET).is_none(),
+            "a reconnect that has not spent its budget keeps retrying"
+        );
+        // A budget already spent is the observable end of the session: the
+        // fatal timeout the player sees when the host stays away.
+        let error = reconnect_gave_up(Some(web_time::Instant::now()), Duration::ZERO)
+            .expect("a spent budget ends the session");
+        assert!(matches!(
+            error,
+            MultiplayerError::Timeout { ref phase, after }
+                if phase.as_ref() == "reconnecting to the host" && after == Duration::ZERO
         ));
     }
 

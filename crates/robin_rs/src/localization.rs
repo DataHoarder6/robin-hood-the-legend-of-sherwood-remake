@@ -114,6 +114,8 @@ pub enum LocalizationError {
         #[source]
         source: std::io::Error,
     },
+    #[error("no install directory for the language preference file")]
+    PreferenceDirectoryMissing,
     #[error("failed to install language resource lookup (file status {0})")]
     FileLookup(robin_engine::sbfile::SbFileError),
     #[error("failed to install shipping language resources: {0:#}")]
@@ -287,7 +289,7 @@ impl LocalizationService {
         shipping: Option<&ShippingDatadir>,
         files: Arc<SbFileSystem>,
     ) -> Result<Self, LocalizationError> {
-        let store = default_preference_store();
+        let store = default_preference_store()?;
         Self::initialize_with_store(shipping, store, files)
     }
 
@@ -784,14 +786,16 @@ fn normalize_locale(locale: &str) -> String {
     normalized
 }
 
-fn default_preference_store() -> PreferenceStore {
+fn default_preference_store() -> Result<PreferenceStore, LocalizationError> {
     #[cfg(target_arch = "wasm32")]
     {
-        PreferenceStore::Browser
+        Ok(PreferenceStore::Browser)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        PreferenceStore::Native(crate::save_file::default_save_directory().join(PREFERENCES_FILE))
+        let directory = crate::save_file::default_save_directory()
+            .ok_or(LocalizationError::PreferenceDirectoryMissing)?;
+        Ok(PreferenceStore::Native(directory.join(PREFERENCES_FILE)))
     }
 }
 

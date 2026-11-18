@@ -15,7 +15,7 @@ TRANSPORT_TESTS = ["robin_rs::multiplayer::tests::state_reports_the_hosts_dial_a
 CONTRACT = corpus.Contract(
     covered=frozenset({"H01", "H02"}),
     layers={"H01": "core", "H02": "core"},
-    game_codes=frozenset({"Quit", "LevelSucceeded", "LevelFailed"}),
+    game_codes=frozenset({"quit", "level_succeeded", "level_failed"}),
     asserts={"H01": frozenset({"hash-equal(peers=0,1,every=25)"}),
              "H02": frozenset({"hash-equal(peers=0,1,every=25)"})},
 )
@@ -113,7 +113,7 @@ class CorpusValidationTests(unittest.TestCase):
         good = scenario(
             "H01",
             expect=PROVEN + [{"assert": "transition",
-                              "payload": {"CampaignExit": "LevelFailed"},
+                              "payload": {"CampaignExit": "level_failed"},
                               "acked": [0, 1], "committed": True}],
         )
         self.assertEqual(corpus.validate(DEFAULTS, corpus_of(good, scenario("H02")), CONTRACT), [])
@@ -158,7 +158,7 @@ class CorpusValidationTests(unittest.TestCase):
 
     def test_extends_runs_the_parent_expectations_first(self):
         parent = scenario("H01", expect=PROVEN, faults=[{"at": {"frame": 5}, "peer": 1, "fault": "kill"}])
-        child = scenario("H02", extends="H01", expect=[{"assert": "final-operation", "operation": "Quit"}])
+        child = scenario("H02", extends="H01", expect=[{"assert": "final-operation", "operation": "quit"}])
         found = corpus_of(parent, child)
         self.assertEqual(corpus.chain("H02", found), ["H01", "H02"])
         expanded = corpus.expanded("H02", found, DEFAULTS, CONTRACT)

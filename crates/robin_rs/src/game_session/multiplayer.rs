@@ -499,7 +499,11 @@ fn session_identity(host: &Host) -> (Option<u8>, Option<String>) {
         return (None, None);
     };
     let seat = Some(host.transport.local_seat().0);
-    let session_id = net.session_id().ok().map(|id| format!("{id:?}"));
+    // Hex, not `Debug`: the same string is the diagnostics bundle's file stem.
+    let session_id = net
+        .session_id()
+        .ok()
+        .map(|id| robin_engine::spellforge::hex_hash(&id.0));
     (seat, session_id)
 }
 

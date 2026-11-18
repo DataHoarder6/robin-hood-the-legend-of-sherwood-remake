@@ -144,7 +144,8 @@ class ContractError(RuntimeError):
 
 @dataclasses.dataclass(frozen=True)
 class Contract:
-    """What the document promises: covered cells, layers, assertions, GameCodes."""
+    """What the document promises: covered cells, layers, assertions and the
+    GameCode spellings `/state` actually writes."""
 
     covered: frozenset
     layers: dict
@@ -411,10 +412,19 @@ def load_contract(harness=HARNESS, game_operation=GAME_OPERATION) -> Contract:
     match = re.search(r"pub enum GameCode \{(.*?)\n\}", source, re.S)
     if match is None:
         raise ContractError(f"{game_operation}: no GameCode enum")
-    game_codes = frozenset(re.findall(r"^\s{4}([A-Za-z_][A-Za-z0-9_]*)", match.group(1), re.M))
-    if not game_codes:
+    variants = frozenset(re.findall(r"^\s{4}([A-Za-z_][A-Za-z0-9_]*)", match.group(1), re.M))
+    if not variants:
         raise ContractError(f"{game_operation}: GameCode has no variants")
-    return Contract(covered, layers, game_codes, asserts)
+    # `/state` spells a code through `wire_name`, never `Debug`; the corpus
+    # asserts that spelling, so read the same match arms the binary compiles.
+    names = re.search(r"pub fn wire_name\(self\) -> &'static str \{(.*?)\n    \}", source, re.S)
+    if names is None:
+        raise ContractError(f"{game_operation}: GameCode has no wire_name")
+    arms = dict(re.findall(r"Self::([A-Za-z_][A-Za-z0-9_]*) => \"([a-z_]+)\"", names.group(1)))
+    if set(arms) != variants:
+        missing = sorted(variants ^ set(arms))
+        raise ContractError(f"{game_operation}: wire names do not cover {missing}")
+    return Contract(covered, layers, frozenset(arms.values()), asserts)
 
 
 def load_corpus(directory=SCENARIO_DIRECTORY):

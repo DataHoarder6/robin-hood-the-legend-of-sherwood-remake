@@ -74,7 +74,7 @@ count to report before it.
    "admission": "running", "begin_sim_frame": 133,
    "pending_transition": null,
    "last_compared_hash_frame": 125, "desync_count": 0,
-   "final_operation": "LevelInProgress",
+   "final_operation": "level_in_progress",
    "connect_string": "{\"id\":…,\"addrs\":[…]}"
  },
  "terminal": null,
@@ -86,11 +86,12 @@ count to report before it.
  }}
 ```
 
-`admission` is a stable lowercase phase name; `pending_transition` is
-`{"id", "payload", "awaiting"}` with `payload` `"Save"` or
-`{"CampaignExit": "<GameCode>"}` and `awaiting` the seats whose acknowledgement
-the host's commit still waits for. `connect_string` is the host's dial address
-and `null` on a client.
+`admission` and `final_operation` are stable lowercase names
+(`MultiplayerAdmission::wire_name`, `GameCode::wire_name`); neither is Rust
+`Debug` output. `pending_transition` is `{"id", "payload", "awaiting"}` with
+`payload` `"Save"` or `{"CampaignExit": "<GameCode wire name>"}` and `awaiting`
+the seats whose acknowledgement the host's commit still waits for.
+`connect_string` is the host's dial address and `null` on a client.
 
 `terminal` is `null` while a mission is producing snapshots. A mission that
 ended sets it, and the snapshot stays the last one published:

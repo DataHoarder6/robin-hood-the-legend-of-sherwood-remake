@@ -148,6 +148,10 @@ pub(super) struct PendingSnapshotTransition {
     /// Seats whose acknowledgement was processed, or that were evicted when
     /// the barrier expired. A later ack from any of them is a no-op.
     pub(super) answered: HashSet<u8>,
+    /// Monotonic milliseconds since server start at which the transition
+    /// began. Set with `deadline_ms` so the wait is measured, never
+    /// reconstructed from the budget.
+    pub(super) started_ms: u64,
     /// Monotonic milliseconds since server start at which absent peers are
     /// evicted. Set when the transition begins.
     pub(super) deadline_ms: u64,
@@ -228,11 +232,7 @@ impl SnapshotTransitions {
         Some(ExpiredTransition {
             id: transition.id,
             evicted,
-            waited_ms: now_ms.saturating_sub(
-                transition
-                    .deadline_ms
-                    .saturating_sub(transition_budget_ms(&transition.payload)),
-            ),
+            waited_ms: now_ms.saturating_sub(transition.started_ms),
             payload_bytes: payload_bytes(&transition.payload),
         })
     }

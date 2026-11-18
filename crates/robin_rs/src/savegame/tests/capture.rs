@@ -961,8 +961,18 @@ fn per_profile_save_managers_are_isolated() {
     let p0_dir = root.path().join("Profile_000");
     let p1_dir = root.path().join("Profile_001");
     // Matches the `Profile_NNN` layout `save_directory_for_profile` uses.
-    assert!(save_directory_for_profile(0).ends_with("Profile_000"));
-    assert!(save_directory_for_profile(42).ends_with("Profile_042"));
+    // This environment has an install root (the resolver test proves the
+    // absence case), so the layout assertion has a path to read.
+    assert!(
+        save_directory_for_profile(0)
+            .expect("a test environment with an install root")
+            .ends_with("Profile_000")
+    );
+    assert!(
+        save_directory_for_profile(42)
+            .expect("a test environment with an install root")
+            .ends_with("Profile_042")
+    );
     let mut mgr0 = SaveGameManager::new(p0_dir.to_string_lossy().into_owned());
     let mut mgr1 = SaveGameManager::new(p1_dir.to_string_lossy().into_owned());
 

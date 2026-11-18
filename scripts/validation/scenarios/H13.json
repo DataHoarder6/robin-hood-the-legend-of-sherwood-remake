@@ -19,7 +19,7 @@
   "expect": [
     {
       "assert": "transition",
-      "payload": { "CampaignExit": "LevelSucceeded" },
+      "payload": { "CampaignExit": "level_succeeded" },
       "acked": [0, 1],
       "committed": false
     },

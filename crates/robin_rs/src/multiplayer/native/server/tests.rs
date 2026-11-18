@@ -215,6 +215,7 @@ fn stale_peer_dispatch_rejects_every_effect_before_touching_successor_state() {
                 },
                 awaiting: HashSet::from([first.seat]),
                 answered: HashSet::new(),
+                started_ms: 0,
                 deadline_ms: u64::MAX,
             });
         let messages = [
@@ -362,6 +363,7 @@ fn prepared_transition_suppresses_new_and_cached_simulation_barriers() {
             },
             awaiting: HashSet::from([claim.seat]),
             answered: HashSet::new(),
+            started_ms: 0,
             deadline_ms: u64::MAX,
         });
     }
@@ -406,6 +408,7 @@ fn current_snapshot_ack_commits_once_and_detaches_authority() {
             },
             awaiting: HashSet::from([claim.seat]),
             answered: HashSet::new(),
+            started_ms: 0,
             deadline_ms: u64::MAX,
         });
     super::dispatch_server_peer_message(
@@ -561,6 +564,7 @@ async fn inactive_reader_drains_terminal_frames_after_buffered_input_without_res
                     },
                     awaiting: HashSet::from([claim.seat]),
                     answered: HashSet::new(),
+                    started_ms: 0,
                     deadline_ms: u64::MAX,
                 });
         }
@@ -754,6 +758,7 @@ fn snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops() {
         },
         awaiting: HashSet::from([1, 2]),
         answered: HashSet::new(),
+        started_ms: 0,
         deadline_ms: u64::MAX,
     });
     let wrong_id = robin_engine::multiplayer::SnapshotTransitionId { sequence: 2, ..id };
@@ -791,17 +796,20 @@ fn expired_transition_evicts_absent_seats_and_completes_the_barrier() {
         },
         awaiting: HashSet::from([1, 2]),
         answered: HashSet::new(),
-        deadline_ms: 5_000,
+        // The wait is measured from the start, not reconstructed from the
+        // deadline and the payload budget.
+        started_ms: 1_000,
+        deadline_ms: 61_000,
     });
     transitions.acknowledge(PlayerId(1), id).unwrap();
     assert!(
-        transitions.expire(4_999).is_none(),
+        transitions.expire(60_999).is_none(),
         "a live barrier must not evict before its deadline"
     );
-    let expired = transitions.expire(5_000).expect("deadline reached");
+    let expired = transitions.expire(61_000).expect("deadline reached");
     assert_eq!(expired.id, id);
     assert_eq!(expired.evicted, vec![2]);
-    assert_eq!(expired.waited_ms, 5_000);
+    assert_eq!(expired.waited_ms, 60_000);
     assert_eq!(expired.payload_bytes, 3);
     // Eviction is not a protocol failure: the evicted seat may ack late, or
     // when it re-admits from a snapshot.
@@ -1045,6 +1053,7 @@ fn snapshot_transition_waits_for_every_current_peer() {
         },
         awaiting: HashSet::from([1, 2]),
         answered: HashSet::new(),
+        started_ms: 0,
         deadline_ms: u64::MAX,
     });
 
@@ -1075,6 +1084,7 @@ fn disconnected_transition_peer_must_ack_again_after_reconnect() {
         },
         awaiting: HashSet::new(),
         answered: HashSet::new(),
+        started_ms: 0,
         deadline_ms: u64::MAX,
     });
 

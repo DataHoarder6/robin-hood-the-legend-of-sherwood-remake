@@ -11,10 +11,10 @@
   "expect": [
     {
       "assert": "transition",
-      "payload": { "CampaignExit": "LevelSucceeded" },
+      "payload": { "CampaignExit": "level_succeeded" },
       "acked": [0, 1],
       "committed": true
     },
-    { "assert": "final-operation", "operation": "LevelSucceeded" }
+    { "assert": "final-operation", "operation": "level_succeeded" }
   ]
 }
