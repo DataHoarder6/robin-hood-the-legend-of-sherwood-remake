@@ -10,7 +10,7 @@ pub fn main() {
     println!("cargo:rerun-if-changed=../../build-support/robin_build.rs");
     println!("cargo:rerun-if-env-changed=ROBIN_PACKAGE_VERSION");
     println!("cargo:rerun-if-env-changed=ROBIN_REQUIRE_BUILD_IDENTITY");
-    println!("cargo:rerun-if-env-changed=ROBIN_GIT_COMMIT");
+    println!("cargo:rerun-if-env-changed=ROBIN_PACKAGE_COMMIT");
     emit_git_hash();
     emit_build_identity();
 }
@@ -29,7 +29,7 @@ fn missing_identity(reason: &str) -> String {
 /// reference it via `env!("ROBIN_GIT_HASH")`. Used by the replay format
 /// to tag recordings with the engine version they were produced on.
 fn emit_git_hash() {
-    let full_hash = explicit_commit().unwrap_or_else(discover_git_hash);
+    let full_hash = packaged_commit().unwrap_or_else(discover_git_hash);
     let short_hash = full_hash.get(..12).unwrap_or(&full_hash);
     println!("cargo:rustc-env=ROBIN_GIT_HASH={short_hash}");
     println!("cargo:rustc-env=ROBIN_GIT_COMMIT={full_hash}");
@@ -39,20 +39,29 @@ fn emit_git_hash() {
 ///
 /// A Nix build is a copy of the tracked tree in the store: `git rev-parse HEAD`
 /// has nothing to read, so the flake that packages this workspace passes the
-/// revision it resolved (`self.rev`) here. The value is provenance, not a
-/// guess, so a malformed one panics instead of falling back to discovery.
+/// revision it resolved (`self.rev`) as `ROBIN_PACKAGE_COMMIT`. The value is
+/// provenance, not a guess, so a malformed one panics instead of falling back
+/// to discovery.
+///
+/// The input's name must never be one of the names this script emits below.
+/// Cargo exports a package's own build-script `cargo:rustc-env` output into the
+/// environment of the binaries it runs (`cargo test`, `cargo run`, `cargo
+/// bench`), so an input called `ROBIN_GIT_COMMIT` is satisfied by this script's
+/// previous output with no packager involved: discovery never runs, and every
+/// caller sees a stamp it did not earn (issue #30 — `nix develop --command
+/// cargo test -p robin_rs --test build_provenance`).
 ///
 /// Lowercase is required: `ROBIN_GIT_HASH` is the first 12 bytes of this value
 /// and the replay format accepts only lowercase hex.
-fn explicit_commit() -> Option<String> {
-    let commit = std::env::var("ROBIN_GIT_COMMIT").ok()?;
+fn packaged_commit() -> Option<String> {
+    let commit = std::env::var("ROBIN_PACKAGE_COMMIT").ok()?;
     if !matches!(commit.len(), 40 | 64)
         || !commit
             .bytes()
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
     {
         panic!(
-            "ROBIN_GIT_COMMIT must be a full 40- or 64-character lowercase hex commit ID, got {commit:?}"
+            "ROBIN_PACKAGE_COMMIT must be a full 40- or 64-character lowercase hex commit ID, got {commit:?}"
         );
     }
     Some(commit)

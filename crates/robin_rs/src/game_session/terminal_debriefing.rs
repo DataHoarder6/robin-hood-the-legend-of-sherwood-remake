@@ -131,7 +131,7 @@ fn leaderboard_outcome(
 
 /// Recorded terminal commands are authoritative, including their clock and
 /// nonce. Only live play may produce another command at this host boundary.
-fn stage_terminal_campaign_update(
+pub(super) fn stage_terminal_campaign_update(
     playing_back: bool,
     transport: &crate::host::HostTransport,
     frame: &mut MissionFrame,
@@ -243,6 +243,24 @@ pub(super) struct PendingTerminalDebriefing {
     terminal_mission_id: u32,
     previous_attempt_sequence: u64,
     popup_title: Option<String>,
+}
+
+impl PendingTerminalDebriefing {
+    /// Built by any tick that ends the mission — a live frame and a stepped one
+    /// alike — so both reach the same campaign handoff and the same page.
+    pub(super) fn new(
+        exit_code: GameCode,
+        terminal_mission_id: u32,
+        previous_attempt_sequence: u64,
+        popup_title: Option<String>,
+    ) -> Self {
+        Self {
+            exit_code,
+            terminal_mission_id,
+            previous_attempt_sequence,
+            popup_title,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

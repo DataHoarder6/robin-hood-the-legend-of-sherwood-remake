@@ -166,6 +166,21 @@ Backward movement fails if the requested frame predates retained rewind
 history. Moving the timeline resets rollback-checker history because the live
 Engine is now on a reconstructed timeline.
 
+A mission-end terminal page owns the mission until it is dismissed. A step with
+a matching typed dismissal (or `auto_dismiss`) queues that dismissal for the page
+and then advances the frame that applies it, so a paused automation session makes
+progress instead of being rejected forever. On a multiplayer client the same
+request is the acknowledgement the host's barrier waits for: it answers `200`
+with `{"direction":"terminal-modal-dismissal","queued":true}` and never advances
+the host's timeline, because frame stepping stays host-only.
+
+A tick that ends the mission hands the completion to the frame that follows: the
+step stages the campaign update and queues the mission-end page, and the session
+keeps running the page instead of closing the application. That handoff needs a
+frame to apply the completion, so a driver that starts paused must step until the
+page appears; while the page is still pending, a step without a dismissal is
+refused with "mission ended" rather than advancing behind it.
+
 ```bash
 curl -s -X POST -H 'Content-Type: application/json' \
   -d '{"n":1}' http://127.0.0.1:17640/step-forward

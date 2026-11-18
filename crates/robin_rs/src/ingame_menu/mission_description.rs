@@ -19,6 +19,7 @@
 //! and per-slot tooltips are delayed the same ~750 ms the button
 //! tooltips use.
 
+use crate::campaign_progress::MissionAvailability;
 use crate::ingame_menu::resources::SealButton;
 use crate::ingame_menu::widget_bridge::ModalScreenIo;
 use robin_engine::campaign::CampaignValue;
@@ -30,6 +31,7 @@ use robin_engine::profiles as engine_profiles;
 use robin_engine::sprite::BBox;
 
 use crate::ingame_menu::layout::center_horizontally_x;
+use crate::ingame_menu::layout::{MenuTransform, place_window_on_screen};
 use crate::renderer::Renderer;
 use crate::ui_screens::{
     MissionChoice, MissionDescriptionButton, MissionDescriptionScreen,
@@ -129,6 +131,24 @@ pub struct MissionDescriptionModalState {
 }
 
 impl MissionDescriptionModalState {
+    /// Window origin in virtual menu coordinates.
+    ///
+    /// The window is opened from the campaign map but belongs to the screen,
+    /// not to the map panel: a request near a screen edge slides the whole
+    /// window back into view instead of being clamped to the map rect.
+    fn window_origin(
+        transform: MenuTransform,
+        screen: (i32, i32),
+        requested: (i32, i32),
+    ) -> (i32, i32) {
+        place_window_on_screen(
+            transform,
+            screen,
+            requested,
+            (layout_consts::WINDOW_WIDTH, layout_consts::WINDOW_HEIGHT),
+        )
+    }
+
     pub fn new(
         event_pump: &crate::window::GameWindow,
         renderer: &mut Renderer,
@@ -153,8 +173,18 @@ impl MissionDescriptionModalState {
         };
         let picture = resources.picture_from(renderer, text_resources, screen.picture_id);
         let (pic_w, pic_h) = picture.map(|p| (p.width, p.height)).unwrap_or((0, 0));
-        let win_x = (MENU_W - layout_consts::WINDOW_WIDTH) / 2;
-        let win_y = (MENU_H - layout_consts::WINDOW_HEIGHT) / 2;
+        let viewport = (
+            i32::from(renderer.screen_width()),
+            i32::from(renderer.screen_height()),
+        );
+        let (win_x, win_y) = Self::window_origin(
+            MenuTransform::centered(viewport.0, viewport.1),
+            viewport,
+            (
+                (MENU_W - layout_consts::WINDOW_WIDTH) / 2,
+                (MENU_H - layout_consts::WINDOW_HEIGHT) / 2,
+            ),
+        );
         let pic_x = layout_consts::PICTURE_FRAME_RIGHT_EDGE - pic_w;
         let pic_y = layout_consts::PICTURE_FRAME_Y;
         let (btn_w, btn_h) = resources.seal_button_dimensions(SealButton::Ok);
@@ -291,6 +321,20 @@ impl MissionDescriptionModalState {
                 .screen
                 .closed
                 .then_some((self.screen.user_choice, self.screen.men_to_blazon_mode));
+        }
+
+        // Campaign state can move while the dialog stays open (a blazon
+        // purchase can close by cascade). Refresh the engine-derived
+        // availability first so no frame can offer a start the engine's
+        // `select_next_mission` invariant would reject.
+        let availability = MissionAvailability::derive(engine.campaign(), self.mission_index);
+        if availability != self.screen.availability {
+            self.screen.update_availability(availability);
+        }
+        if let Some(widget) = self.frame.widget_mut(ID_START_MISSION) {
+            widget.base_mut().enabled = self
+                .screen
+                .is_enabled(MissionDescriptionButton::StartMission);
         }
 
         let screen = ScreenFrame::begin(io, &mut self.input_state);
@@ -479,5 +523,63 @@ impl MissionDescriptionModalState {
         self.screen
             .closed
             .then_some((self.screen.user_choice, self.screen.men_to_blazon_mode))
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+
+    /// Screen corners and edge midpoints a caller may request an origin at.
+    fn screen_anchors(width: i32, height: i32) -> [(i32, i32); 9] {
+        [
+            (0, 0),
+            (width / 2, 0),
+            (width, 0),
+            (0, height / 2),
+            (width / 2, height / 2),
+            (width, height / 2),
+            (0, height),
+            (width / 2, height),
+            (width, height),
+        ]
+    }
+
+    #[test]
+    fn mission_description_window_stays_on_screen_at_every_edge_and_viewport() {
+        for (width, height) in [(2259, 1271), (800, 600)] {
+            let transform = MenuTransform::centered(width, height);
+            for anchor in screen_anchors(width, height) {
+                let requested = transform.from_screen(anchor.0, anchor.1);
+                let (x, y) = MissionDescriptionModalState::window_origin(
+                    transform,
+                    (width, height),
+                    requested,
+                );
+                let (sx, sy) = transform.to_screen(x, y);
+                assert!(
+                    sx >= 0 && sy >= 0,
+                    "{width}x{height} anchor {anchor:?}: window at ({sx}, {sy}) starts off screen"
+                );
+                assert!(
+                    sx + layout_consts::WINDOW_WIDTH <= width,
+                    "{width}x{height} anchor {anchor:?}: window crosses the right edge"
+                );
+                assert!(
+                    sy + layout_consts::WINDOW_HEIGHT <= height,
+                    "{width}x{height} anchor {anchor:?}: window crosses the bottom edge"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn requested_origin_near_the_right_edge_moves_the_window_outside_the_map_panel() {
+        let transform = MenuTransform::centered(2259, 1271);
+        let requested = transform.from_screen(2259 - layout_consts::WINDOW_WIDTH, 600);
+        let (x, _) =
+            MissionDescriptionModalState::window_origin(transform, (2259, 1271), requested);
+        assert_eq!(x, requested.0, "an on-screen request is honoured");
+        assert!(transform.to_screen(x, 0).0 > transform.origin_x + 640);
     }
 }

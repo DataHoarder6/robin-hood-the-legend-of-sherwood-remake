@@ -112,6 +112,8 @@ fn mission_description_is_enabled_reflects_convert_flags() {
         can_convert_peasants: true,
         can_convert_money: false,
         can_convert_mission: true,
+        show_start_mission: true,
+        availability: crate::campaign_progress::MissionAvailability::Ready,
         ..Default::default()
     };
     assert!(screen.is_enabled(MissionDescriptionButton::Cancel));
@@ -119,6 +121,21 @@ fn mission_description_is_enabled_reflects_convert_flags() {
     assert!(screen.is_enabled(MissionDescriptionButton::ConvertPeasants));
     assert!(!screen.is_enabled(MissionDescriptionButton::ConvertMoney));
     assert!(screen.is_enabled(MissionDescriptionButton::ConvertMission));
+}
+
+#[test]
+fn mission_description_locked_mission_refuses_start() {
+    let mut screen = MissionDescriptionScreen {
+        can_convert_peasants: true,
+        show_start_mission: false,
+        availability: crate::campaign_progress::MissionAvailability::Locked,
+        ..Default::default()
+    };
+    assert!(!screen.is_enabled(MissionDescriptionButton::StartMission));
+    assert!(!screen.is_enabled(MissionDescriptionButton::ConvertPeasants));
+    screen.activate(MissionDescriptionButton::StartMission);
+    assert_eq!(screen.user_choice, MissionChoice::None);
+    assert!(!screen.closed);
 }
 
 #[test]

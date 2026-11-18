@@ -269,6 +269,11 @@ pub(super) fn commit_snapshot_transition(
     let Some((id, senders)) = committed else {
         return;
     };
+    tracing::info!(
+        transition = ?id,
+        peers = senders.len(),
+        "multiplayer: snapshot transition committed"
+    );
     publish_context_continuation(context);
     for sender in &senders {
         sender
@@ -287,17 +292,40 @@ pub(super) fn commit_snapshot_transition(
     drop(senders);
 }
 
+/// Host monotonic milliseconds. Every barrier deadline is expressed in this
+/// clock so tests can advance it without sleeping.
+pub(super) fn elapsed_ms(context: &ServerContext) -> u64 {
+    u64::try_from(context.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 pub(super) fn maybe_begin_sim_locked(
     peers: &mut ServerPeers,
+    now_ms: u64,
 ) -> Result<Option<(u32, u64, Vec<UnboundedSender<NetMsg>>)>, MultiplayerError> {
     if peers.transitions.pending().is_some() {
         return Ok(None);
     }
-    let Some(begin_frame) = peers.readiness.candidate(
+    let decision = peers.readiness.candidate(
+        now_ms,
         peers.sessions.expected_players(),
         peers.sessions.readiness(),
-    ) else {
-        return Ok(None);
+    );
+    let begin_frame = match decision {
+        ReadyDecision::Wait => return Ok(None),
+        ReadyDecision::Begin(frame) => frame,
+        ReadyDecision::Expired => {
+            let evicted = peers.sessions.evict_unready_seats();
+            tracing::warn!(
+                evicted = ?evicted,
+                budget_ms = READY_BUDGET_MS,
+                waited_ms = peers.readiness.waited_ms(now_ms),
+                "multiplayer: ready barrier expired; evicting peers that never became ready"
+            );
+            peers
+                .readiness
+                .forced_frame(peers.sessions.readiness())
+                .expect("the host frame exists whenever the barrier is evaluated")
+        }
     };
     let start_epoch_ms = try_current_epoch_ms()?.checked_add(500).ok_or_else(|| {
         MultiplayerError::LocalState(
@@ -339,6 +367,9 @@ pub(super) struct ServerContext {
     pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
     pub(super) host_left: AtomicBool,
     pub(super) connections: Mutex<std::collections::HashMap<u8, iroh::endpoint::Connection>>,
+    /// Monotonic anchor for barrier deadlines. Never serialized; deadlines
+    /// stored in peer state are elapsed milliseconds from this instant.
+    pub(super) started: std::time::Instant,
 }
 
 pub(super) fn fail_server(context: &ServerContext, error: MultiplayerError) {
@@ -522,6 +553,7 @@ pub(super) fn start_server_inner(
         content,
         cancellation: Arc::clone(&cancellation),
         shutdown_tx: shutdown_tx.clone(),
+        started: std::time::Instant::now(),
     });
 
     let (startup_tx, startup_rx) =
@@ -664,6 +696,7 @@ pub(super) async fn run_server(
         Arc::clone(&context),
         endpoint.clone(),
     ));
+    let watchdog = tokio::spawn(run_barrier_watchdog(Arc::clone(&context)));
 
     // Root task: explicit shutdown and an invalid host-side publication both
     // close the endpoint, ending every peer connection and the accept loop.
@@ -702,6 +735,8 @@ pub(super) async fn run_server(
     endpoint.close().await;
     accept.abort();
     let _ = accept.await;
+    watchdog.abort();
+    let _ = watchdog.await;
     if !pump_finished {
         pump.abort();
         let _ = pump.await;
@@ -732,7 +767,7 @@ pub(super) fn publish_connect_seats(context: &ServerContext, seats: Vec<(u8, Str
 pub(super) fn retry_begin_sim(context: &ServerContext) {
     let begin = {
         let mut peers = context.peers.lock();
-        maybe_begin_sim_locked(&mut peers)
+        maybe_begin_sim_locked(&mut peers, elapsed_ms(context))
     };
     match begin {
         Ok(begin) => announce_begin_sim(context, begin),
@@ -808,6 +843,58 @@ pub(super) fn connect_all_provisional_seats(context: &ServerContext) {
     let connected_seats = seats.iter().map(|(seat, _)| *seat).collect::<Vec<_>>();
     publish_connect_seats(context, seats);
     finish_seat_connections(context, &connected_seats);
+}
+
+/// Poll every bounded barrier so a peer that stops answering cannot freeze
+/// the session.
+///
+/// Snapshot transitions expire into eviction plus a commit for the peers that
+/// remain; the ready barrier expires into eviction plus a start for the peers
+/// that loaded. Both are no-ops on a tick where nothing is pending, so one
+/// ticker serves both. Eviction is safe because an evicted seat keeps its
+/// authenticated owner and re-admits from an authoritative snapshot.
+async fn run_barrier_watchdog(context: Arc<ServerContext>) {
+    let mut ticker = tokio::time::interval(Duration::from_millis(500));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if context.cancellation.load(Ordering::Acquire) {
+            return;
+        }
+        let (committed, begin) = {
+            let mut peers = context.peers.lock();
+            let now_ms = elapsed_ms(&context);
+            if let Some(expired) = peers.transitions.expire(now_ms) {
+                tracing::warn!(
+                    transition = ?expired.id,
+                    evicted = ?expired.evicted,
+                    waited_ms = expired.waited_ms,
+                    payload_bytes = expired.payload_bytes,
+                    "multiplayer: evicted unresponsive peers from snapshot transition"
+                );
+            }
+            let committed = take_committed_snapshot_transition(&mut peers);
+            // The replacement mission resets readiness; evaluating it in the
+            // same tick would start the old state for the new transport.
+            let begin = if committed.is_some() {
+                Ok(None)
+            } else {
+                maybe_begin_sim_locked(&mut peers, now_ms)
+            };
+            (committed, begin)
+        };
+        if committed.is_some() {
+            commit_snapshot_transition(&context, committed);
+        }
+        match begin {
+            Ok(begin) => announce_begin_sim(&context, begin),
+            Err(error) => {
+                tracing::error!(%error, "multiplayer ready barrier could not produce a start time");
+                fail_server(&context, error);
+                return;
+            }
+        }
+    }
 }
 
 pub(super) async fn run_server_accept_loop(context: Arc<ServerContext>, endpoint: Endpoint) {
@@ -1458,7 +1545,7 @@ pub(super) fn apply_authenticated_peer_message(
             let begin = {
                 let mut p = context.peers.lock();
                 p.sessions.record_ready(seat.0, session_generation, frame)?;
-                maybe_begin_sim_locked(&mut p)
+                maybe_begin_sim_locked(&mut p, elapsed_ms(context))
             };
             let begin = match begin {
                 Ok(begin) => begin,

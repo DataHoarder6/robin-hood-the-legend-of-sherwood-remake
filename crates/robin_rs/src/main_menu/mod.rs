@@ -739,11 +739,8 @@ impl MainMenuState {
         // Custom cursor on top — the OS cursor is hidden, so skip this
         // and the mouse appears to vanish.
         io.cursor_renderer.advance_ui_animation();
-        ModalCursor::new(io.cursor_renderer, MOUSE_OPACITY_DEFAULT, 0).draw(
-            renderer,
-            transform,
-            &self.input_state,
-        );
+        ModalCursor::new(io.cursor_renderer, MOUSE_OPACITY_DEFAULT, 0)
+            .draw(renderer, &self.input_state);
 
         renderer.present();
     }

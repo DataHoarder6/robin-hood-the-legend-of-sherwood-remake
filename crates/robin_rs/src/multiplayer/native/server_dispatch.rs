@@ -146,7 +146,7 @@ pub(super) async fn run_server_outgoing_pump(
                 let begin = {
                     let mut p = context.peers.lock();
                     p.readiness.host_frame = Some(frame);
-                    maybe_begin_sim_locked(&mut p)
+                    maybe_begin_sim_locked(&mut p, super::elapsed_ms(&context))
                 }?;
                 super::connect_all_provisional_seats(&context);
                 announce_begin_sim(&context, begin);
@@ -279,10 +279,21 @@ fn begin_host_snapshot_transition(
             .map(|(seat, _)| seat)
             .copied()
             .collect::<HashSet<_>>();
+        let now_ms = super::elapsed_ms(&context);
+        let deadline_ms = now_ms.saturating_add(transition_budget_ms(&payload));
+        tracing::info!(
+            transition = ?id,
+            payload_bytes = super::server_protocol::payload_bytes(&payload),
+            budget_ms = transition_budget_ms(&payload),
+            awaiting = ?awaiting,
+            "multiplayer: snapshot transition prepared"
+        );
         peers.transitions.begin(PendingSnapshotTransition {
             id,
             payload: payload.clone(),
             awaiting,
+            answered: HashSet::new(),
+            deadline_ms,
         });
         let prepare = NetMsg::PrepareSnapshotTransition { id, payload };
         // Keep the peer-state lock until every current writer has

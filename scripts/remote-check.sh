@@ -9,11 +9,13 @@
 #
 #   scripts/remote-check.sh engine          # this worktree, engine suite
 #   scripts/remote-check.sh engine feat/x   # explicit copy name
+#   scripts/remote-check.sh --suites tooling format
+#                                           # several suites, one synced tree
 #   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
 #   scripts/remote-check.sh --prune         # delete every copy but this one
 #
-# The suite runs under flock, so two agents on one copy queue instead of
+# The suites run under flock, so two agents on one copy queue instead of
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
 set -euo pipefail
 
@@ -143,30 +145,57 @@ case "${1:-}" in
         ;;
 esac
 
-suite=$1
-name=$(copy_name "${2:-}")
+multi=0
+if [ "${1:-}" = --suites ]; then
+    multi=1
+    shift
+    (( $# > 0 )) || usage
+    # One copy, one name: the suites share a tree, so there is nothing for a
+    # second name to separate.
+    name=$(copy_name "")
+    requested=("$@")
+else
+    (( $# > 0 )) || usage
+    name=$(copy_name "${2:-}")
+    requested=("$1")
+fi
 
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
-suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
-suites=${suites#*suites: }
-case " $suites " in
-    *" $suite "*) ;;
-    *)
-        printf 'remote-check: unknown suite %s\nsuites: %s\n' "$suite" "$suites" >&2
-        exit 2
-        ;;
-esac
+known=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
+known=${known#*suites: }
+for suite in "${requested[@]}"; do
+    case " $known " in
+        *" $suite "*) ;;
+        *)
+            printf 'remote-check: unknown suite %s\nsuites: %s\n' "$suite" "$known" >&2
+            exit 2
+            ;;
+    esac
+done
 
 require_host
 sync_worktree
 lock="$remote_dir.lock"
-printf 'remote-check: %s -> %s:%s\n' "$suite" "$host" "$remote_dir" >&2
-
-ssh "$host" bash -s <<EOF
+if ((multi)); then
+    printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2
+    # One synced tree, one lock, one devShell: a second sync between two suites
+    # would swap the copy out from under the first, and the suites share its
+    # build cache. `\$suite` reaches the remote shell untouched.
+    ssh "$host" bash -s <<EOF
 set -euo pipefail
 cd $remote_dir
-exec systemd-inhibit --what=idle --why='check-quality $suite' \
-    flock -w 7200 $lock \
-    nix develop --command bash scripts/check-quality.sh $suite
+exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
+    flock -w 7200 $lock \\
+    nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
+else
+    printf 'remote-check: %s -> %s:%s\n' "${requested[0]}" "$host" "$remote_dir" >&2
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
+    flock -w 7200 $lock \\
+    nix develop --command bash scripts/check-quality.sh ${requested[0]}
+EOF
+fi

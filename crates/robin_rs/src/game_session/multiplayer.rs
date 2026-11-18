@@ -66,6 +66,15 @@ pub(crate) enum SessionProtocolFailure {
         full_mod_sha256: [u8; 32],
         offset: u64,
     },
+    /// An admission phase never received the message that would release it.
+    #[error(
+        "fatal multiplayer session error: no admission progress for {waited_ms} ms in {}",
+        state.label()
+    )]
+    AdmissionTimeout {
+        state: super::runtime::MultiplayerAdmission,
+        waited_ms: u64,
+    },
     /// A session invariant the host must uphold was violated.
     #[error("{0}")]
     Invariant(&'static str),
@@ -423,6 +432,16 @@ struct NetDrain<'a> {
     effective_frame: u32,
 }
 
+/// Seat and session identity used to label a pinned diagnostic bundle.
+fn session_identity(host: &Host) -> (Option<u8>, Option<String>) {
+    let Some(net) = host.transport.net() else {
+        return (None, None);
+    };
+    let seat = Some(host.transport.local_seat().0);
+    let session_id = net.session_id().ok().map(|id| format!("{id:?}"));
+    (seat, session_id)
+}
+
 impl NetDrain<'_> {
     /// Phase 1: fold one drained transport event.
     fn handle_event(
@@ -589,6 +608,13 @@ impl NetDrain<'_> {
                 .into());
             }
             NetEvent::Fatal(fatal) => {
+                let (seat, session_id) = session_identity(self.host);
+                crate::multiplayer::diagnostics::record_session_failure(
+                    &fatal.to_string(),
+                    None,
+                    seat,
+                    session_id,
+                );
                 return Err(SessionProtocolFailure::TransportFatal(fatal).into());
             }
             NetEvent::InitialSnapshot {
@@ -1237,7 +1263,22 @@ pub(super) fn drain_mission_network(
         );
     }
 
-    let admission_pause = timeline.multiplayer_mut().admission_paused(now_epoch_ms);
+    let admission_pause = match timeline
+        .multiplayer_mut()
+        .admission_paused(now_epoch_ms, crate::window::process_uptime_ms())
+    {
+        Ok(paused) => paused,
+        Err(error) => {
+            let (seat, session_id) = session_identity(host);
+            crate::multiplayer::diagnostics::record_session_failure(
+                &error.to_string(),
+                Some(timeline.multiplayer().admission().label()),
+                seat,
+                session_id,
+            );
+            return Err(error.into());
+        }
+    };
     let mut clock_pause = false;
     if local_is_peer && !admission_pause {
         if let Some(deadline_ms) = timeline
@@ -1277,6 +1318,7 @@ pub(super) fn drain_mission_network(
         net.publish_frame(timeline.frame_number());
         net.service_modal_session(
             host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST,
+            u64::from(crate::window::process_uptime_ms()),
         )
         .map_err(|error| channel_failure("modal session control failed", error))?;
         if host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST {

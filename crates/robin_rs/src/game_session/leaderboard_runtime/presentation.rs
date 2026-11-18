@@ -201,7 +201,6 @@ fn render_preparing(
             // cursor avoids a visible jump when the board becomes ready.
             cursor.draw(
                 renderer,
-                transform,
                 &crate::ingame_menu::widget_bridge::ModalInputState::default(),
             );
         }
