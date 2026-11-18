@@ -147,7 +147,33 @@ not_called 'docker run'
 not_called 'ssh .*deploy-'
 called 'wrangler deployments list'
 if grep '^wrangler' "$FAKE_CALLS" | grep -qv 'deployments list'; then fail 'wrangler used beyond deployments list'; fi
-compgen -G "$HOME/.local/share/robin_hood/release-logs/*.log" >/dev/null || fail 'no release log written'
+log_dir=$HOME/.local/share/robin_hood/release-logs
+logs=("$log_dir"/*.log)
+[[ -e ${logs[0]} ]] || fail 'no release log written'
+
+# 1b. A run that dies at its first check still leaves its audit log, and the log
+# is there the moment the process exits. `release.sh` opens the file before it
+# starts the tee process substitution; bash does not wait for that child, so a
+# tee that has not started yet would otherwise be the only thing that ever
+# created the file. The path is checked with a plain glob because the build
+# host's bash has no `compgen` (it is built without readline).
+rm -rf "$log_dir"
+tee_bin=$(command -v tee)
+fake "$bin/tee" <<EOF
+sleep 0.5
+exec "$tee_bin" "\$@"
+EOF
+status=0
+(cd "$work" && FAKE_DIRTY=1 PATH="$bin:$PATH" bash "$fixture/scripts/release.sh" --dry-run \
+    >"$work/early.out" 2>&1) || status=$?
+rm -f "$bin/tee"
+((status != 0)) || fail 'unexpected success'
+# The lazy tee is still asleep, so the run's own output is not readable yet;
+# the calls it made show it reached the dirty-tree check and died there.
+called 'git status --porcelain --untracked-files=no'
+logs=("$log_dir"/*.log)
+[[ -e ${logs[0]} ]] || fail 'a run that died at its first check left no release log'
+[[ ${#logs[@]} -eq 1 ]] || fail "expected one release log, found ${#logs[@]}"
 
 # 2. Live datadir header differs from the code: a new generation is built first.
 FAKE_LIVE_MAGIC=RHDDNA15 release --web-only --dry-run

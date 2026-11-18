@@ -40,6 +40,11 @@ wrangler=$repo/wasm-www/node_modules/.bin/wrangler
 log_dir=$HOME/.local/share/robin_hood/release-logs
 mkdir -p "$log_dir"
 log=$log_dir/$(date -u +%Y%m%dT%H%M%SZ).log
+# Every run leaves an audit log, including one that dies at its first check.
+# `exec > >(tee -a)` only starts tee; it returns before tee has opened the file,
+# and a run that exits immediately was measured leaving no log at all. Open it
+# synchronously first, then let tee append to the same file.
+: >>"$log"
 exec > >(tee -a "$log") 2>&1
 
 step() { printf '\n==> %s\n' "$*"; }
