@@ -420,7 +420,10 @@ isolation rule):
   ids, admission phase, evictions);
 
 and, when a session fails, a pinned bundle under `robin_hood/diagnostics/` that
-names the reason, the phase, the seat, the session and the newest replay.
+names the reason, the phase, the seat, the session and the newest replay's path
+and modification time. The bundle is `session-<session id>.json` — the write
+time when the failure predates a session identity — so one session keeps one
+note instead of a pile of guesses.
 
 The **host's** replay is the shared record: it carries every seat's input and the
 authoritative hash chain, and a bug report is reproduced from it. A peer's replay
