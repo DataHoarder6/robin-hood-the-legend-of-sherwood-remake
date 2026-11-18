@@ -416,11 +416,27 @@ isolation rule):
 - a local mission replay of every mission it plays (`replays/`), produced by the
   same recorder single-player uses — a peer is not a spectator, it owns a
   timeline;
-- its own log stream, with the multiplayer events (seat, session, transition
-  ids, admission phase, evictions);
+- `logs/robin-<YYYYMMDDTHHMMSS>.log`, this run's full trace — every line stderr
+  would have carried, written whether or not the process has a terminal. Ten
+  runs are kept and older ones are pruned at startup;
+- `logs/events.jsonl`, the session narrative as one JSON object per line:
+  admission phases, seat connect/assign/evict, start-barrier reach/release, the
+  transition prepared/committed/aborted/dropped states, modal announce/propose/
+  ack/expiry, desync and session failure. Each line carries `seq`, `uptime_ms`,
+  `utc`, `kind`, `seat`, `frame` and `detail`, and the same call site writes the
+  log line, so the two cannot disagree;
+- `GET /events?since=<seq>` while the process lives, which serves that same ring
+  (see [JSON_SERVER.md](JSON_SERVER.md#session-events));
+- `GET /state`, which keeps answering after the mission ends: the last published
+  snapshot plus a `terminal` block naming the operation and why it stopped;
 
-and, when a session fails, a pinned bundle under `robin_hood/diagnostics/` that
-names the reason, the phase, the seat, the session and the newest replay.
+and, when a session fails, a pinned bundle under `diagnostics/` that names the
+reason, the phase, the seat, the session, the newest replay and this run's log.
+
+One install home therefore reconstructs a session without the game: the replay
+carries the inputs and hash chain, the run log carries everything traced, and
+`events.jsonl` carries the multiplayer facts with timestamps and sequence
+numbers. A failing seat's directory is the whole report.
 
 The **host's** replay is the shared record: it carries every seat's input and the
 authoritative hash chain, and a bug report is reproduced from it. A peer's replay
