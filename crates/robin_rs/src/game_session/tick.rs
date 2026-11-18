@@ -1407,30 +1407,17 @@ fn default_http_modal_result(
 
 use super::session_policy::validate_modal_result as validate_http_modal_result;
 
-/// Apply multiplayer authority to HTTP-supplied modal outcomes before any
-/// local presentation state is changed. A host publishes the same decision
-/// its own UI would publish; a client can only submit an advisory proposal and
-/// must keep the modal open until that decision comes back from the host.
-/// Terminal pages are session-owned, so their dismissal follows the same rule
-/// as a story page: a host decides at once, a client only submits its
-/// acknowledgement. The client's acknowledgement is published by the modal gate
-/// when the queued result is applied, so it must not be proposed twice here.
-fn authorize_terminal_http_dismissal(
-    host: &Host,
+/// Author one modal decision for a dismissal the host's HTTP endpoint owns:
+/// open the session's instance, publish the decision, then complete it.
+///
+/// Both the step's modal policy and the mission-end page decide through here,
+/// so there is one place that authors a decision and one order for the three
+/// session calls; the request that carried the result only chooses which
+/// preconditions apply.
+fn author_modal_decision(
+    net: &crate::multiplayer::NetChannels,
     dismissal: &crate::http_server::HttpModalDismissal,
 ) -> Result<(), RpcError> {
-    if host.transport.net().is_none() {
-        return Ok(());
-    }
-    if !robin_engine::multiplayer::is_session_shared_modal(&dismissal.kind) {
-        return Err(RpcError::unavailable_capability(
-            "terminal modal is not shared by the session".to_owned(),
-        ));
-    }
-    if host.transport.local_seat() != PlayerId::HOST {
-        return Ok(());
-    }
-    let net = host.transport.net().expect("net checked above");
     let instance = net
         .open_modal_instance(&dismissal.kind)
         .map_err(RpcError::internal)?;
@@ -1441,6 +1428,39 @@ fn authorize_terminal_http_dismissal(
     Ok(())
 }
 
+/// Authorize a dismissal of the terminal page that owns a mission.
+///
+/// Terminal pages are session-owned, so their dismissal follows the same rule
+/// as a story page: a host decides at once, a client only submits its
+/// acknowledgement. The client's acknowledgement is published by the modal gate
+/// when the queued result is applied, so it must not be proposed twice here.
+fn authorize_terminal_http_dismissal(
+    host: &Host,
+    dismissal: &crate::http_server::HttpModalDismissal,
+) -> Result<(), RpcError> {
+    let Some(net) = host.transport.net() else {
+        return Ok(());
+    };
+    // A terminal page is session-owned. Dismissing anything else is not a
+    // terminal decision, and authoring one would invent an occurrence the
+    // session never opened.
+    if !robin_engine::multiplayer::is_session_shared_modal(&dismissal.kind) {
+        return Err(RpcError::unavailable_capability(
+            "terminal modal is not shared by the session".to_owned(),
+        ));
+    }
+    if host.transport.local_seat() != PlayerId::HOST {
+        // The client's acknowledgement is published by the modal gate when the
+        // queued result is applied, so it must not be proposed twice here.
+        return Ok(());
+    }
+    author_modal_decision(net, dismissal)
+}
+
+/// Apply multiplayer authority to HTTP-supplied modal outcomes before any
+/// local presentation state is changed. A host publishes the same decision
+/// its own UI would publish; a client can only submit an advisory proposal and
+/// must keep the modal open until that decision comes back from the host.
 fn authorize_http_modal_dismissals(
     host: &Host,
     dismissals: &[crate::http_server::HttpModalDismissal],
@@ -1451,13 +1471,7 @@ fn authorize_http_modal_dismissals(
 
     if host.transport.local_seat() == PlayerId::HOST {
         for dismissal in dismissals {
-            let instance = net
-                .open_modal_instance(&dismissal.kind)
-                .map_err(RpcError::internal)?;
-            net.decide_modal_dismiss(instance, dismissal.kind.clone(), dismissal.result)
-                .map_err(RpcError::internal)?;
-            net.complete_modal_instance(&dismissal.kind, instance)
-                .map_err(RpcError::internal)?;
+            author_modal_decision(net, dismissal)?;
         }
         Ok(())
     } else {
@@ -2709,6 +2723,112 @@ mod tests {
             NetOutbound::ModalDecision(robin_engine::multiplayer::ModalDecision { kind, result, .. })
                 if kind == expected.kind && result == expected.result
         ));
+    }
+
+    /// A host with a bound session, for the modal-authority tests.
+    fn session_host(
+        seat: PlayerId,
+        session_byte: u8,
+    ) -> (
+        Host,
+        std::sync::mpsc::Receiver<crate::multiplayer::NetOutbound>,
+    ) {
+        let (net, _incoming, outgoing, _cursor, _snapshot) = crate::multiplayer::NetChannels::new();
+        net.install_session_id(crate::multiplayer::MultiplayerSessionId([session_byte; 32]))
+            .unwrap();
+        let mut host = Host::default();
+        host.transport = crate::host::HostTransport::test_session(net, seat);
+        (host, outgoing)
+    }
+
+    fn published_decision(
+        outgoing: &std::sync::mpsc::Receiver<crate::multiplayer::NetOutbound>,
+    ) -> robin_engine::multiplayer::ModalDecision {
+        match outgoing.try_recv().expect("an authoritative decision") {
+            crate::multiplayer::NetOutbound::ModalDecision(decision) => decision,
+            other => panic!("expected a decision, got {other:?}"),
+        }
+    }
+
+    /// The mission-end page and the step policy are one decision path: the
+    /// same dismissal publishes the same authoritative decision either way.
+    #[test]
+    fn terminal_and_step_dismissals_author_the_same_host_decision() {
+        use robin_engine::player_command::{DebriefingTextId, DialogResult, ModalKind};
+
+        let dismissal = crate::http_server::HttpModalDismissal {
+            kind: ModalKind::FinalDebriefing {
+                text_id: DebriefingTextId::Win { index: 0 },
+            },
+            result: DialogResult::Completed,
+        };
+
+        let (terminal_host, terminal_out) = session_host(PlayerId::HOST, 3);
+        authorize_terminal_http_dismissal(&terminal_host, &dismissal)
+            .expect("a host authorizes the terminal page's dismissal");
+        let terminal_decision = published_decision(&terminal_out);
+        assert!(
+            terminal_out.try_recv().is_err(),
+            "one dismissal publishes one decision"
+        );
+
+        let (step_host, step_out) = session_host(PlayerId::HOST, 3);
+        authorize_http_modal_dismissals(&step_host, std::slice::from_ref(&dismissal))
+            .expect("a host authorizes a step's dismissal");
+        let step_decision = published_decision(&step_out);
+
+        assert_eq!(terminal_decision, step_decision);
+        assert_eq!(terminal_decision.kind, dismissal.kind);
+        assert_eq!(terminal_decision.result, dismissal.result);
+    }
+
+    /// A client may only acknowledge a terminal page: the modal gate publishes
+    /// that acknowledgement, so authorizing here must not propose it twice.
+    #[test]
+    fn terminal_dismissal_is_not_a_client_proposal() {
+        use robin_engine::player_command::{DebriefingTextId, DialogResult, ModalKind};
+
+        let (host, outgoing) = session_host(PlayerId(1), 4);
+        let dismissal = crate::http_server::HttpModalDismissal {
+            kind: ModalKind::FinalDebriefing {
+                text_id: DebriefingTextId::Win { index: 0 },
+            },
+            result: DialogResult::Completed,
+        };
+
+        authorize_terminal_http_dismissal(&host, &dismissal)
+            .expect("a client's terminal dismissal is queued, not refused");
+
+        assert!(
+            outgoing.try_recv().is_err(),
+            "the client must not propose the acknowledgement the modal gate publishes"
+        );
+    }
+
+    #[test]
+    fn terminal_dismissal_refuses_a_modal_the_session_does_not_own() {
+        use robin_engine::player_command::{DialogResult, MissionStateModalKind, ModalKind};
+
+        let (host, outgoing) = session_host(PlayerId::HOST, 5);
+        let dismissal = crate::http_server::HttpModalDismissal {
+            kind: ModalKind::MissionState {
+                kind: MissionStateModalKind::LeaveMissionNow,
+            },
+            result: DialogResult::Aborted,
+        };
+
+        let error = authorize_terminal_http_dismissal(&host, &dismissal)
+            .expect_err("a local confirm is not a terminal page");
+
+        assert_eq!(
+            error.kind,
+            crate::http_server::RpcErrorKind::UnavailableCapability
+        );
+        assert!(error.to_string().contains("not shared by the session"));
+        assert!(
+            outgoing.try_recv().is_err(),
+            "a refused dismissal authors nothing"
+        );
     }
 
     #[test]
