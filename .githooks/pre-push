@@ -73,11 +73,12 @@ fi
 
 # remote-check pushes this checkout to the build host, and that push would enter
 # this hook again; the copy is a build cache, not an integration.
-for suite in "${suites[@]}"; do
-    printf 'pre-push: %s\n' "$suite" >&2
-    SKIP_PUSH_GATE=1 bash scripts/remote-check.sh "$suite" || {
-        printf 'pre-push: %s failed; the integration branch stays where it is.\n' "$suite" >&2
-        printf 'pre-push: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2
-        exit 1
-    }
-done
+#
+# One sync for every suite: syncing per suite could straddle an edit and report a
+# verdict for a tree that no longer exists.
+printf 'pre-push: %s\n' "${suites[*]}" >&2
+SKIP_PUSH_GATE=1 bash scripts/remote-check.sh --suites "${suites[@]}" || {
+    printf 'pre-push: %s failed; the integration branch stays where it is.\n' "${suites[*]}" >&2
+    printf 'pre-push: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2
+    exit 1
+}

@@ -9,6 +9,8 @@
 #
 #   scripts/remote-check.sh engine          # this worktree, engine suite
 #   scripts/remote-check.sh engine feat/x   # explicit copy name
+#   scripts/remote-check.sh --suites engine client-release
+#                                           # several suites, one sync, one tree
 #   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
 #   scripts/remote-check.sh --prune         # delete every copy but this one
@@ -143,20 +145,49 @@ case "${1:-}" in
         ;;
 esac
 
-suite=$1
-name=$(copy_name "${2:-}")
-
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
-suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
-suites=${suites#*suites: }
-case " $suites " in
-    *" $suite "*) ;;
-    *)
-        printf 'remote-check: unknown suite %s\nsuites: %s\n' "$suite" "$suites" >&2
-        exit 2
-        ;;
-esac
+known_suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
+known_suites=${known_suites#*suites: }
+
+validate_suite() {
+    case " $known_suites " in
+        *" $1 "*) ;;
+        *)
+            printf 'remote-check: unknown suite %s\nsuites: %s\n' "$1" "$known_suites" >&2
+            exit 2
+            ;;
+    esac
+}
+
+# Several suites run against one synced tree: two syncs could straddle an edit
+# and report a verdict for a tree that no longer exists.
+if [ "${1:-}" = --suites ]; then
+    shift
+    [ $# -ge 1 ] || usage
+    name=$(copy_name "")
+    selected=()
+    for suite in "$@"; do
+        validate_suite "$suite"
+        selected+=("$suite")
+    done
+    require_host
+    sync_worktree
+    lock="$remote_dir.lock"
+    printf 'remote-check: %s -> %s:%s\n' "${selected[*]}" "$host" "$remote_dir" >&2
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+exec systemd-inhibit --what=idle --why='check-quality ${selected[*]}' \\
+    flock -w 7200 $lock \\
+    nix develop --command bash -c 'for suite in ${selected[*]}; do bash scripts/check-quality.sh "\$suite" || exit 1; done'
+EOF
+    exit
+fi
+
+suite=$1
+name=$(copy_name "${2:-}")
+validate_suite "$suite"
 
 require_host
 sync_worktree

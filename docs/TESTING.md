@@ -96,8 +96,11 @@ crates recompiled). The copy is the thing to keep warm.
 
 The push that updates the integration branch is gated by
 `.githooks/pre-push`: it runs `format` and `client-release` when anything under
-`crates/` or a gate script changed, `engine` when engine crates did, on the build
-host, and refuses the push on the first failure. `SKIP_PUSH_GATE=1` exists for a
+`crates/` or a gate script changed and `engine` when engine crates did, on the build
+host, and refuses the push on the first failure. All suites for one push run from a
+single `scripts/remote-check.sh --suites …` invocation, so they compile one synced
+tree; a per-suite sync could straddle an edit and report a verdict for a tree that
+no longer exists. `SKIP_PUSH_GATE=1` exists for a
 deliberately red branch. Review branches are not gated; the push that lands them
 is. GitHub Actions is not part of this: no push in this repository has ever
 produced a run (#26), so a workflow gate would be decoration.
