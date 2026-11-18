@@ -420,9 +420,13 @@ isolation rule):
   would have carried, written whether or not the process has a terminal. Ten
   runs are kept and older ones are pruned at startup;
 - `logs/events.jsonl`, the session narrative as one JSON object per line:
-  admission phases, seat connect/assign/evict, start-barrier reach/release, the
-  transition prepared/committed/aborted/dropped states, modal announce/propose/
-  ack/expiry, desync and session failure. Each line carries `seq`, `uptime_ms`,
+  mission start, host start, admission phases, seat connect/assign/evict,
+  transport disconnect/reconnect, start-barrier reach/release, the transition
+  prepared/committed/aborted/dropped states, modal announce/propose/ack/expiry,
+  desync and session failure. An eviction is an admitted `DisconnectSeat`; a
+  transport retry is its own `transport_disconnected`/`transport_reconnected`
+  pair, so a reconnect is never read as a participant leaving. Each line
+  carries `seq`, `uptime_ms`,
   `utc`, `kind`, `seat`, `frame` and `detail`, and the same call site writes the
   log line, so the two cannot disagree;
 - `GET /events?since=<seq>` while the process lives, which serves that same ring
