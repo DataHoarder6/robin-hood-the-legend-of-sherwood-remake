@@ -77,7 +77,7 @@ fn summon_wakes_a_staged_body_at_the_reinforcement_door() {
             TickCtx::new(&sim, &assets),
             SummonRequest {
                 faction: Camp::Lacklandists,
-                entry: None,
+                entry: crate::engine::reinforcement::SummonEntry::Any,
             },
         )
         .expect("a staged garrison body answers the call");
@@ -113,7 +113,7 @@ fn summon_is_off_when_the_sim_flag_is_off() {
                 TickCtx::new(&sim, &assets),
                 SummonRequest {
                     faction: Camp::Lacklandists,
-                    entry: None,
+                    entry: crate::engine::reinforcement::SummonEntry::Any,
                 },
             )
             .is_none(),
@@ -1545,4 +1545,94 @@ fn selection_followup_retargets_recording_before_forwarding_returns() {
         vec![second],
         "character selection followed by macro-recording update must complete in the originating frame"
     );
+}
+
+#[test]
+fn enter_from_outside_places_the_actor_beyond_the_map_edge() {
+    use crate::coordinates::{MapBBox, MapPoint};
+
+    let mut engine = EngineInner::new();
+    let mut bbox = MapBBox::new();
+    bbox.expand_point(MapPoint::new(0.0, 0.0));
+    bbox.expand_point(MapPoint::new(1000.0, 1000.0));
+    engine.world.fast_grid_mut().level_mut().map_bbox = bbox;
+    let mut actor = make_test_ai_soldier(crate::element::Camp::Lacklandists);
+    actor.position_iface_mut().configure_for_actor(
+        crate::position_interface::PathfinderIndex::new(0).expect("pathfinder index"),
+        crate::coordinates::MoveBoxHalfDiagonal::new(20.0, 20.0),
+        MapPoint::new(500.0, 500.0),
+    );
+    let id = engine.add_test_entity(actor);
+
+    let outside = engine.enter_from_outside(id, MapPoint::new(500.0, 500.0), 0, None, 0);
+
+    assert!(
+        outside.x < 0.0 || outside.y < 0.0 || outside.x > 1000.0 || outside.y > 1000.0,
+        "the entry point must lie outside the map"
+    );
+    assert_eq!(
+        engine.get_entity(id).unwrap().element_data().position_map(),
+        outside
+    );
+}
+
+#[test]
+fn summon_uses_an_edge_entry_without_a_door() {
+    use crate::ai::OffmapEntry;
+    use crate::coordinates::MapPoint;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::{SummonEntry, SummonRequest};
+    use crate::level_data::ReinforcementEntryKind;
+
+    let (mut engine, body) = staged_garrison_engine();
+    engine.ai.global.reinforcement_doors.clear();
+    engine.ai.global.offmap_entries.push(OffmapEntry {
+        kind: ReinforcementEntryKind::Road,
+        point_out: MapPoint::new(-25.0, 300.0),
+        point_in: MapPoint::new(-10.0, 300.0),
+        target: MapPoint::new(500.0, 300.0),
+        layer: 0,
+        sector: None,
+        direction: 0,
+    });
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let summoned = engine
+        .summon_garrison(
+            TickCtx::new(&sim, &assets),
+            SummonRequest {
+                faction: Camp::Lacklandists,
+                entry: SummonEntry::Offmap(0),
+            },
+        )
+        .expect("an edge entry answers the call without a door");
+
+    assert_eq!(summoned, body);
+    let entity = engine.get_entity(body).expect("summoned body");
+    assert!(entity.element_data().active);
+    assert_eq!(
+        entity.element_data().position_map(),
+        MapPoint::new(-25.0, 300.0)
+    );
+}
+
+#[test]
+fn summon_can_use_a_named_door_entry() {
+    use crate::element::Camp;
+    use crate::engine::reinforcement::{SummonEntry, SummonRequest};
+    use crate::gate::DoorIndex;
+
+    let (mut engine, body) = staged_garrison_engine();
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let summoned = engine
+        .summon_garrison(
+            TickCtx::new(&sim, &assets),
+            SummonRequest {
+                faction: Camp::Lacklandists,
+                entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
+            },
+        )
+        .expect("the named door answers the call");
+    assert_eq!(summoned, body);
 }

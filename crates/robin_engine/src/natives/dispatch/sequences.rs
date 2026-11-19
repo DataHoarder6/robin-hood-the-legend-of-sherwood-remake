@@ -615,8 +615,6 @@ impl NativeContext<'_, '_> {
                     direction as i16
                 };
 
-                let (_border, (ox, oy)) = self.compute_border_point((dx, dy), effective_dir);
-
                 // If the actor is already in `moving_actors`,
                 // just refresh the cached destination and skip
                 // the teleport / outside-spawn block.  Only the
@@ -643,24 +641,20 @@ impl NativeContext<'_, '_> {
                     // observes the actor as outside the map on
                     // the next script read.  Also handles the
                     // `in_honolulu` wake-up case.
-                    if let Some(entity) = self.get_entity_mut(actor) {
-                        let ed = entity.element_data_mut();
-                        if ed.in_honolulu {
-                            ed.active = true;
-                            ed.in_honolulu = false;
-                        }
-                        ed.set_position_map(crate::coordinates::MapPoint { x: ox, y: oy });
-                        if let Some((layer, sector)) = dest_layer_sector {
-                            ed.set_layer(layer);
-                            ed.sprite
-                                .position_iface
-                                .set_sector_topology(Some(sector), sector.arena_index());
-                        }
-                        ed.update_grid_cell();
-                    } else {
+                    let map_bbox = self.fast_grid.level.map_bbox;
+                    let Some(entity) = self.get_entity_mut(actor) else {
                         script_error!(native, "invalid actor handle {actor}");
                         return 0;
-                    }
+                    };
+                    let outside = crate::engine::reinforcement::place_outside_entity(
+                        map_bbox,
+                        entity,
+                        crate::coordinates::MapPoint { x: dx, y: dy },
+                        dest_layer_sector.map(|(layer, _)| layer),
+                        dest_layer_sector.map(|(_, sector)| sector),
+                        effective_dir,
+                    );
+                    let (ox, oy) = (outside.x, outside.y);
                     self.yield_engine_command(EngineCommand::SetActorLocation {
                         actor_handle: actor,
                         x: ox,

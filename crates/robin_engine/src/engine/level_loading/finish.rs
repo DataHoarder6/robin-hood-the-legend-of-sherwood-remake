@@ -255,36 +255,46 @@ impl EngineInner {
         {
             let map_bbox = self.world.fast_grid.level.map_bbox;
             let special_layer = self.world.fast_grid.level.special_layer;
-            let sector_out_of_map = crate::sector::SectorNumber::new(-1);
-            // The original game retains one real motion-area sector reference for the
-            // outside endpoint of every reinforcement gate. Resolve that
-            // exact arena object, excluding unrelated -1 click/shadow
-            // sectors, and reject an absent or duplicate candidate.
-            let mut out_of_map_matches = self
-                .world
-                .fast_grid
-                .level
-                .sectors
+            // Only gate-shaped entries need the explicit out-of-map motion
+            // area. An edge entry computes its outside point from the map
+            // bounds and never gets a gate, so it must not require that
+            // sector to exist.
+            let out_of_map_sector = tactic
+                .reinforcement_points
                 .iter()
-                .enumerate()
-                .filter(|(_, sector)| {
-                    sector.sector_number == sector_out_of_map
-                        && sector.sector_type.is_motion()
-                        && sector.sector_type.is_area()
+                .any(|point| {
+                    point.kind == crate::level_data::ReinforcementEntryKind::Door
                 })
-                .map(|(index, _)| {
-                    crate::fast_find_grid::SectorIndex::new(
-                        u32::try_from(index).expect("out-of-map runtime sector index exceeds u32"),
-                    )
-                    .expect("out-of-map runtime sector index equals null sentinel")
+                .then(|| {
+                    let sector_out_of_map = crate::sector::SectorNumber::new(-1);
+                    let mut matches = self
+                        .world
+                        .fast_grid
+                        .level
+                        .sectors
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, sector)| {
+                            sector.sector_number == sector_out_of_map
+                                && sector.sector_type.is_motion()
+                                && sector.sector_type.is_area()
+                        })
+                        .map(|(index, _)| {
+                            crate::fast_find_grid::SectorIndex::new(
+                                u32::try_from(index)
+                                    .expect("out-of-map runtime sector index exceeds u32"),
+                            )
+                            .expect("out-of-map runtime sector index equals null sentinel")
+                        });
+                    let index = matches
+                        .next()
+                        .expect("reinforcement doors require the explicit out-of-map motion area");
+                    assert!(
+                        matches.next().is_none(),
+                        "multiple out-of-map motion areas make reinforcement endpoint identity ambiguous"
+                    );
+                    (sector_out_of_map, index)
                 });
-            let sector_out_index = out_of_map_matches
-                .next()
-                .expect("reinforcement doors require the explicit out-of-map motion area");
-            assert!(
-                out_of_map_matches.next().is_none(),
-                "multiple out-of-map motion areas make reinforcement endpoint identity ambiguous"
-            );
             let mut installed = 0usize;
             for raw in &tactic.reinforcement_points {
                 // The sector field in the reinforcement chunk is an original-game sparse
@@ -329,6 +339,25 @@ impl EngineInner {
                 // fractions shifts every later exit-point movement goal.
                 let border = MapPoint::new(border.0 as i16 as f32, border.1 as i16 as f32);
                 let outside = MapPoint::new(outside.0 as i16 as f32, outside.1 as i16 as f32);
+
+                if raw.kind != crate::level_data::ReinforcementEntryKind::Door {
+                    let target = raw
+                        .target
+                        .map(|(x, y)| MapPoint::new(x as f32, y as f32))
+                        .unwrap_or(inside);
+                    self.ai.global.offmap_entries.push(crate::ai::OffmapEntry {
+                        kind: raw.kind,
+                        point_out: outside,
+                        point_in: inside,
+                        target,
+                        layer: raw.layer,
+                        sector: crate::position_interface::SectorHandle::new(u16::from(sector_in)),
+                        direction: raw.direction as i16,
+                    });
+                    continue;
+                }
+                let (sector_out_of_map, sector_out_index) =
+                    out_of_map_sector.expect("a door entry requires the out-of-map motion area");
 
                 // Reinforcement doors get 4× WalkingUpright actions
                 // by default.

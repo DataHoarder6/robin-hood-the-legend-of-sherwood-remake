@@ -71,28 +71,28 @@ pub(crate) fn ai_position_to_point_3d(
                 if grid_sector.is_some_and(|sector| sector.sector_type.is_building()) {
                     let sector = grid_sector.expect("building sector disappeared");
                     let door = sector
-                    .gate_indices
-                    .iter()
-                    .filter_map(|index| {
-                        fast_grid
-                            .level
-                            .door_projection_infos
-                            .get(usize::from(*index))
-                    })
-                    .find(|door| {
-                        (door.point_in.x - position.x)
-                            .abs()
-                            .max((door.point_in.y - position.y).abs())
-                            < 20.0
-                    })
-                    .unwrap_or_else(|| {
-                        panic!(
+                        .gate_indices
+                        .iter()
+                        .filter_map(|index| {
+                            fast_grid
+                                .level
+                                .door_projection_infos
+                                .get(usize::from(*index))
+                        })
+                        .find(|door| {
+                            (door.point_in.x - position.x)
+                                .abs()
+                                .max((door.point_in.y - position.y).abs())
+                                < 20.0
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
                             "position_to_point_3d: building sector {} has no door near ({}, {})",
                             handle.get(),
                             position.x,
                             position.y
                         )
-                    });
+                        });
                     (
                         crate::position_interface::SectorHandle::from_number(door.sector_out)
                             .with_arena_index(door.sector_out_index.unwrap_or_else(|| {
@@ -310,6 +310,31 @@ pub struct ReinforcementDoorInfo {
     pub point_in: MapPoint,
 }
 
+/// An authored entry with no gate: the body appears beyond the map border
+/// and walks to `target` inside the level. Populated at level load from the
+/// non-door reinforcement points.
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct OffmapEntry {
+    pub kind: crate::level_data::ReinforcementEntryKind,
+    /// The point beyond the border where the body appears.
+    pub point_out: MapPoint,
+    /// The authored point the entry faces; `direction` points inward from it.
+    pub point_in: MapPoint,
+    /// The in-map destination of the walk.
+    pub target: MapPoint,
+    pub layer: u16,
+    pub sector: Option<crate::position_interface::SectorHandle>,
+    pub direction: i16,
+}
+
 // ---------------------------------------------------------------------------
 // Global AI state
 // ---------------------------------------------------------------------------
@@ -452,6 +477,10 @@ pub struct AiGlobalState {
     /// and animate the NPC running to the door's exit point.
     /// Populated at level load.
     pub reinforcement_doors: Vec<ReinforcementDoorInfo>,
+
+    /// Non-gate reinforcement points, used when a summon has no door to pass.
+    /// Populated at level load.
+    pub offmap_entries: Vec<OffmapEntry>,
 
     /// Buildings the AI knows about — populated during AI initialization from
     /// every sector whose `sector_type.is_building()` is true, with

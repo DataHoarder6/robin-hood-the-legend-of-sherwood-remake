@@ -329,6 +329,8 @@ fn reinforcement_install_resolves_sparse_slot_across_public_sector_collision() {
     let mut loaded = crate::level_data::LoadedLevel::empty();
     loaded.mission.tactic_data = Some(RawTacticData {
         reinforcement_points: vec![RawReinforcementPoint {
+            kind: crate::level_data::ReinforcementEntryKind::Door,
+            target: None,
             x: 10,
             y: 20,
             direction: 14,

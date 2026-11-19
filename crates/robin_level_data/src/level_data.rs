@@ -1125,6 +1125,30 @@ pub struct RawScroll {
 //  Tactic (AI) data structures
 // ═══════════════════════════════════════════════════════════════════
 
+/// How an authored reinforcement point brings a body into the level.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum ReinforcementEntryKind {
+    /// A gate with an outside endpoint; the body walks through it.
+    #[default]
+    Door,
+    /// An open map edge: the body appears beyond the border and walks in.
+    Road,
+    Stairs,
+    Jetty,
+}
+
 /// Reinforcement door spawn point from the REIN/POW sub-chunk.
 #[derive(
     Debug,
@@ -1136,6 +1160,11 @@ pub struct RawScroll {
     bitcode::Decode,
 )]
 pub struct RawReinforcementPoint {
+    #[serde(default)]
+    pub kind: ReinforcementEntryKind,
+    /// In-map destination for a non-door entry. Doors use `point_in`.
+    #[serde(default)]
+    pub target: Option<(i16, i16)>,
     pub x: i16,
     pub y: i16,
     pub direction: u32,
@@ -6069,6 +6098,8 @@ fn read_reinforcement_points(
         let layer = reader.read_u16()?;
 
         points.push(RawReinforcementPoint {
+            kind: ReinforcementEntryKind::Door,
+            target: None,
             x,
             y,
             direction,

@@ -30,11 +30,85 @@ use crate::sequence::{MoveFlags, Sequence, SequenceElement, SequenceElementData}
 pub(crate) struct SummonRequest {
     /// Which side's staged bodies may answer.
     pub faction: crate::element::Camp,
-    /// A specific entry; `None` picks one of the level's reinforcement doors.
-    pub entry: Option<crate::gate::DoorIndex>,
+    /// A specific entry, or any the level offers.
+    pub entry: SummonEntry,
+}
+
+/// Which authored entry a summon uses.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SummonEntry {
+    Any,
+    Door(crate::gate::DoorIndex),
+    Offmap(usize),
+}
+
+/// Shared off-map placement for a scripted actor and a summoned body.
+///
+/// Finds the point beyond the map edge reached by walking backwards from
+/// `destination` in `direction`, then puts `entity` there. The layer and
+/// sector are only replaced when the caller supplies them — computed script
+/// locations carry neither, while authored entry points and static script
+/// points carry both.
+pub(crate) fn place_outside_entity(
+    map_bbox: crate::coordinates::MapBBox,
+    entity: &mut Entity,
+    destination: MapPoint,
+    layer: Option<u16>,
+    sector: Option<crate::position_interface::SectorHandle>,
+    direction: i16,
+) -> MapPoint {
+    let (_border, (x, y)) = crate::natives::compute_border_point_bbox(
+        map_bbox,
+        (destination.x, destination.y),
+        direction,
+    );
+    let outside = MapPoint::new(x, y);
+    let element = entity.element_data_mut();
+    if element.in_honolulu {
+        element.active = true;
+        element.in_honolulu = false;
+    }
+    element.set_position_map(outside);
+    if let Some(layer) = layer {
+        element.set_layer(layer);
+    }
+    if let Some(sector) = sector {
+        element
+            .sprite
+            .position_iface
+            .set_sector_topology(Some(sector), sector.arena_index());
+    }
+    element.update_grid_cell();
+    outside
 }
 
 impl EngineInner {
+    /// Put `actor` on the off-map spawn point opposite `destination`'s
+    /// inward `direction`, and return that point. Shared with the
+    /// `RecordEnterGame` native so a scripted actor and a summoned body use
+    /// the same border computation.
+    pub(crate) fn enter_from_outside(
+        &mut self,
+        actor: EntityId,
+        destination: MapPoint,
+        layer: u16,
+        sector: Option<crate::position_interface::SectorHandle>,
+        direction: i16,
+    ) -> MapPoint {
+        let map_bbox = self.world.fast_grid.level.map_bbox;
+        let entity = self
+            .get_entity_mut(actor)
+            .unwrap_or_else(|| panic!("enter_from_outside: actor {actor:?} missing"));
+        place_outside_entity(
+            map_bbox,
+            entity,
+            destination,
+            Some(layer),
+            sector,
+            direction,
+        )
+    }
+
     pub(crate) fn create_reinforcement(&mut self, tcx: TickCtx<'_>, dead_pc: Option<EntityId>) {
         // Pick a random reinforcement door.
         let door_count = self.ai.global.reinforcement_doors.len();
@@ -332,8 +406,9 @@ impl EngineInner {
         if !self.control.sim_config.enable_offmap_reinforcements {
             return None;
         }
-        if self.ai.global.reinforcement_doors.is_empty() {
-            tracing::warn!("SUMMON: no reinforcement doors on this level.");
+        if self.ai.global.reinforcement_doors.is_empty() && self.ai.global.offmap_entries.is_empty()
+        {
+            tracing::warn!("SUMMON: no reinforcement entries on this level.");
             return None;
         }
 
@@ -346,64 +421,116 @@ impl EngineInner {
             })
         })?;
 
-        let (door_index, point_out, layer_out, sector_out, point_in, layer_in, sector_in) =
-            match request.entry {
-                Some(index) => {
-                    let door = self
-                        .ai
-                        .global
-                        .reinforcement_doors
-                        .iter()
-                        .find(|door| door.door_index == index)?;
-                    (
-                        door.door_index,
-                        door.point_out,
-                        door.layer_out,
-                        door.sector_out,
-                        door.point_in,
-                        door.position_in.level,
-                        door.position_in.sector,
-                    )
-                }
-                None => {
+        enum Entry {
+            Door {
+                door_index: crate::gate::DoorIndex,
+                point_out: MapPoint,
+                layer_out: u16,
+                sector_out: Option<crate::position_interface::SectorHandle>,
+                point_in: MapPoint,
+                layer_in: u16,
+                sector_in: Option<crate::position_interface::SectorHandle>,
+            },
+            Offmap(usize),
+        }
+
+        let door_entry = |index: crate::gate::DoorIndex| {
+            self.ai
+                .global
+                .reinforcement_doors
+                .iter()
+                .find(|door| door.door_index == index)
+                .map(|door| Entry::Door {
+                    door_index: door.door_index,
+                    point_out: door.point_out,
+                    layer_out: door.layer_out,
+                    sector_out: door.sector_out,
+                    point_in: door.point_in,
+                    layer_in: door.position_in.level,
+                    sector_in: door.position_in.sector,
+                })
+        };
+        let entry = match request.entry {
+            SummonEntry::Door(index) => door_entry(index)?,
+            SummonEntry::Offmap(index) => {
+                self.ai.global.offmap_entries.get(index)?;
+                Entry::Offmap(index)
+            }
+            SummonEntry::Any => {
+                if !self.ai.global.reinforcement_doors.is_empty() {
                     let pick = crate::sim_rng::usize(
                         tcx.sim,
                         crate::sim_rng::RngSite::ReinforcementDoor,
                         0..self.ai.global.reinforcement_doors.len(),
                     );
-                    let door = &self.ai.global.reinforcement_doors[pick];
-                    (
-                        door.door_index,
-                        door.point_out,
-                        door.layer_out,
-                        door.sector_out,
-                        door.point_in,
-                        door.position_in.level,
-                        door.position_in.sector,
-                    )
+                    door_entry(self.ai.global.reinforcement_doors[pick].door_index)?
+                } else {
+                    let pick = crate::sim_rng::usize(
+                        tcx.sim,
+                        crate::sim_rng::RngSite::ReinforcementDoor,
+                        0..self.ai.global.offmap_entries.len(),
+                    );
+                    Entry::Offmap(pick)
                 }
-            };
+            }
+        };
 
-        let (alert, camp, money) = {
-            let Some(Entity::Soldier(actor)) = self.get_entity_mut(body) else {
-                return None;
-            };
-            let alert = actor
-                .npc
-                .ai
-                .ai_brain
-                .base()
-                .map(|base| base.current_music_alert_status)
-                .unwrap_or(crate::ai::AlertLevel::Green);
-            let camp = actor.soldier.cached_camp;
-            let money = actor.npc.ai.money;
-            actor.soldier.staged = false;
-            actor.element.active = true;
-            actor.element.set_position_map(point_out);
-            actor.element.set_layer(layer_out);
-            actor.element.set_sector(sector_out);
-            actor.element.update_grid_cell();
-            (alert, camp, money)
+        let (alert, camp, money) = match entry {
+            Entry::Door {
+                point_out,
+                layer_out,
+                sector_out,
+                ..
+            } => {
+                let Some(Entity::Soldier(actor)) = self.get_entity_mut(body) else {
+                    return None;
+                };
+                let alert = actor
+                    .npc
+                    .ai
+                    .ai_brain
+                    .base()
+                    .map(|base| base.current_music_alert_status)
+                    .unwrap_or(crate::ai::AlertLevel::Green);
+                let camp = actor.soldier.cached_camp;
+                let money = actor.npc.ai.money;
+                actor.soldier.staged = false;
+                actor.element.active = true;
+                actor.element.set_position_map(point_out);
+                actor.element.set_layer(layer_out);
+                actor.element.set_sector(sector_out);
+                actor.element.update_grid_cell();
+                (alert, camp, money)
+            }
+            Entry::Offmap(index) => {
+                let offmap = &self.ai.global.offmap_entries[index];
+                let (point_out, layer, sector, direction) = (
+                    offmap.point_out,
+                    offmap.layer,
+                    offmap.sector,
+                    offmap.direction,
+                );
+                let Some(Entity::Soldier(actor)) = self.get_entity_mut(body) else {
+                    return None;
+                };
+                actor.element.set_position_map(point_out);
+                actor.element.set_layer(layer);
+                actor.element.set_sector(sector);
+                actor.element.set_direction_instantly(direction);
+                actor.element.update_grid_cell();
+                let alert = actor
+                    .npc
+                    .ai
+                    .ai_brain
+                    .base()
+                    .map(|base| base.current_music_alert_status)
+                    .unwrap_or(crate::ai::AlertLevel::Green);
+                let camp = actor.soldier.cached_camp;
+                let money = actor.npc.ai.money;
+                actor.soldier.staged = false;
+                actor.element.active = true;
+                (alert, camp, money)
+            }
         };
         self.publish_soldier_alert_count(alert);
         self.record_soldier_in_level(camp, money);
@@ -413,78 +540,109 @@ impl EngineInner {
         // summon path owns detection wiring for soldier targets.
         let action = OrderType::WalkingUpright;
         let mut seq = Sequence::new();
+        match entry {
+            Entry::Door {
+                door_index,
+                point_in,
+                layer_in,
+                sector_in,
+                ..
+            } => {
+                let mut pass =
+                    SequenceElement::new_movement(1, Command::PassDoor, Some(body), action);
+                pass.data = SequenceElementData::Movement {
+                    destination: point_in,
+                    layer: layer_in,
+                    sector: sector_in,
+                    gate_id: Some(door_index),
+                    line_id: None,
+                    element: None,
+                    flags: MoveFlags::DOOR | MoveFlags::MAP,
+                    tolerance: 0.0,
+                    direction: 0,
+                    action,
+                    speed_factor: 1.0,
+                    linked_seek: None,
+                    post_seek_sequence: None,
+                };
+                seq.append_element(pass);
 
-        let mut pass = SequenceElement::new_movement(1, Command::PassDoor, Some(body), action);
-        pass.data = SequenceElementData::Movement {
-            destination: point_in,
-            layer: layer_in,
-            sector: sector_in,
-            gate_id: Some(door_index),
-            line_id: None,
-            element: None,
-            flags: MoveFlags::DOOR | MoveFlags::MAP,
-            tolerance: 0.0,
-            direction: 0,
-            action,
-            speed_factor: 1.0,
-            linked_seek: None,
-            post_seek_sequence: None,
-        };
-        seq.append_element(pass);
-
-        let half_diagonal = self
-            .expect_entity(body, "summoned body entry movement")
-            .position_iface()
-            .get_half_diagonal();
-        let mut jitter: Option<MapPoint> = None;
-        for _ in 0..10 {
-            let dx = -50.0
-                + 100.0
-                    * crate::sim_rng::c_rand_unit_inclusive(
-                        tcx.sim,
-                        crate::sim_rng::RngSite::ReinforcementJitter,
-                    );
-            let dy = -50.0
-                + 100.0
-                    * crate::sim_rng::c_rand_unit_inclusive(
-                        tcx.sim,
-                        crate::sim_rng::RngSite::ReinforcementJitter,
-                    );
-            let candidate = point_in + MapVec::new(dx, dy);
-            if self
-                .world
-                .fast_grid
-                .is_reachable_thick(point_in, candidate, layer_in, half_diagonal)
-            {
-                jitter = Some(candidate);
-                break;
+                let half_diagonal = self
+                    .expect_entity(body, "summoned body entry movement")
+                    .position_iface()
+                    .get_half_diagonal();
+                let mut jitter: Option<MapPoint> = None;
+                for _ in 0..10 {
+                    let dx = -50.0
+                        + 100.0
+                            * crate::sim_rng::c_rand_unit_inclusive(
+                                tcx.sim,
+                                crate::sim_rng::RngSite::ReinforcementJitter,
+                            );
+                    let dy = -50.0
+                        + 100.0
+                            * crate::sim_rng::c_rand_unit_inclusive(
+                                tcx.sim,
+                                crate::sim_rng::RngSite::ReinforcementJitter,
+                            );
+                    let candidate = point_in + MapVec::new(dx, dy);
+                    if self.world.fast_grid.is_reachable_thick(
+                        point_in,
+                        candidate,
+                        layer_in,
+                        half_diagonal,
+                    ) {
+                        jitter = Some(candidate);
+                        break;
+                    }
+                }
+                if let Some(target) = jitter {
+                    let mut mv =
+                        SequenceElement::new_movement(2, Command::Move, Some(body), action);
+                    mv.data = SequenceElementData::Movement {
+                        destination: target,
+                        layer: layer_in,
+                        sector: None,
+                        gate_id: None,
+                        line_id: None,
+                        element: None,
+                        flags: MoveFlags::STRAIGHT,
+                        tolerance: 0.0,
+                        direction: 0,
+                        action,
+                        speed_factor: 1.0,
+                        linked_seek: None,
+                        post_seek_sequence: None,
+                    };
+                    seq.append_element(mv);
+                }
             }
-        }
-        if let Some(target) = jitter {
-            let mut mv = SequenceElement::new_movement(2, Command::Move, Some(body), action);
-            mv.data = SequenceElementData::Movement {
-                destination: target,
-                layer: layer_in,
-                sector: None,
-                gate_id: None,
-                line_id: None,
-                element: None,
-                flags: MoveFlags::STRAIGHT,
-                tolerance: 0.0,
-                direction: 0,
-                action,
-                speed_factor: 1.0,
-                linked_seek: None,
-                post_seek_sequence: None,
-            };
-            seq.append_element(mv);
+            Entry::Offmap(index) => {
+                let offmap = self.ai.global.offmap_entries[index].clone();
+                let mut mv = SequenceElement::new_movement(1, Command::Move, Some(body), action);
+                mv.data = SequenceElementData::Movement {
+                    destination: offmap.target,
+                    layer: offmap.layer,
+                    sector: offmap.sector,
+                    gate_id: None,
+                    line_id: None,
+                    element: None,
+                    flags: MoveFlags::STRAIGHT,
+                    tolerance: 0.0,
+                    direction: 0,
+                    action,
+                    speed_factor: 1.0,
+                    linked_seek: None,
+                    post_seek_sequence: None,
+                };
+                seq.append_element(mv);
+            }
         }
 
         let seq_id = self.launch_sequence(tcx, seq);
         tracing::info!(
             body = ?body,
             ?seq_id,
-            door = %door_index,
             "SUMMON: garrison body entered from outside the map."
         );
         Some(body)
