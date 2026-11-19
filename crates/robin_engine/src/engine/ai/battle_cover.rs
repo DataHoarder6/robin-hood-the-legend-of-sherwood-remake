@@ -277,7 +277,7 @@ impl EngineInner {
             let direction = crate::position_interface::vector_to_sector_0_to_15_iso(
                 target.x - position.x,
                 target.y - position.y,
-            ) as i16;
+            );
             if self
                 .expect_entity(owner, "cover direction")
                 .element_data()

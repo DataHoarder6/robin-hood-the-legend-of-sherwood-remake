@@ -121,8 +121,7 @@ impl EngineInner {
     /// Whether the selected order belongs to the generic Execute switch
     /// rather than the movement driver.
     pub(super) fn actor_animation_selects_generic_order(&self, entity_id: EntityId) -> bool {
-        let selected_generic_order = self
-            .orders
+        self.orders
             .sequence_manager
             .current_order_for_actor(&self.world.entities, entity_id)
             .and_then(|(seq_id, elem_idx, order)| {
@@ -146,8 +145,7 @@ impl EngineInner {
                             ) == Some(super::tick::ExecuteOwnerFamily::GenericAnimation)
                     })
             })
-            .unwrap_or(false);
-        selected_generic_order
+            .unwrap_or(false)
     }
 
     /// Admission gates plus the antagonist, door-pass and facing operands.
@@ -181,13 +179,10 @@ impl EngineInner {
             return None;
         }
 
-        let Some((seq_id, elem_idx, order)) = self
+        let (seq_id, elem_idx, order) = self
             .orders
             .sequence_manager
-            .current_order_for_actor(&self.world.entities, entity_id)
-        else {
-            return None;
-        };
+            .current_order_for_actor(&self.world.entities, entity_id)?;
         let exact_selected_bow = self
             .selected_bow_order(entity_id)
             .is_some_and(|(sequence, index, _)| (sequence, index) == (seq_id, elem_idx));
@@ -1336,9 +1331,14 @@ impl EngineInner {
                     // This take-off / landing transition runs its
                     // sprite through the shared motion path, which
                     // seeds the goal and its increment itself.
-                    let order_id = order_id.unwrap_or_else(|| {
-                        panic!("jump transition {anim_type:?} for {entity_id:?} has no order id")
-                    });
+                    let order_id = match order_id {
+                        Some(order_id) => order_id,
+                        None => {
+                            panic!(
+                                "jump transition {anim_type:?} for {entity_id:?} has no order id"
+                            )
+                        }
+                    };
                     let motion_order = crate::sprite::MotionOrderContext {
                         order_id,
                         destination: order_target,
@@ -1464,7 +1464,7 @@ impl EngineInner {
             .entities
             .get_mut(entity_id)
             .expect("animation owner disappeared");
-        let motion = motion.map(|motion_state| {
+        let motion = motion.inspect(|_motion_state| {
             if anim_type == OrderType::StandingUpSword {
                 // Human-actor execution performs the
                 // stand-up sprite first, then re-aims at the live
@@ -1481,8 +1481,6 @@ impl EngineInner {
             if !weak_sword_held {
                 apply_weak_sword_tiredness_after_perform(entity, anim_type);
             }
-
-            motion_state
         });
         if motion.is_some()
             && self

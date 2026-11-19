@@ -120,10 +120,10 @@ impl LegacyPcHumanAdoptionPlan {
                 .entities
                 .get(entity_id)
                 .ok_or_else(expected_human)?;
-            let Some(runtime_human) = runtime.human_data() else {
+            if runtime.human_data().is_none() {
                 return Err(expected_human());
-            };
-            let human = convert_human(ctx, saved_human, runtime_human, creation_order, sources)?;
+            }
+            let human = convert_human(ctx, saved_human, creation_order, sources)?;
             let pc = saved_pc
                 .map(|saved| {
                     let Entity::Pc(runtime_pc) = runtime else {
@@ -187,7 +187,6 @@ impl LegacyPcHumanAdoptionPlan {
 fn convert_human(
     ctx: &AdoptCtx<'_>,
     saved: &LegacyHumanPayload,
-    runtime: &HumanData,
     creation_order: u32,
     sources: HumanSources<'_>,
 ) -> Result<HumanData, LegacyAdoptError> {
@@ -314,9 +313,6 @@ fn convert_human(
             final_angle: saved.final_strike_angle,
         },
         pending_shoots,
-        // Preserve mission-initialized Human state outside this save
-        // section's ownership.
-        ..runtime.clone()
     })
 }
 

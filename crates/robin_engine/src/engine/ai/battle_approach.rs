@@ -611,9 +611,9 @@ impl AiOwnerCtx<'_> {
         {
             let target = self.engine.approach_primary(self.owner);
             let wait = precompute_avenger_on_roof_wait_position(
-                &self.engine.entities(),
+                self.engine.entities(),
                 self.engine.script_domains.interactables.doors.as_slice(),
-                &self.engine.seq(),
+                self.engine.seq(),
                 self.owner,
                 target,
                 |element| super::ai_view_position_sector(self.engine, element),

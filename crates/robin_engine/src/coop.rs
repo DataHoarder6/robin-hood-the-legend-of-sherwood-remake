@@ -184,7 +184,7 @@ mod tests {
             assert!(CoopRules { control, ..rules }.validate().is_err());
         }
         let full = CoopRules {
-            team: [b'R', b'R', b'T', b'T', b'M'],
+            team: *b"RRTTM",
             ..rules
         };
         assert!(full.validate().is_ok());

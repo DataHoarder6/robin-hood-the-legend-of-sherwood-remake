@@ -2323,16 +2323,15 @@ impl EngineInner {
             if per_actor_scripts
                 .iter()
                 .any(|(script_handle, _)| *script_handle == handle)
-            {
-                if let Err(error) = self.call_script_vm(
+                && let Err(error) = self.call_script_vm(
                     tcx,
                     ScriptVmKey::Actor(handle),
                     "Initialize",
                     &[],
                     crate::natives::ScriptCallFrame::actor(handle),
-                ) {
-                    tracing::warn!("Actor Initialize (handle {handle}): {error}");
-                }
+                )
+            {
+                tracing::warn!("Actor Initialize (handle {handle}): {error}");
             }
             if is_pc {
                 self.actor_wait(tcx, id.into());

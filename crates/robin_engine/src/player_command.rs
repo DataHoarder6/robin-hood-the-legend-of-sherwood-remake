@@ -1612,11 +1612,250 @@ impl PlayerCommand {
     }
 }
 
+/// Which blocking modal was dismissed, plus whatever identifier the
+/// host needs to pair the dismissal with the specific script-queued
+/// entry it came from.
+///
+/// Only modals that actually block the main loop and need replay
+/// auto-dismiss are enumerated. The remaining drain sites
+/// (short-briefings pane, other mission-state popups) share the same
+/// pattern — add new variants as they get wired up.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum DebriefingTextId {
+    Lose { index: usize },
+    Win { index: usize },
+}
+
+impl DebriefingTextId {
+    pub fn from_outcome(won: bool, index: usize) -> Self {
+        if won {
+            Self::Win { index }
+        } else {
+            Self::Lose { index }
+        }
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum ModalKind {
+    /// Two-button dialogue window (`show_dialogue`), keyed by the
+    /// script-assigned dialog id.
+    Dialog { dialog_id: i32 },
+    /// Single-OK popup scroll (`show_popup_scroll` via
+    /// `DisplayPopupText`), keyed by the script text id.
+    PopupText { text_id: i32 },
+    /// Sherwood campaign stats report (`show_popup_scroll` variant
+    /// dispatched from `DisplaySherwoodReport`). Unkeyed — only one
+    /// in flight at a time.
+    SherwoodReport,
+    /// Mission debriefing page queued by `DisplayDebriefing`.
+    Debriefing { text_id: DebriefingTextId },
+    /// Final mission debriefing shown after the engine returns a
+    /// mission exit code. Distinct from `Debriefing` because the final
+    /// flow can also resolve to Restart or Load.
+    FinalDebriefing { text_id: DebriefingTextId },
+    /// Mission-state confirmation popup.
+    MissionState { kind: MissionStateModalKind },
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum MissionStateModalKind {
+    /// First-time mission-won prompt asking whether to leave now.
+    LeaveMissionNow,
+    /// End-state mission popup shown before the final debriefing.
+    EndState { won: bool },
+}
+
+/// Outcome of a blocking modal.
+///
+/// Popup-scroll / single-button modals always record `Completed`;
+/// `Aborted` is only meaningful for modals that distinguish a
+/// play-through-all-sentences OK from an early Stop / Escape
+/// (currently just `show_dialogue`).
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub enum DialogResult {
+    /// Player saw every sentence / pressed OK / pressed Return.
+    Completed,
+    /// Player aborted (Stop / Escape / window close).
+    Aborted,
+    /// Final mission debriefing requested restart.
+    Restart,
+    /// Final mission debriefing requested loading a save slot.
+    Load { slot: u32 },
+}
+
+/// Identifies which player issued a command. `LOCAL` (= 0) is the
+/// implicit single-player default; multiplayer assigns distinct ids
+/// per connected seat. The id is plumbed through the input stream,
+/// replay file, and engine command-dispatch boundary so handlers can
+/// authorise / route per-player commands. Viewport state is deliberately
+/// host-local; engine seats carry deterministic selection/hotgroup state.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct PlayerId(pub u8);
+
+impl PlayerId {
+    /// The host / first-joined seat.  Assigned by **join order**, not
+    /// by which machine a recording was captured on:
+    ///
+    /// - In single-player, the only seat is `HOST`.
+    /// - In multiplayer with a headful host, the host always gets `HOST`;
+    ///   peers receive `PlayerId(1)`, `PlayerId(2)`, … in the order they
+    ///   join.
+    /// - In multiplayer with a headless host, the first peer to join
+    ///   gets `HOST` and subsequent peers get `PlayerId(1+)`.
+    ///
+    /// This is **not** "the seat this process drives" — that's
+    /// `Host::local_seat`, which can be any `PlayerId` and varies per
+    /// machine.  Recordings serialize the join-order seat so a replay
+    /// produced on peer-2 is byte-identical to one produced on the host.
+    pub const HOST: Self = Self(0);
+}
+
+impl Default for PlayerId {
+    fn default() -> Self {
+        Self::HOST
+    }
+}
+
+/// A [`PlayerCommand`] tagged with the [`PlayerId`] that issued it.
+///
+/// This is the wire-level / replay-level / batch-dispatch unit. The
+/// inner [`PlayerCommand`] enum stays focused on *what* action was
+/// requested; the wrapper records *who* requested it so replay,
+/// rollback, network sync, and (eventually) per-seat state mutation
+/// all see the same authoritative tag.
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct PlayerInput {
+    pub player_id: PlayerId,
+    pub command: PlayerCommand,
+}
+
+impl PlayerInput {
+    /// Tag a command as issued by the host seat ([`PlayerId::HOST`]).
+    /// Used for the single-player input pipeline and for v1 replay
+    /// upgrade (legacy untagged recordings have a single seat by
+    /// definition).  Live multiplayer pipelines should use
+    /// [`PlayerInput::new`] with `Host::local_seat` instead, so the
+    /// stamping is data-driven.
+    pub fn host(command: PlayerCommand) -> Self {
+        Self {
+            player_id: PlayerId::HOST,
+            command,
+        }
+    }
+
+    pub fn new(player_id: PlayerId, command: PlayerCommand) -> Self {
+        Self { player_id, command }
+    }
+}
+
+impl From<PlayerCommand> for PlayerInput {
+    fn from(command: PlayerCommand) -> Self {
+        Self::host(command)
+    }
+}
+
+/// All player commands for a single frame.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct FrameCommands {
+    pub commands: Vec<PlayerInput>,
+}
+
+impl FrameCommands {
+    pub fn new() -> Self {
+        Self {
+            commands: Vec::new(),
+        }
+    }
+
+    /// Append a command. Accepts either a bare [`PlayerCommand`] (tagged
+    /// [`PlayerId::HOST`] via `From`) or a pre-tagged [`PlayerInput`].
+    pub fn push(&mut self, cmd: impl Into<PlayerInput>) {
+        self.commands.push(cmd.into());
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+}
+
 /// Deserialize an explicitly present optional value.
 ///
 /// Serde otherwise treats an absent `Option<T>` field as `None`, which would
 /// silently accept replay commands from an older, truncated schema.
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2053,245 +2292,5 @@ mod tests {
         let decoded: PlayerCommand =
             serde_json::from_str(&encoded).expect("deserialize legacy tactical tag");
         assert!(matches!(decoded, PlayerCommand::ClearTacticalSelection));
-    }
-}
-
-/// Which blocking modal was dismissed, plus whatever identifier the
-/// host needs to pair the dismissal with the specific script-queued
-/// entry it came from.
-///
-/// Only modals that actually block the main loop and need replay
-/// auto-dismiss are enumerated. The remaining drain sites
-/// (short-briefings pane, other mission-state popups) share the same
-/// pattern — add new variants as they get wired up.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum DebriefingTextId {
-    Lose { index: usize },
-    Win { index: usize },
-}
-
-impl DebriefingTextId {
-    pub fn from_outcome(won: bool, index: usize) -> Self {
-        if won {
-            Self::Win { index }
-        } else {
-            Self::Lose { index }
-        }
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum ModalKind {
-    /// Two-button dialogue window (`show_dialogue`), keyed by the
-    /// script-assigned dialog id.
-    Dialog { dialog_id: i32 },
-    /// Single-OK popup scroll (`show_popup_scroll` via
-    /// `DisplayPopupText`), keyed by the script text id.
-    PopupText { text_id: i32 },
-    /// Sherwood campaign stats report (`show_popup_scroll` variant
-    /// dispatched from `DisplaySherwoodReport`). Unkeyed — only one
-    /// in flight at a time.
-    SherwoodReport,
-    /// Mission debriefing page queued by `DisplayDebriefing`.
-    Debriefing { text_id: DebriefingTextId },
-    /// Final mission debriefing shown after the engine returns a
-    /// mission exit code. Distinct from `Debriefing` because the final
-    /// flow can also resolve to Restart or Load.
-    FinalDebriefing { text_id: DebriefingTextId },
-    /// Mission-state confirmation popup.
-    MissionState { kind: MissionStateModalKind },
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum MissionStateModalKind {
-    /// First-time mission-won prompt asking whether to leave now.
-    LeaveMissionNow,
-    /// End-state mission popup shown before the final debriefing.
-    EndState { won: bool },
-}
-
-/// Outcome of a blocking modal.
-///
-/// Popup-scroll / single-button modals always record `Completed`;
-/// `Aborted` is only meaningful for modals that distinguish a
-/// play-through-all-sentences OK from an early Stop / Escape
-/// (currently just `show_dialogue`).
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum DialogResult {
-    /// Player saw every sentence / pressed OK / pressed Return.
-    Completed,
-    /// Player aborted (Stop / Escape / window close).
-    Aborted,
-    /// Final mission debriefing requested restart.
-    Restart,
-    /// Final mission debriefing requested loading a save slot.
-    Load { slot: u32 },
-}
-
-/// Identifies which player issued a command. `LOCAL` (= 0) is the
-/// implicit single-player default; multiplayer assigns distinct ids
-/// per connected seat. The id is plumbed through the input stream,
-/// replay file, and engine command-dispatch boundary so handlers can
-/// authorise / route per-player commands. Viewport state is deliberately
-/// host-local; engine seats carry deterministic selection/hotgroup state.
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct PlayerId(pub u8);
-
-impl PlayerId {
-    /// The host / first-joined seat.  Assigned by **join order**, not
-    /// by which machine a recording was captured on:
-    ///
-    /// - In single-player, the only seat is `HOST`.
-    /// - In multiplayer with a headful host, the host always gets `HOST`;
-    ///   peers receive `PlayerId(1)`, `PlayerId(2)`, … in the order they
-    ///   join.
-    /// - In multiplayer with a headless host, the first peer to join
-    ///   gets `HOST` and subsequent peers get `PlayerId(1+)`.
-    ///
-    /// This is **not** "the seat this process drives" — that's
-    /// `Host::local_seat`, which can be any `PlayerId` and varies per
-    /// machine.  Recordings serialize the join-order seat so a replay
-    /// produced on peer-2 is byte-identical to one produced on the host.
-    pub const HOST: Self = Self(0);
-}
-
-impl Default for PlayerId {
-    fn default() -> Self {
-        Self::HOST
-    }
-}
-
-/// A [`PlayerCommand`] tagged with the [`PlayerId`] that issued it.
-///
-/// This is the wire-level / replay-level / batch-dispatch unit. The
-/// inner [`PlayerCommand`] enum stays focused on *what* action was
-/// requested; the wrapper records *who* requested it so replay,
-/// rollback, network sync, and (eventually) per-seat state mutation
-/// all see the same authoritative tag.
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct PlayerInput {
-    pub player_id: PlayerId,
-    pub command: PlayerCommand,
-}
-
-impl PlayerInput {
-    /// Tag a command as issued by the host seat ([`PlayerId::HOST`]).
-    /// Used for the single-player input pipeline and for v1 replay
-    /// upgrade (legacy untagged recordings have a single seat by
-    /// definition).  Live multiplayer pipelines should use
-    /// [`PlayerInput::new`] with `Host::local_seat` instead, so the
-    /// stamping is data-driven.
-    pub fn host(command: PlayerCommand) -> Self {
-        Self {
-            player_id: PlayerId::HOST,
-            command,
-        }
-    }
-
-    pub fn new(player_id: PlayerId, command: PlayerCommand) -> Self {
-        Self { player_id, command }
-    }
-}
-
-impl From<PlayerCommand> for PlayerInput {
-    fn from(command: PlayerCommand) -> Self {
-        Self::host(command)
-    }
-}
-
-/// All player commands for a single frame.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct FrameCommands {
-    pub commands: Vec<PlayerInput>,
-}
-
-impl FrameCommands {
-    pub fn new() -> Self {
-        Self {
-            commands: Vec::new(),
-        }
-    }
-
-    /// Append a command. Accepts either a bare [`PlayerCommand`] (tagged
-    /// [`PlayerId::HOST`] via `From`) or a pre-tagged [`PlayerInput`].
-    pub fn push(&mut self, cmd: impl Into<PlayerInput>) {
-        self.commands.push(cmd.into());
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.commands.is_empty()
     }
 }

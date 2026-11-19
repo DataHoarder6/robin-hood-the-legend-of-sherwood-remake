@@ -75,10 +75,10 @@ impl EngineInner {
                 Some(K::LadyMarianne) => {
                     campaign.deeds.companion_victories.insert(4);
                 }
-                Some(K::MerryManA | K::MerryManB | K::MerryManC) => {
-                    if self.mission_domain.achievements.has_contributed(character) {
-                        campaign.deeds.contributing_veterans.insert(character);
-                    }
+                Some(K::MerryManA | K::MerryManB | K::MerryManC)
+                    if self.mission_domain.achievements.has_contributed(character) =>
+                {
+                    campaign.deeds.contributing_veterans.insert(character);
                 }
                 _ => {}
             }

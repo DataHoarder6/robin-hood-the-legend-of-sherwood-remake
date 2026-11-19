@@ -1432,8 +1432,8 @@ pub fn is_detecting_target(
         ViewerContext {
             position: viewer_los,
             direction: viewer_direction,
-            real_half_aperture: real_half_aperture,
-            layer: layer,
+            real_half_aperture,
+            layer,
             forward: (fx, fy),
         },
         target_los,

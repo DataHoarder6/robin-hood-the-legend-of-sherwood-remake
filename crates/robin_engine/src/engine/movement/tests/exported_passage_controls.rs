@@ -360,8 +360,8 @@ fn click_exported_passage(
             ));
         }
         let passing = crate::engine::ai::selected_actor_is_passing_door(
-            &engine.entities(),
-            &engine.seq(),
+            engine.entities(),
+            engine.seq(),
             owner,
         );
         if !passing {

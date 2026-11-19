@@ -36,7 +36,7 @@ impl AiOwnerCtx<'_> {
                 .expect("boredom requires actor")
                 .installed_order
                 .is_some_and(|order| {
-                    order.resolve(&self.engine.seq()).order_type
+                    order.resolve(self.engine.seq()).order_type
                         == crate::order::OrderType::WaitingUprightBoredRandom
                 })
             || ai.likes_to_sit_around
@@ -260,8 +260,7 @@ impl AiOwnerCtx<'_> {
                         .expect_entity(self.owner, "post direction")
                         .element_data()
                         .direction();
-                    let vector =
-                        crate::shadow_polygon::sector_to_direction((direction & 15) as i16);
+                    let vector = crate::shadow_polygon::sector_to_direction(direction & 15);
                     let ai = self.engine.default_ai_mut(self.owner);
                     ai.has_patrol_path = false;
                     ai.initial_position = position;

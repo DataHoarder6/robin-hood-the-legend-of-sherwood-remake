@@ -343,14 +343,11 @@ impl EngineInner {
 
         let mut unconscious = Vec::new();
         let mut index = 0;
-        loop {
-            let Some(&handle) = self
-                .enemy_ai(owner, "battle cleanup entry")
-                .list_them
-                .get(index)
-            else {
-                break;
-            };
+        while let Some(&handle) = self
+            .enemy_ai(owner, "battle cleanup entry")
+            .list_them
+            .get(index)
+        {
             let target = self.expect_human_id_for_ai_handle(handle, "battle cleanup target");
             let entity = self.expect_entity(target, "battle cleanup human");
             let allied = self.camps_are_allied(camp, entity.camp());

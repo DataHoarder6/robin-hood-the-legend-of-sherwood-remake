@@ -668,7 +668,7 @@ impl EngineInner {
             return None;
         }
 
-        let Some((strike, target_id, animation)) = self
+        let (strike, target_id, animation) = self
             .orders
             .sequence_manager
             .current_order_for_actor(&self.world.entities, attacker_id)
@@ -686,10 +686,7 @@ impl EngineInner {
                     )
                 });
                 Some((strike, target, order.order_type))
-            })
-        else {
-            return None;
-        };
+            })?;
         let gesture_quality = self
             .orders
             .sequence_manager
@@ -1014,7 +1011,7 @@ impl EngineInner {
             return Some(crate::sprite::MotionState::InProgress);
         }
 
-        let Some((strike, target_id, animation)) = self
+        let (strike, target_id, animation) = self
             .orders
             .sequence_manager
             .current_order_for_actor(&self.world.entities, attacker_id)
@@ -1032,10 +1029,7 @@ impl EngineInner {
                     )
                 });
                 Some((strike, target, order.order_type))
-            })
-        else {
-            return None;
-        };
+            })?;
         let gesture_quality = self
             .orders
             .sequence_manager
@@ -1078,9 +1072,7 @@ impl EngineInner {
         // completed-motion result.
         {
             let entity_id = attacker_id;
-            let Some(entity) = self.world.entities.get_mut(attacker_id) else {
-                return None;
-            };
+            let entity = self.world.entities.get_mut(attacker_id)?;
             sweep_phase = SweepTickPhase::InProgress;
             let true_sweep_at_action_point = matches!(
                 strike_kind,
@@ -2363,14 +2355,14 @@ impl EngineInner {
 
         let ctx = crate::combat::StrikeSelectionContext {
             attacker_profile,
-            fighting_ability: fighting_ability,
-            blood_alcohol: blood_alcohol,
-            is_rank_soldier: is_rank_soldier,
-            attacker_direction: attacker_direction,
-            attacker_elevation: attacker_elevation,
-            attacker_camp: attacker_camp,
+            fighting_ability,
+            blood_alcohol,
+            is_rank_soldier,
+            attacker_direction,
+            attacker_elevation,
+            attacker_camp,
             diplomacy: &self.mission_domain.diplomacy,
-            is_swordfighting: is_swordfighting,
+            is_swordfighting,
             opponent_time_limit,
             strike_startup_frames: attacker_sprite_frames,
             parry_startup_frames: parry_startup,
@@ -2416,7 +2408,7 @@ impl EngineInner {
                 debug,
                 "enemy_reconsider",
                 rng_before,
-                &proposed,
+                proposed,
             );
         }
         let strike = match proposed {

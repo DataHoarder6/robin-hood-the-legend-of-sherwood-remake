@@ -57,10 +57,12 @@ fn soldier_geometry_references_match_golden() {
         SightObstacle::new(42, crate::sight_obstacle::SIGHTOBSTACLE_PROJECTION_AREA),
     ]);
     let sector = crate::engine::test_support::ensure_ordinary_sector(&mut inner, 31, 2);
-    let mut door = crate::gate::Door::default();
-    door.gate_type = crate::gate::GateType::Jump;
-    door.point_out = crate::coordinates::MapPoint::new(-0.0, 2.5);
-    door.point_in = crate::coordinates::MapPoint::new(13.0, -9.0);
+    let door = crate::gate::Door {
+        gate_type: crate::gate::GateType::Jump,
+        point_out: crate::coordinates::MapPoint::new(-0.0, 2.5),
+        point_in: crate::coordinates::MapPoint::new(13.0, -9.0),
+        ..Default::default()
+    };
     inner.script_domains.interactables.doors.push(door);
     std::sync::Arc::make_mut(&mut inner.world.fast_grid)
         .level_mut()
@@ -105,8 +107,10 @@ fn soldier_geometry_references_match_golden() {
         .set_target_element(Some(target));
     let mut npc = NpcData::default();
     npc.ai.ai_brain = AiBrain::Enemy(enemy);
-    let mut human = crate::element::HumanData::default();
-    human.building_sector = Some(sector);
+    let human = crate::element::HumanData {
+        building_sector: Some(sector),
+        ..Default::default()
+    };
     let id = inner.add_test_entity(Entity::Soldier(ActorSoldier {
         element,
         actor: Default::default(),

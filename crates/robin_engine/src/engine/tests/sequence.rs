@@ -4554,8 +4554,10 @@ fn waypoint_driver_dispatches_and_distinguishes_missing_vm() {
 fn disabled_waypoint_scripts_do_not_enter_vm_or_continue_route() {
     let mut engine = EngineInner::new();
     let owner = engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
-    let mut config = crate::engine::SimConfig::default();
-    config.script_enabled = false;
+    let config = crate::engine::SimConfig {
+        script_enabled: false,
+        ..Default::default()
+    };
     let sim = crate::sim_rng::SimulationContext::with_seed_and_config(1, config);
     engine.execute_ai_waypoint_script(
         TickCtx::new(&sim, &LevelAssets::new()),

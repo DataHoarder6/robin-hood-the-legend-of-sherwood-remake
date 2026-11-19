@@ -10,116 +10,6 @@ use crate::engine::TickCtx;
 use crate::parameters_ai;
 use crate::profiles::ProfileRank;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::test_support::actors::make_test_ai_soldier;
-
-    #[test]
-    fn waiting_group_stops_pruning_at_first_approaching_member() {
-        let mut engine = EngineInner::new();
-        let [owner, obsolete, approaching, later_obsolete] = std::array::from_fn(|_| {
-            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists))
-        });
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        let officer = engine.seek_enemy_mut(owner);
-        officer.base.current_state = AiState::Seeking;
-        officer.base.current_substate = Substate::SeekingOfficerWaitForGroup;
-        officer.alerted_us = vec![
-            obsolete.index(),
-            approaching.index(),
-            later_obsolete.index(),
-        ];
-        let member = engine.seek_enemy_mut(approaching);
-        member.base.current_state = AiState::Seeking;
-        member.base.current_substate = Substate::SeekingGroupGoToOfficer;
-        let result = engine.execute_ai_officer_rendezvous_event(
-            TickCtx::new(&crate::sim_rng::test_context(), &assets),
-            owner,
-            &Stimulus::new(StimulusType::EventTimer),
-        );
-        assert_eq!(result, Some(false));
-        assert_eq!(
-            engine.seek_enemy(owner).alerted_us,
-            vec![approaching.index(), later_obsolete.index()]
-        );
-        assert_eq!(
-            engine.seek_enemy(owner).base.current_substate,
-            Substate::SeekingOfficerWaitForGroup
-        );
-    }
-
-    #[test]
-    fn officer_rendezvous_leaves_interruptions_to_event_dispatch() {
-        let mut engine = EngineInner::new();
-        let owner =
-            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        engine.seek_enemy_mut(owner).base.current_state = AiState::Seeking;
-        engine.seek_enemy_mut(owner).base.current_substate =
-            Substate::SeekingOfficerWaitForInstructedSoldier;
-        for event in [
-            StimulusType::EventView,
-            StimulusType::EventCouldntReachPoint,
-            StimulusType::CallReport,
-        ] {
-            assert_eq!(
-                engine.execute_ai_officer_rendezvous_event(
-                    TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                    owner,
-                    &Stimulus::new(event)
-                ),
-                None
-            );
-        }
-    }
-
-    #[test]
-    fn civilian_report_seeks_report_location_when_no_officer_can_accept() {
-        let mut engine = EngineInner::new();
-        let sector = crate::engine::test_support::ensure_ordinary_sector(&mut engine, 1, 0);
-        let mut soldier = make_test_ai_soldier(crate::element::Camp::Lacklandists);
-        soldier.element_data_mut().set_sector(Some(sector));
-        soldier
-            .element_data_mut()
-            .set_position(crate::coordinates::WorldPoint3D::new(100.0, 100.0, 0.0));
-        let owner = engine.add_test_entity(soldier);
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        let report = Position {
-            x: 200.0,
-            y: 100.0,
-            sector: Some(sector),
-            level: 0,
-        };
-        let ai = engine.seek_enemy_mut(owner);
-        crate::engine::test_support::actors::edit_enemy_profile(&mut assets, ai, |profile| {
-            profile.rank = ProfileRank::Soldier
-        });
-        crate::engine::test_support::actors::edit_enemy_profile(&mut assets, ai, |profile| {
-            profile.initiative = 0
-        });
-        ai.base.current_state = AiState::Seeking;
-        ai.base.current_substate = Substate::SeekingGetAlertingReportFromCivilianLook;
-        ai.base.seek_position = report;
-        assert_eq!(
-            engine.execute_ai_officer_rendezvous_event(
-                TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                owner,
-                &Stimulus::new(StimulusType::EventTimer),
-            ),
-            Some(false)
-        );
-        let ai = engine.seek_enemy(owner);
-        assert_eq!(ai.seek_center, report);
-        assert_eq!(ai.personal_seek_point_1.as_ref().unwrap().position, report);
-        assert!(ai.seek_flags.contains(SeekFlags::LOCATION_FIRST));
-        assert!(!ai.seek_flags.contains(SeekFlags::LOOK_FOR_HELP_AFTER));
-    }
-}
-
 impl EngineInner {
     pub(in crate::engine) fn execute_ai_officer_rendezvous_event(
         &mut self,
@@ -618,7 +508,7 @@ impl AiOwnerCtx<'_> {
             self.engine,
             self.engine
                 .expect_entity(target, "officer destination forecast"),
-            selected_actor_is_passing_door(&self.engine.entities(), &self.engine.seq(), target),
+            selected_actor_is_passing_door(self.engine.entities(), self.engine.seq(), target),
         )
         .expect("officer forecast requires an actor");
         let destination = crate::ai::prepare_forecast_destination_for_ia(
@@ -796,5 +686,115 @@ impl AiOwnerCtx<'_> {
             }
         }
         self.duty();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::test_support::actors::make_test_ai_soldier;
+
+    #[test]
+    fn waiting_group_stops_pruning_at_first_approaching_member() {
+        let mut engine = EngineInner::new();
+        let [owner, obsolete, approaching, later_obsolete] = std::array::from_fn(|_| {
+            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists))
+        });
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        let officer = engine.seek_enemy_mut(owner);
+        officer.base.current_state = AiState::Seeking;
+        officer.base.current_substate = Substate::SeekingOfficerWaitForGroup;
+        officer.alerted_us = vec![
+            obsolete.index(),
+            approaching.index(),
+            later_obsolete.index(),
+        ];
+        let member = engine.seek_enemy_mut(approaching);
+        member.base.current_state = AiState::Seeking;
+        member.base.current_substate = Substate::SeekingGroupGoToOfficer;
+        let result = engine.execute_ai_officer_rendezvous_event(
+            TickCtx::new(&crate::sim_rng::test_context(), &assets),
+            owner,
+            &Stimulus::new(StimulusType::EventTimer),
+        );
+        assert_eq!(result, Some(false));
+        assert_eq!(
+            engine.seek_enemy(owner).alerted_us,
+            vec![approaching.index(), later_obsolete.index()]
+        );
+        assert_eq!(
+            engine.seek_enemy(owner).base.current_substate,
+            Substate::SeekingOfficerWaitForGroup
+        );
+    }
+
+    #[test]
+    fn officer_rendezvous_leaves_interruptions_to_event_dispatch() {
+        let mut engine = EngineInner::new();
+        let owner =
+            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        engine.seek_enemy_mut(owner).base.current_state = AiState::Seeking;
+        engine.seek_enemy_mut(owner).base.current_substate =
+            Substate::SeekingOfficerWaitForInstructedSoldier;
+        for event in [
+            StimulusType::EventView,
+            StimulusType::EventCouldntReachPoint,
+            StimulusType::CallReport,
+        ] {
+            assert_eq!(
+                engine.execute_ai_officer_rendezvous_event(
+                    TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                    owner,
+                    &Stimulus::new(event)
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn civilian_report_seeks_report_location_when_no_officer_can_accept() {
+        let mut engine = EngineInner::new();
+        let sector = crate::engine::test_support::ensure_ordinary_sector(&mut engine, 1, 0);
+        let mut soldier = make_test_ai_soldier(crate::element::Camp::Lacklandists);
+        soldier.element_data_mut().set_sector(Some(sector));
+        soldier
+            .element_data_mut()
+            .set_position(crate::coordinates::WorldPoint3D::new(100.0, 100.0, 0.0));
+        let owner = engine.add_test_entity(soldier);
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        let report = Position {
+            x: 200.0,
+            y: 100.0,
+            sector: Some(sector),
+            level: 0,
+        };
+        let ai = engine.seek_enemy_mut(owner);
+        crate::engine::test_support::actors::edit_enemy_profile(&mut assets, ai, |profile| {
+            profile.rank = ProfileRank::Soldier
+        });
+        crate::engine::test_support::actors::edit_enemy_profile(&mut assets, ai, |profile| {
+            profile.initiative = 0
+        });
+        ai.base.current_state = AiState::Seeking;
+        ai.base.current_substate = Substate::SeekingGetAlertingReportFromCivilianLook;
+        ai.base.seek_position = report;
+        assert_eq!(
+            engine.execute_ai_officer_rendezvous_event(
+                TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                owner,
+                &Stimulus::new(StimulusType::EventTimer),
+            ),
+            Some(false)
+        );
+        let ai = engine.seek_enemy(owner);
+        assert_eq!(ai.seek_center, report);
+        assert_eq!(ai.personal_seek_point_1.as_ref().unwrap().position, report);
+        assert!(ai.seek_flags.contains(SeekFlags::LOCATION_FIRST));
+        assert!(!ai.seek_flags.contains(SeekFlags::LOOK_FOR_HELP_AFTER));
     }
 }

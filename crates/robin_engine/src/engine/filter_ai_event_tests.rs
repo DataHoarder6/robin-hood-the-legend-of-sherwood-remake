@@ -1688,7 +1688,7 @@ fn install_test_action(
         .sequence_manager
         .start_sequence_level(sequence);
     engine.select_sequence_element(actor, Some((sequence, 0)));
-    engine.t_element_in_progress(&assets, sequence, 0);
+    engine.t_element_in_progress(assets, sequence, 0);
 }
 
 fn install_test_wait_timer(
@@ -1718,7 +1718,7 @@ fn install_test_wait_timer(
         .sequence_manager
         .start_sequence_level(sequence);
     engine.select_sequence_element(actor, None);
-    engine.t_instruct_owner(&assets, actor, sequence, 0);
+    engine.t_instruct_owner(assets, actor, sequence, 0);
     sequence
 }
 
@@ -1774,7 +1774,7 @@ fn install_test_order_queue(
         .sequence_manager
         .start_sequence_level(sequence);
     engine.select_sequence_element(actor, Some((sequence, 0)));
-    engine.t_element_in_progress(&assets, sequence, 0);
+    engine.t_element_in_progress(assets, sequence, 0);
     sequence
 }
 
@@ -5153,7 +5153,7 @@ fn select_unrelated_pass_door_fixture(
         .sequence_manager
         .start_sequence_level(pass_sequence);
     engine.select_sequence_element(door_actor, Some((pass_sequence, 0)));
-    engine.t_element_in_progress(&assets, pass_sequence, 0);
+    engine.t_element_in_progress(assets, pass_sequence, 0);
 }
 
 fn resolve_test_actor_forecast(

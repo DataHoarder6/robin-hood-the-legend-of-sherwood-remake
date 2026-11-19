@@ -171,8 +171,8 @@ impl AiOwnerCtx<'_> {
                                 self.engine,
                                 self.engine.expect_entity(officer, "officer forecast"),
                                 selected_actor_is_passing_door(
-                                    &self.engine.entities(),
-                                    &self.engine.seq(),
+                                    self.engine.entities(),
+                                    self.engine.seq(),
                                     officer,
                                 ),
                             )

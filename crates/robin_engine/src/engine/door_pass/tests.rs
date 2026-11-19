@@ -2044,13 +2044,12 @@ fn only_building_and_lift_passes_write_passing_door_directly() {
             .unwrap()
             .actor_data()
             .unwrap();
-        assert_eq!(
+        assert!(
             engine
                 .get_entity(owner)
                 .unwrap()
                 .position_iface()
                 .get_door_direction(),
-            true,
             "{door_type:?} must still record a direct traversal"
         );
         assert_eq!(

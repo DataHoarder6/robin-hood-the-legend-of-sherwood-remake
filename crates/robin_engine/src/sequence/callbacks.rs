@@ -933,9 +933,10 @@ impl crate::engine::EngineInner {
             .sequence_manager
             .get_element(target.sequence_id, target.element_index)
             .expect("postponed successor missing");
-        if successor.command == Command::MoveOk && successor.owner.is_some() {
+        if successor.command == Command::MoveOk
+            && let Some(target_owner) = successor.owner
+        {
             let owner = source_owner.expect("movement blocker has no owner");
-            let target_owner = successor.owner.expect("postponed movement owner missing");
             if self
                 .world
                 .entities

@@ -389,7 +389,7 @@ impl AiOwnerCtx<'_> {
                 if let Some(ref mut path) = self.controller_mut().patrol_path {
                     path.flip_forward_movement();
                 }
-                return std::ops::ControlFlow::Continue(());
+                std::ops::ControlFlow::Continue(())
             }
 
             MacroOpcode::SkipPoint => {
@@ -397,7 +397,7 @@ impl AiOwnerCtx<'_> {
                     path.advance();
                 }
                 self.controller_mut().number_of_remaining_macro_bytes = 0;
-                return std::ops::ControlFlow::Continue(());
+                std::ops::ControlFlow::Continue(())
             }
 
             MacroOpcode::GotoPoint => {
@@ -414,7 +414,7 @@ impl AiOwnerCtx<'_> {
                 }
                 self.controller_mut().number_of_remaining_macro_bytes = 0;
                 *point_already_set = true;
-                return std::ops::ControlFlow::Continue(());
+                std::ops::ControlFlow::Continue(())
             }
 
             MacroOpcode::FaceTo => {
@@ -427,7 +427,7 @@ impl AiOwnerCtx<'_> {
                     .duty_face_direction(self.tcx, self.owner, direction);
 
                 self.consume_macro_operand();
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Wait => {
@@ -439,7 +439,7 @@ impl AiOwnerCtx<'_> {
                     .launch_macro_timer(frames as u32, ctx.frame);
                 self.debug_macro_lifecycle(ctx, "timer_started", "wait");
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Check4 => {
@@ -466,7 +466,7 @@ impl AiOwnerCtx<'_> {
                 );
 
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Check4Sync => {
@@ -492,12 +492,12 @@ impl AiOwnerCtx<'_> {
                     .initialize_ai_friend_check(self.tcx, self.owner, friend_id, frames, index);
 
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::StayHere => {
                 self.assign_path(PatrolAssignment::ClearPath);
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::ChangeWay => {
@@ -515,7 +515,7 @@ impl AiOwnerCtx<'_> {
                 self.engine.execute_ai_break_macro(self.owner);
                 self.engine
                     .execute_ai_return_to_duty(self.tcx, self.owner, DutyFlags::empty());
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Run => {
@@ -535,7 +535,7 @@ impl AiOwnerCtx<'_> {
                     self.controller_mut().default_path_walking_flags -=
                         GotoFlags::FORBIDDEN_CIVILIANS;
                 }
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Walk => {
@@ -554,7 +554,7 @@ impl AiOwnerCtx<'_> {
                     self.controller_mut().default_path_walking_flags -=
                         GotoFlags::FORBIDDEN_CIVILIANS;
                 }
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::LookLeft => {
@@ -568,7 +568,7 @@ impl AiOwnerCtx<'_> {
 
                 self.set_macro_state(Substate::DefaultInMacroWaitingForDone);
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::LookRight => {
@@ -582,7 +582,7 @@ impl AiOwnerCtx<'_> {
 
                 self.set_macro_state(Substate::DefaultInMacroWaitingForDone);
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::Bend => {
@@ -601,7 +601,7 @@ impl AiOwnerCtx<'_> {
                     .launch_macro_timer(frames as u32, ctx.frame);
                 self.debug_macro_lifecycle(ctx, "timer_started", "bend");
                 self.controller_mut().macro_started_in_this_frame = false;
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::PatrolStop => {
@@ -616,7 +616,7 @@ impl AiOwnerCtx<'_> {
                     self.speak(Remark::OfficerStopsPatrol);
                 }
                 self.run();
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::PatrolDirection => {
@@ -634,7 +634,7 @@ impl AiOwnerCtx<'_> {
                     .instruct_patrol_direction_to_patrol_members(self.tcx, self.owner, direction);
                 self.consume_macro_operand();
                 self.run();
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
 
             MacroOpcode::PatrolStart => {
@@ -651,7 +651,7 @@ impl AiOwnerCtx<'_> {
                 self.engine
                     .initialize_patrol_for_npc(self.tcx.assets, self.owner);
                 self.run();
-                return std::ops::ControlFlow::Break(());
+                std::ops::ControlFlow::Break(())
             }
         }
     }

@@ -50,7 +50,6 @@ impl EngineInner {
             tracing::warn!("co-op mission has no playable party to duplicate");
             return;
         }
-        let mut party = party;
         while rules.team_len() == 0 && party.len() < rules.players as usize {
             let slot = party.len();
             let preferred = if rules.campaign {
@@ -161,10 +160,10 @@ impl EngineInner {
         let ids = self.world.soldier_registry.all().to_vec();
         for id in ids {
             let id = EntityId::Soldier(crate::element::SoldierId(id));
-            if self.fog_entity_is_hostile(id) {
-                if let Some(entity) = self.world.entities.get_mut(id) {
-                    Self::scale_coop_enemy_health(entity, percent);
-                }
+            if self.fog_entity_is_hostile(id)
+                && let Some(entity) = self.world.entities.get_mut(id)
+            {
+                Self::scale_coop_enemy_health(entity, percent);
             }
         }
         let mut assigned_party = Vec::new();

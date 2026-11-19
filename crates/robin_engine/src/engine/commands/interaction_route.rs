@@ -658,7 +658,7 @@ impl EngineInner {
             crate::engine::movement::GateRouteRequest {
                 entity_id: actor,
                 source_sector: gate_source_sector,
-                gate_path: gate_path,
+                gate_path,
                 goal: GoalShape::Target {
                     point: target_pos,
                     target,

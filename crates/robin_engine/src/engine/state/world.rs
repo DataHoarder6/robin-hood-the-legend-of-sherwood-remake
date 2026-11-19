@@ -493,7 +493,7 @@ impl WorldState {
             };
             let mut members = std::collections::BTreeSet::new();
             for &id in registry {
-                if !members.insert(id) || !self.entities.get(id).is_some_and(&eligible) {
+                if !members.insert(id) || !self.entities.get(id).is_some_and(eligible) {
                     return Err(format!(
                         "{name} registry contains duplicate or invalid member {id}"
                     ));
@@ -566,17 +566,16 @@ impl WorldState {
         self.validate_fast_grid_indices_against(assets.navigation.level_grid.sectors.len())?;
 
         for (id, entity) in self.entities.occupied() {
-            if let Some(enemy) = entity.enemy_ai() {
-                if assets
+            if let Some(enemy) = entity.enemy_ai()
+                && assets
                     .profile_manager
                     .get_soldier(enemy.behavior_profile)
                     .is_none()
-                {
-                    return Err(format!(
-                        "entity {id} references missing behavior profile {}",
-                        enemy.behavior_profile.0
-                    ));
-                }
+            {
+                return Err(format!(
+                    "entity {id} references missing behavior profile {}",
+                    enemy.behavior_profile.0
+                ));
             }
             entity
                 .sprite()

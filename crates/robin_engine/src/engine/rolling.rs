@@ -41,7 +41,7 @@ impl EngineInner {
         tcx: TickCtx<'_>,
         owner: EntityId,
     ) -> Option<MotionState> {
-        let Some((seq_id, elem_idx, order, next_order)) = self
+        let (seq_id, elem_idx, order, next_order) = self
             .orders
             .sequence_manager
             .current_order_for_actor(&self.world.entities, owner)
@@ -58,10 +58,7 @@ impl EngineInner {
                     order.clone(),
                     element.orders.get(1).cloned(),
                 )
-            })
-        else {
-            return None;
-        };
+            })?;
 
         let initialising = self.world.entities[owner]
             .as_ref()

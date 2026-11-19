@@ -1508,7 +1508,7 @@ pub(crate) fn selected_ability(
                 crate::sequence::SequenceElementData::Interaction { antagonist } => antagonist,
                 _ => None,
             },
-            _ => order.antagonist.or_else(|| match element.data {
+            _ => order.antagonist.or(match element.data {
                 crate::sequence::SequenceElementData::Interaction { antagonist } => antagonist,
                 _ => None,
             }),

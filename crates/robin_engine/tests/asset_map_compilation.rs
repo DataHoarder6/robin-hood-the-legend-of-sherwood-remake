@@ -319,7 +319,7 @@ fn spline_mask_application_fragments_preserve_independent_ranges() {
     let engine = construct(&serde_json::to_vec(&descriptor).unwrap(), &mut assets);
     let masks = &engine.fast_grid().level.masks;
     assert_eq!(masks.len(), 6);
-    for (repeat, pair) in masks.chunks_exact(2).enumerate() {
+    for (repeat, pair) in masks.as_chunks::<2>().0.iter().enumerate() {
         let offset = 100. * repeat as f32;
         assert_eq!(pair[0].bitmap, pair[1].bitmap);
         assert_eq!(pair[0].mask_type, 23);
@@ -385,7 +385,7 @@ fn spline_closed_mask_islands_keep_separate_native_application_rules() {
     let engine = construct(&serde_json::to_vec(&descriptor).unwrap(), &mut assets);
     let masks = &engine.fast_grid().level.masks;
     assert_eq!(masks.len(), 6);
-    for (repeat, pair) in masks.chunks_exact(2).enumerate() {
+    for (repeat, pair) in masks.as_chunks::<2>().0.iter().enumerate() {
         assert_eq!(pair[0].bitmap, pair[1].bitmap);
         assert_eq!(pair[0].mask_type, 23);
         assert_eq!(pair[1].mask_type, 3);
@@ -2775,7 +2775,8 @@ fn construct_with_dimensions(
         .unwrap();
     campaign.current_mission_idx = Some(index);
     assets.profile_manager = std::sync::Arc::new(profiles);
-    let engine = Engine::new(EngineArgs {
+
+    Engine::new(EngineArgs {
         campaign,
         level: LevelLoadArgs {
             assets,
@@ -2793,8 +2794,7 @@ fn construct_with_dimensions(
             ..Default::default()
         },
     })
-    .expect("construct compiled asset map without game files");
-    engine
+    .expect("construct compiled asset map without game files")
 }
 
 #[test]

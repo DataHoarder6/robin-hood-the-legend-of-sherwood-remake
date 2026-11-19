@@ -837,7 +837,8 @@ mod suite {
             },
             ..Default::default()
         };
-        let owner = engine.add_test_entity(Entity::Soldier(ActorSoldier {
+
+        engine.add_test_entity(Entity::Soldier(ActorSoldier {
             element,
             actor: ActorData {
                 action_state: ActionState::MovingFast,
@@ -849,8 +850,7 @@ mod suite {
                 cached_camp: crate::element::Camp::Lacklandists,
                 ..Default::default()
             },
-        }));
-        owner
+        }))
     }
 
     fn install_selected_running_move(

@@ -63,7 +63,7 @@ impl EngineInner {
             // moved outside the configured bow range.
         } else {
             match bow_shot::begin_bow_shot(
-                &mut self.world.entities,
+                &self.world.entities,
                 &mut self.orders.sequence_manager,
                 owner,
                 target,

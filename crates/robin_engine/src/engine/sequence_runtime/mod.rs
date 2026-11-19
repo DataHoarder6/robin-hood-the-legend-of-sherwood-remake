@@ -147,7 +147,6 @@ fn read_sequence_map_point_property(
 /// directly from `Translate`: a sector-less assertion compares max-norm
 /// distance against `tolerance + 5`, while a sector assertion compares only
 /// the sector. Both paths interrupt on mismatch and terminate on success.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_position_assertion(
         &mut self,
@@ -233,7 +232,6 @@ impl EngineInner {
 /// Translation books the same stationary order as WAIT. This context is then
 /// invoked once per actual owner Execute while the element remains current,
 /// matching the game's projectile-launch behavior.
-
 impl EngineInner {
     pub(in crate::engine) fn authorize_and_reserve_lift_wait(
         &mut self,
@@ -363,7 +361,6 @@ impl EngineInner {
 
 /// Translate one WAIT-priority smalltalk strike/parry at the synchronous
 /// owner boundary where it was launched.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_smalltalk_command(
         &mut self,
@@ -458,7 +455,6 @@ impl EngineInner {
 /// The original command bodies read actor posture/action state, append
 /// transition orders, and update the sequence element. They do not need the
 /// mission, scripts, AI, players, feedback, or spatial world domains.
-
 impl EngineInner {
     fn dispatch_bow_transition(
         &mut self,
@@ -693,7 +689,6 @@ impl EngineInner {
 }
 
 /// Script-target activation resolution with no mutable world access.
-
 impl EngineInner {
     fn dispatch_target_activation(
         &mut self,
@@ -729,7 +724,6 @@ impl EngineInner {
 }
 
 /// Actor/FX animation and target-interaction translation.
-
 impl EngineInner {
     fn dispatch_play_animation(
         &mut self,
@@ -827,7 +821,6 @@ impl EngineInner {
 
 /// PC-side FX-target orders need read-only entity classification plus the two
 /// order fields they mutate; they never need mutable world access.
-
 impl EngineInner {
     fn dispatch_sequence_target_interaction(
         &mut self,
@@ -907,7 +900,6 @@ impl EngineInner {
 
 /// Directional and one-shot owner commands that only mutate entity facing
 /// plus the owning sequence/order allocator.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_turn_command(
         &mut self,
@@ -1022,7 +1014,6 @@ impl EngineInner {
 
 /// WAIT/WAIT_TIMER translation against entity state, sequence state, and the
 /// immutable profile table used by the carried-VIP animation branch.
-
 /// The base actor WAIT posture switch.
 ///
 /// Human WAIT translation normally handles dead/unconscious holds itself.
@@ -1429,7 +1420,6 @@ impl EngineInner {
 }
 
 /// Fixed NPC posture/action-state transition order translation.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_npc_state_command(
         &mut self,
@@ -1534,7 +1524,6 @@ impl EngineInner {
 /// Soldier swordfight setup appends these
 /// orders synchronously from `Translate`. The sequence phase must therefore
 /// still reach its after-action splice immediately after this context returns.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_npc_attention_command(
         &mut self,
@@ -1595,7 +1584,6 @@ impl EngineInner {
                     // Translation is still active, so actor instruction handling
                     // returns before publishing the actor order or IN_PROGRESS.
                     self.element_terminated(tcx, active_scripts, elem_ref);
-                    return;
                 }
             }
             _ => unreachable!("non-attention command passed to NPC attention context"),
@@ -1687,7 +1675,6 @@ impl EngineInner {
 /// Stealth-posture command translation with the exact mutable domains it
 /// touches: entities, the owning sequence, order allocation, and HIDDEN
 /// titbits. Character profiles are read only to derive the HIDDEN phase.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_stealth_command(
         &mut self,
@@ -1860,7 +1847,6 @@ impl EngineInner {
 /// sequence state, order-id allocation, and immutable animation profiles.
 /// Campaign-backed ammo checks are evaluated by the caller and passed as a
 /// value so this context cannot reach mission or campaign ownership.
-
 impl EngineInner {
     pub(in crate::engine) fn dispatch_direct_ability_command(
         &mut self,
@@ -2092,7 +2078,6 @@ impl EngineInner {
 
 /// Owner recovery and wake-up animations touch only entity state, sequence
 /// state, and the deterministic order-id stream.
-
 impl EngineInner {
     fn dispatch_recovery_command(
         &mut self,
@@ -2265,7 +2250,6 @@ impl EngineInner {
 
 /// Drink/take translation reads only the interaction pair and object payload,
 /// then books one deterministic animation order on the owning element.
-
 impl EngineInner {
     fn dispatch_object_interaction_command(
         &mut self,
@@ -2347,7 +2331,6 @@ impl EngineInner {
 }
 
 /// Immediate mobile controls cannot reach any other world or mission state.
-
 impl EngineInner {
     fn dispatch_mobile_immediate(
         &mut self,
@@ -2395,7 +2378,6 @@ impl EngineInner {
 
 /// Immediate sprite metadata commands are isolated from mobile, AI, camera,
 /// script, and mission ownership.
-
 impl EngineInner {
     fn dispatch_sprite_immediate(
         &mut self,
@@ -2486,7 +2468,6 @@ impl EngineInner {
 
 /// Map/dialog/popup commands emit presentation outputs and reset input
 /// without borrowing host UI state.
-
 impl EngineInner {
     fn dispatch_presentation_command(
         &mut self,
@@ -2587,7 +2568,6 @@ impl EngineInner {
 }
 
 /// Character availability updates PC metadata and selection synchronously.
-
 impl EngineInner {
     fn dispatch_availability_immediate(
         &mut self,

@@ -40,179 +40,6 @@ struct BeamMePcSpawn {
     list_index: u8,
 }
 
-#[cfg(test)]
-mod authored_roster_tests {
-    use super::*;
-
-    #[test]
-    fn mixed_spawn_points_reserve_fixed_profiles_then_fill_campaign_slots() {
-        let loaded = crate::level_data::LoadedLevel::hackable_from_json(br#"{
-            "map_filename":"Mission", "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
-            "spawn_points":[{"position":[10,10]},{"position":[20,20],"profile":0},{"position":[30,30]}]
-        }"#).unwrap();
-        assert!(loaded.mission.authored_spawn_roster);
-        let mut profiles = crate::profiles::ProfileManager::default();
-        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
-        let mut campaign = crate::campaign::Campaign::default();
-        campaign.characters = (0..2)
-            .map(|profile| crate::campaign::PcDescription {
-                character_profile_idx: Some(crate::profiles::CharacterProfileIdx(profile)),
-                ..Default::default()
-            })
-            .collect();
-        campaign.mission_team_indices = vec![0, 1];
-        let difficulty = crate::player_profile::DifficultyLevel::Medium;
-        let plan =
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .unwrap();
-        assert_eq!(
-            plan.iter()
-                .map(|entry| (entry.1.0, entry.2))
-                .collect::<Vec<_>>(),
-            vec![(1, 0), (0, 1)]
-        );
-        let restarted =
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .unwrap();
-        assert_eq!(
-            restarted
-                .iter()
-                .map(|entry| (entry.1.0, entry.2))
-                .collect::<Vec<_>>(),
-            vec![(1, 0), (0, 1)]
-        );
-        campaign.mission_team_indices.clear();
-        let standalone =
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .unwrap();
-        assert_eq!(standalone.len(), 1);
-        assert_eq!(standalone[0].2, 1);
-    }
-
-    #[test]
-    fn authored_spawn_roster_fills_every_slot_without_a_campaign_team() {
-        let loaded = crate::level_data::LoadedLevel::hackable_from_json(
-            br#"{
-            "map_filename":"Mission",
-            "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
-            "spawn_points":[
-                {"position":[10,10],"profile":1},
-                {"position":[20,20],"profile":0},
-                {"position":[30,30],"profile":1}
-            ]
-        }"#,
-        )
-        .unwrap();
-        let mut campaign = crate::campaign::Campaign::default();
-        let mut profiles = crate::profiles::ProfileManager::default();
-        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
-        let difficulty = crate::player_profile::DifficultyLevel::Medium;
-        let plan =
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .unwrap();
-        assert_eq!(
-            plan.iter()
-                .map(|entry| (entry.1.0, entry.2))
-                .collect::<Vec<_>>(),
-            vec![(1, 0), (0, 1), (1, 2)]
-        );
-        assert_eq!(campaign.characters.len(), 3);
-        assert_eq!(campaign.mission_team_indices, vec![0, 1, 2]);
-        assert!(
-            campaign
-                .characters
-                .iter()
-                .all(|character| character.instanced)
-        );
-        let restarted =
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .unwrap();
-        assert_eq!(
-            restarted.iter().map(|entry| entry.0).collect::<Vec<_>>(),
-            vec![0, 1, 2]
-        );
-        assert_eq!(campaign.characters.len(), 3);
-        profiles.characters.clear();
-        assert!(
-            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
-                .is_err()
-        );
-    }
-
-    /// Reusing a campaign slot for an authored spawn point must not reset that
-    /// character.  The authored descriptor is spawn data (position, profile,
-    /// action) and carries no life, ammo, skill or perk value, so every one of
-    /// them must survive the re-run — previously the slot was overwritten with
-    /// a fresh `PcStatus::from_profile`, which silently erased progression.
-    #[test]
-    fn authored_roster_spawn_preserves_training_ammo_and_perks() {
-        let loaded = crate::level_data::LoadedLevel::hackable_from_json(
-            br#"{
-            "map_filename":"Mission",
-            "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
-            "spawn_points":[{"position":[10,10],"profile":0}]
-        }"#,
-        )
-        .unwrap();
-        assert!(loaded.mission.authored_spawn_roster);
-        let mut profiles = crate::profiles::ProfileManager::default();
-        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
-        let mut campaign = crate::campaign::Campaign::default();
-        let mut status = crate::pc_status::PcStatus::from_profile(
-            &profiles.characters[0],
-            true,
-            crate::player_profile::DifficultyLevel::Medium,
-        );
-        status
-            .human_status
-            .add_experience(crate::pc_status::SkillName::Bow, 250);
-        status.num_arrows = 9;
-        status.keep_moving_in_combat = true;
-        status.auto_loot = true;
-        status.no_friendly_fire_damage = true;
-        status.no_friendly_fire_knockback = true;
-        campaign.characters.push(crate::campaign::PcDescription {
-            character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
-            instanced: true,
-            status,
-        });
-        campaign.mission_team_indices = vec![0];
-        let before = campaign.characters[0].status.clone();
-
-        let plan = EngineInner::authored_beam_me_spawn_plan(
-            &mut campaign,
-            &profiles,
-            &loaded,
-            crate::player_profile::DifficultyLevel::Medium,
-        )
-        .unwrap();
-
-        assert_eq!(
-            plan.iter().map(|entry| entry.0).collect::<Vec<_>>(),
-            vec![0],
-            "the authored slot reuses the campaign character that owns the profile"
-        );
-        assert_eq!(
-            campaign.characters[0].status, before,
-            "an authored spawn point must not rewrite the character's progression"
-        );
-        assert_eq!(campaign.characters[0].status.human_status.bow.capacity, 2);
-        assert_eq!(
-            campaign.characters[0].status.human_status.bow.experience,
-            50
-        );
-        assert_eq!(campaign.characters[0].status.num_arrows, 9);
-        assert!(campaign.characters[0].status.keep_moving_in_combat);
-        assert!(campaign.characters[0].status.auto_loot);
-        assert!(campaign.characters[0].status.no_friendly_fire_damage);
-        assert!(campaign.characters[0].status.no_friendly_fire_knockback);
-        assert!(
-            campaign.characters[0].instanced,
-            "spawn data still marks the reused character instanced"
-        );
-    }
-}
-
 impl EngineInner {
     pub(super) fn prepare_selected_team(
         &mut self,
@@ -1368,5 +1195,178 @@ impl EngineInner {
         if let Some(roll) = sherwood_placement_roll {
             self.apply_randomized_position(spawned_eid, roll);
         }
+    }
+}
+
+#[cfg(test)]
+mod authored_roster_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_spawn_points_reserve_fixed_profiles_then_fill_campaign_slots() {
+        let loaded = crate::level_data::LoadedLevel::hackable_from_json(br#"{
+            "map_filename":"Mission", "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
+            "spawn_points":[{"position":[10,10]},{"position":[20,20],"profile":0},{"position":[30,30]}]
+        }"#).unwrap();
+        assert!(loaded.mission.authored_spawn_roster);
+        let mut profiles = crate::profiles::ProfileManager::default();
+        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
+        let mut campaign = crate::campaign::Campaign::default();
+        campaign.characters = (0..2)
+            .map(|profile| crate::campaign::PcDescription {
+                character_profile_idx: Some(crate::profiles::CharacterProfileIdx(profile)),
+                ..Default::default()
+            })
+            .collect();
+        campaign.mission_team_indices = vec![0, 1];
+        let difficulty = crate::player_profile::DifficultyLevel::Medium;
+        let plan =
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .unwrap();
+        assert_eq!(
+            plan.iter()
+                .map(|entry| (entry.1.0, entry.2))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (0, 1)]
+        );
+        let restarted =
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .unwrap();
+        assert_eq!(
+            restarted
+                .iter()
+                .map(|entry| (entry.1.0, entry.2))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (0, 1)]
+        );
+        campaign.mission_team_indices.clear();
+        let standalone =
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .unwrap();
+        assert_eq!(standalone.len(), 1);
+        assert_eq!(standalone[0].2, 1);
+    }
+
+    #[test]
+    fn authored_spawn_roster_fills_every_slot_without_a_campaign_team() {
+        let loaded = crate::level_data::LoadedLevel::hackable_from_json(
+            br#"{
+            "map_filename":"Mission",
+            "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
+            "spawn_points":[
+                {"position":[10,10],"profile":1},
+                {"position":[20,20],"profile":0},
+                {"position":[30,30],"profile":1}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let mut campaign = crate::campaign::Campaign::default();
+        let mut profiles = crate::profiles::ProfileManager::default();
+        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
+        let difficulty = crate::player_profile::DifficultyLevel::Medium;
+        let plan =
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .unwrap();
+        assert_eq!(
+            plan.iter()
+                .map(|entry| (entry.1.0, entry.2))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (0, 1), (1, 2)]
+        );
+        assert_eq!(campaign.characters.len(), 3);
+        assert_eq!(campaign.mission_team_indices, vec![0, 1, 2]);
+        assert!(
+            campaign
+                .characters
+                .iter()
+                .all(|character| character.instanced)
+        );
+        let restarted =
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .unwrap();
+        assert_eq!(
+            restarted.iter().map(|entry| entry.0).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(campaign.characters.len(), 3);
+        profiles.characters.clear();
+        assert!(
+            EngineInner::authored_beam_me_spawn_plan(&mut campaign, &profiles, &loaded, difficulty)
+                .is_err()
+        );
+    }
+
+    /// Reusing a campaign slot for an authored spawn point must not reset that
+    /// character.  The authored descriptor is spawn data (position, profile,
+    /// action) and carries no life, ammo, skill or perk value, so every one of
+    /// them must survive the re-run — previously the slot was overwritten with
+    /// a fresh `PcStatus::from_profile`, which silently erased progression.
+    #[test]
+    fn authored_roster_spawn_preserves_training_ammo_and_perks() {
+        let loaded = crate::level_data::LoadedLevel::hackable_from_json(
+            br#"{
+            "map_filename":"Mission",
+            "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
+            "spawn_points":[{"position":[10,10],"profile":0}]
+        }"#,
+        )
+        .unwrap();
+        assert!(loaded.mission.authored_spawn_roster);
+        let mut profiles = crate::profiles::ProfileManager::default();
+        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
+        let mut campaign = crate::campaign::Campaign::default();
+        let mut status = crate::pc_status::PcStatus::from_profile(
+            &profiles.characters[0],
+            true,
+            crate::player_profile::DifficultyLevel::Medium,
+        );
+        status
+            .human_status
+            .add_experience(crate::pc_status::SkillName::Bow, 250);
+        status.num_arrows = 9;
+        status.keep_moving_in_combat = true;
+        status.auto_loot = true;
+        status.no_friendly_fire_damage = true;
+        status.no_friendly_fire_knockback = true;
+        campaign.characters.push(crate::campaign::PcDescription {
+            character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
+            instanced: true,
+            status,
+        });
+        campaign.mission_team_indices = vec![0];
+        let before = campaign.characters[0].status.clone();
+
+        let plan = EngineInner::authored_beam_me_spawn_plan(
+            &mut campaign,
+            &profiles,
+            &loaded,
+            crate::player_profile::DifficultyLevel::Medium,
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.iter().map(|entry| entry.0).collect::<Vec<_>>(),
+            vec![0],
+            "the authored slot reuses the campaign character that owns the profile"
+        );
+        assert_eq!(
+            campaign.characters[0].status, before,
+            "an authored spawn point must not rewrite the character's progression"
+        );
+        assert_eq!(campaign.characters[0].status.human_status.bow.capacity, 2);
+        assert_eq!(
+            campaign.characters[0].status.human_status.bow.experience,
+            50
+        );
+        assert_eq!(campaign.characters[0].status.num_arrows, 9);
+        assert!(campaign.characters[0].status.keep_moving_in_combat);
+        assert!(campaign.characters[0].status.auto_loot);
+        assert!(campaign.characters[0].status.no_friendly_fire_damage);
+        assert!(campaign.characters[0].status.no_friendly_fire_knockback);
+        assert!(
+            campaign.characters[0].instanced,
+            "spawn data still marks the reused character instanced"
+        );
     }
 }

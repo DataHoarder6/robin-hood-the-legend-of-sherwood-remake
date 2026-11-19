@@ -2395,8 +2395,10 @@ mod tests {
         );
         let mut graph = PathGraph::new();
         let partition = PathPartition::from_graph(&graph);
-        let mut scratch = PathSearchScratch::default();
-        scratch.current_half_diagonal = MoveBoxHalfDiagonal::new(6., 3.);
+        let mut scratch = PathSearchScratch {
+            current_half_diagonal: MoveBoxHalfDiagonal::new(6., 3.),
+            ..Default::default()
+        };
         let search = PathSearch {
             graph: &graph,
             partition: &partition,
@@ -2546,10 +2548,12 @@ mod tests {
         ];
         let partition = PathPartition::from_graph(&graph);
         for (attempts, expected) in [(1, NodeIdx(0)), (0, NodeIdx(1))] {
-            let mut scratch = PathSearchScratch::default();
-            scratch.shortest_distance_found = 2e10;
-            scratch.search_nodes = graph.nodes.iter().map(NodeSearchState::capture).collect();
-            scratch.open_nodes = [NodeIdx(0), NodeIdx(1)].into();
+            let mut scratch = PathSearchScratch {
+                shortest_distance_found: 2e10,
+                search_nodes: graph.nodes.iter().map(NodeSearchState::capture).collect(),
+                open_nodes: [NodeIdx(0), NodeIdx(1)].into(),
+                ..Default::default()
+            };
             let mut search = PathSearch {
                 graph: &graph,
                 partition: &partition,
@@ -3312,8 +3316,10 @@ mod tests {
         graph.layers = vec![vec![vec![vec![NodeIdx(0)]]]];
         graph.alternative_layers = vec![vec![vec![Vec::new()]]];
         let partition = PathPartition::from_graph(&graph);
-        let mut scratch = PathSearchScratch::default();
-        scratch.current_half_diagonal = MoveBoxHalfDiagonal::new(10.0, 10.0);
+        let mut scratch = PathSearchScratch {
+            current_half_diagonal: MoveBoxHalfDiagonal::new(10.0, 10.0),
+            ..Default::default()
+        };
         let mut runtime = PathSearch {
             graph: &graph,
             partition: &partition,

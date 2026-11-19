@@ -19,11 +19,13 @@ fn zoom_dispatch_uses_supplied_camera_display_not_owned_placeholder() {
                 DisplayOpCode::NoBackgroundMove
             };
             engine.feedback.cutscene_camera.display.display_op = owned_op;
-            let mut supplied = CameraDisplayState::default();
-            supplied.display_op = if supplied_is_idle {
-                DisplayOpCode::NoBackgroundMove
-            } else {
-                DisplayOpCode::InZoom
+            let mut supplied = CameraDisplayState {
+                display_op: if supplied_is_idle {
+                    DisplayOpCode::NoBackgroundMove
+                } else {
+                    DisplayOpCode::InZoom
+                },
+                ..Default::default()
             };
             supplied.background_transform.current_zoom_level = 1;
 

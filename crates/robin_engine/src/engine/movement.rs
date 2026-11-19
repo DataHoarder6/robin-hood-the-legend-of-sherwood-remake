@@ -3799,9 +3799,7 @@ impl EngineInner {
         owner: EntityId,
         selected: Option<MovementOwnerSelection>,
     ) -> Option<MotionState> {
-        let Some(selected) = selected else {
-            return None;
-        };
+        let selected = selected?;
         let selected_is_live = self
             .orders
             .sequence_manager
@@ -4742,10 +4740,7 @@ impl EngineInner {
         entity_id: EntityId,
         is_swordfighting: bool,
     ) -> Option<SelectedMovementOrder> {
-        let actor = match entity.actor_data_mut() {
-            Some(a) => a,
-            None => return None,
-        };
+        let actor = entity.actor_data_mut()?;
         let has_moving_state = actor.action_state.is_moving()
             || actor.action_state == crate::element::ActionState::MovingSword
             || actor.action_state == crate::element::ActionState::MovingFastSword
@@ -4801,12 +4796,9 @@ impl EngineInner {
             // is its selected current element.
             return None;
         }
-        let Some(order) = manager
+        let order = manager
             .get_element(seq_id, elem_idx)
-            .and_then(|e| e.current_order())
-        else {
-            return None;
-        };
+            .and_then(|e| e.current_order())?;
         let goal = MapPoint::new(order.target_x, order.target_y);
         let order_id = Some(order.order_id);
         let order_action = order.order_type;
@@ -5628,7 +5620,7 @@ impl EngineInner {
                         entity_layer,
                         &move_box,
                         half_diagonal,
-                        &grid,
+                        grid,
                         next_order_id,
                     );
                 }

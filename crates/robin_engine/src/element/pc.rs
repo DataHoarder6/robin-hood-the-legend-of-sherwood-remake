@@ -1,98 +1,6 @@
 //! Player-character data and local behavior.
 use super::*;
 
-#[cfg(test)]
-mod spawn_status_tests {
-    use super::*;
-
-    #[test]
-    fn spawn_status_preserves_inventory_and_initializes_all_action_slots() {
-        let status = crate::pc_status::PcStatus {
-            life_points: 73,
-            num_ales: 1,
-            num_arrows: 9,
-            num_apples: 2,
-            num_rations: 3,
-            num_stones: 4,
-            num_wasp_nests: 5,
-            num_nets: 6,
-            num_plants: 9,
-            num_purses: 7,
-            ..Default::default()
-        };
-        let profile = CharacterProfile {
-            actions: [Action::Bow, Action::Purse, Action::NoAction],
-            ..Default::default()
-        };
-        let pc = PcData::from_spawn_status(&status, &profile, 0);
-        assert_eq!(pc.life_points, 73);
-        assert_eq!(
-            pc.ammo,
-            PcAmmoData {
-                ales: 1,
-                arrows: 9,
-                apples: 2,
-                rations: 3,
-                stones: 4,
-                wasp_nests: 5,
-                nets: 6,
-                plants: 9,
-                purses: 7,
-            }
-        );
-        assert_eq!(pc.disabled_actions, [false, true, false]);
-        assert_eq!(pc.disabled_actions_temp, [false; 3]);
-
-        let empty_bow = crate::pc_status::PcStatus {
-            num_arrows: 0,
-            ..status
-        };
-        let pc = PcData::from_spawn_status(&empty_bow, &profile, 100);
-        assert_eq!(pc.disabled_actions, [true, false, false]);
-        assert_eq!(pc.disabled_actions_temp, [false; 3]);
-    }
-
-    /// A purchased perk is campaign progression: spawn is the only place it
-    /// becomes mission state, and each bit must cross on its own — the perks
-    /// are independent flags, not one "has any perk" switch.
-    #[test]
-    fn spawn_status_copies_each_purchased_perk_independently() {
-        let profile = CharacterProfile::default();
-        for no_friendly_fire_knockback in [false, true] {
-            for no_friendly_fire_damage in [false, true] {
-                for (keep_moving_in_combat, auto_loot) in
-                    [(false, false), (true, false), (false, true), (true, true)]
-                {
-                    let status = crate::pc_status::PcStatus {
-                        keep_moving_in_combat,
-                        auto_loot,
-                        no_friendly_fire_damage,
-                        no_friendly_fire_knockback,
-                        ..Default::default()
-                    };
-                    let pc = PcData::from_spawn_status(&status, &profile, 0);
-                    assert_eq!(
-                        pc.keep_moving_in_combat, keep_moving_in_combat,
-                        "keep-moving-in-combat must cross spawn with its own bit"
-                    );
-                    assert_eq!(
-                        pc.auto_loot, auto_loot,
-                        "auto-loot must cross spawn with its own bit"
-                    );
-                    assert_eq!(
-                        pc.no_friendly_fire_damage, no_friendly_fire_damage,
-                        "no-friendly-fire-damage must cross spawn with its own bit"
-                    );
-                    assert_eq!(
-                        pc.no_friendly_fire_knockback, no_friendly_fire_knockback,
-                        "no-friendly-fire-knockback must cross spawn with its own bit"
-                    );
-                }
-            }
-        }
-    }
-}
-
 /// Ammo counters owned by a live PC entity.
 ///
 /// An original-game player actor always has a player-status reference, and
@@ -607,5 +515,97 @@ impl PcData {
             }
         }
         restore_action
+    }
+}
+
+#[cfg(test)]
+mod spawn_status_tests {
+    use super::*;
+
+    #[test]
+    fn spawn_status_preserves_inventory_and_initializes_all_action_slots() {
+        let status = crate::pc_status::PcStatus {
+            life_points: 73,
+            num_ales: 1,
+            num_arrows: 9,
+            num_apples: 2,
+            num_rations: 3,
+            num_stones: 4,
+            num_wasp_nests: 5,
+            num_nets: 6,
+            num_plants: 9,
+            num_purses: 7,
+            ..Default::default()
+        };
+        let profile = CharacterProfile {
+            actions: [Action::Bow, Action::Purse, Action::NoAction],
+            ..Default::default()
+        };
+        let pc = PcData::from_spawn_status(&status, &profile, 0);
+        assert_eq!(pc.life_points, 73);
+        assert_eq!(
+            pc.ammo,
+            PcAmmoData {
+                ales: 1,
+                arrows: 9,
+                apples: 2,
+                rations: 3,
+                stones: 4,
+                wasp_nests: 5,
+                nets: 6,
+                plants: 9,
+                purses: 7,
+            }
+        );
+        assert_eq!(pc.disabled_actions, [false, true, false]);
+        assert_eq!(pc.disabled_actions_temp, [false; 3]);
+
+        let empty_bow = crate::pc_status::PcStatus {
+            num_arrows: 0,
+            ..status
+        };
+        let pc = PcData::from_spawn_status(&empty_bow, &profile, 100);
+        assert_eq!(pc.disabled_actions, [true, false, false]);
+        assert_eq!(pc.disabled_actions_temp, [false; 3]);
+    }
+
+    /// A purchased perk is campaign progression: spawn is the only place it
+    /// becomes mission state, and each bit must cross on its own — the perks
+    /// are independent flags, not one "has any perk" switch.
+    #[test]
+    fn spawn_status_copies_each_purchased_perk_independently() {
+        let profile = CharacterProfile::default();
+        for no_friendly_fire_knockback in [false, true] {
+            for no_friendly_fire_damage in [false, true] {
+                for (keep_moving_in_combat, auto_loot) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    let status = crate::pc_status::PcStatus {
+                        keep_moving_in_combat,
+                        auto_loot,
+                        no_friendly_fire_damage,
+                        no_friendly_fire_knockback,
+                        ..Default::default()
+                    };
+                    let pc = PcData::from_spawn_status(&status, &profile, 0);
+                    assert_eq!(
+                        pc.keep_moving_in_combat, keep_moving_in_combat,
+                        "keep-moving-in-combat must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.auto_loot, auto_loot,
+                        "auto-loot must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.no_friendly_fire_damage, no_friendly_fire_damage,
+                        "no-friendly-fire-damage must cross spawn with its own bit"
+                    );
+                    assert_eq!(
+                        pc.no_friendly_fire_knockback, no_friendly_fire_knockback,
+                        "no-friendly-fire-knockback must cross spawn with its own bit"
+                    );
+                }
+            }
+        }
     }
 }

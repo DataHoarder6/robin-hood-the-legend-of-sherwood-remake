@@ -122,7 +122,7 @@ fn drop_ammo_and_tick(
     let mut elem = SequenceElement::new_generic(1, crate::element::Command::DropAmmo, Some(pc_id));
     elem.set_property(Field::ActionId, FieldValue::Integer(Action::Bow as u32));
     elem.set_property(Field::Amount, FieldValue::Integer(amount));
-    engine.t_launch_element(&assets, elem);
+    engine.t_launch_element(assets, elem);
 
     let mut display = HostDisplayState::default();
     let mut dev = DevState::default();

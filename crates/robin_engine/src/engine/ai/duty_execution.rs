@@ -136,15 +136,13 @@ impl AiOwnerCtx<'_> {
             .expect("duty owner has no AI actor data")
             .detectable_lists[crate::element::DetectableType::MissedFriend as usize]
             .is_empty();
-        if has_missed_friend {
-            if let Some(checkpoint) = self.enemy().base.checkpoint_charly {
-                self.enemy_mut()
-                    .base
-                    .missed_in_action
-                    .push(checkpoint.get());
-                self.engine
-                    .execute_ai_set_checkpoint_charly(self.owner, None);
-            }
+        if has_missed_friend && let Some(checkpoint) = self.enemy().base.checkpoint_charly {
+            self.enemy_mut()
+                .base
+                .missed_in_action
+                .push(checkpoint.get());
+            self.engine
+                .execute_ai_set_checkpoint_charly(self.owner, None);
         }
 
         let substate = self.enemy().base.current_substate;
@@ -403,7 +401,7 @@ impl AiOwnerCtx<'_> {
             .entities()
             .expect_entity(officer, format_args!("selected officer"));
         let passing_door =
-            selected_actor_is_passing_door(&self.engine.entities(), &self.engine.seq(), officer);
+            selected_actor_is_passing_door(self.engine.entities(), self.engine.seq(), officer);
         let input = extract_exact_forecast_input(self.engine, entity, passing_door)
             .expect("officer forecast requires an actor");
         let destination = crate::ai::forecast_destination_for_ia(

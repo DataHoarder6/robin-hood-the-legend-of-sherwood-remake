@@ -20,7 +20,7 @@ fn after_combat_injury_speaks_once_only_after_a_rejected_strike_proposal() {
             entity.human_data_mut().unwrap().opponents.clear();
             entity.human_data_mut().unwrap().opponents.push(opponent);
             entity.element_data_mut().set_direction_instantly(
-                crate::position_interface::vector_to_sector_0_to_15_iso(dx, 0.0) as i16,
+                crate::position_interface::vector_to_sector_0_to_15_iso(dx, 0.0),
             );
             let sprite = &mut entity.element_data_mut().sprite;
             sprite.scripts = std::sync::Arc::new(vec![crate::sprite_script::SpriteScript {

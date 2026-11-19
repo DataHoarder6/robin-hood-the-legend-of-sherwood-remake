@@ -64,7 +64,7 @@ impl OrderQueue {
         self.orders
             .iter()
             .find(|order| order.storage_slot == slot)
-            .or_else(|| match &self.installed {
+            .or(match &self.installed {
                 Some(InstalledOrderLease::Detached(order)) if order.storage_slot == slot => {
                     Some(order)
                 }
@@ -76,7 +76,7 @@ impl OrderQueue {
         self.orders
             .iter_mut()
             .find(|order| order.storage_slot == slot)
-            .or_else(|| match &mut self.installed {
+            .or(match &mut self.installed {
                 Some(InstalledOrderLease::Detached(order)) if order.storage_slot == slot => {
                     Some(order)
                 }

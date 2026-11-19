@@ -67,7 +67,7 @@ fn run_test_bow_owner(
     let order_id = order.order_id;
     let mut engine = crate::engine::EngineInner::new();
     engine.world.entities = std::mem::take(entities);
-    engine.orders.sequence_manager = std::mem::replace(sequences, SequenceManager::new());
+    engine.orders.sequence_manager = std::mem::take(sequences);
     engine
         .world
         .entities
@@ -3977,10 +3977,10 @@ fn tick_arrows_inactive_shield_hit_deflects_and_keeps_flying() {
             TickCtx::new(&crate::sim_rng::test_context(), &assets),
             arrow_id,
         );
-        if let Entity::Projectile(p) = engine.world.entities.get(arrow_id).unwrap() {
-            if p.projectile.falling {
-                break;
-            }
+        if let Entity::Projectile(p) = engine.world.entities.get(arrow_id).unwrap()
+            && p.projectile.falling
+        {
+            break;
         }
     }
     assert!(projectile_activation_seen(

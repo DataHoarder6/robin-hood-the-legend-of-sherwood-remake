@@ -139,9 +139,13 @@ fn react_as_officer(body_y: f32) -> (EngineInner, EntityId, EntityId) {
     (engine, owner, body)
 }
 
+// The fixture places the body at 149.5 stretched units, inside the officer's
+// 150-unit delegate radius, while the unstretched distance stays below it.
+const _: () =
+    assert!(149.5 < 150.0 && 149.5 * crate::position_interface::INVERSE_ASPECT_RATIO > 150.0);
+
 #[test]
 fn officer_body_reaction_uses_stretched_max_norm_to_delegate() {
-    assert!(149.5 < 150.0 && 149.5 * crate::position_interface::INVERSE_ASPECT_RATIO > 150.0);
     let (engine, owner, _) = react_as_officer(649.5);
     let ai = engine.seek_enemy(owner);
     assert_eq!(
@@ -159,9 +163,11 @@ fn officer_body_reaction_uses_stretched_max_norm_to_delegate() {
     );
 }
 
+// A body 80 stretched units away stays inside the officer's 150-unit radius.
+const _: () = assert!(80.0 * crate::position_interface::INVERSE_ASPECT_RATIO <= 150.0);
+
 #[test]
 fn officer_body_reaction_examines_body_within_stretched_threshold() {
-    assert!(80.0 * crate::position_interface::INVERSE_ASPECT_RATIO <= 150.0);
     let (engine, owner, body) = react_as_officer(580.0);
     let ai = engine.seek_enemy(owner);
     assert_eq!(ai.base.current_substate, Substate::SeekingBody);

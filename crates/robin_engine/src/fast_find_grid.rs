@@ -1161,7 +1161,7 @@ fn segment_row_cell_range(
     let last = (((right + margin) / 64.).floor() as i64)
         .saturating_add(1)
         .min(i64::from(max));
-    (first <= last).then(|| (first as u16, last as u16))
+    (first <= last).then_some((first as u16, last as u16))
 }
 
 /// Clamp a world-space rect to the inclusive grid-cell range it covers,

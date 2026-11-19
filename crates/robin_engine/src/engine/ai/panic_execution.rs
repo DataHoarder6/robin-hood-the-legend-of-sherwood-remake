@@ -7,89 +7,6 @@ fn panic_retry_side(creation_order: u32) -> u8 {
     if creation_order & 1 != 0 { 4 } else { 12 }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spent_panic_hides_blinks_and_consumes_only_required_random_draws() {
-        for directed in [false, true] {
-            for stimulus in [
-                StimulusType::EventReachPoint,
-                StimulusType::EventCouldntReachPoint,
-            ] {
-                let mut engine = EngineInner::new();
-                let owner = engine.add_test_entity(
-                    crate::engine::test_support::actors::make_test_ai_soldier(
-                        crate::element::Camp::Lacklandists,
-                    ),
-                );
-                let mut assets = LevelAssets::new();
-                crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-                engine.control.frame_counter = 70;
-                engine.enter_ai_think_frame(owner);
-                let entity = engine.ent_mut(owner);
-                entity.enemy_ai_mut().unwrap().fleeing_seen_enemy_counter = 20;
-                let ai = entity.ai_controller_mut().unwrap();
-                ai.current_state = AiState::Fleeing;
-                ai.current_substate = Substate::FleeingPanic;
-                ai.directed_panic = directed;
-                ai.lasting_panic_runs = 0;
-                ai.panic_center_x = 100.0;
-                entity.npc_data_mut().unwrap().detectable_lists
-                    [crate::element::DetectableType::Enemy as usize]
-                    .push(crate::element::Detectable {
-                        detectable_type: crate::element::DetectableType::Enemy,
-                        seen_now: true,
-                        seen_last_frame: true,
-                        ..Default::default()
-                    });
-                let (_, draws) = crate::sim_rng::with_draw_trace(|| {
-                    engine
-                        .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                        .execute_ai_common_fleeing_event(&Stimulus::new(stimulus))
-                        .expect("spent panic event must be handled");
-                });
-                let ai = engine.ai_ctrl(owner);
-                assert_eq!(
-                    engine.enemy(owner).fleeing_seen_enemy_counter,
-                    if stimulus == StimulusType::EventReachPoint {
-                        0
-                    } else {
-                        20
-                    },
-                    "only arrival renews the soldier's panic sighting budget",
-                );
-                assert_eq!(ai.current_substate, Substate::FleeingHiding);
-                assert_eq!(ai.view_alert_status, AlertLevel::Yellow);
-                assert!(ai.timer_is_running);
-                assert!(
-                    (70 + crate::parameters_ai::AI_MIN_PANIC_HIDING_TIME as u32
-                        ..70 + crate::parameters_ai::AI_MIN_PANIC_HIDING_TIME as u32
-                            + crate::parameters_ai::AI_DELTA_PANIC_HIDING_TIME as u32)
-                        .contains(&ai.when_does_timer_ring)
-                );
-                assert_eq!(draws.len(), if directed { 1 } else { 2 });
-                assert!(
-                    draws
-                        .iter()
-                        .all(|site| *site == crate::sim_rng::RngSite::AiPanic)
-                );
-                let detectable = &engine.npc(owner).detectable_lists
-                    [crate::element::DetectableType::Enemy as usize][0];
-                assert!(!detectable.seen_now && !detectable.seen_last_frame);
-            }
-        }
-    }
-
-    #[test]
-    fn retry_turn_uses_creation_order_instead_of_entity_slot() {
-        assert_eq!(panic_retry_side(68), 12);
-        assert_eq!(panic_retry_side(69), 4);
-        assert_ne!(panic_retry_side(68), panic_retry_side(37));
-    }
-}
-
 impl EngineInner {}
 
 impl AiOwnerCtx<'_> {
@@ -463,5 +380,88 @@ impl AiOwnerCtx<'_> {
             ai.lasting_panic_runs = ai.lasting_panic_runs.wrapping_sub(1);
             self.execute_ai_callback(&Stimulus::new(StimulusType::EventReachPoint));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spent_panic_hides_blinks_and_consumes_only_required_random_draws() {
+        for directed in [false, true] {
+            for stimulus in [
+                StimulusType::EventReachPoint,
+                StimulusType::EventCouldntReachPoint,
+            ] {
+                let mut engine = EngineInner::new();
+                let owner = engine.add_test_entity(
+                    crate::engine::test_support::actors::make_test_ai_soldier(
+                        crate::element::Camp::Lacklandists,
+                    ),
+                );
+                let mut assets = LevelAssets::new();
+                crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+                engine.control.frame_counter = 70;
+                engine.enter_ai_think_frame(owner);
+                let entity = engine.ent_mut(owner);
+                entity.enemy_ai_mut().unwrap().fleeing_seen_enemy_counter = 20;
+                let ai = entity.ai_controller_mut().unwrap();
+                ai.current_state = AiState::Fleeing;
+                ai.current_substate = Substate::FleeingPanic;
+                ai.directed_panic = directed;
+                ai.lasting_panic_runs = 0;
+                ai.panic_center_x = 100.0;
+                entity.npc_data_mut().unwrap().detectable_lists
+                    [crate::element::DetectableType::Enemy as usize]
+                    .push(crate::element::Detectable {
+                        detectable_type: crate::element::DetectableType::Enemy,
+                        seen_now: true,
+                        seen_last_frame: true,
+                        ..Default::default()
+                    });
+                let (_, draws) = crate::sim_rng::with_draw_trace(|| {
+                    engine
+                        .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                        .execute_ai_common_fleeing_event(&Stimulus::new(stimulus))
+                        .expect("spent panic event must be handled");
+                });
+                let ai = engine.ai_ctrl(owner);
+                assert_eq!(
+                    engine.enemy(owner).fleeing_seen_enemy_counter,
+                    if stimulus == StimulusType::EventReachPoint {
+                        0
+                    } else {
+                        20
+                    },
+                    "only arrival renews the soldier's panic sighting budget",
+                );
+                assert_eq!(ai.current_substate, Substate::FleeingHiding);
+                assert_eq!(ai.view_alert_status, AlertLevel::Yellow);
+                assert!(ai.timer_is_running);
+                assert!(
+                    (70 + crate::parameters_ai::AI_MIN_PANIC_HIDING_TIME as u32
+                        ..70 + crate::parameters_ai::AI_MIN_PANIC_HIDING_TIME as u32
+                            + crate::parameters_ai::AI_DELTA_PANIC_HIDING_TIME as u32)
+                        .contains(&ai.when_does_timer_ring)
+                );
+                assert_eq!(draws.len(), if directed { 1 } else { 2 });
+                assert!(
+                    draws
+                        .iter()
+                        .all(|site| *site == crate::sim_rng::RngSite::AiPanic)
+                );
+                let detectable = &engine.npc(owner).detectable_lists
+                    [crate::element::DetectableType::Enemy as usize][0];
+                assert!(!detectable.seen_now && !detectable.seen_last_frame);
+            }
+        }
+    }
+
+    #[test]
+    fn retry_turn_uses_creation_order_instead_of_entity_slot() {
+        assert_eq!(panic_retry_side(68), 12);
+        assert_eq!(panic_retry_side(69), 4);
+        assert_ne!(panic_retry_side(68), panic_retry_side(37));
     }
 }

@@ -3,236 +3,6 @@
 use super::*;
 use crate::ai::{AiState, EmoticonType, Substate};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ai::AiEntityHandle;
-    use crate::engine::test_support::actors::{make_test_ai_soldier, make_test_pc};
-
-    fn beggar_fixture(civilian: bool) -> (EngineInner, LevelAssets, EntityId, EntityId) {
-        let mut engine = EngineInner::new();
-        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
-            &mut engine,
-            (128, 128),
-            (2000.0, 2000.0),
-        );
-        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let beggar = engine.add_test_entity(if civilian {
-            crate::engine::test_support::actors::make_test_civilian(
-                crate::element::Posture::Upright,
-            )
-        } else {
-            make_test_pc(crate::element::Posture::SimulatingBeggar)
-        });
-        for (id, x) in [(owner, 100.0), (beggar, 140.0)] {
-            engine.place(id, crate::coordinates::WorldPoint3D::new(x, 100.0, 0.0));
-            engine.elem_mut(id).set_sector(Some(sector));
-        }
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        std::sync::Arc::make_mut(&mut assets.profile_manager)
-            .civilians
-            .push(crate::profiles::CivilianProfile::default());
-        engine.scripts.mission = Some(crate::engine::test_support::asm::empty_mission_script(
-            "beggar_test.scs",
-        ));
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("beggar fixture"));
-        ai.base.current_state = AiState::Seeking;
-        ai.base.current_substate = Substate::SeekingSeekpointIdentifyingBeggar1;
-        ai.beggar_to_examine = Some(AiEntityHandle::new(beggar.index()));
-        engine.enter_ai_think_frame(owner);
-        (engine, assets, owner, beggar)
-    }
-
-    #[test]
-    fn live_beggar_arrival_registers_one_turn_then_response_sequence() {
-        for (archer, command, timer) in [
-            (false, crate::element::Command::StartMenace, 30),
-            (true, crate::element::Command::EquipBow, 100),
-        ] {
-            let (mut engine, assets, owner, _) = beggar_fixture(false);
-            let ai = engine
-                .world
-                .entities
-                .expect_enemy_ai_mut(owner, format_args!("beggar arrival setup"));
-            ai.base.current_substate = Substate::SeekingSeekpointApproachingBeggar;
-            ai.is_archer_unit = archer;
-            assert!(
-                engine
-                    .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                    .execute_ai_archery_expected_event(StimulusType::EventReachPoint)
-            );
-            let sequence = engine
-                .orders
-                .sequence_manager
-                .sequences_iter()
-                .find(|sequence| {
-                    sequence.elements.len() == 2
-                        && sequence.elements[0].command == crate::element::Command::TurnFast
-                })
-                .expect("beggar response sequence");
-            assert_eq!(sequence.elements[0].command_level, 1);
-            assert_eq!(sequence.elements[1].command_level, 2);
-            assert_eq!(sequence.elements[1].command, command);
-            assert_eq!(
-                engine
-                    .world
-                    .entities
-                    .expect_ai_controller(owner, format_args!("beggar response timer"))
-                    .when_does_timer_ring,
-                timer
-            );
-        }
-    }
-
-    #[test]
-    fn live_npc_beggar_identification_launches_show_face_and_waits() {
-        let (mut engine, assets, owner, beggar) = beggar_fixture(true);
-        assert!(
-            engine
-                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                .execute_ai_archery_expected_event(StimulusType::EventTimer)
-        );
-        assert!(
-            engine
-                .orders
-                .sequence_manager
-                .sequences_iter()
-                .any(|sequence| sequence
-                    .elements
-                    .iter()
-                    .any(|element| element.owner == Some(beggar)
-                        && element.command == crate::element::Command::BeggarShowFace))
-        );
-        let ai = engine
-            .world
-            .entities
-            .expect_ai_controller(owner, format_args!("identified beggar result"));
-        assert_eq!(
-            ai.current_substate,
-            Substate::SeekingSeekpointIdentifyingBeggar2
-        );
-        assert_eq!(ai.when_does_timer_ring, 50);
-    }
-
-    #[test]
-    fn live_false_beggar_archer_identification_selects_target_and_registers_departure() {
-        let (mut engine, mut assets, owner, beggar) = beggar_fixture(false);
-        let profiles = std::sync::Arc::make_mut(&mut assets.profile_manager);
-        if profiles.bows.is_empty() {
-            profiles.bows.push(crate::profiles::BowProfile::default());
-        }
-        profiles.bows[0].normal_shoot.range = 1000;
-        for profile in &mut profiles.soldiers {
-            profile.shooting_weapon_id = 1;
-        }
-        engine
-            .world
-            .entities
-            .expect_ai_actor_data_mut(owner, format_args!("false beggar arrows"))
-            .number_of_arrows = 10;
-        engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("false beggar archer"))
-            .is_archer_unit = true;
-        assert!(
-            engine
-                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                .execute_ai_archery_expected_event(StimulusType::EventTimer)
-        );
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai(owner, format_args!("false beggar result"));
-        assert_eq!(
-            ai.base.primary_target,
-            Some(AiEntityHandle::new(beggar.index()))
-        );
-        assert_eq!(ai.list_them, vec![beggar.index()]);
-        assert_eq!(ai.base.current_substate, Substate::AttackingBowShooting);
-        assert!(
-            engine
-                .orders
-                .sequence_manager
-                .sequences_iter()
-                .any(|sequence| sequence
-                    .elements
-                    .iter()
-                    .any(|element| element.owner == Some(beggar)
-                        && element.command == crate::element::Command::LeaveBeggar))
-        );
-        assert!(
-            engine
-                .orders
-                .sequence_manager
-                .sequences_iter()
-                .any(|sequence| sequence
-                    .elements
-                    .iter()
-                    .any(|element| element.owner == Some(owner)
-                        && element.command == crate::element::Command::ShootBow))
-        );
-    }
-
-    #[test]
-    fn proximity_uses_current_target_position_and_live_shield_link() {
-        let mut engine = EngineInner::new();
-        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let target = engine.add_test_entity(make_test_pc(crate::element::Posture::Upright));
-        let assets = LevelAssets::new();
-        for (id, x) in [(owner, 100.0), (target, 1000.0)] {
-            engine.place(id, crate::coordinates::WorldPoint3D::new(x, 100.0, 0.0));
-        }
-        let position = engine.live_ai_position(owner);
-        assert!(!engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
-        engine.place(
-            target,
-            crate::coordinates::WorldPoint3D::new(125.0, 100.0, 0.0),
-        );
-        assert!(engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
-        engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("proximity shield link"))
-            .shield_bearer_before_me = Some(AiEntityHandle::new(target.index()));
-        assert!(!engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
-    }
-
-    #[test]
-    fn cover_arrival_completion_focuses_current_target_and_starts_five_frame_timer() {
-        let mut engine = EngineInner::new();
-        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let target = engine.add_test_entity(make_test_pc(crate::element::Posture::Upright));
-        engine.control.frame_counter = 123;
-        let ai = engine
-            .world
-            .entities
-            .expect_ai_controller_mut(owner, format_args!("cover test setup"));
-        ai.current_state = AiState::Attacking;
-        ai.current_substate = Substate::AttackingBowRunningBehindShieldBearer;
-        ai.primary_target = Some(AiEntityHandle::new(target.index()));
-        assert!(
-            engine
-                .ai_ctx(&crate::sim_rng::test_context(), &LevelAssets::new(), owner)
-                .execute_ai_archery_expected_event(StimulusType::EventDone)
-        );
-        let ai = engine
-            .world
-            .entities
-            .expect_ai_controller(owner, format_args!("cover test timer"));
-        assert_eq!(ai.when_does_timer_ring, 128);
-        assert!(ai.timer_is_running);
-        assert_eq!(
-            ai.substate_at_last_timer_launch,
-            Substate::AttackingBowRunningBehindShieldBearer
-        );
-    }
-}
-
 impl EngineInner {
     fn live_beggar_to_examine(&self, owner: EntityId) -> EntityId {
         let handle = self
@@ -582,5 +352,235 @@ impl AiOwnerCtx<'_> {
             _ => return false,
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::AiEntityHandle;
+    use crate::engine::test_support::actors::{make_test_ai_soldier, make_test_pc};
+
+    fn beggar_fixture(civilian: bool) -> (EngineInner, LevelAssets, EntityId, EntityId) {
+        let mut engine = EngineInner::new();
+        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
+            &mut engine,
+            (128, 128),
+            (2000.0, 2000.0),
+        );
+        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let beggar = engine.add_test_entity(if civilian {
+            crate::engine::test_support::actors::make_test_civilian(
+                crate::element::Posture::Upright,
+            )
+        } else {
+            make_test_pc(crate::element::Posture::SimulatingBeggar)
+        });
+        for (id, x) in [(owner, 100.0), (beggar, 140.0)] {
+            engine.place(id, crate::coordinates::WorldPoint3D::new(x, 100.0, 0.0));
+            engine.elem_mut(id).set_sector(Some(sector));
+        }
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        std::sync::Arc::make_mut(&mut assets.profile_manager)
+            .civilians
+            .push(crate::profiles::CivilianProfile::default());
+        engine.scripts.mission = Some(crate::engine::test_support::asm::empty_mission_script(
+            "beggar_test.scs",
+        ));
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("beggar fixture"));
+        ai.base.current_state = AiState::Seeking;
+        ai.base.current_substate = Substate::SeekingSeekpointIdentifyingBeggar1;
+        ai.beggar_to_examine = Some(AiEntityHandle::new(beggar.index()));
+        engine.enter_ai_think_frame(owner);
+        (engine, assets, owner, beggar)
+    }
+
+    #[test]
+    fn live_beggar_arrival_registers_one_turn_then_response_sequence() {
+        for (archer, command, timer) in [
+            (false, crate::element::Command::StartMenace, 30),
+            (true, crate::element::Command::EquipBow, 100),
+        ] {
+            let (mut engine, assets, owner, _) = beggar_fixture(false);
+            let ai = engine
+                .world
+                .entities
+                .expect_enemy_ai_mut(owner, format_args!("beggar arrival setup"));
+            ai.base.current_substate = Substate::SeekingSeekpointApproachingBeggar;
+            ai.is_archer_unit = archer;
+            assert!(
+                engine
+                    .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                    .execute_ai_archery_expected_event(StimulusType::EventReachPoint)
+            );
+            let sequence = engine
+                .orders
+                .sequence_manager
+                .sequences_iter()
+                .find(|sequence| {
+                    sequence.elements.len() == 2
+                        && sequence.elements[0].command == crate::element::Command::TurnFast
+                })
+                .expect("beggar response sequence");
+            assert_eq!(sequence.elements[0].command_level, 1);
+            assert_eq!(sequence.elements[1].command_level, 2);
+            assert_eq!(sequence.elements[1].command, command);
+            assert_eq!(
+                engine
+                    .world
+                    .entities
+                    .expect_ai_controller(owner, format_args!("beggar response timer"))
+                    .when_does_timer_ring,
+                timer
+            );
+        }
+    }
+
+    #[test]
+    fn live_npc_beggar_identification_launches_show_face_and_waits() {
+        let (mut engine, assets, owner, beggar) = beggar_fixture(true);
+        assert!(
+            engine
+                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                .execute_ai_archery_expected_event(StimulusType::EventTimer)
+        );
+        assert!(
+            engine
+                .orders
+                .sequence_manager
+                .sequences_iter()
+                .any(|sequence| sequence
+                    .elements
+                    .iter()
+                    .any(|element| element.owner == Some(beggar)
+                        && element.command == crate::element::Command::BeggarShowFace))
+        );
+        let ai = engine
+            .world
+            .entities
+            .expect_ai_controller(owner, format_args!("identified beggar result"));
+        assert_eq!(
+            ai.current_substate,
+            Substate::SeekingSeekpointIdentifyingBeggar2
+        );
+        assert_eq!(ai.when_does_timer_ring, 50);
+    }
+
+    #[test]
+    fn live_false_beggar_archer_identification_selects_target_and_registers_departure() {
+        let (mut engine, mut assets, owner, beggar) = beggar_fixture(false);
+        let profiles = std::sync::Arc::make_mut(&mut assets.profile_manager);
+        if profiles.bows.is_empty() {
+            profiles.bows.push(crate::profiles::BowProfile::default());
+        }
+        profiles.bows[0].normal_shoot.range = 1000;
+        for profile in &mut profiles.soldiers {
+            profile.shooting_weapon_id = 1;
+        }
+        engine
+            .world
+            .entities
+            .expect_ai_actor_data_mut(owner, format_args!("false beggar arrows"))
+            .number_of_arrows = 10;
+        engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("false beggar archer"))
+            .is_archer_unit = true;
+        assert!(
+            engine
+                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                .execute_ai_archery_expected_event(StimulusType::EventTimer)
+        );
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai(owner, format_args!("false beggar result"));
+        assert_eq!(
+            ai.base.primary_target,
+            Some(AiEntityHandle::new(beggar.index()))
+        );
+        assert_eq!(ai.list_them, vec![beggar.index()]);
+        assert_eq!(ai.base.current_substate, Substate::AttackingBowShooting);
+        assert!(
+            engine
+                .orders
+                .sequence_manager
+                .sequences_iter()
+                .any(|sequence| sequence
+                    .elements
+                    .iter()
+                    .any(|element| element.owner == Some(beggar)
+                        && element.command == crate::element::Command::LeaveBeggar))
+        );
+        assert!(
+            engine
+                .orders
+                .sequence_manager
+                .sequences_iter()
+                .any(|sequence| sequence
+                    .elements
+                    .iter()
+                    .any(|element| element.owner == Some(owner)
+                        && element.command == crate::element::Command::ShootBow))
+        );
+    }
+
+    #[test]
+    fn proximity_uses_current_target_position_and_live_shield_link() {
+        let mut engine = EngineInner::new();
+        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let target = engine.add_test_entity(make_test_pc(crate::element::Posture::Upright));
+        let assets = LevelAssets::new();
+        for (id, x) in [(owner, 100.0), (target, 1000.0)] {
+            engine.place(id, crate::coordinates::WorldPoint3D::new(x, 100.0, 0.0));
+        }
+        let position = engine.live_ai_position(owner);
+        assert!(!engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
+        engine.place(
+            target,
+            crate::coordinates::WorldPoint3D::new(125.0, 100.0, 0.0),
+        );
+        assert!(engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
+        engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("proximity shield link"))
+            .shield_bearer_before_me = Some(AiEntityHandle::new(target.index()));
+        assert!(!engine.ai_archer_is_too_near_to_enemy(&assets, owner, position, target));
+    }
+
+    #[test]
+    fn cover_arrival_completion_focuses_current_target_and_starts_five_frame_timer() {
+        let mut engine = EngineInner::new();
+        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let target = engine.add_test_entity(make_test_pc(crate::element::Posture::Upright));
+        engine.control.frame_counter = 123;
+        let ai = engine
+            .world
+            .entities
+            .expect_ai_controller_mut(owner, format_args!("cover test setup"));
+        ai.current_state = AiState::Attacking;
+        ai.current_substate = Substate::AttackingBowRunningBehindShieldBearer;
+        ai.primary_target = Some(AiEntityHandle::new(target.index()));
+        assert!(
+            engine
+                .ai_ctx(&crate::sim_rng::test_context(), &LevelAssets::new(), owner)
+                .execute_ai_archery_expected_event(StimulusType::EventDone)
+        );
+        let ai = engine
+            .world
+            .entities
+            .expect_ai_controller(owner, format_args!("cover test timer"));
+        assert_eq!(ai.when_does_timer_ring, 128);
+        assert!(ai.timer_is_running);
+        assert_eq!(
+            ai.substate_at_last_timer_launch,
+            Substate::AttackingBowRunningBehindShieldBearer
+        );
     }
 }

@@ -190,15 +190,13 @@ impl EngineInner {
 
         // Read movement operands from the selected sequence element's current
         // order. Its order queue owns the route throughout execution.
-        let Some(mut selected_order) = EngineInner::prepare_selected_movement_order(
+        let mut selected_order = EngineInner::prepare_selected_movement_order(
             entity,
             &self.orders.sequence_manager,
             selected,
             entity_id,
             is_swordfighting,
-        ) else {
-            return None;
-        };
+        )?;
 
         if selected_order.door_pass_anim.is_some()
             && !tcx.assets.navigation.passage_states.is_empty()
@@ -1193,7 +1191,6 @@ impl EngineInner {
                     door_pass_anim,
                     ..
                 } = selected_order;
-                let dist = dist;
                 let elem = self
                     .world
                     .entities
@@ -1582,7 +1579,7 @@ impl EngineInner {
                     entity_id,
                     MovementArrivalBoundary {
                         tolerance_arrival,
-                        point_seek_post_arrival: point_seek_post_arrival,
+                        point_seek_post_arrival,
                         arrived_after_committed_step,
                         live_seek_target,
                     },
@@ -1979,10 +1976,8 @@ impl EngineInner {
                     self.dispatch_galopp_loop_event(tcx, entity_id);
                 }
             }
-            if is_pc {
-                if is_sword_motion {
-                    self.abort_pinched_pc_sword_movement(entity_id, &mut motion_state);
-                }
+            if is_pc && is_sword_motion {
+                self.abort_pinched_pc_sword_movement(entity_id, &mut motion_state);
             }
             motion_state
         };
@@ -2088,7 +2083,6 @@ impl EngineInner {
             move_elem_idx,
             ..
         } = selected_order;
-        let tolerance_arrival = tolerance_arrival;
         let MovementSeekOperands {
             live_seek_target,
             live_seek_target_ground,

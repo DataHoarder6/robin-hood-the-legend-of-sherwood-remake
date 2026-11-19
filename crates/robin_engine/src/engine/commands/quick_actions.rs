@@ -1851,17 +1851,13 @@ impl EngineInner {
         // covers MOVE+SEEK on dispatch; `PostureToggle` enters
         // through the quickitos path which has no swordfight
         // gate, so it must also pass.
-        if is_swordfighting
+        !(is_swordfighting
             && !matches!(
                 &step.replay,
                 QaReplayCommand::Move { .. }
                     | QaReplayCommand::TacticalMove { .. }
                     | QaReplayCommand::PostureToggle { .. }
-            )
-        {
-            return false;
-        }
-        true
+            ))
     }
 
     /// Begin recording a macro.  `pc = None` arms on every

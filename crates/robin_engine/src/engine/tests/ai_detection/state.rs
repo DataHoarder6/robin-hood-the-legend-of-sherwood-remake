@@ -820,7 +820,6 @@ fn wake_blinks_apply_inline_at_the_waker_slot_for_both_producers() {
                     ),
                     ConcussionOutcome::WokeUp
                 );
-                ()
             });
         }
         assert_ne!(

@@ -710,7 +710,7 @@ impl NativeContext<'_, '_> {
                     // modded profile schema supplies detector data.
                     cloak_authored_detector: crate::cloak::SHIPPED_AUTHORED_DETECTOR,
                     sight_obstacles: sight_obstacle_list,
-                    fast_grid: &self.fast_grid,
+                    fast_grid: self.fast_grid,
                     layer: npc_layer,
                     target_dead: target_entity.is_dead(),
                     target_unconscious: tgt_unconscious,
@@ -728,7 +728,7 @@ impl NativeContext<'_, '_> {
                         view_forward,
                         real_half_aperture,
                         is_night_or_fog,
-                        &self.fast_grid,
+                        self.fast_grid,
                         sight_obstacle_list,
                         target_obstacle,
                     );

@@ -524,6 +524,72 @@ pub struct SpeechTimingVariant {
     /// it instead of inventing a duration.
     pub duration_frames: Option<u32>,
 }
+impl LevelNavigationAssets {
+    pub(crate) fn hiking_waypoint_sector(
+        &self,
+        path_index: usize,
+        waypoint_index: usize,
+        public_sector: u16,
+    ) -> Option<crate::position_interface::SectorHandle> {
+        let Some(paths) = &self.hiking_waypoint_sectors else {
+            return crate::position_interface::SectorHandle::new(public_sector);
+        };
+        let exact = paths
+            .get(path_index)
+            .and_then(|path| path.get(waypoint_index))
+            .copied()
+            .unwrap_or_else(|| {
+                panic!(
+                    "required exact hiking waypoint identity is missing for path {path_index} waypoint {waypoint_index}"
+                )
+            });
+        assert_eq!(
+            exact.get(),
+            public_sector,
+            "hiking waypoint path {path_index} waypoint {waypoint_index} public/exact identity conflict"
+        );
+        Some(exact)
+    }
+}
+
+impl LevelAssets {
+    /// Mutable access to sprite_scriptor during initialization.
+    pub fn sprite_scriptor_mut(&mut self) -> &mut crate::sprite_script::SpriteScriptor {
+        std::sync::Arc::make_mut(&mut self.sprite_scriptor)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            navigation: LevelNavigationAssets::default(),
+            environment: LevelEnvironmentAssets::default(),
+            audio: LevelAudioAssets::default(),
+            attachments: LevelRuntimeAttachments::default(),
+            sprite_scriptor: std::sync::Arc::new(crate::sprite_script::SpriteScriptor::new()),
+            profile_manager: std::sync::Arc::new(crate::profiles::ProfileManager::new()),
+            bank_signature: 0,
+            scripts: LevelScriptAssets::default(),
+            entities: LevelEntityAssets::default(),
+            peasant_firstnames: Vec::new(),
+            peasant_surnames: Vec::new(),
+            fixed_vip_names: std::collections::BTreeMap::new(),
+            accessory_sprite_prototypes: std::collections::HashMap::new(),
+            character_sprite_prototypes: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Pick a deterministic firstname+surname for a civilian using
+    /// `seed` as the index. Returns `None` if the name pool hasn't
+    /// been populated.
+    pub fn random_peasant_name(&self, seed: usize) -> Option<String> {
+        if self.peasant_firstnames.is_empty() || self.peasant_surnames.is_empty() {
+            return None;
+        }
+        let f = &self.peasant_firstnames[seed % self.peasant_firstnames.len()];
+        let l = &self.peasant_surnames[(seed / self.peasant_firstnames.len().max(1) + seed * 7)
+            % self.peasant_surnames.len()];
+        Some(format!("{f} {l}"))
+    }
+}
 
 #[cfg(test)]
 mod speech_timing_metadata_tests {
@@ -751,72 +817,5 @@ mod speech_timing_metadata_tests {
             .expect("decode incomplete timing metadata");
         assert_eq!(decoded, incomplete);
         assert!(!decoded.is_complete());
-    }
-}
-
-impl LevelNavigationAssets {
-    pub(crate) fn hiking_waypoint_sector(
-        &self,
-        path_index: usize,
-        waypoint_index: usize,
-        public_sector: u16,
-    ) -> Option<crate::position_interface::SectorHandle> {
-        let Some(paths) = &self.hiking_waypoint_sectors else {
-            return crate::position_interface::SectorHandle::new(public_sector);
-        };
-        let exact = paths
-            .get(path_index)
-            .and_then(|path| path.get(waypoint_index))
-            .copied()
-            .unwrap_or_else(|| {
-                panic!(
-                    "required exact hiking waypoint identity is missing for path {path_index} waypoint {waypoint_index}"
-                )
-            });
-        assert_eq!(
-            exact.get(),
-            public_sector,
-            "hiking waypoint path {path_index} waypoint {waypoint_index} public/exact identity conflict"
-        );
-        Some(exact)
-    }
-}
-
-impl LevelAssets {
-    /// Mutable access to sprite_scriptor during initialization.
-    pub fn sprite_scriptor_mut(&mut self) -> &mut crate::sprite_script::SpriteScriptor {
-        std::sync::Arc::make_mut(&mut self.sprite_scriptor)
-    }
-
-    pub fn new() -> Self {
-        Self {
-            navigation: LevelNavigationAssets::default(),
-            environment: LevelEnvironmentAssets::default(),
-            audio: LevelAudioAssets::default(),
-            attachments: LevelRuntimeAttachments::default(),
-            sprite_scriptor: std::sync::Arc::new(crate::sprite_script::SpriteScriptor::new()),
-            profile_manager: std::sync::Arc::new(crate::profiles::ProfileManager::new()),
-            bank_signature: 0,
-            scripts: LevelScriptAssets::default(),
-            entities: LevelEntityAssets::default(),
-            peasant_firstnames: Vec::new(),
-            peasant_surnames: Vec::new(),
-            fixed_vip_names: std::collections::BTreeMap::new(),
-            accessory_sprite_prototypes: std::collections::HashMap::new(),
-            character_sprite_prototypes: std::collections::HashMap::new(),
-        }
-    }
-
-    /// Pick a deterministic firstname+surname for a civilian using
-    /// `seed` as the index. Returns `None` if the name pool hasn't
-    /// been populated.
-    pub fn random_peasant_name(&self, seed: usize) -> Option<String> {
-        if self.peasant_firstnames.is_empty() || self.peasant_surnames.is_empty() {
-            return None;
-        }
-        let f = &self.peasant_firstnames[seed % self.peasant_firstnames.len()];
-        let l = &self.peasant_surnames[(seed / self.peasant_firstnames.len().max(1) + seed * 7)
-            % self.peasant_surnames.len()];
-        Some(format!("{f} {l}"))
     }
 }

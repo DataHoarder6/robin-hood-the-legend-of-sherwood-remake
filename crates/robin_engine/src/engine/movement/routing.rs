@@ -54,7 +54,6 @@ impl EngineInner {
 
     /// Complete movement eligibility checks for callers that still queue requests.
     /// Live engine movement has already completed these checks before admission.
-
     /// Resolve the requested destination before proximity completion is considered.
     pub(in crate::engine) fn resolve_ai_accessible_destination(
         &mut self,
@@ -473,11 +472,11 @@ impl EngineInner {
                     tcx,
                     &mut Vec::new(),
                     crate::engine::movement::GateRouteRequest {
-                        entity_id: entity_id,
+                        entity_id,
                         source_sector: route_assert_sector,
-                        gate_path: gate_path,
-                        goal: goal,
-                        goal_layer: goal_layer,
+                        gate_path,
+                        goal,
+                        goal_layer,
                         base_action: action,
                         move_after_last_door: door_goal.is_none(),
                         speed_factor: speed,

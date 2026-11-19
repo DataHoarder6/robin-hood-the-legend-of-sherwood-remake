@@ -140,27 +140,29 @@ fn projectile_subtypes_match_frozen_json_including_partial_runtime_metadata() {
             let mut element = ElementData::default();
             element.kind = ElementKind::ObjectProjectile;
             element.active = active;
-            let mut projectile = ProjectileData::default();
-            projectile.start_of_trajectory_x = -0.0;
-            projectile.start_of_trajectory_y = f32::from_bits(0x7fc01234);
-            projectile.frame_count = 17;
-            projectile.arrow_bow_profile = Some(None);
-            projectile.last_orientation_azimuth = -37;
-            projectile.trajectory = vec![
-                TrajectoryPoint {
-                    position: crate::coordinates::WorldPoint3D::new(1.0, 2.0, 3.0),
-                    time: 7,
-                },
-                TrajectoryPoint {
-                    position: crate::coordinates::WorldPoint3D::new(-1.0, -2.0, -3.0),
-                    time: 9,
-                },
-            ];
-            projectile.trajectory_runtime = vec![TrajectoryPointRuntime {
-                legacy_material_uninitialized: false,
-                bounce: true,
-                material: u32::MAX,
-            }];
+            let projectile = ProjectileData {
+                start_of_trajectory_x: -0.0,
+                start_of_trajectory_y: f32::from_bits(0x7fc01234),
+                frame_count: 17,
+                arrow_bow_profile: Some(None),
+                last_orientation_azimuth: -37,
+                trajectory: vec![
+                    TrajectoryPoint {
+                        position: crate::coordinates::WorldPoint3D::new(1.0, 2.0, 3.0),
+                        time: 7,
+                    },
+                    TrajectoryPoint {
+                        position: crate::coordinates::WorldPoint3D::new(-1.0, -2.0, -3.0),
+                        time: 9,
+                    },
+                ],
+                trajectory_runtime: vec![TrajectoryPointRuntime {
+                    legacy_material_uninitialized: false,
+                    bounce: true,
+                    material: u32::MAX,
+                }],
+                ..Default::default()
+            };
             let mut inner = EngineInner::new();
             let id = inner.add_test_entity(Entity::Projectile(ElementProjectile {
                 element,

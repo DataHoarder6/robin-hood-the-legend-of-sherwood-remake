@@ -21,19 +21,6 @@ fn vector_angle(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     }
 }
 
-#[cfg(test)]
-mod angle_tests {
-    use super::vector_angle;
-
-    #[test]
-    fn coincident_friend_has_opposite_angle_to_forward_target() {
-        let friend = vector_angle(1.0, 0.0, 0.0, 0.0);
-        let target = vector_angle(1.0, 0.0, 100.0, -3.0);
-        assert_eq!(friend, std::f32::consts::PI);
-        assert!((target - friend).abs() > std::f32::consts::FRAC_PI_2);
-    }
-}
-
 impl EngineInner {
     pub(in crate::engine) fn propose_live_shot_target(
         &mut self,
@@ -42,8 +29,7 @@ impl EngineInner {
     ) -> Option<AiEntityHandle> {
         let position = self.live_ai_position(owner);
         let entity = self.expect_entity(owner, "shot selection owner");
-        let nose =
-            crate::shadow_polygon::sector_to_direction(entity.element_data().direction() as i16);
+        let nose = crate::shadow_polygon::sector_to_direction(entity.element_data().direction());
         let forest = self.world.weather.is_forest_level
             && self.is_player_aligned_camp(entity.camp())
             && !entity.soldier_data().is_some_and(|soldier| soldier.rider);
@@ -243,5 +229,18 @@ impl AiOwnerCtx<'_> {
             );
         }
         ControlFlow::Break(true)
+    }
+}
+
+#[cfg(test)]
+mod angle_tests {
+    use super::vector_angle;
+
+    #[test]
+    fn coincident_friend_has_opposite_angle_to_forward_target() {
+        let friend = vector_angle(1.0, 0.0, 0.0, 0.0);
+        let target = vector_angle(1.0, 0.0, 100.0, -3.0);
+        assert_eq!(friend, std::f32::consts::PI);
+        assert!((target - friend).abs() > std::f32::consts::FRAC_PI_2);
     }
 }

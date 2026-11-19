@@ -7,244 +7,6 @@
 use super::*;
 use crate::engine::TickCtx;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ai::{AiState, EmoticonType, Substate};
-    use crate::element::{ActionState, EyeStatus, Posture};
-    use crate::order::OrderType;
-
-    #[test]
-    fn soldier_alert_counts_follow_brain_publication_and_survive_removal_and_restore() {
-        use crate::ai::AlertLevel;
-        let mut engine = EngineInner::new();
-        let mut owners = Vec::new();
-        for (camp, level) in [
-            (crate::element::Camp::Lacklandists, AlertLevel::Green),
-            (crate::element::Camp::Royalists, AlertLevel::Yellow),
-            (crate::element::Camp::Custom(2), AlertLevel::Red),
-        ] {
-            let mut entity = crate::engine::test_support::actors::make_test_ai_soldier(camp);
-            entity
-                .ai_controller_mut()
-                .unwrap()
-                .current_music_alert_status = level;
-            owners.push(engine.add_test_entity(entity));
-        }
-        assert_eq!(engine.ai.global.green_alert_soldiers, 1);
-        assert_eq!(engine.ai.global.yellow_alert_soldiers, 1);
-        assert_eq!(engine.ai.global.red_alert_soldiers, 1);
-        engine.remove_entity(owners[0]);
-        assert_eq!(engine.ai.global.green_alert_soldiers, 1);
-        let json = serde_json::to_string(&engine).unwrap();
-        let restored: EngineInner = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.ai.global.green_alert_soldiers, 1);
-        assert_eq!(restored.ai.global.yellow_alert_soldiers, 1);
-        assert_eq!(restored.ai.global.red_alert_soldiers, 1);
-        assert_eq!(
-            robin_util::state_hash::compute(&engine.ai.global),
-            robin_util::state_hash::compute(&restored.ai.global)
-        );
-    }
-
-    fn fixture(action: OrderType, indoors: bool) -> (EngineInner, LevelAssets, EntityId) {
-        let mut engine = EngineInner::new();
-        engine.world.fast_grid_mut().size_map(128, 128);
-        engine.world.fast_grid_mut().allocate_layers(1);
-        let mut sector = crate::engine::test_support::square_sector(
-            1,
-            0,
-            MapPoint::new(0.0, 0.0),
-            MapPoint::new(2000.0, 2000.0),
-        );
-        if indoors {
-            sector.sector_type |= crate::sector::SectorType::BUILDING;
-        }
-        let index = engine.world.fast_grid_mut().add_sector(sector, 0);
-        let sector = crate::position_interface::SectorHandle::new(1)
-            .unwrap()
-            .with_arena_index(crate::fast_find_grid::SectorIndex::new(index).unwrap());
-        let mut entity =
-            crate::engine::test_support::actors::make_test_ai_soldier(Camp::Lacklandists);
-        entity
-            .element_data_mut()
-            .set_position_map(MapPoint::new(100.0, 100.0));
-        entity
-            .element_data_mut()
-            .set_position(crate::coordinates::WorldPoint3D::new(100.0, 100.0, 0.0));
-        entity.element_data_mut().set_sector(Some(sector));
-        entity.npc_data_mut().unwrap().life_points = 100;
-        let owner = engine.add_test_entity(entity);
-        let ai = engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .ai_controller_mut()
-            .unwrap();
-        ai.owner_entity_id = Some(owner);
-        ai.me = owner.index();
-        ai.initial_action = action as u32;
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        (engine, assets, owner)
-    }
-
-    #[test]
-    fn ai_startup_scales_script_modified_health_and_honors_trainer_invulnerability() {
-        for invulnerable in [false, true] {
-            let (mut engine, assets, owner) = fixture(OrderType::WaitingUpright, false);
-            engine.control.sim_config.difficulty = crate::player_profile::DifficultyLevel::Hard;
-            let Entity::Soldier(soldier) = engine.entities_mut().get_mut(owner).unwrap() else {
-                panic!("soldier fixture");
-            };
-            soldier.npc.life_points = 80;
-            soldier.soldier.cached_max_life_points = 120;
-            soldier.human.invulnerable = invulnerable;
-            engine.init_one_ai(
-                TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                owner,
-                &Default::default(),
-                0,
-                &[owner],
-                &[],
-            );
-            let soldier = engine.entities().get(owner).unwrap();
-            assert_eq!(
-                soldier.human_life_points(),
-                if invulnerable { 100 } else { 120 }
-            );
-            assert_eq!(soldier.soldier_data().unwrap().cached_max_life_points, 180);
-            assert_eq!(soldier.enemy_ai().unwrap().initial_life_points, 80);
-        }
-    }
-
-    #[test]
-    fn authored_waiting_enters_post_and_clears_previous_pose_preferences() {
-        for action in [
-            OrderType::WaitingUpright,
-            OrderType::WaitingUprightBored,
-            OrderType::WaitingUprightBoredRandom,
-        ] {
-            let (mut engine, assets, owner) = fixture(action, false);
-            let ai = engine
-                .world
-                .entities
-                .get_mut(owner)
-                .unwrap()
-                .ai_controller_mut()
-                .unwrap();
-            ai.likes_to_sit_around = true;
-            ai.special_action = true;
-            ai.is_stay_at_home = true;
-            assert!(engine.initialize_ai_state(
-                TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                owner
-            ));
-            let ai = engine
-                .world
-                .entities
-                .get(owner)
-                .unwrap()
-                .ai_controller()
-                .unwrap();
-            assert_eq!(ai.current_state, AiState::Default);
-            assert_eq!(ai.current_substate, Substate::DefaultOnPost);
-            assert!(ai.timer_is_running);
-            assert!(!ai.likes_to_sit_around && !ai.special_action && !ai.is_stay_at_home);
-        }
-    }
-
-    #[test]
-    fn authored_sleep_and_leisure_apply_live_actor_pose() {
-        for (action, posture, action_state) in [
-            (
-                OrderType::SleepingUpright,
-                Posture::Upright,
-                ActionState::Sleeping,
-            ),
-            (OrderType::Sitting, Posture::Sitting, ActionState::Waiting),
-            (OrderType::Special, Posture::Leisure, ActionState::Waiting),
-        ] {
-            let (mut engine, assets, owner) = fixture(action, false);
-            assert!(!engine.initialize_ai_state(
-                TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                owner
-            ));
-            let entity = engine.world.entities.get(owner).unwrap();
-            let ai = entity.ai_controller().unwrap();
-            assert_eq!(entity.posture(), posture);
-            assert_eq!(entity.actor_data().unwrap().action_state, action_state);
-            assert_eq!(ai.likes_to_sit_around, action == OrderType::Sitting);
-            assert_eq!(ai.special_action, action == OrderType::Special);
-            if action == OrderType::SleepingUpright {
-                assert_eq!(ai.current_substate, Substate::SleepingNapping);
-                assert_eq!(ai.current_emoticon_type, EmoticonType::Zzz);
-                assert_eq!(
-                    entity.ai_actor_data().unwrap().eye_status,
-                    EyeStatus::Closed
-                );
-            } else {
-                assert_eq!(ai.current_substate, Substate::DefaultOnPost);
-            }
-        }
-    }
-
-    #[test]
-    fn authored_dead_and_unconscious_poses_commit_human_state() {
-        for (action, posture, substate) in [
-            (
-                OrderType::BeingDead,
-                Posture::Dead,
-                Substate::SleepingForever,
-            ),
-            (
-                OrderType::BeingDeadFallenBack,
-                Posture::DeadBack,
-                Substate::SleepingForever,
-            ),
-            (
-                OrderType::BeingUnconscious,
-                Posture::Lying,
-                Substate::SleepingUnconscious,
-            ),
-        ] {
-            let (mut engine, assets, owner) = fixture(action, false);
-            assert!(!engine.initialize_ai_state(
-                TickCtx::new(&crate::sim_rng::test_context(), &assets),
-                owner
-            ));
-            let entity = engine.world.entities.get(owner).unwrap();
-            assert_eq!(entity.posture(), posture);
-            assert_eq!(entity.ai_controller().unwrap().current_substate, substate);
-            let human = entity.human_data().unwrap();
-            if action == OrderType::BeingUnconscious {
-                assert!(human.unconscious);
-                assert_eq!(human.concussion_of_the_brain, crate::combat::CONCUSSION_MAX);
-                assert_eq!(entity.human_life_points(), 100);
-            } else {
-                assert_eq!(entity.human_life_points(), 0);
-                assert!(human.killed_by_accident);
-            }
-        }
-    }
-
-    #[test]
-    fn building_membership_overrides_authored_initial_action() {
-        let (mut engine, assets, owner) = fixture(OrderType::BeingDead, true);
-        assert!(!engine.initialize_ai_state(
-            TickCtx::new(&crate::sim_rng::test_context(), &assets),
-            owner
-        ));
-        let entity = engine.world.entities.get(owner).unwrap();
-        let ai = entity.ai_controller().unwrap();
-        assert!(ai.is_stay_at_home);
-        assert_eq!(ai.current_substate, Substate::DefaultHomeSweetHome);
-        assert_eq!(entity.human_life_points(), 100);
-        assert_eq!(entity.posture(), Posture::Upright);
-    }
-}
-
 impl EngineInner {
     // ─── AI initialization ──────────────────────────────────────
 
@@ -1087,5 +849,243 @@ impl EngineInner {
             rally_points = self.ai.global.door_rally_points.len(),
             "Initialized AI building data"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::{AiState, EmoticonType, Substate};
+    use crate::element::{ActionState, EyeStatus, Posture};
+    use crate::order::OrderType;
+
+    #[test]
+    fn soldier_alert_counts_follow_brain_publication_and_survive_removal_and_restore() {
+        use crate::ai::AlertLevel;
+        let mut engine = EngineInner::new();
+        let mut owners = Vec::new();
+        for (camp, level) in [
+            (crate::element::Camp::Lacklandists, AlertLevel::Green),
+            (crate::element::Camp::Royalists, AlertLevel::Yellow),
+            (crate::element::Camp::Custom(2), AlertLevel::Red),
+        ] {
+            let mut entity = crate::engine::test_support::actors::make_test_ai_soldier(camp);
+            entity
+                .ai_controller_mut()
+                .unwrap()
+                .current_music_alert_status = level;
+            owners.push(engine.add_test_entity(entity));
+        }
+        assert_eq!(engine.ai.global.green_alert_soldiers, 1);
+        assert_eq!(engine.ai.global.yellow_alert_soldiers, 1);
+        assert_eq!(engine.ai.global.red_alert_soldiers, 1);
+        engine.remove_entity(owners[0]);
+        assert_eq!(engine.ai.global.green_alert_soldiers, 1);
+        let json = serde_json::to_string(&engine).unwrap();
+        let restored: EngineInner = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.ai.global.green_alert_soldiers, 1);
+        assert_eq!(restored.ai.global.yellow_alert_soldiers, 1);
+        assert_eq!(restored.ai.global.red_alert_soldiers, 1);
+        assert_eq!(
+            robin_util::state_hash::compute(&engine.ai.global),
+            robin_util::state_hash::compute(&restored.ai.global)
+        );
+    }
+
+    fn fixture(action: OrderType, indoors: bool) -> (EngineInner, LevelAssets, EntityId) {
+        let mut engine = EngineInner::new();
+        engine.world.fast_grid_mut().size_map(128, 128);
+        engine.world.fast_grid_mut().allocate_layers(1);
+        let mut sector = crate::engine::test_support::square_sector(
+            1,
+            0,
+            MapPoint::new(0.0, 0.0),
+            MapPoint::new(2000.0, 2000.0),
+        );
+        if indoors {
+            sector.sector_type |= crate::sector::SectorType::BUILDING;
+        }
+        let index = engine.world.fast_grid_mut().add_sector(sector, 0);
+        let sector = crate::position_interface::SectorHandle::new(1)
+            .unwrap()
+            .with_arena_index(crate::fast_find_grid::SectorIndex::new(index).unwrap());
+        let mut entity =
+            crate::engine::test_support::actors::make_test_ai_soldier(Camp::Lacklandists);
+        entity
+            .element_data_mut()
+            .set_position_map(MapPoint::new(100.0, 100.0));
+        entity
+            .element_data_mut()
+            .set_position(crate::coordinates::WorldPoint3D::new(100.0, 100.0, 0.0));
+        entity.element_data_mut().set_sector(Some(sector));
+        entity.npc_data_mut().unwrap().life_points = 100;
+        let owner = engine.add_test_entity(entity);
+        let ai = engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .ai_controller_mut()
+            .unwrap();
+        ai.owner_entity_id = Some(owner);
+        ai.me = owner.index();
+        ai.initial_action = action as u32;
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        (engine, assets, owner)
+    }
+
+    #[test]
+    fn ai_startup_scales_script_modified_health_and_honors_trainer_invulnerability() {
+        for invulnerable in [false, true] {
+            let (mut engine, assets, owner) = fixture(OrderType::WaitingUpright, false);
+            engine.control.sim_config.difficulty = crate::player_profile::DifficultyLevel::Hard;
+            let Entity::Soldier(soldier) = engine.entities_mut().get_mut(owner).unwrap() else {
+                panic!("soldier fixture");
+            };
+            soldier.npc.life_points = 80;
+            soldier.soldier.cached_max_life_points = 120;
+            soldier.human.invulnerable = invulnerable;
+            engine.init_one_ai(
+                TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                owner,
+                &Default::default(),
+                0,
+                &[owner],
+                &[],
+            );
+            let soldier = engine.entities().get(owner).unwrap();
+            assert_eq!(
+                soldier.human_life_points(),
+                if invulnerable { 100 } else { 120 }
+            );
+            assert_eq!(soldier.soldier_data().unwrap().cached_max_life_points, 180);
+            assert_eq!(soldier.enemy_ai().unwrap().initial_life_points, 80);
+        }
+    }
+
+    #[test]
+    fn authored_waiting_enters_post_and_clears_previous_pose_preferences() {
+        for action in [
+            OrderType::WaitingUpright,
+            OrderType::WaitingUprightBored,
+            OrderType::WaitingUprightBoredRandom,
+        ] {
+            let (mut engine, assets, owner) = fixture(action, false);
+            let ai = engine
+                .world
+                .entities
+                .get_mut(owner)
+                .unwrap()
+                .ai_controller_mut()
+                .unwrap();
+            ai.likes_to_sit_around = true;
+            ai.special_action = true;
+            ai.is_stay_at_home = true;
+            assert!(engine.initialize_ai_state(
+                TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                owner
+            ));
+            let ai = engine
+                .world
+                .entities
+                .get(owner)
+                .unwrap()
+                .ai_controller()
+                .unwrap();
+            assert_eq!(ai.current_state, AiState::Default);
+            assert_eq!(ai.current_substate, Substate::DefaultOnPost);
+            assert!(ai.timer_is_running);
+            assert!(!ai.likes_to_sit_around && !ai.special_action && !ai.is_stay_at_home);
+        }
+    }
+
+    #[test]
+    fn authored_sleep_and_leisure_apply_live_actor_pose() {
+        for (action, posture, action_state) in [
+            (
+                OrderType::SleepingUpright,
+                Posture::Upright,
+                ActionState::Sleeping,
+            ),
+            (OrderType::Sitting, Posture::Sitting, ActionState::Waiting),
+            (OrderType::Special, Posture::Leisure, ActionState::Waiting),
+        ] {
+            let (mut engine, assets, owner) = fixture(action, false);
+            assert!(!engine.initialize_ai_state(
+                TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                owner
+            ));
+            let entity = engine.world.entities.get(owner).unwrap();
+            let ai = entity.ai_controller().unwrap();
+            assert_eq!(entity.posture(), posture);
+            assert_eq!(entity.actor_data().unwrap().action_state, action_state);
+            assert_eq!(ai.likes_to_sit_around, action == OrderType::Sitting);
+            assert_eq!(ai.special_action, action == OrderType::Special);
+            if action == OrderType::SleepingUpright {
+                assert_eq!(ai.current_substate, Substate::SleepingNapping);
+                assert_eq!(ai.current_emoticon_type, EmoticonType::Zzz);
+                assert_eq!(
+                    entity.ai_actor_data().unwrap().eye_status,
+                    EyeStatus::Closed
+                );
+            } else {
+                assert_eq!(ai.current_substate, Substate::DefaultOnPost);
+            }
+        }
+    }
+
+    #[test]
+    fn authored_dead_and_unconscious_poses_commit_human_state() {
+        for (action, posture, substate) in [
+            (
+                OrderType::BeingDead,
+                Posture::Dead,
+                Substate::SleepingForever,
+            ),
+            (
+                OrderType::BeingDeadFallenBack,
+                Posture::DeadBack,
+                Substate::SleepingForever,
+            ),
+            (
+                OrderType::BeingUnconscious,
+                Posture::Lying,
+                Substate::SleepingUnconscious,
+            ),
+        ] {
+            let (mut engine, assets, owner) = fixture(action, false);
+            assert!(!engine.initialize_ai_state(
+                TickCtx::new(&crate::sim_rng::test_context(), &assets),
+                owner
+            ));
+            let entity = engine.world.entities.get(owner).unwrap();
+            assert_eq!(entity.posture(), posture);
+            assert_eq!(entity.ai_controller().unwrap().current_substate, substate);
+            let human = entity.human_data().unwrap();
+            if action == OrderType::BeingUnconscious {
+                assert!(human.unconscious);
+                assert_eq!(human.concussion_of_the_brain, crate::combat::CONCUSSION_MAX);
+                assert_eq!(entity.human_life_points(), 100);
+            } else {
+                assert_eq!(entity.human_life_points(), 0);
+                assert!(human.killed_by_accident);
+            }
+        }
+    }
+
+    #[test]
+    fn building_membership_overrides_authored_initial_action() {
+        let (mut engine, assets, owner) = fixture(OrderType::BeingDead, true);
+        assert!(!engine.initialize_ai_state(
+            TickCtx::new(&crate::sim_rng::test_context(), &assets),
+            owner
+        ));
+        let entity = engine.world.entities.get(owner).unwrap();
+        let ai = entity.ai_controller().unwrap();
+        assert!(ai.is_stay_at_home);
+        assert_eq!(ai.current_substate, Substate::DefaultHomeSweetHome);
+        assert_eq!(entity.human_life_points(), 100);
+        assert_eq!(entity.posture(), Posture::Upright);
     }
 }

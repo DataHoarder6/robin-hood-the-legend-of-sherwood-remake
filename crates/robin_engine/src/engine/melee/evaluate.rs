@@ -1698,12 +1698,7 @@ impl EngineInner {
         );
         self.apply_strike_selection_sweep_rebase(tcx.assets, pc_id, sweep_rebase);
         if let Some(debug) = debug {
-            self.trace_reactive_sword_proposal_boundary(
-                debug,
-                "pc_evaluate",
-                rng_before,
-                &proposed,
-            );
+            self.trace_reactive_sword_proposal_boundary(debug, "pc_evaluate", rng_before, proposed);
         }
 
         // Strike selection mutates the live boredom counters while
@@ -2252,7 +2247,7 @@ impl EngineInner {
                     debug,
                     "pc_reactive_warning",
                     rng_before,
-                    &proposed,
+                    proposed,
                 );
             }
 
@@ -2428,9 +2423,7 @@ impl EngineInner {
             let Some(Entity::Soldier(s)) = self.world.entities.get(victim_id) else {
                 return None;
             };
-            let Some(ai) = s.npc.ai_brain.enemy() else {
-                return None;
-            };
+            let ai = s.npc.ai_brain.enemy()?;
             Some(command_strike) == ai.known_enemy_strike_1
                 || Some(command_strike) == ai.known_enemy_strike_2
                 || Some(command_strike) == ai.known_enemy_strike_3
@@ -2748,7 +2741,7 @@ impl EngineInner {
                 debug,
                 "reactive_warning",
                 rng_before,
-                &proposed,
+                proposed,
             );
         }
 
@@ -3139,6 +3132,20 @@ impl EngineInner {
     }
 }
 
+fn parade_timer_debug_enabled() -> bool {
+    use crate::engine::diagnostics::ParityGate;
+    static GATE: std::sync::OnceLock<ParityGate<0>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| ParityGate::from_env("PARITY_DEBUG_PARADE_TIMER", []))
+        .enabled()
+}
+
+fn bad_experience_debug_enabled() -> bool {
+    use crate::engine::diagnostics::ParityGate;
+    static GATE: std::sync::OnceLock<ParityGate<0>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| ParityGate::from_env("PARITY_DEBUG_BAD_EXPERIENCE", []))
+        .enabled()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -3352,18 +3359,4 @@ mod tests {
             "StrikingDownSword is not an Original A-I strike and keeps the unlimited control deadline"
         );
     }
-}
-
-fn parade_timer_debug_enabled() -> bool {
-    use crate::engine::diagnostics::ParityGate;
-    static GATE: std::sync::OnceLock<ParityGate<0>> = std::sync::OnceLock::new();
-    GATE.get_or_init(|| ParityGate::from_env("PARITY_DEBUG_PARADE_TIMER", []))
-        .enabled()
-}
-
-fn bad_experience_debug_enabled() -> bool {
-    use crate::engine::diagnostics::ParityGate;
-    static GATE: std::sync::OnceLock<ParityGate<0>> = std::sync::OnceLock::new();
-    GATE.get_or_init(|| ParityGate::from_env("PARITY_DEBUG_BAD_EXPERIENCE", []))
-        .enabled()
 }

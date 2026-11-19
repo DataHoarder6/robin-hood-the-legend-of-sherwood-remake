@@ -909,7 +909,7 @@ impl EngineInner {
 
     fn console_honolulu(
         &mut self,
-        mut dev: Option<&mut DevState>,
+        dev: Option<&mut DevState>,
         selected_view_element: &mut Option<EntityId>,
     ) -> ConsoleResponse {
         // Body only runs when there is a selected view element
@@ -950,7 +950,7 @@ impl EngineInner {
                     base.non_script_lock(AiLockFlags::FREEZE);
                 }
             }
-            if let Some(host) = dev.as_deref_mut() {
+            if let Some(host) = dev {
                 host.last_actor_in_honolulu = Some(id);
             }
             *selected_view_element = None;

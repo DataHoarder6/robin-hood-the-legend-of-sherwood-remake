@@ -197,9 +197,11 @@ mod tests {
         let Entity::Pc(pc) = &mut hero else {
             unreachable!()
         };
-        let mut ai = crate::ai_enemy::EnemyAi::default();
-        ai.is_vip = true;
-        ai.is_archer_unit = true;
+        let ai = crate::ai_enemy::EnemyAi {
+            is_vip: true,
+            is_archer_unit: true,
+            ..Default::default()
+        };
         pc.pc.ai = Some(Box::new(crate::element::AiActorData {
             ai_brain: crate::element::AiBrain::Enemy(Box::new(ai)),
             ..Default::default()

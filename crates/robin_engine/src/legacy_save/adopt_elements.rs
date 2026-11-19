@@ -1048,7 +1048,7 @@ fn convert_local_ai(
         view_alert_status,
     )?;
     match (&saved.tail, &runtime.ai_brain) {
-        (LegacyLocalAiTail::Friendly(tail), AiBrain::Friendly(runtime_ai)) => {
+        (LegacyLocalAiTail::Friendly(tail), AiBrain::Friendly(_)) => {
             Ok(AiBrain::Friendly(Box::new(FriendlyAi {
                 base: common,
                 fleeing_seen_enemy_counter: tail.fleeing_seen_enemy_counter,
@@ -1061,9 +1061,6 @@ fn convert_local_ai(
                     "local_ai.friendly.last_talk_partner",
                 )?,
                 can_go_away: tail.can_go_away,
-                // Preserve mission-initialized civilian AI state outside this
-                // save section's ownership.
-                ..FriendlyAi::clone(runtime_ai)
             })))
         }
         (LegacyLocalAiTail::Enemy(tail), AiBrain::Enemy(runtime_ai)) => {

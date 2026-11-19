@@ -1388,7 +1388,7 @@ impl EngineInner {
                             speed_factor: 1.0,
                             initial_flags: MoveFlags::empty(),
                             prefix_elements: vec![wait],
-                            tail_elements: tail_elements,
+                            tail_elements,
                             append_arrival_speech: false,
                             append_recovery: false,
                         },

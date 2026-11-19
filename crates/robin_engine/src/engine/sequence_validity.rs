@@ -1379,9 +1379,7 @@ impl EngineInner {
         tcx: TickCtx<'_>,
         entity_id: EntityId,
     ) -> Option<crate::sprite::MotionState> {
-        let Some(entity) = self.world.entities.get(entity_id) else {
-            return None;
-        };
+        let entity = self.world.entities.get(entity_id)?;
         if !entity.is_human() {
             return None;
         }
@@ -1410,14 +1408,9 @@ impl EngineInner {
             .sequence_manager
             .current_order_for_actor(&self.world.entities, entity_id)
             .map(|(s, i, o)| (s, i, o.order_type));
-        let Some((seq_id, elem_idx, order_type)) = snapshot else {
-            return None;
-        };
+        let (seq_id, elem_idx, order_type) = snapshot?;
 
-        let Some((check_position, terminal)) = human_init_validity_arm(order_type, entity.is_pc())
-        else {
-            return None;
-        };
+        let (check_position, terminal) = human_init_validity_arm(order_type, entity.is_pc())?;
 
         // The original game's guard compares initialization with new-order state, which
         // The actor update establishes this for the exact execution call before
@@ -1431,9 +1424,7 @@ impl EngineInner {
 
         // Look up the element so we can run the per-command
         // validity rule.
-        let Some(elem) = self.orders.sequence_manager.get_element(seq_id, elem_idx) else {
-            return None;
-        };
+        let elem = self.orders.sequence_manager.get_element(seq_id, elem_idx)?;
         if self.check_sequence_element_validity(tcx.assets, entity_id, elem, check_position) {
             return None;
         }
@@ -2569,7 +2560,7 @@ mod tests {
                 id
             };
         let result = begin_bow_shot(
-            &mut engine.world.entities,
+            &engine.world.entities,
             &mut engine.orders.sequence_manager,
             shooter,
             target,

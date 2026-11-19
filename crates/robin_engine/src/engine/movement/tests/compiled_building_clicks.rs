@@ -189,8 +189,8 @@ fn building_click_round_trip(
             let element = engine.ent(owner).element_data();
             let sector = element.sector().ok_or("actor lost its sector")?;
             let passing = crate::engine::ai::selected_actor_is_passing_door(
-                &engine.entities(),
-                &engine.seq(),
+                engine.entities(),
+                engine.seq(),
                 owner,
             );
             let inside = sector.arena_index() == door.sector_in_index;

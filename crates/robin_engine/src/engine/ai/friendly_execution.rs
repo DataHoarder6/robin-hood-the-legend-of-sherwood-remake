@@ -76,11 +76,11 @@ impl EngineInner {
                         best_distance = distance;
                     }
                 }
-                AiState::Attacking | AiState::Menacing | AiState::Fleeing => {
-                    if self.patrol_member_visible(assets, owner, target) {
-                        self.clear_civilian_alert_friends(owner);
-                        return None;
-                    }
+                AiState::Attacking | AiState::Menacing | AiState::Fleeing
+                    if self.patrol_member_visible(assets, owner, target) =>
+                {
+                    self.clear_civilian_alert_friends(owner);
+                    return None;
                 }
                 _ => {}
             }
@@ -194,10 +194,9 @@ impl AiOwnerCtx<'_> {
             if matches!(
                 state,
                 AiState::Sleeping | AiState::Default | AiState::Wondering | AiState::Seeking
-            ) {
-                if let StimulusInfo::Noise(noise) = stimulus.info {
-                    self.civilian_hear(&noise);
-                }
+            ) && let StimulusInfo::Noise(noise) = stimulus.info
+            {
+                self.civilian_hear(&noise);
             }
             return Some(false);
         }
@@ -536,7 +535,7 @@ impl AiOwnerCtx<'_> {
             .engine
             .expect_entity(target, "civilian approach forecast");
         let passing_door =
-            selected_pass_door_movement(&self.engine.entities(), &self.engine.seq(), target)
+            selected_pass_door_movement(self.engine.entities(), self.engine.seq(), target)
                 .is_some();
         let input = extract_exact_forecast_input(self.engine, entity, passing_door)
             .expect("soldier forecast requires an actor");
@@ -1065,9 +1064,7 @@ mod tests {
             reporting_pair(Substate::SeekingCivilianGiveAlertingReportToSoldierPoint);
         let direction = crate::position_interface::vector_to_sector_0_to_15_iso(0.0, 0.0);
         let entity = engine.world.entities.get_mut(owner).unwrap();
-        entity
-            .element_data_mut()
-            .set_direction_instantly(direction as i16);
+        entity.element_data_mut().set_direction_instantly(direction);
         entity.actor_data_mut().unwrap().action_state = crate::element::ActionState::Waiting;
         engine
             .ai_ctx(

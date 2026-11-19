@@ -672,7 +672,7 @@ impl AiOwnerCtx<'_> {
             self.engine,
             self.engine
                 .expect_entity(target, "officer destination forecast"),
-            selected_actor_is_passing_door(&self.engine.entities(), &self.engine.seq(), target),
+            selected_actor_is_passing_door(self.engine.entities(), self.engine.seq(), target),
         )
         .expect("officer forecast requires an actor");
         crate::ai::prepare_forecast_destination_for_ia(
@@ -777,14 +777,14 @@ impl AiOwnerCtx<'_> {
                         }
                     }
                     ProfileRank::Soldier
-                        if officer_report_in_progress(brain.base.current_substate) =>
+                        if officer_report_in_progress(brain.base.current_substate)
+                            && self.engine.patrol_member_visible(
+                                self.tcx.assets,
+                                self.owner,
+                                id,
+                            ) =>
                     {
-                        if self
-                            .engine
-                            .patrol_member_visible(self.tcx.assets, self.owner, id)
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                     _ => {}
                 }
@@ -1017,22 +1017,21 @@ impl AiOwnerCtx<'_> {
                 (initial_position.level, initial_position.sector),
                 |(_, _, layer, sector)| (layer, sector),
             );
-            if let Some((out, _, _, _)) = door {
-                if attempt > 0
-                    && !self.engine.world.fast_grid.is_straight_movement_authorized(
-                        out,
-                        try_point,
-                        layer,
-                        self.engine
-                            .expect_entity(self.owner, "officer move box")
-                            .element_data()
-                            .sprite
-                            .position_iface
-                            .get_move_box(),
-                    )
-                {
-                    break;
-                }
+            if let Some((out, _, _, _)) = door
+                && attempt > 0
+                && !self.engine.world.fast_grid.is_straight_movement_authorized(
+                    out,
+                    try_point,
+                    layer,
+                    self.engine
+                        .expect_entity(self.owner, "officer move box")
+                        .element_data()
+                        .sprite
+                        .position_iface
+                        .get_move_box(),
+                )
+            {
+                break;
             }
             for offset in 0..16 {
                 direction = direction_seed + offset;

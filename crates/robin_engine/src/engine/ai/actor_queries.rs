@@ -18,6 +18,61 @@ pub(super) fn is_live_beggar(entity: &Entity) -> bool {
     }
 }
 
+impl EngineInner {
+    pub(super) fn soldier_profile_facts<'a>(
+        &self,
+        assets: &'a LevelAssets,
+        s: &crate::element::ActorSoldier,
+        id: EntityId,
+    ) -> (
+        &'a crate::profiles::SoldierProfile,
+        u16,
+        Option<&'a crate::profiles::BowProfile>,
+    ) {
+        let soldier_profile = assets
+            .profile_manager
+            .get_soldier(s.soldier.soldier_profile_index)
+            .unwrap_or_else(|| {
+                panic!(
+                    "soldier {} requires missing soldier profile {}",
+                    id.index(),
+                    u32::from(s.soldier.soldier_profile_index)
+                )
+            });
+        let fighting_ability = {
+            let base = soldier_profile.fighting;
+            if self.is_hostile_to_player_camp(s.soldier.cached_camp) {
+                let diff = self.control.sim_config.difficulty;
+                diff.rules().enemy_fighting(base, 100)
+            } else {
+                base
+            }
+        };
+        // Enemy archer detection is exactly
+        // the actor having a bow. Weapon initialization creates the
+        // bow whenever the one-based shooting-weapon id is non-zero;
+        // the bow profile's ranges do not participate in identity.
+        let bow_profile = if soldier_profile.shooting_weapon_id == 0 {
+            None
+        } else {
+            Some(
+                assets
+                    .profile_manager
+                    .get_bow(soldier_profile.shooting_weapon_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "soldier {} requires missing bow profile {}",
+                            id.index(),
+                            soldier_profile.shooting_weapon_id
+                        )
+                    }),
+            )
+        };
+
+        (soldier_profile, fighting_ability, bow_profile)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_archer_from_bow;
@@ -96,60 +151,5 @@ mod tests {
         assert_eq!(bow.normal_shoot.range, 0);
         assert!(is_archer_from_bow(Some(&bow)));
         assert!(!is_archer_from_bow(None));
-    }
-}
-
-impl EngineInner {
-    pub(super) fn soldier_profile_facts<'a>(
-        &self,
-        assets: &'a LevelAssets,
-        s: &crate::element::ActorSoldier,
-        id: EntityId,
-    ) -> (
-        &'a crate::profiles::SoldierProfile,
-        u16,
-        Option<&'a crate::profiles::BowProfile>,
-    ) {
-        let soldier_profile = assets
-            .profile_manager
-            .get_soldier(s.soldier.soldier_profile_index)
-            .unwrap_or_else(|| {
-                panic!(
-                    "soldier {} requires missing soldier profile {}",
-                    id.index(),
-                    u32::from(s.soldier.soldier_profile_index)
-                )
-            });
-        let fighting_ability = {
-            let base = soldier_profile.fighting;
-            if self.is_hostile_to_player_camp(s.soldier.cached_camp) {
-                let diff = self.control.sim_config.difficulty;
-                diff.rules().enemy_fighting(base, 100)
-            } else {
-                base
-            }
-        };
-        // Enemy archer detection is exactly
-        // the actor having a bow. Weapon initialization creates the
-        // bow whenever the one-based shooting-weapon id is non-zero;
-        // the bow profile's ranges do not participate in identity.
-        let bow_profile = if soldier_profile.shooting_weapon_id == 0 {
-            None
-        } else {
-            Some(
-                assets
-                    .profile_manager
-                    .get_bow(soldier_profile.shooting_weapon_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "soldier {} requires missing bow profile {}",
-                            id.index(),
-                            soldier_profile.shooting_weapon_id
-                        )
-                    }),
-            )
-        };
-
-        (soldier_profile, fighting_ability, bow_profile)
     }
 }

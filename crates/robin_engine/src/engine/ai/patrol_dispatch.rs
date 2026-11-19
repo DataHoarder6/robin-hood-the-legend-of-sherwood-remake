@@ -87,21 +87,21 @@ impl AiOwnerCtx<'_> {
             AiState::Wondering => {}
             _ => return false,
         }
-        if let Some(chief) = ai.base.patrol_chief {
-            if matches!(
+        if let Some(chief) = ai.base.patrol_chief
+            && matches!(
                 self.engine
                     .world
                     .entities
                     .expect_entity(chief, format_args!("patrol chief")),
                 Entity::Soldier(_)
-            ) && self
+            )
+            && self
                 .engine
                 .patrol_member_visible(self.tcx.assets, self.owner, chief)
-            {
-                return self
-                    .engine
-                    .dispatch_live_stimulus_to_patrol(self.tcx, chief, stimulus);
-            }
+        {
+            return self
+                .engine
+                .dispatch_live_stimulus_to_patrol(self.tcx, chief, stimulus);
         }
 
         let ai = self

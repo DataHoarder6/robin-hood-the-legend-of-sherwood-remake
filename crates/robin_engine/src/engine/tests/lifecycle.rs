@@ -201,12 +201,10 @@ fn corpse_exit_initialization_fixture(
 /// to the carrier's own heading. The
 /// dropped body therefore ends the drop with a goal exactly four
 /// sectors ahead of its facing.
-
 /// Original-game action selection closes each selected PC's synchronous stop
 /// before the next engine update. If that Stop interrupts a mid-grab
 /// `TakeCorpse`, the body's Wait is therefore installed before its own actor
 /// slot and executes in that same frame.
-
 fn install_owner_selected_test_melee(
     engine: &mut EngineInner,
     attacker: EntityId,
@@ -668,7 +666,6 @@ mod projectiles;
 /// This will grow as more sim surface comes online — right now there are
 /// no entities, so it mostly exercises frame counters, script ticks,
 /// chorus timer, mission state, and the RNG/sound-queue plumbing.
-
 /// The original game loop calls mission post-initialization only after its
 /// first forced refresh and sound update. Keep the
 /// engine tick and that host-owned boundary observably separate: frame

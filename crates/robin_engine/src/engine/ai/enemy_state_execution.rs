@@ -16,16 +16,17 @@ impl EngineInner {
         ai.base
             .register_log_line(LogLineType::ChangeState, substate as u16);
         ai.base.timer_is_running = false;
-        if ai.base.current_state == AiState::Menacing && state != AiState::Menacing {
-            if let Some(pc) = ai.guarded_pc.take() {
-                let entity = self
-                    .entities_mut()
-                    .expect_entity_mut(EntityId::Pc(pc), format_args!("released guarded PC"));
-                let Entity::Pc(pc) = entity else {
-                    unreachable!("typed PC guard")
-                };
-                pc.pc.guard = None;
-            }
+        if ai.base.current_state == AiState::Menacing
+            && state != AiState::Menacing
+            && let Some(pc) = ai.guarded_pc.take()
+        {
+            let entity = self
+                .entities_mut()
+                .expect_entity_mut(EntityId::Pc(pc), format_args!("released guarded PC"));
+            let Entity::Pc(pc) = entity else {
+                unreachable!("typed PC guard")
+            };
+            pc.pc.guard = None;
         }
         let ai = self.seek_enemy_mut(owner);
         if state != AiState::Default

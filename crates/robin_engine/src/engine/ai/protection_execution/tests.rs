@@ -796,7 +796,7 @@ fn phalanx_walks_the_complete_live_chain_and_observes_relinks() {
 fn shield_sequence_keeps_stored_world_y_without_map_roundtrip() {
     let (mut engine, assets, ids) = fixture(&[(100.0, 100.0)]);
     let owner = ids[0];
-    let point = WorldPoint3D::new(100.0, 503.01535, 4.06752014);
+    let point = WorldPoint3D::new(100.0, 503.01535, 4.067_52);
     let element = engine
         .world
         .entities

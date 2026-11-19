@@ -2073,9 +2073,9 @@ impl EngineInner {
             "live AI position unavailable for {id:?}"
         );
         resolve_ai_position_with(
-            &self.entities(),
+            self.entities(),
             &self.script_domains.interactables.doors,
-            &self.seq(),
+            self.seq(),
             id,
             |position_id| {
                 let element = self
@@ -3166,7 +3166,7 @@ impl EngineInner {
                 .direction();
             let ai = self.ai(npc_id, "panic owner");
             if directed_panic_center_is_in_front(
-                direction as i16,
+                direction,
                 position.x,
                 position.y,
                 ai.panic_center_x,

@@ -840,9 +840,7 @@ impl TitbitManager {
                 } else {
                     // Advance sprite frame for star rotation.
                     let num_frames = mgr.num_frames_for_row(t.sprite_row);
-                    UpdateAction::Mutate(Mutation::Animate {
-                        num_frames: num_frames,
-                    })
+                    UpdateAction::Mutate(Mutation::Animate { num_frames })
                 }
             }
 
@@ -853,9 +851,7 @@ impl TitbitManager {
                     } else {
                         // Advance sprite frame for star rotation.
                         let num_frames = mgr.num_frames_for_row(t.sprite_row);
-                        UpdateAction::Mutate(Mutation::Animate {
-                            num_frames: num_frames,
-                        })
+                        UpdateAction::Mutate(Mutation::Animate { num_frames })
                     }
                 } else {
                     // Misused as "teleport stars" — count down phase.
@@ -899,7 +895,7 @@ impl TitbitManager {
                     let rise = 2.0 + (query.random_u32() % 4) as f32;
                     UpdateAction::Mutate(Mutation::Rise {
                         sprite_frame: new_frame,
-                        rise: rise,
+                        rise,
                     })
                 }
             }
@@ -963,9 +959,7 @@ impl TitbitManager {
                     UpdateAction::Mutate(Mutation::Animate { num_frames: 8 })
                 } else {
                     let num_frames = mgr.num_frames_for_row(t.sprite_row);
-                    UpdateAction::Mutate(Mutation::Animate {
-                        num_frames: num_frames,
-                    })
+                    UpdateAction::Mutate(Mutation::Animate { num_frames })
                 }
             }
 

@@ -2591,8 +2591,8 @@ impl EngineInner {
                         let MapPoint { x: ax, y: ay } = poly[i];
                         let MapPoint { x: bx, y: by } = poly[(i + 1) % n];
                         let MapPoint { x: cx, y: cy } = poly[(i + 2) % n];
-                        let v1 = (bx as f32 - ax as f32, by as f32 - ay as f32);
-                        let v2 = (cx as f32 - bx as f32, cy as f32 - by as f32);
+                        let v1 = (bx - ax, by - ay);
+                        let v2 = (cx - bx, cy - by);
                         let det = v1.0 * v2.1 - v1.1 * v2.0;
                         if det < 0.0 {
                             // Clockwise normal → (y, -x).
@@ -2606,7 +2606,7 @@ impl EngineInner {
                                 .level_mut()
                                 .level_repulsive_points
                                 .push(crate::fast_find_grid::LevelRepulsivePoint {
-                                    position: MapPoint::new(bx as f32, by as f32),
+                                    position: MapPoint::new(bx, by),
                                     layer: Some(
                                         crate::position_interface::Layer::new(layer_idx as u16)
                                             .expect(

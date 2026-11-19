@@ -51,7 +51,7 @@ impl NativeContext<'_, '_> {
             InitGlobal => {
                 let value = stack.pop_i32();
                 let id = stack.pop_i32();
-                initialize_script_global(&mut self.script_globals, id, value);
+                initialize_script_global(self.script_globals, id, value);
                 0
             }
             SetGlobal => {
@@ -123,7 +123,7 @@ impl NativeContext<'_, '_> {
                 diplomacy
                     .set_relationship_ids(first, second, relationship)
                     .unwrap_or_else(|error| panic!("SetDiplomacyRelationship: {error}"));
-                crate::diplomacy::reconcile_entities(&mut self.entities, diplomacy);
+                crate::diplomacy::reconcile_entities(self.entities, diplomacy);
                 0
             }
 

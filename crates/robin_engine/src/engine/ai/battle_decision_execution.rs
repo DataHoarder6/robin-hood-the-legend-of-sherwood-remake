@@ -13,82 +13,6 @@ use crate::ai_enemy::{
 use crate::engine::TickCtx;
 use std::ops::ControlFlow;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::ai::battle_decision_observation_tests::fixture;
-
-    #[test]
-    fn alert_and_tower_decisions_without_targets_settle_as_reserve() {
-        for decision in [
-            Decision::AlertSoldiers,
-            Decision::TowerGuardAlert,
-            Decision::TowerGuardObserve,
-        ] {
-            let (mut engine, assets, owner, _) = fixture(false);
-            engine
-                .world
-                .entities
-                .expect_enemy_ai_mut(owner, format_args!("empty battle"))
-                .list_them
-                .clear();
-            let result = engine
-                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                .execute_live_battle_decision(decision, Substate::AttackingReactiontime, 0, false);
-            assert_eq!(result, Some(Decision::Reserve));
-            let ai = engine
-                .world
-                .entities
-                .expect_enemy_ai(owner, format_args!("reserve fallback"));
-            assert_eq!(ai.base.primary_target, None);
-            assert!(!ai.base.friends_are_alerted);
-            assert_eq!(ai.base.current_substate, Substate::AttackingReserve);
-            assert_eq!(ai.base.when_does_timer_ring, 150);
-            assert_eq!(engine.ai_think_depth(), 1);
-        }
-    }
-
-    #[test]
-    fn forced_tower_decision_retains_force_and_reads_current_exact_target_position() {
-        let (mut engine, assets, owner, target) = fixture(false);
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("forced tower"));
-        ai.base.owner_entity_id = Some(owner);
-        ai.tower_guard = true;
-        ai.forced_next_battle_decision = Decision::TowerGuardAlert;
-        for (x, y) in [(650.0, 100.0), (610.0, 130.0)] {
-            engine
-                .world
-                .entities
-                .get_mut(target)
-                .unwrap()
-                .element_data_mut()
-                .set_position_map(MapPoint::new(x, y));
-            let expected = engine.live_ai_position(target);
-            engine
-                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-                .execute_battle_decisions();
-            let ai = engine
-                .world
-                .entities
-                .expect_enemy_ai(owner, format_args!("tower outcome"));
-            assert_eq!(ai.base.seek_position, expected);
-            assert_eq!(
-                ai.base.primary_target,
-                Some(AiEntityHandle::new(target.index()))
-            );
-            assert_eq!(ai.base.current_substate, Substate::AttackingTowerGuardAlert);
-            assert_eq!(ai.forced_next_battle_decision, Decision::TowerGuardAlert);
-            assert_eq!(
-                ai.base.ai_log.last().unwrap().info,
-                Decision::TowerGuardAlert as u16
-            );
-        }
-    }
-}
-
 impl EngineInner {
     pub(super) fn battle_primary(&self, owner: EntityId) -> Option<EntityId> {
         self.ai(owner, "battle primary")
@@ -405,8 +329,8 @@ impl AiOwnerCtx<'_> {
                     self.engine,
                     self.engine.expect_entity(target, "missed battle forecast"),
                     selected_actor_is_passing_door(
-                        &self.engine.entities(),
-                        &self.engine.seq(),
+                        self.engine.entities(),
+                        self.engine.seq(),
                         target,
                     ),
                 )
@@ -716,9 +640,9 @@ impl AiOwnerCtx<'_> {
                 .battle_primary(self.owner)
                 .expect("observe roof target");
             let wait = precompute_avenger_on_roof_wait_position(
-                &self.engine.entities(),
+                self.engine.entities(),
                 self.engine.script_domains.interactables.doors.as_slice(),
-                &self.engine.seq(),
+                self.engine.seq(),
                 self.owner,
                 target,
                 |element| super::ai_view_position_sector(self.engine, element),
@@ -743,5 +667,81 @@ impl AiOwnerCtx<'_> {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::ai::battle_decision_observation_tests::fixture;
+
+    #[test]
+    fn alert_and_tower_decisions_without_targets_settle_as_reserve() {
+        for decision in [
+            Decision::AlertSoldiers,
+            Decision::TowerGuardAlert,
+            Decision::TowerGuardObserve,
+        ] {
+            let (mut engine, assets, owner, _) = fixture(false);
+            engine
+                .world
+                .entities
+                .expect_enemy_ai_mut(owner, format_args!("empty battle"))
+                .list_them
+                .clear();
+            let result = engine
+                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                .execute_live_battle_decision(decision, Substate::AttackingReactiontime, 0, false);
+            assert_eq!(result, Some(Decision::Reserve));
+            let ai = engine
+                .world
+                .entities
+                .expect_enemy_ai(owner, format_args!("reserve fallback"));
+            assert_eq!(ai.base.primary_target, None);
+            assert!(!ai.base.friends_are_alerted);
+            assert_eq!(ai.base.current_substate, Substate::AttackingReserve);
+            assert_eq!(ai.base.when_does_timer_ring, 150);
+            assert_eq!(engine.ai_think_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn forced_tower_decision_retains_force_and_reads_current_exact_target_position() {
+        let (mut engine, assets, owner, target) = fixture(false);
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("forced tower"));
+        ai.base.owner_entity_id = Some(owner);
+        ai.tower_guard = true;
+        ai.forced_next_battle_decision = Decision::TowerGuardAlert;
+        for (x, y) in [(650.0, 100.0), (610.0, 130.0)] {
+            engine
+                .world
+                .entities
+                .get_mut(target)
+                .unwrap()
+                .element_data_mut()
+                .set_position_map(MapPoint::new(x, y));
+            let expected = engine.live_ai_position(target);
+            engine
+                .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+                .execute_battle_decisions();
+            let ai = engine
+                .world
+                .entities
+                .expect_enemy_ai(owner, format_args!("tower outcome"));
+            assert_eq!(ai.base.seek_position, expected);
+            assert_eq!(
+                ai.base.primary_target,
+                Some(AiEntityHandle::new(target.index()))
+            );
+            assert_eq!(ai.base.current_substate, Substate::AttackingTowerGuardAlert);
+            assert_eq!(ai.forced_next_battle_decision, Decision::TowerGuardAlert);
+            assert_eq!(
+                ai.base.ai_log.last().unwrap().info,
+                Decision::TowerGuardAlert as u16
+            );
+        }
     }
 }

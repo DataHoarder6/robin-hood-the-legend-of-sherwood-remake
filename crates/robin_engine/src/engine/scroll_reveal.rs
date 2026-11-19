@@ -23,79 +23,6 @@ use serde::{Deserialize, Serialize};
 use super::{EngineInner, LevelAssets};
 use crate::element::{Entity, EntityId};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reveal_returns_published_replacement_identity_and_preserves_placement() {
-        let sim = crate::sim_rng::SimulationContext::with_seed_and_config(
-            1,
-            crate::engine::SimConfig {
-                difficulty: crate::player_profile::DifficultyLevel::Easy,
-                ..Default::default()
-            },
-        );
-        let mut engine = EngineInner::new();
-        let mut assets = LevelAssets::new();
-        std::sync::Arc::make_mut(&mut assets.sprite_scriptor).insert(
-            "BONUS_FourLeavedClover/BONUS Trefle",
-            crate::sprite_script::SpriteInfo {
-                scripts: std::sync::Arc::new(vec![crate::sprite_script::SpriteScript {
-                    action_id: crate::order::OrderType::BonusOne as u16,
-                    frame_ids: vec![1],
-                    delays: vec![1],
-                    distances: vec![0],
-                    offsets: vec![Default::default()],
-                    sound_ids: vec![0],
-                    ..Default::default()
-                }]),
-                conversion: std::sync::Arc::new({
-                    let mut conversion = crate::engine::test_support::unmapped_conversion();
-                    conversion[crate::order::OrderType::BonusOne as usize] = 0;
-                    conversion
-                }),
-                size: crate::coordinates::SpriteSize::new(12.0, 8.0),
-                center: crate::coordinates::SpriteAnchor::new(2.0, 3.0),
-            },
-        );
-        let mut scroll = crate::element::ElementScroll::default();
-        scroll.element.kind = crate::element::ElementKind::ObjectScroll;
-        scroll.element.active = true;
-        scroll.presence = [false; 3];
-        let position = crate::coordinates::MapPoint::new(27.0, 51.0);
-        scroll.element.sprite.apply_placement(
-            position,
-            2,
-            None,
-            13,
-            crate::element::GameMaterial::default(),
-            None,
-            None,
-        );
-        let scroll_id = engine.add_test_entity(Entity::Scroll(scroll));
-        assets.entities.scroll_entity_ids.push(scroll_id);
-
-        let revealed = engine
-            .reveal_scroll(TickCtx::new(&sim, &assets), 0)
-            .expect("scroll is revealable");
-
-        assert_ne!(revealed, scroll_id);
-        let Entity::Bonus(amulet) = engine.expect_entity(revealed, "revealed amulet") else {
-            panic!("replacement must be an amulet");
-        };
-        assert_eq!(
-            amulet.object.object_type,
-            crate::element::ObjectType::BonusAmulet
-        );
-        assert_eq!(amulet.element.position_map(), position);
-        assert_eq!(amulet.element.layer(), 2);
-        assert_eq!(amulet.element.direction(), 13);
-        assert_eq!(engine.scroll_status(scroll_id), ScrollStatus::Taken);
-        assert_eq!(engine.reveal_scroll(TickCtx::new(&sim, &assets), 0), None);
-    }
-}
-
 /// Scroll reveal status. Persisted in the canonical script-domain scroll state
 /// (keyed by actor script handle); the script natives
 /// `GetScrollStatus` / `SetScrollStatus` read/write it directly.
@@ -544,5 +471,78 @@ impl EngineInner {
             },
         });
         self.add_entity(entity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reveal_returns_published_replacement_identity_and_preserves_placement() {
+        let sim = crate::sim_rng::SimulationContext::with_seed_and_config(
+            1,
+            crate::engine::SimConfig {
+                difficulty: crate::player_profile::DifficultyLevel::Easy,
+                ..Default::default()
+            },
+        );
+        let mut engine = EngineInner::new();
+        let mut assets = LevelAssets::new();
+        std::sync::Arc::make_mut(&mut assets.sprite_scriptor).insert(
+            "BONUS_FourLeavedClover/BONUS Trefle",
+            crate::sprite_script::SpriteInfo {
+                scripts: std::sync::Arc::new(vec![crate::sprite_script::SpriteScript {
+                    action_id: crate::order::OrderType::BonusOne as u16,
+                    frame_ids: vec![1],
+                    delays: vec![1],
+                    distances: vec![0],
+                    offsets: vec![Default::default()],
+                    sound_ids: vec![0],
+                    ..Default::default()
+                }]),
+                conversion: std::sync::Arc::new({
+                    let mut conversion = crate::engine::test_support::unmapped_conversion();
+                    conversion[crate::order::OrderType::BonusOne as usize] = 0;
+                    conversion
+                }),
+                size: crate::coordinates::SpriteSize::new(12.0, 8.0),
+                center: crate::coordinates::SpriteAnchor::new(2.0, 3.0),
+            },
+        );
+        let mut scroll = crate::element::ElementScroll::default();
+        scroll.element.kind = crate::element::ElementKind::ObjectScroll;
+        scroll.element.active = true;
+        scroll.presence = [false; 3];
+        let position = crate::coordinates::MapPoint::new(27.0, 51.0);
+        scroll.element.sprite.apply_placement(
+            position,
+            2,
+            None,
+            13,
+            crate::element::GameMaterial::default(),
+            None,
+            None,
+        );
+        let scroll_id = engine.add_test_entity(Entity::Scroll(scroll));
+        assets.entities.scroll_entity_ids.push(scroll_id);
+
+        let revealed = engine
+            .reveal_scroll(TickCtx::new(&sim, &assets), 0)
+            .expect("scroll is revealable");
+
+        assert_ne!(revealed, scroll_id);
+        let Entity::Bonus(amulet) = engine.expect_entity(revealed, "revealed amulet") else {
+            panic!("replacement must be an amulet");
+        };
+        assert_eq!(
+            amulet.object.object_type,
+            crate::element::ObjectType::BonusAmulet
+        );
+        assert_eq!(amulet.element.position_map(), position);
+        assert_eq!(amulet.element.layer(), 2);
+        assert_eq!(amulet.element.direction(), 13);
+        assert_eq!(engine.scroll_status(scroll_id), ScrollStatus::Taken);
+        assert_eq!(engine.reveal_scroll(TickCtx::new(&sim, &assets), 0), None);
     }
 }

@@ -327,12 +327,11 @@ impl EngineInner {
                     entity_id,
                 )
                 .is_some_and(|ability| ability.kind == crate::movement::AbilityKind::Listen);
-                if listen {
-                    if let Some(motion) =
+                if listen
+                    && let Some(motion) =
                         self.tick_enemy_ai_blip_detection_for_owner(tcx, entity_id)
-                    {
-                        break 'execute motion;
-                    }
+                {
+                    break 'execute motion;
                 }
                 break 'execute self
                     .tick_selected_ability(tcx, entity_id, self.actors_frozen())

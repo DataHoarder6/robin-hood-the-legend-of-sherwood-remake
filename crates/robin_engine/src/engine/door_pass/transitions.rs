@@ -98,10 +98,10 @@ impl EngineInner {
         match action {
             OT::TransitionWaitingCrouchedClimbingWallDown => {
                 self.set_entity_posture(entity_id, Posture::OnWall);
-                if let Some(entity) = self.world.entities.get_mut(entity_id) {
-                    if let Some(actor) = entity.actor_data_mut() {
-                        actor.action_state = ActionState::Moving;
-                    }
+                if let Some(entity) = self.world.entities.get_mut(entity_id)
+                    && let Some(actor) = entity.actor_data_mut()
+                {
+                    actor.action_state = ActionState::Moving;
                 }
                 self.set_transition_position_map_and_compute_position_all(
                     assets,
@@ -178,10 +178,10 @@ impl EngineInner {
                         Posture::Upright
                     },
                 );
-                if let Some(entity) = self.world.entities.get_mut(entity_id) {
-                    if let Some(actor) = entity.actor_data_mut() {
-                        actor.action_state = ActionState::Waiting;
-                    }
+                if let Some(entity) = self.world.entities.get_mut(entity_id)
+                    && let Some(actor) = entity.actor_data_mut()
+                {
+                    actor.action_state = ActionState::Waiting;
                 }
                 self.set_transition_position_map_and_compute_position_all(
                     assets,

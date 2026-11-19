@@ -729,7 +729,7 @@ fn legacy_unmapped_jump_goal_collapses_only_onto_its_underlying_source() {
                 is_valid: true,
                 selected_sector_index: Some(source),
                 selected_layer: 0,
-                retained_jump_falls_back_to_spatial: retained_jump_falls_back_to_spatial,
+                retained_jump_falls_back_to_spatial,
                 all_source_arenas_match_spatial: all_match,
             },
         )

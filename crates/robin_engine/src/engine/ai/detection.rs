@@ -261,7 +261,6 @@ fn trace_hearing_gate_target(
 }
 
 /// `[universal frame, viewer creation order]`.
-
 #[inline(never)]
 fn debug_detectable_list_entries(
     stage: &str,
@@ -812,12 +811,8 @@ impl EngineInner {
         // The action state stays `Listening` through the
         // countdown — the exit transition in owner-local `tick_ability`
         // will flip it back to `Waiting`.
-        let Some(ability) =
-            crate::abilities::selected_ability(&self.entities(), &self.seq(), pc_id)
-                .filter(|ability| ability.order_type == crate::order::OrderType::Listening)
-        else {
-            return None;
-        };
+        let ability = crate::abilities::selected_ability(self.entities(), self.seq(), pc_id)
+            .filter(|ability| ability.order_type == crate::order::OrderType::Listening)?;
         let listener_position = {
             let pc = match self.entities_mut().get_mut(pc_id) {
                 Some(Entity::Pc(pc)) => pc,

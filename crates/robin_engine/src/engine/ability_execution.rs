@@ -1340,7 +1340,7 @@ impl EngineInner {
             .element_data_mut()
             .set_direction_goal(facing);
 
-        let valid = {
+        {
             let element = self
                 .orders
                 .sequence_manager
@@ -1356,11 +1356,7 @@ impl EngineInner {
             assert_eq!(order.order_id, order_id);
             assert_eq!(order.target_actor, Some(victim_id.index()));
             self.check_sequence_element_validity(assets, actor_id, element, true)
-        };
-        if !valid {
-            return false;
         }
-        true
     }
 
     pub(super) fn initialize_ability_tying_init(
@@ -1596,13 +1592,11 @@ impl EngineInner {
             "ability owner {requested_actor:?} is not an actor"
         );
         let entity_id = requested_actor;
-        let Some(ability) = selected_ability(
+        let ability = selected_ability(
             &self.world.entities,
             &self.orders.sequence_manager,
             requested_actor,
-        ) else {
-            return None;
-        };
+        )?;
         let initialising = self
             .world
             .entities
@@ -1985,20 +1979,17 @@ impl EngineInner {
         let actor = entity.actor_data_mut().unwrap_or_else(|| {
             panic!("asserted Listen owner {entity_id:?} lost required actor state")
         });
-        match motion {
-            SpriteMotionState::Done => {
-                if order_type == OrderType::TransitionWaitingUprightListening {
-                    // Switch to the listening pose (driven by
-                    // animation.rs idle-pose fallback) and hand off
-                    // to the ai.rs countdown.
-                    actor.action_state = ActionState::Listening;
-                    self.apply_ability_listen_entered(tcx, entity_id);
-                } else if order_type == OrderType::TransitionListeningWaitingUpright {
-                    actor.action_state = ActionState::Waiting;
-                    self.apply_ability_listen_done(tcx, entity_id);
-                }
+        if motion == SpriteMotionState::Done {
+            if order_type == OrderType::TransitionWaitingUprightListening {
+                // Switch to the listening pose (driven by
+                // animation.rs idle-pose fallback) and hand off
+                // to the ai.rs countdown.
+                actor.action_state = ActionState::Listening;
+                self.apply_ability_listen_entered(tcx, entity_id);
+            } else if order_type == OrderType::TransitionListeningWaitingUpright {
+                actor.action_state = ActionState::Waiting;
+                self.apply_ability_listen_done(tcx, entity_id);
             }
-            _ => {}
         }
         motion
     }

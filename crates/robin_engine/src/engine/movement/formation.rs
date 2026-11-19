@@ -618,14 +618,14 @@ impl EngineInner {
                 has_recorded_route_outcome: !recorded_gate_routes.is_empty()
                     || !recorded_failed_gate_routes.is_empty(),
                 recorded_door_route: door_route_override,
-                is_door_click: is_door_click,
-                is_jump_click: is_jump_click,
-                is_lift_click: is_lift_click,
+                is_door_click,
+                is_jump_click,
+                is_lift_click,
                 is_valid: hit.is_valid_for_move(&self.world.fast_grid),
                 selected_sector_index: hit.sector_idx,
                 selected_layer: hit.layer,
-                retained_jump_falls_back_to_spatial: retained_jump_falls_back_to_spatial,
-                all_source_arenas_match_spatial: all_source_arenas_match_spatial,
+                retained_jump_falls_back_to_spatial,
+                all_source_arenas_match_spatial,
             },
         );
 
@@ -1019,7 +1019,7 @@ impl EngineInner {
                 crate::engine::movement::GateRouteRequest {
                     entity_id: approach_owner,
                     source_sector: (!source_and_line_are_same_sector).then_some(*src_sector),
-                    gate_path: gate_path,
+                    gate_path,
                     goal: GoalShape::Line {
                         line_index: source_line_idx,
                         midpoint: source_line_midpoint,

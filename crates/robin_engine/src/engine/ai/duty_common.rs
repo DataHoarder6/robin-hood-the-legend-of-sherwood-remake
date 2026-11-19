@@ -1,4 +1,569 @@
 //! Common duty execution with live actor reads and synchronous role changes.
+use super::*;
+use crate::ai::{
+    AiState, AlertFlags, AlertLevel, DutyFlags, GotoFlags, Position, Substate, WillStopCaller,
+};
+use crate::engine::TickCtx;
+
+impl EngineInner {
+    pub(in crate::engine) fn duty_set_state(
+        &mut self,
+        tcx: TickCtx<'_>,
+        owner: EntityId,
+        state: AiState,
+        substate: Substate,
+    ) {
+        AiOwnerCtx::new(self, tcx, owner).duty_set_state(state, substate)
+    }
+
+    pub(in crate::engine) fn duty_face_direction(
+        &mut self,
+        tcx: TickCtx<'_>,
+        owner: EntityId,
+        direction: u16,
+    ) {
+        AiOwnerCtx::new(self, tcx, owner).duty_face_direction(direction)
+    }
+
+    pub(in crate::engine) fn duty_face_position_at_elevation(
+        &mut self,
+        tcx: TickCtx<'_>,
+        owner: EntityId,
+        position: Position,
+        elevation: f32,
+    ) {
+        AiOwnerCtx::new(self, tcx, owner).duty_face_position_at_elevation(position, elevation)
+    }
+
+    pub(in crate::engine) fn duty_go_to(
+        &mut self,
+        tcx: TickCtx<'_>,
+        owner: EntityId,
+        destination: Position,
+        flags: GotoFlags,
+    ) {
+        AiOwnerCtx::new(self, tcx, owner).duty_go_to(destination, flags)
+    }
+
+    pub(in crate::engine) fn duty_go_near(
+        &mut self,
+        tcx: TickCtx<'_>,
+        owner: EntityId,
+        destination: Position,
+        distance: i32,
+        flags: GotoFlags,
+    ) {
+        AiOwnerCtx::new(self, tcx, owner).duty_go_near(destination, distance, flags)
+    }
+}
+
+impl AiOwnerCtx<'_> {
+    pub(in crate::engine) fn duty_set_state(&mut self, state: AiState, substate: Substate) {
+        let forced_attentive = if self
+            .engine
+            .expect_entity(self.owner, "state-change owner")
+            .enemy_ai()
+            .is_some()
+        {
+            Some(
+                self.engine
+                    .begin_live_enemy_state(self.tcx.assets, self.owner, state, substate),
+            )
+        } else {
+            let entity = self
+                .engine
+                .entities_mut()
+                .expect_entity_mut(self.owner, format_args!("state-change owner"));
+            let ai = entity
+                .friendly_ai_mut()
+                .expect("state-change owner has no role");
+            debug_assert_eq!(substate.ai_state_family(), Some(state));
+            ai.base
+                .register_log_line(crate::ai::LogLineType::ChangeState, substate as u16);
+            let alert = match state {
+                AiState::Sleeping | AiState::Default | AiState::Wondering => {
+                    crate::ai::AlertLevel::Green
+                }
+                AiState::Seeking | AiState::Fleeing => crate::ai::AlertLevel::Yellow,
+                _ => panic!("Civilian AI entered invalid state: {state:?}"),
+            };
+            self.engine.execute_ai_set_alert_status(
+                self.tcx.assets,
+                self.owner,
+                alert,
+                crate::ai::AlertFlags::empty(),
+            );
+            None
+        };
+
+        let ai = self.engine.ai(self.owner, "state-change owner");
+        let notify = forced_attentive.is_none() || ai.current_substate != substate;
+        let source = match state {
+            AiState::Attacking | AiState::Menacing | AiState::Fleeing => {
+                crate::ai::AiStateChangeSource::from_optional_human(ai.primary_target)
+            }
+            _ => crate::ai::AiStateChangeSource::SelfActor,
+        };
+        if notify {
+            self.engine
+                .call_live_ai_state_change_filter(self.tcx, self.owner, state, source);
+        }
+        if let Some(forced_attentive) = forced_attentive {
+            self.engine.finish_live_enemy_state(
+                self.tcx,
+                self.owner,
+                state,
+                substate,
+                forced_attentive,
+            );
+        } else {
+            let entity = self
+                .engine
+                .entities_mut()
+                .expect_entity_mut(self.owner, format_args!("state-change callback owner"));
+            let ai = entity
+                .ai_controller_mut()
+                .expect("state-change callback removed owner AI");
+            ai.set_ai_state(state);
+            ai.current_substate = substate;
+        }
+    }
+
+    pub(in crate::engine) fn duty_face_direction(&mut self, direction: u16) {
+        let entity = self
+            .engine
+            .entities_mut()
+            .expect_entity_mut(self.owner, format_args!("duty facing owner"));
+        let current_direction = entity.element_data().direction() as u16;
+        let action_state = entity
+            .actor_data()
+            .expect("facing requires actor")
+            .action_state;
+        if current_direction == direction
+            && matches!(
+                action_state,
+                crate::element::ActionState::Waiting | crate::element::ActionState::Bored
+            )
+        {
+            entity
+                .ai_controller_mut()
+                .expect("facing requires controller")
+                .already_turned = true;
+        } else {
+            self.engine
+                .launch_live_ai_turn(self.tcx, self.owner, direction as i16, false);
+        }
+    }
+
+    pub(in crate::engine) fn duty_face_position_at_elevation(
+        &mut self,
+        position: Position,
+        elevation: f32,
+    ) {
+        // Facing accepts a signed integral elevation, including the -1
+        // sentinel for resolving the target's ground point.
+        let elevation = elevation as i16;
+        let entity = self
+            .engine
+            .expect_entity(self.owner, "duty facing position owner");
+        let (dx, dy) = if elevation == -1 {
+            let target = self.engine.position_to_point_3d(
+                self.tcx.assets,
+                position.sector,
+                position.level,
+                position.x,
+                position.y,
+            );
+            let here = entity.element_data().position();
+            (target.x - here.x, target.y - here.y)
+        } else {
+            let here = self.engine.live_ai_position(self.owner);
+            (
+                position.x - here.x,
+                (position.y - here.y)
+                    + (f32::from(elevation) - entity.position_iface().get_elevation()),
+            )
+        };
+        let direction = crate::position_interface::vector_to_sector_0_to_15_iso(dx, dy);
+        self.duty_face_direction(direction as u16);
+    }
+
+    pub(in crate::engine) fn duty_point_to(&mut self, position: Position) {
+        let target = self.engine.position_to_point_3d(
+            self.tcx.assets,
+            position.sector,
+            position.level,
+            position.x,
+            position.y,
+        );
+        let body = self
+            .engine
+            .expect_entity(self.owner, "pointing owner")
+            .element_data()
+            .position();
+        let direction = crate::position_interface::vector_to_sector_0_to_15_iso(
+            target.x - body.x,
+            target.y - body.y,
+        );
+        use crate::sequence::{Field, FieldValue, Sequence, SequenceElement};
+        let mut turn =
+            SequenceElement::new_generic(1, crate::element::Command::Turn, Some(self.owner));
+        turn.set_property(Field::Direction, FieldValue::Integer(direction as u32));
+        let mut point =
+            SequenceElement::new_generic(2, crate::element::Command::Point, Some(self.owner));
+        point.set_property(Field::Direction, FieldValue::Integer(direction as u32));
+        let mut sequence = Sequence::new();
+        sequence.append_element(turn);
+        sequence.append_element(point);
+        self.engine.launch_sequence(self.tcx, sequence);
+    }
+
+    pub(in crate::engine) fn duty_go_to(&mut self, destination: Position, flags: GotoFlags) {
+        self.duty_go_to_speed(destination, flags, 1.0);
+    }
+
+    pub(in crate::engine) fn duty_go_to_speed(
+        &mut self,
+        destination: Position,
+        flags: GotoFlags,
+        speed: f32,
+    ) {
+        self.engine
+            .ai_mut(self.owner, "movement request owner")
+            .begin_move_request(destination, flags);
+        let mut destination = destination;
+        if flags.contains(GotoFlags::FIND_ACCESSIBLE)
+            && !self
+                .engine
+                .resolve_ai_accessible_destination(self.owner, &mut destination)
+        {
+            return;
+        }
+        let position = self.engine.live_ai_position(self.owner);
+        let depth = self.engine.ai_think_depth();
+        let entity = self
+            .engine
+            .world
+            .entities
+            .expect_entity_mut(self.owner, format_args!("duty movement owner"));
+        let element = entity.element_data();
+        let layer = element.layer();
+        let sector = element.sector();
+        let actor = entity.actor_data().expect("duty movement requires actor");
+        let installed_order = actor.installed_order;
+        let civilian = entity.is_civilian();
+        let ai = entity
+            .ai_controller_mut()
+            .expect("duty movement requires controller");
+        let flags = {
+            let mut flags = flags;
+            if civilian {
+                flags -= GotoFlags::FORBIDDEN_CIVILIANS;
+            }
+            let dx = (position.x - destination.x).abs();
+            let dy = (position.y - destination.y).abs();
+            if dx.max(dy) < 5.0
+                && !ai.likes_to_sit_around
+                && !ai.special_action
+                && matches!(
+                    installed_order
+                        .map(|handle| handle
+                            .resolve(&self.engine.orders.sequence_manager)
+                            .order_type)
+                        .unwrap_or(crate::order::OrderType::NonanimationEnd),
+                    crate::order::OrderType::WaitingUpright
+                        | crate::order::OrderType::WaitingAlerted
+                        | crate::order::OrderType::NonanimationEnd
+                )
+            {
+                if depth > 0 {
+                    ai.already_on_point = true;
+                } else {
+                    self.execute_ai_callback(&crate::ai::Stimulus::new(
+                        crate::ai::StimulusType::EventReachPoint,
+                    ));
+                }
+                return;
+            }
+            let tolerance = if flags.contains(GotoFlags::NEAR) {
+                ai.stop_before_end_of_path_distance as f32
+            } else {
+                0.0
+            };
+            if flags.contains(GotoFlags::NEAR)
+                && destination.level == layer
+                && dx * dx + dy * dy <= tolerance * tolerance
+            {
+                if depth > 0 {
+                    ai.already_on_point = true;
+                } else {
+                    self.execute_ai_callback(&crate::ai::Stimulus::new(
+                        crate::ai::StimulusType::EventReachPoint,
+                    ));
+                }
+                return;
+            }
+            if destination.x <= 0.0
+                || destination.y <= 0.0
+                || destination.sector.is_none()
+                || (destination.level as i16) < 0
+            {
+                ai.couldnt_reachpoint = true;
+                return;
+            }
+            let crosses_sector = match (
+                destination.sector.and_then(|s| s.arena_index()),
+                sector.and_then(|s| s.arena_index()),
+            ) {
+                (Some(destination), Some(current)) => destination != current,
+                _ => destination.sector != sector,
+            };
+            if flags.contains(GotoFlags::STRAIGHT)
+                && !flags.contains(GotoFlags::ASK_OBSTACLE)
+                && (crosses_sector || destination.level != layer)
+            {
+                flags -= GotoFlags::STRAIGHT;
+            }
+            flags
+        };
+        if !self.engine.authorize_ai_destination(
+            self.owner,
+            destination,
+            true,
+            flags.contains(GotoFlags::ASK_OBSTACLE),
+        ) {
+            return;
+        }
+        self.engine
+            .launch_ai_move(self.tcx, self.owner, destination, flags, speed);
+    }
+
+    pub(in crate::engine) fn duty_go_near(
+        &mut self,
+        destination: Position,
+        distance: i32,
+        flags: GotoFlags,
+    ) {
+        let depth = self.engine.ai_think_depth();
+        self.engine
+            .ai_mut(self.owner, "duty approach owner")
+            .prepare_approach(distance, flags, depth);
+        self.duty_go_to(destination, flags | GotoFlags::NEAR);
+    }
+
+    pub(in crate::engine) fn execute_common_ai_duty(&mut self, flags: DutyFlags) {
+        self.engine.execute_ai_set_alert_status(
+            self.tcx.assets,
+            self.owner,
+            AlertLevel::Green,
+            AlertFlags::empty(),
+        );
+        {
+            let entity = self
+                .engine
+                .entities_mut()
+                .expect_entity_mut(self.owner, format_args!("common duty owner"));
+            let no_friends = entity
+                .ai_actor_data()
+                .expect("duty owner has no actor")
+                .detectable_lists[crate::element::DetectableType::Friend as usize]
+                .is_empty();
+            let ai = entity
+                .ai_controller_mut()
+                .expect("duty owner has no controller");
+            if !flags.contains(DutyFlags::KEEP_EMOTICON) {
+                ai.clear_emoticon();
+            }
+            if let Some(path) = &mut ai.patrol_path {
+                path.reset_history();
+            } else {
+                ai.detached_patrol_path_status.history.clear();
+            }
+            ai.my_reconnaissance_report.reset();
+            if no_friends {
+                ai.detected_body = None;
+            }
+        }
+
+        let chief = self.engine.ai(self.owner, "duty chief query").patrol_chief;
+        if let Some(chief) = chief {
+            let able = match self.engine.expect_entity(chief, "duty patrol chief") {
+                Entity::Soldier(soldier) => crate::element::Human::is_able_to_fight(soldier),
+                Entity::Pc(pc) => crate::element::Human::is_able_to_fight(pc),
+                _ => false,
+            };
+            if able
+                && self
+                    .engine
+                    .patrol_member_visible(self.tcx.assets, self.owner, chief)
+            {
+                self.duty_set_state(AiState::Default, Substate::DefaultGotoChief);
+                // State notifications may replace the chief before the approach.
+                let chief = self
+                    .engine
+                    .ai(self.owner, "duty chief after state")
+                    .patrol_chief
+                    .expect("duty state callback cleared required patrol chief");
+                let destination = self.engine.live_ai_position(chief);
+                self.duty_go_near(
+                    destination,
+                    crate::parameters_ai::AI_TALK_DISTANCE,
+                    GotoFlags::empty(),
+                );
+                let ai = self.engine.ai_mut(self.owner, "duty approach result");
+                if !ai.couldnt_reachpoint {
+                    return;
+                }
+                ai.couldnt_reachpoint = false;
+            }
+        }
+
+        if self
+            .engine
+            .ai(self.owner, "duty path query")
+            .has_patrol_path
+        {
+            let here = self.engine.live_ai_position(self.owner);
+            let paths = &self.tcx.assets.navigation.hiking_paths;
+            let nearest_distance = {
+                let ai = self.engine.ai_mut(self.owner, "duty path selection");
+                let path = ai
+                    .patrol_path
+                    .as_mut()
+                    .expect("duty path flag requires initialized path");
+                let first = path
+                    .get_waypoint(0, paths)
+                    .expect("duty path requires a waypoint");
+                let mut best = 0;
+                let mut distance = (first.x as f32 - here.x)
+                    .abs()
+                    .max((first.y as f32 - here.y).abs());
+                for index in 0..path.size {
+                    let waypoint = path.get_waypoint(index, paths).expect("duty path waypoint");
+                    let candidate = (waypoint.x as f32 - here.x)
+                        .abs()
+                        .max((waypoint.y as f32 - here.y).abs());
+                    if candidate < distance {
+                        best = index;
+                        distance = candidate;
+                    }
+                }
+                path.set_current_index(best);
+                let waypoint = path
+                    .current_waypoint(paths)
+                    .expect("selected duty waypoint");
+                let dx = waypoint.x as f32 - here.x;
+                let dy = waypoint.y as f32 - here.y;
+                let nearest_distance = dx.abs().max(dy.abs());
+                if best < path.size - 1 {
+                    let next = path.peek_next_waypoint(paths).expect("next duty waypoint");
+                    if nearest_distance < 10.0
+                        || dx * (next.x as f32 - waypoint.x as f32)
+                            + dy * (next.y as f32 - waypoint.y as f32)
+                            < 0.0
+                    {
+                        path.advance();
+                    }
+                }
+                nearest_distance
+            };
+            self.duty_set_state(AiState::Default, Substate::DefaultGotoRoute);
+            let frame = self.engine.control.frame_counter;
+            let creation_order = self.engine.world.original_creation_order(self.owner);
+            {
+                let ai = self.engine.ai_mut(self.owner, "duty route history");
+                if ai.has_patrol() && frame == 0 && nearest_distance < 50.0 {
+                    ai.patrol_path
+                        .as_mut()
+                        .expect("duty route state requires path")
+                        .initialize_history_entries_on_path(paths, |p, w, s| {
+                            self.tcx.assets.navigation.hiking_waypoint_sector(p, w, s)
+                        });
+                }
+            }
+            let walk_flags = {
+                let ai = self.engine.ai_mut(self.owner, "duty route forecast");
+                let stop = ai.will_stop_at_next_waypoint_at(
+                    self.tcx.sim,
+                    paths,
+                    frame,
+                    Some(creation_order),
+                    WillStopCaller::ReturnToDuty,
+                );
+                ai.default_path_walking_flags
+                    | if stop {
+                        GotoFlags::empty()
+                    } else {
+                        GotoFlags::DONT_STOP
+                    }
+            };
+            let destination = {
+                let path = self
+                    .engine
+                    .ai(self.owner, "duty route destination")
+                    .patrol_path
+                    .as_ref()
+                    .expect("duty route requires path");
+                let waypoint = path
+                    .current_waypoint(paths)
+                    .expect("duty route requires waypoint");
+                Position {
+                    x: waypoint.x as f32,
+                    y: waypoint.y as f32,
+                    sector: self.tcx.assets.navigation.hiking_waypoint_sector(
+                        usize::from(path.hiking_path_index),
+                        usize::from(path.current_waypoint_index),
+                        waypoint.sector,
+                    ),
+                    level: waypoint.level,
+                }
+            };
+            self.duty_go_to(destination, walk_flags);
+            return;
+        }
+
+        let (posture, initial, special_posture) = {
+            let entity = self.engine.expect_entity(self.owner, "duty post owner");
+            let ai = entity.ai_controller().expect("duty post controller");
+            let special = if ai.likes_to_sit_around {
+                Some(crate::element::Posture::Sitting)
+            } else if ai.special_action {
+                Some(crate::element::Posture::Leisure)
+            } else {
+                None
+            };
+            (
+                entity.element_data().posture(),
+                ai.initial_position,
+                special,
+            )
+        };
+        let here = self.engine.live_ai_position(self.owner);
+        if special_posture == Some(posture)
+            && (here.x - initial.x).abs().max((here.y - initial.y).abs()) < 3.0
+        {
+            self.duty_set_state(AiState::Default, Substate::DefaultOnPost);
+            let bored = self.engine.ai_bored_time(self.tcx, self.owner);
+            let frame = self.engine.control.frame_counter;
+            let ai = self.engine.ai_mut(self.owner, "duty post timer");
+            ai.launch_timer(bored as u32, frame);
+        } else {
+            self.duty_set_state(AiState::Default, Substate::DefaultGotoPost);
+            let initial = self
+                .engine
+                .ai(self.owner, "duty post after state")
+                .initial_position;
+            self.duty_go_to(
+                initial,
+                if special_posture.is_some() {
+                    GotoFlags::SPECIAL_ACTION
+                } else {
+                    GotoFlags::empty()
+                },
+            );
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -900,572 +1465,6 @@ mod tests {
                     Substate::AttackingOverviewLookLeft
                 );
             }
-        }
-    }
-}
-
-use super::*;
-use crate::ai::{
-    AiState, AlertFlags, AlertLevel, DutyFlags, GotoFlags, Position, Substate, WillStopCaller,
-};
-use crate::engine::TickCtx;
-
-impl EngineInner {
-    pub(in crate::engine) fn duty_set_state(
-        &mut self,
-        tcx: TickCtx<'_>,
-        owner: EntityId,
-        state: AiState,
-        substate: Substate,
-    ) {
-        AiOwnerCtx::new(self, tcx, owner).duty_set_state(state, substate)
-    }
-
-    pub(in crate::engine) fn duty_face_direction(
-        &mut self,
-        tcx: TickCtx<'_>,
-        owner: EntityId,
-        direction: u16,
-    ) {
-        AiOwnerCtx::new(self, tcx, owner).duty_face_direction(direction)
-    }
-
-    pub(in crate::engine) fn duty_face_position_at_elevation(
-        &mut self,
-        tcx: TickCtx<'_>,
-        owner: EntityId,
-        position: Position,
-        elevation: f32,
-    ) {
-        AiOwnerCtx::new(self, tcx, owner).duty_face_position_at_elevation(position, elevation)
-    }
-
-    pub(in crate::engine) fn duty_go_to(
-        &mut self,
-        tcx: TickCtx<'_>,
-        owner: EntityId,
-        destination: Position,
-        flags: GotoFlags,
-    ) {
-        AiOwnerCtx::new(self, tcx, owner).duty_go_to(destination, flags)
-    }
-
-    pub(in crate::engine) fn duty_go_near(
-        &mut self,
-        tcx: TickCtx<'_>,
-        owner: EntityId,
-        destination: Position,
-        distance: i32,
-        flags: GotoFlags,
-    ) {
-        AiOwnerCtx::new(self, tcx, owner).duty_go_near(destination, distance, flags)
-    }
-}
-
-impl AiOwnerCtx<'_> {
-    pub(in crate::engine) fn duty_set_state(&mut self, state: AiState, substate: Substate) {
-        let forced_attentive = if self
-            .engine
-            .expect_entity(self.owner, "state-change owner")
-            .enemy_ai()
-            .is_some()
-        {
-            Some(
-                self.engine
-                    .begin_live_enemy_state(self.tcx.assets, self.owner, state, substate),
-            )
-        } else {
-            let entity = self
-                .engine
-                .entities_mut()
-                .expect_entity_mut(self.owner, format_args!("state-change owner"));
-            let ai = entity
-                .friendly_ai_mut()
-                .expect("state-change owner has no role");
-            debug_assert_eq!(substate.ai_state_family(), Some(state));
-            ai.base
-                .register_log_line(crate::ai::LogLineType::ChangeState, substate as u16);
-            let alert = match state {
-                AiState::Sleeping | AiState::Default | AiState::Wondering => {
-                    crate::ai::AlertLevel::Green
-                }
-                AiState::Seeking | AiState::Fleeing => crate::ai::AlertLevel::Yellow,
-                _ => panic!("Civilian AI entered invalid state: {state:?}"),
-            };
-            self.engine.execute_ai_set_alert_status(
-                self.tcx.assets,
-                self.owner,
-                alert,
-                crate::ai::AlertFlags::empty(),
-            );
-            None
-        };
-
-        let ai = self.engine.ai(self.owner, "state-change owner");
-        let notify = forced_attentive.is_none() || ai.current_substate != substate;
-        let source = match state {
-            AiState::Attacking | AiState::Menacing | AiState::Fleeing => {
-                crate::ai::AiStateChangeSource::from_optional_human(ai.primary_target)
-            }
-            _ => crate::ai::AiStateChangeSource::SelfActor,
-        };
-        if notify {
-            self.engine
-                .call_live_ai_state_change_filter(self.tcx, self.owner, state, source);
-        }
-        if let Some(forced_attentive) = forced_attentive {
-            self.engine.finish_live_enemy_state(
-                self.tcx,
-                self.owner,
-                state,
-                substate,
-                forced_attentive,
-            );
-        } else {
-            let entity = self
-                .engine
-                .entities_mut()
-                .expect_entity_mut(self.owner, format_args!("state-change callback owner"));
-            let ai = entity
-                .ai_controller_mut()
-                .expect("state-change callback removed owner AI");
-            ai.set_ai_state(state);
-            ai.current_substate = substate;
-        }
-    }
-
-    pub(in crate::engine) fn duty_face_direction(&mut self, direction: u16) {
-        let entity = self
-            .engine
-            .entities_mut()
-            .expect_entity_mut(self.owner, format_args!("duty facing owner"));
-        let current_direction = entity.element_data().direction() as u16;
-        let action_state = entity
-            .actor_data()
-            .expect("facing requires actor")
-            .action_state;
-        if current_direction == direction
-            && matches!(
-                action_state,
-                crate::element::ActionState::Waiting | crate::element::ActionState::Bored
-            )
-        {
-            entity
-                .ai_controller_mut()
-                .expect("facing requires controller")
-                .already_turned = true;
-        } else {
-            self.engine
-                .launch_live_ai_turn(self.tcx, self.owner, direction as i16, false);
-        }
-    }
-
-    pub(in crate::engine) fn duty_face_position_at_elevation(
-        &mut self,
-        position: Position,
-        elevation: f32,
-    ) {
-        // Facing accepts a signed integral elevation, including the -1
-        // sentinel for resolving the target's ground point.
-        let elevation = elevation as i16;
-        let entity = self
-            .engine
-            .expect_entity(self.owner, "duty facing position owner");
-        let (dx, dy) = if elevation == -1 {
-            let target = self.engine.position_to_point_3d(
-                self.tcx.assets,
-                position.sector,
-                position.level,
-                position.x,
-                position.y,
-            );
-            let here = entity.element_data().position();
-            (target.x - here.x, target.y - here.y)
-        } else {
-            let here = self.engine.live_ai_position(self.owner);
-            (
-                position.x - here.x,
-                (position.y - here.y)
-                    + (f32::from(elevation) - entity.position_iface().get_elevation()),
-            )
-        };
-        let direction = crate::position_interface::vector_to_sector_0_to_15_iso(dx, dy);
-        self.duty_face_direction(direction as u16);
-    }
-
-    pub(in crate::engine) fn duty_point_to(&mut self, position: Position) {
-        let target = self.engine.position_to_point_3d(
-            self.tcx.assets,
-            position.sector,
-            position.level,
-            position.x,
-            position.y,
-        );
-        let body = self
-            .engine
-            .expect_entity(self.owner, "pointing owner")
-            .element_data()
-            .position();
-        let direction = crate::position_interface::vector_to_sector_0_to_15_iso(
-            target.x - body.x,
-            target.y - body.y,
-        );
-        use crate::sequence::{Field, FieldValue, Sequence, SequenceElement};
-        let mut turn =
-            SequenceElement::new_generic(1, crate::element::Command::Turn, Some(self.owner));
-        turn.set_property(Field::Direction, FieldValue::Integer(direction as u32));
-        let mut point =
-            SequenceElement::new_generic(2, crate::element::Command::Point, Some(self.owner));
-        point.set_property(Field::Direction, FieldValue::Integer(direction as u32));
-        let mut sequence = Sequence::new();
-        sequence.append_element(turn);
-        sequence.append_element(point);
-        self.engine.launch_sequence(self.tcx, sequence);
-    }
-
-    pub(in crate::engine) fn duty_go_to(&mut self, destination: Position, flags: GotoFlags) {
-        self.duty_go_to_speed(destination, flags, 1.0);
-    }
-
-    pub(in crate::engine) fn duty_go_to_speed(
-        &mut self,
-        destination: Position,
-        flags: GotoFlags,
-        speed: f32,
-    ) {
-        self.engine
-            .ai_mut(self.owner, "movement request owner")
-            .begin_move_request(destination, flags);
-        let mut destination = destination;
-        if flags.contains(GotoFlags::FIND_ACCESSIBLE)
-            && !self
-                .engine
-                .resolve_ai_accessible_destination(self.owner, &mut destination)
-        {
-            return;
-        }
-        let position = self.engine.live_ai_position(self.owner);
-        let depth = self.engine.ai_think_depth();
-        let entity = self
-            .engine
-            .world
-            .entities
-            .expect_entity_mut(self.owner, format_args!("duty movement owner"));
-        let element = entity.element_data();
-        let layer = element.layer();
-        let sector = element.sector();
-        let actor = entity.actor_data().expect("duty movement requires actor");
-        let installed_order = actor.installed_order;
-        let civilian = entity.is_civilian();
-        let ai = entity
-            .ai_controller_mut()
-            .expect("duty movement requires controller");
-        let flags = {
-            let mut flags = flags;
-            if civilian {
-                flags -= GotoFlags::FORBIDDEN_CIVILIANS;
-            }
-            let dx = (position.x - destination.x).abs();
-            let dy = (position.y - destination.y).abs();
-            if dx.max(dy) < 5.0
-                && !ai.likes_to_sit_around
-                && !ai.special_action
-                && matches!(
-                    installed_order
-                        .map(|handle| handle
-                            .resolve(&self.engine.orders.sequence_manager)
-                            .order_type)
-                        .unwrap_or(crate::order::OrderType::NonanimationEnd),
-                    crate::order::OrderType::WaitingUpright
-                        | crate::order::OrderType::WaitingAlerted
-                        | crate::order::OrderType::NonanimationEnd
-                )
-            {
-                if depth > 0 {
-                    ai.already_on_point = true;
-                } else {
-                    self.execute_ai_callback(&crate::ai::Stimulus::new(
-                        crate::ai::StimulusType::EventReachPoint,
-                    ));
-                }
-                return;
-            }
-            let tolerance = if flags.contains(GotoFlags::NEAR) {
-                ai.stop_before_end_of_path_distance as f32
-            } else {
-                0.0
-            };
-            if flags.contains(GotoFlags::NEAR)
-                && destination.level == layer
-                && dx * dx + dy * dy <= tolerance * tolerance
-            {
-                if depth > 0 {
-                    ai.already_on_point = true;
-                } else {
-                    self.execute_ai_callback(&crate::ai::Stimulus::new(
-                        crate::ai::StimulusType::EventReachPoint,
-                    ));
-                }
-                return;
-            }
-            if destination.x <= 0.0
-                || destination.y <= 0.0
-                || destination.sector.is_none()
-                || (destination.level as i16) < 0
-            {
-                ai.couldnt_reachpoint = true;
-                return;
-            }
-            let crosses_sector = match (
-                destination.sector.and_then(|s| s.arena_index()),
-                sector.and_then(|s| s.arena_index()),
-            ) {
-                (Some(destination), Some(current)) => destination != current,
-                _ => destination.sector != sector,
-            };
-            if flags.contains(GotoFlags::STRAIGHT)
-                && !flags.contains(GotoFlags::ASK_OBSTACLE)
-                && (crosses_sector || destination.level != layer)
-            {
-                flags -= GotoFlags::STRAIGHT;
-            }
-            flags
-        };
-        if !self.engine.authorize_ai_destination(
-            self.owner,
-            destination,
-            true,
-            flags.contains(GotoFlags::ASK_OBSTACLE),
-        ) {
-            return;
-        }
-        self.engine
-            .launch_ai_move(self.tcx, self.owner, destination, flags, speed);
-    }
-
-    pub(in crate::engine) fn duty_go_near(
-        &mut self,
-        destination: Position,
-        distance: i32,
-        flags: GotoFlags,
-    ) {
-        let depth = self.engine.ai_think_depth();
-        self.engine
-            .ai_mut(self.owner, "duty approach owner")
-            .prepare_approach(distance, flags, depth);
-        self.duty_go_to(destination, flags | GotoFlags::NEAR);
-    }
-
-    pub(in crate::engine) fn execute_common_ai_duty(&mut self, flags: DutyFlags) {
-        self.engine.execute_ai_set_alert_status(
-            self.tcx.assets,
-            self.owner,
-            AlertLevel::Green,
-            AlertFlags::empty(),
-        );
-        {
-            let entity = self
-                .engine
-                .entities_mut()
-                .expect_entity_mut(self.owner, format_args!("common duty owner"));
-            let no_friends = entity
-                .ai_actor_data()
-                .expect("duty owner has no actor")
-                .detectable_lists[crate::element::DetectableType::Friend as usize]
-                .is_empty();
-            let ai = entity
-                .ai_controller_mut()
-                .expect("duty owner has no controller");
-            if !flags.contains(DutyFlags::KEEP_EMOTICON) {
-                ai.clear_emoticon();
-            }
-            if let Some(path) = &mut ai.patrol_path {
-                path.reset_history();
-            } else {
-                ai.detached_patrol_path_status.history.clear();
-            }
-            ai.my_reconnaissance_report.reset();
-            if no_friends {
-                ai.detected_body = None;
-            }
-        }
-
-        let chief = self.engine.ai(self.owner, "duty chief query").patrol_chief;
-        if let Some(chief) = chief {
-            let able = match self.engine.expect_entity(chief, "duty patrol chief") {
-                Entity::Soldier(soldier) => crate::element::Human::is_able_to_fight(soldier),
-                Entity::Pc(pc) => crate::element::Human::is_able_to_fight(pc),
-                _ => false,
-            };
-            if able
-                && self
-                    .engine
-                    .patrol_member_visible(self.tcx.assets, self.owner, chief)
-            {
-                self.duty_set_state(AiState::Default, Substate::DefaultGotoChief);
-                // State notifications may replace the chief before the approach.
-                let chief = self
-                    .engine
-                    .ai(self.owner, "duty chief after state")
-                    .patrol_chief
-                    .expect("duty state callback cleared required patrol chief");
-                let destination = self.engine.live_ai_position(chief);
-                self.duty_go_near(
-                    destination,
-                    crate::parameters_ai::AI_TALK_DISTANCE,
-                    GotoFlags::empty(),
-                );
-                let ai = self.engine.ai_mut(self.owner, "duty approach result");
-                if !ai.couldnt_reachpoint {
-                    return;
-                }
-                ai.couldnt_reachpoint = false;
-            }
-        }
-
-        if self
-            .engine
-            .ai(self.owner, "duty path query")
-            .has_patrol_path
-        {
-            let here = self.engine.live_ai_position(self.owner);
-            let paths = &self.tcx.assets.navigation.hiking_paths;
-            let nearest_distance = {
-                let ai = self.engine.ai_mut(self.owner, "duty path selection");
-                let path = ai
-                    .patrol_path
-                    .as_mut()
-                    .expect("duty path flag requires initialized path");
-                let first = path
-                    .get_waypoint(0, paths)
-                    .expect("duty path requires a waypoint");
-                let mut best = 0;
-                let mut distance = (first.x as f32 - here.x)
-                    .abs()
-                    .max((first.y as f32 - here.y).abs());
-                for index in 0..path.size {
-                    let waypoint = path.get_waypoint(index, paths).expect("duty path waypoint");
-                    let candidate = (waypoint.x as f32 - here.x)
-                        .abs()
-                        .max((waypoint.y as f32 - here.y).abs());
-                    if candidate < distance {
-                        best = index;
-                        distance = candidate;
-                    }
-                }
-                path.set_current_index(best);
-                let waypoint = path
-                    .current_waypoint(paths)
-                    .expect("selected duty waypoint");
-                let dx = waypoint.x as f32 - here.x;
-                let dy = waypoint.y as f32 - here.y;
-                let nearest_distance = dx.abs().max(dy.abs());
-                if best < path.size - 1 {
-                    let next = path.peek_next_waypoint(paths).expect("next duty waypoint");
-                    if nearest_distance < 10.0
-                        || dx * (next.x as f32 - waypoint.x as f32)
-                            + dy * (next.y as f32 - waypoint.y as f32)
-                            < 0.0
-                    {
-                        path.advance();
-                    }
-                }
-                nearest_distance
-            };
-            self.duty_set_state(AiState::Default, Substate::DefaultGotoRoute);
-            let frame = self.engine.control.frame_counter;
-            let creation_order = self.engine.world.original_creation_order(self.owner);
-            {
-                let ai = self.engine.ai_mut(self.owner, "duty route history");
-                if ai.has_patrol() && frame == 0 && nearest_distance < 50.0 {
-                    ai.patrol_path
-                        .as_mut()
-                        .expect("duty route state requires path")
-                        .initialize_history_entries_on_path(paths, |p, w, s| {
-                            self.tcx.assets.navigation.hiking_waypoint_sector(p, w, s)
-                        });
-                }
-            }
-            let walk_flags = {
-                let ai = self.engine.ai_mut(self.owner, "duty route forecast");
-                let stop = ai.will_stop_at_next_waypoint_at(
-                    self.tcx.sim,
-                    paths,
-                    frame,
-                    Some(creation_order),
-                    WillStopCaller::ReturnToDuty,
-                );
-                ai.default_path_walking_flags
-                    | if stop {
-                        GotoFlags::empty()
-                    } else {
-                        GotoFlags::DONT_STOP
-                    }
-            };
-            let destination = {
-                let path = self
-                    .engine
-                    .ai(self.owner, "duty route destination")
-                    .patrol_path
-                    .as_ref()
-                    .expect("duty route requires path");
-                let waypoint = path
-                    .current_waypoint(paths)
-                    .expect("duty route requires waypoint");
-                Position {
-                    x: waypoint.x as f32,
-                    y: waypoint.y as f32,
-                    sector: self.tcx.assets.navigation.hiking_waypoint_sector(
-                        usize::from(path.hiking_path_index),
-                        usize::from(path.current_waypoint_index),
-                        waypoint.sector,
-                    ),
-                    level: waypoint.level,
-                }
-            };
-            self.duty_go_to(destination, walk_flags);
-            return;
-        }
-
-        let (posture, initial, special_posture) = {
-            let entity = self.engine.expect_entity(self.owner, "duty post owner");
-            let ai = entity.ai_controller().expect("duty post controller");
-            let special = if ai.likes_to_sit_around {
-                Some(crate::element::Posture::Sitting)
-            } else if ai.special_action {
-                Some(crate::element::Posture::Leisure)
-            } else {
-                None
-            };
-            (
-                entity.element_data().posture(),
-                ai.initial_position,
-                special,
-            )
-        };
-        let here = self.engine.live_ai_position(self.owner);
-        if special_posture == Some(posture)
-            && (here.x - initial.x).abs().max((here.y - initial.y).abs()) < 3.0
-        {
-            self.duty_set_state(AiState::Default, Substate::DefaultOnPost);
-            let bored = self.engine.ai_bored_time(self.tcx, self.owner);
-            let frame = self.engine.control.frame_counter;
-            let ai = self.engine.ai_mut(self.owner, "duty post timer");
-            ai.launch_timer(bored as u32, frame);
-        } else {
-            self.duty_set_state(AiState::Default, Substate::DefaultGotoPost);
-            let initial = self
-                .engine
-                .ai(self.owner, "duty post after state")
-                .initial_position;
-            self.duty_go_to(
-                initial,
-                if special_posture.is_some() {
-                    GotoFlags::SPECIAL_ACTION
-                } else {
-                    GotoFlags::empty()
-                },
-            );
         }
     }
 }

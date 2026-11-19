@@ -566,7 +566,7 @@ fn explicit_halt_then_goto_keeps_single_stop_transition() {
             .orders
             .sequence_manager
             .deferred_elements_to_go()
-            .into_iter()
+            .iter()
             .filter(|&(sequence, _)| *sequence != movement_sequence)
             .count(),
         1,
@@ -1492,7 +1492,7 @@ fn launch_leave_listen_postponed_behind_enter(
         .unwrap()
         .order_id;
     let leave_seq = engine.t_launch_element(
-        &assets,
+        assets,
         SequenceElement::new(1, Command::LeaveListen, Some(owner)),
     );
     // Sequence-element launch only registers the element on the manager's

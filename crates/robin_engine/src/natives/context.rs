@@ -37,11 +37,11 @@ impl<'a> NativeSessionCapabilities<'a> {
     ) -> Self {
         Self {
             simulation,
-            entities: entities,
+            entities,
             pc_registry: None,
-            ai_global: ai_global,
-            fast_grid: fast_grid,
-            script_globals: script_globals,
+            ai_global,
+            fast_grid,
+            script_globals,
             campaign: None,
             mission_stat: None,
             diplomacy: None,
@@ -356,7 +356,7 @@ impl<'ctx, 'owners: 'ctx> NativeContext<'ctx, 'owners> {
     }
 
     pub fn script_globals(&self) -> &[i32] {
-        &self.script_globals
+        self.script_globals
     }
 
     pub fn script_state_mut(&mut self) -> &mut ScriptState {
@@ -364,11 +364,11 @@ impl<'ctx, 'owners: 'ctx> NativeContext<'ctx, 'owners> {
     }
 
     pub(crate) fn ai_global(&self) -> &crate::ai::AiGlobalState {
-        &self.ai_global
+        self.ai_global
     }
 
     pub(crate) fn ai_global_mut(&mut self) -> &mut crate::ai::AiGlobalState {
-        &mut self.ai_global
+        self.ai_global
     }
 
     // These forwards let native dispatch spell handle conversions as

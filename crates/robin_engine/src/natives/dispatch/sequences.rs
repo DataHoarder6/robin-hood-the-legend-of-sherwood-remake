@@ -429,7 +429,7 @@ impl NativeContext<'_, '_> {
                     origin.unwrap_or((dx, dy, goal_layer, goal_sector));
                 self.append_move_to_sequence(SequenceMoveRequest {
                     actor_handle: actor,
-                    action: action,
+                    action,
                     source: SequenceMovePoint {
                         position: (sx, sy),
                         sector: src_sector,
@@ -546,7 +546,7 @@ impl NativeContext<'_, '_> {
                     origin.unwrap_or((ix, iy, door_layer, door_sector));
                 self.append_move_to_sequence(SequenceMoveRequest {
                     actor_handle: actor,
-                    action: action,
+                    action,
                     source: SequenceMovePoint {
                         position: (sx, sy),
                         sector: src_sector,
@@ -786,7 +786,7 @@ impl NativeContext<'_, '_> {
                     origin.unwrap_or((dx, dy, goal_layer, goal_sector));
                 self.append_move_to_sequence(SequenceMoveRequest {
                     actor_handle: actor,
-                    action: action,
+                    action,
                     source: SequenceMovePoint {
                         position: (sx, sy),
                         sector: src_sector,
@@ -1395,7 +1395,7 @@ impl NativeContext<'_, '_> {
                     };
                     self.append_move_to_sequence(SequenceMoveRequest {
                         actor_handle: actor,
-                        action: action,
+                        action,
                         source: SequenceMovePoint {
                             position: (sx, sy),
                             sector: src_sector,
@@ -1407,7 +1407,7 @@ impl NativeContext<'_, '_> {
                             layer: corpse_layer,
                         },
                         victim: None,
-                        tolerance: tolerance,
+                        tolerance,
                         initial_flags: MoveFlags::CALLED_BY_SCRIPT,
                         speed_factor: 1.0,
                     });

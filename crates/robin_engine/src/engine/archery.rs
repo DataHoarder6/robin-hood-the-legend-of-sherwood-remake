@@ -459,10 +459,7 @@ impl EngineInner {
         if actor.execution_frozen {
             return Some(MotionState::InProgress);
         }
-        let Some((sequence_id, element_index, order_id)) = self.selected_bow_order(shooter_id)
-        else {
-            return None;
-        };
+        let (sequence_id, element_index, order_id) = self.selected_bow_order(shooter_id)?;
         if order_id != expected_order_id {
             return None;
         }
@@ -880,7 +877,7 @@ impl EngineInner {
                 y: shooter_position.y,
             },
             target: target_id,
-            target_pos: target_pos,
+            target_pos,
             trajectory,
             damage,
             layer,

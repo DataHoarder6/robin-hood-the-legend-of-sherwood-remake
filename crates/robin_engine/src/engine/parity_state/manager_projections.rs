@@ -170,7 +170,7 @@ impl Engine {
         let entity = typed_entity_reference;
         let doors = &self.inner.script_domains.interactables.doors;
         let gate = |id: Option<crate::gate::DoorIndex>| -> Option<GateBits> {
-            let Some(id) = id else { return None };
+            let id = id?;
             let door = doors
                 .get(usize::from(id))
                 .unwrap_or_else(|| panic!("parity sequence references missing door {id}"));
@@ -191,7 +191,7 @@ impl Engine {
         };
         let lines = &self.inner.world.fast_grid.level.jump_lines;
         let line = |id: Option<crate::jump_line::JumpLineIndex>| -> Option<LineBits> {
-            let Some(id) = id else { return None };
+            let id = id?;
             let line = lines
                 .get(usize::from(id))
                 .unwrap_or_else(|| panic!("parity sequence references missing jump line {id}"));
@@ -211,10 +211,7 @@ impl Engine {
             let sequence = sequence_ordinals.get(&id).copied().unwrap_or_else(|| {
                 panic!("parity sequence reference points outside manager: {id:?}/{element}")
             });
-            SequenceReference {
-                sequence: sequence,
-                element: element,
-            }
+            SequenceReference { sequence, element }
         };
 
         let mut sequences = Vec::new();
@@ -243,7 +240,7 @@ impl Engine {
                         transition: order.transition,
                         done: order.done,
                         id: order.order_id.get() - 1,
-                        antagonist: order.antagonist.map(&entity),
+                        antagonist: order.antagonist.map(entity),
                     })
                     .collect();
 
@@ -251,7 +248,7 @@ impl Engine {
                     SequenceElementData::Simple => SequenceSubtype::Simple,
                     SequenceElementData::Interaction { antagonist } => {
                         SequenceSubtype::Interaction {
-                            antagonist: antagonist.map(&entity),
+                            antagonist: antagonist.map(entity),
                         }
                     }
                     SequenceElementData::Damage {
@@ -263,12 +260,12 @@ impl Engine {
                         is_harder_hit,
                         ..
                     } => SequenceSubtype::Damage {
-                        origin: origin.map(&entity),
+                        origin: origin.map(entity),
                         damage: *damage,
                         concussion: *concussion,
                         harder_hit: *is_harder_hit,
                         sword_strike: sword_strike.map(|strike| strike as i32).unwrap_or(11),
-                        arrow: projectile.map(&entity),
+                        arrow: projectile.map(entity),
                     },
                     SequenceElementData::Movement {
                         destination,
@@ -293,13 +290,13 @@ impl Engine {
                             sector: sector.map(|value| value.get() as i32).unwrap_or(-1),
                             gate: gate(*gate_id),
                             line: line(*line_id),
-                            target: element.map(&entity),
+                            target: element.map(entity),
                             flags: flags.bits(),
                             tolerance: float(*tolerance),
                             direction: *direction,
                             action: *action as u32,
                             speed_factor: float(*speed_factor),
-                            linked_seek: linked_seek,
+                            linked_seek,
                         }
                     }
                     SequenceElementData::Generic { properties } => {
@@ -339,7 +336,7 @@ impl Engine {
                                         PropertyValue::Element(entity(*value))
                                     }
                                     FieldValue::OptionalElement(value) => {
-                                        PropertyValue::OptionalElement(value.map(&entity))
+                                        PropertyValue::OptionalElement(value.map(entity))
                                     }
                                     FieldValue::Animation(value) => {
                                         PropertyValue::Animation(*value as u32)
@@ -363,9 +360,7 @@ impl Engine {
                                 }
                             })
                             .collect();
-                        SequenceSubtype::Generic {
-                            properties: properties,
-                        }
+                        SequenceSubtype::Generic { properties }
                     }
                 };
 
@@ -377,7 +372,7 @@ impl Engine {
                 elements.push(SequenceElement {
                     command: element_state.command as u32,
                     level: element_state.command_level,
-                    owner: element_state.owner.map(&entity),
+                    owner: element_state.owner.map(entity),
                     state: element_state.state as u32,
                     priority: element_state.priority as u32,
                     posture_after_transition: transition_live
@@ -387,18 +382,18 @@ impl Engine {
                     transition_orders: transition_live
                         .then_some(element_state.num_transition_orders),
                     script_driven: element_state.script_driven,
-                    postponed: postponed,
-                    orders: orders,
-                    subtype: subtype,
+                    postponed,
+                    orders,
+                    subtype,
                 });
             }
             sequences.push(Sequence {
-                cursor: cursor,
-                current_level: current_level,
+                cursor,
+                current_level,
                 running_elements: running,
                 elements_in_progress: in_progress,
-                started: started,
-                elements: elements,
+                started,
+                elements,
             });
         }
 
@@ -406,7 +401,7 @@ impl Engine {
             manager.parity_runtime_refs(&self.inner.world.entities);
         serde_json::to_value(SequenceManager {
             next_order_id: self.inner.orders.next_order_id - 1,
-            sequences: sequences,
+            sequences,
             elements_to_go: elements_to_go
                 .into_iter()
                 .map(|(id, element)| reference(id, element))

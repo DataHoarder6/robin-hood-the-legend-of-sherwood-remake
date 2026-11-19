@@ -88,7 +88,8 @@ fn arrow_reaction_with_null_interesting_object_clears_stale_look_there_focus() {
 
     let mut engine = EngineInner::new();
     let receiver_id = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-    for id in [receiver_id] {
+    {
+        let id = receiver_id;
         let Entity::Soldier(soldier) = engine.ent_mut(id) else {
             panic!("arrow-focus test NPC changed kind")
         };

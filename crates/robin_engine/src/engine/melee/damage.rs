@@ -765,7 +765,7 @@ impl EngineInner {
         let params = SwordDamageParams {
             defender: &defender_ctx,
             defender_profile: defender_profile.as_ref(),
-            attacker_profile: &attacker_profile,
+            attacker_profile,
             strike,
             attacker: &attacker_ctx,
             gesture_quality,
@@ -825,7 +825,7 @@ impl EngineInner {
         // this boundary below because their translator owns the sole falling
         // order; close it here for ordinary strikes while leaving the dying
         // animation/roll to the later translation phase.
-        let push_strike = combat::strike_has_push_effect(&attacker_profile, strike);
+        let push_strike = combat::strike_has_push_effect(attacker_profile, strike);
         let fresh_lethal_ordinary =
             !push_strike && !coma_saved && life_points_before > 0 && life_points_after <= 0;
         if fresh_lethal_ordinary {
@@ -1011,7 +1011,7 @@ impl EngineInner {
                 // strikes therefore still run push-damage translation (including
                 // its fall/flight and hurt speech) when parried. Only an ordinary
                 // parried strike returns here with the transition above.
-                if !combat::strike_has_push_effect(&attacker_profile, strike) {
+                if !combat::strike_has_push_effect(attacker_profile, strike) {
                     self.trace_sword_damage_lifecycle(
                         "apply-after-parry",
                         victim_id,
@@ -1308,7 +1308,7 @@ impl EngineInner {
                 self.hero_speaking(tcx.assets, atk_id, HERO_KILLED_OPPONENT);
             } else if victim_is_unconscious {
                 let cutting = combat::get_strike_cutting_effect(
-                    &attacker_profile,
+                    attacker_profile,
                     strike,
                     attacker_ctx.fighting_ability,
                     attacker_ctx.is_rank_soldier,
@@ -1586,7 +1586,7 @@ impl EngineInner {
                 self.expect_entity(victim_id, "sword-damage death anim victim"),
                 Entity::Soldier(s) if s.soldier.rider
             );
-            let stunning_effect = combat::get_strike_stunning_effect(&attacker_profile, strike);
+            let stunning_effect = combat::get_strike_stunning_effect(attacker_profile, strike);
             if !is_rider && stunning_effect > 0 {
                 let e = self.expect_entity(victim_id, "sword-damage death anim victim");
                 let posture = e.element_data().posture();

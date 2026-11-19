@@ -2055,7 +2055,7 @@ fn install_rider_charge_fixture(
             .start_sequence_level(sequence_id);
         sequence_id
     };
-    engine.t_element_in_progress(&assets, sequence_id, 0);
+    engine.t_element_in_progress(assets, sequence_id, 0);
     engine.select_sequence_element(
         engine
             .orders

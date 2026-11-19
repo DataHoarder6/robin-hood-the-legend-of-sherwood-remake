@@ -4,177 +4,6 @@ use super::*;
 use crate::ai::{AiEntityHandle, AiState, DutyFlags, GotoFlags, MoneyFightOperation, Substate};
 use crate::ai_enemy::EnemyAi;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fixture(xs: &[f32]) -> (EngineInner, LevelAssets, Vec<EntityId>) {
-        let mut engine = EngineInner::new();
-        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
-            &mut engine,
-            (128, 128),
-            (2000.0, 2000.0),
-        );
-        let ids: Vec<_> = xs
-            .iter()
-            .map(|&x| {
-                let mut entity =
-                    crate::engine::test_support::actors::make_test_ai_soldier(Camp::Lacklandists);
-                entity
-                    .element_data_mut()
-                    .set_position_map(MapPoint::new(x, 500.0));
-                entity
-                    .element_data_mut()
-                    .set_position(crate::coordinates::WorldPoint3D::new(x, 500.0, 0.0));
-                entity.element_data_mut().set_sector(Some(sector));
-                entity.ai_actor_data_mut().unwrap().view_radius = 500;
-                entity.npc_data_mut().unwrap().life_points = 100;
-                let id = engine.add_test_entity(entity);
-                let ai = engine.money_ai_mut(id);
-                ai.base.owner_entity_id = Some(id);
-                ai.base.me = id.index();
-                id
-            })
-            .collect();
-        engine
-            .world
-            .soldier_registry
-            .rebuild_from_order(&engine.world.entities, ids.iter().copied());
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        (engine, assets, ids)
-    }
-
-    fn knockout(engine: &mut EngineInner, target: EntityId) {
-        engine
-            .world
-            .entities
-            .get_mut(target)
-            .unwrap()
-            .human_data_mut()
-            .unwrap()
-            .unconscious = true;
-        let ai = engine.money_ai_mut(target);
-        ai.base.current_substate = Substate::SleepingUnconscious;
-        ai.base.knocked_out_in_money_fight = true;
-    }
-
-    #[test]
-    fn victim_scan_includes_owner_and_inserts_later_equal_distance_first() {
-        let (mut engine, assets, ids) = fixture(&[500.0, 400.0, 600.0]);
-        for &target in &ids {
-            knockout(&mut engine, target);
-        }
-        engine.create_live_money_fight_victims(&assets, ids[0]);
-        assert_eq!(
-            engine.money_ai(ids[0]).money_fight_victims,
-            vec![ids[0].index(), ids[2].index(), ids[1].index()]
-        );
-    }
-
-    #[test]
-    fn money_morale_reads_current_knockout_flags_and_skips_dead_candidates() {
-        let (mut engine, mut assets, ids) = fixture(&[500.0, 600.0, 700.0, 800.0, 900.0]);
-        crate::engine::test_support::actors::edit_enemy_profile(
-            &mut assets,
-            engine.money_ai_mut(ids[0]),
-            |profile| profile.money = 40,
-        );
-        engine.money_ai_mut(ids[1]).base.current_substate = Substate::WonderingBrawlHitting;
-        knockout(&mut engine, ids[2]);
-        knockout(&mut engine, ids[3]);
-        knockout(&mut engine, ids[4]);
-        engine
-            .world
-            .entities
-            .get_mut(ids[4])
-            .unwrap()
-            .npc_data_mut()
-            .unwrap()
-            .life_points = 0;
-        assert!(!engine.wants_live_money_fight(&assets, ids[0]));
-        engine.money_ai_mut(ids[3]).base.knocked_out_in_money_fight = false;
-        assert!(engine.wants_live_money_fight(&assets, ids[0]));
-    }
-
-    #[test]
-    fn patrol_scan_overwrites_a_money_sort_key_even_when_member_is_rejected() {
-        let (mut engine, assets, ids) = fixture(&[500.0, 400.0, 800.0]);
-        knockout(&mut engine, ids[1]);
-        engine.create_live_money_fight_victims(&assets, ids[0]);
-        assert_eq!(
-            engine
-                .expect_entity(ids[1], "money key")
-                .human_data()
-                .unwrap()
-                .sorting_distance,
-            10_000.0
-        );
-        engine.money_ai_mut(ids[2]).base.theoretical_patrol = vec![ids[1]];
-        engine.initialize_patrol_for_npc(&assets, ids[2]);
-        assert_eq!(
-            engine
-                .expect_entity(ids[1], "nested patrol key")
-                .human_data()
-                .unwrap()
-                .sorting_distance,
-            160_000.0
-        );
-        assert!(engine.money_ai(ids[2]).base.patrol.is_empty());
-        assert_eq!(
-            engine.money_ai(ids[0]).money_fight_victims,
-            [ids[1].index()]
-        );
-    }
-
-    #[test]
-    fn sorting_keys_survive_native_rollback_but_not_persisted_saves_or_hashes() {
-        use robin_util::state_hash::StateHash;
-        use std::hash::Hasher;
-        let mut human = crate::element::HumanData::default();
-        let json = serde_json::to_string(&human).unwrap();
-        let binary = bitcode::encode(&human);
-        let mut before = std::collections::hash_map::DefaultHasher::new();
-        human.state_hash(&mut before);
-        human.sorting_distance = 160_000.0;
-        let mut after = std::collections::hash_map::DefaultHasher::new();
-        human.state_hash(&mut after);
-        assert_eq!(before.finish(), after.finish());
-        assert_eq!(human.clone().sorting_distance, 160_000.0);
-        assert_eq!(serde_json::to_string(&human).unwrap(), json);
-        assert_ne!(bitcode::encode(&human), binary);
-        assert_eq!(
-            bitcode::decode::<crate::element::HumanData>(&bitcode::encode(&human))
-                .unwrap()
-                .sorting_distance,
-            160_000.0
-        );
-        assert_eq!(
-            serde_json::from_str::<crate::element::HumanData>(&json)
-                .unwrap()
-                .sorting_distance,
-            0.0
-        );
-        assert_eq!(
-            bitcode::decode::<crate::element::HumanData>(&binary)
-                .unwrap()
-                .sorting_distance,
-            0.0
-        );
-    }
-
-    #[test]
-    fn enemy_rebuild_skips_unconscious_candidates_before_visibility() {
-        let (mut engine, assets, ids) = fixture(&[500.0, 600.0]);
-        knockout(&mut engine, ids[1]);
-        engine.money_ai_mut(ids[1]).base.current_substate = Substate::WonderingBrawlHitting;
-        crate::sight_obstacle::begin_parity_visibility_capture();
-        engine.create_live_money_fight_enemies(&assets, ids[0]);
-        assert!(crate::sight_obstacle::take_parity_visibility_capture().is_empty());
-        assert!(engine.money_ai(ids[0]).money_fight_enemies.is_empty());
-    }
-}
-
 impl EngineInner {
     fn money_ai(&self, owner: EntityId) -> &EnemyAi {
         self.enemy_ai(owner, "money-fight owner")
@@ -776,5 +605,176 @@ impl AiOwnerCtx<'_> {
             * modifier
             + 1.0) as u32;
         self.engine.money_timer(self.owner, frames);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(xs: &[f32]) -> (EngineInner, LevelAssets, Vec<EntityId>) {
+        let mut engine = EngineInner::new();
+        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
+            &mut engine,
+            (128, 128),
+            (2000.0, 2000.0),
+        );
+        let ids: Vec<_> = xs
+            .iter()
+            .map(|&x| {
+                let mut entity =
+                    crate::engine::test_support::actors::make_test_ai_soldier(Camp::Lacklandists);
+                entity
+                    .element_data_mut()
+                    .set_position_map(MapPoint::new(x, 500.0));
+                entity
+                    .element_data_mut()
+                    .set_position(crate::coordinates::WorldPoint3D::new(x, 500.0, 0.0));
+                entity.element_data_mut().set_sector(Some(sector));
+                entity.ai_actor_data_mut().unwrap().view_radius = 500;
+                entity.npc_data_mut().unwrap().life_points = 100;
+                let id = engine.add_test_entity(entity);
+                let ai = engine.money_ai_mut(id);
+                ai.base.owner_entity_id = Some(id);
+                ai.base.me = id.index();
+                id
+            })
+            .collect();
+        engine
+            .world
+            .soldier_registry
+            .rebuild_from_order(&engine.world.entities, ids.iter().copied());
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        (engine, assets, ids)
+    }
+
+    fn knockout(engine: &mut EngineInner, target: EntityId) {
+        engine
+            .world
+            .entities
+            .get_mut(target)
+            .unwrap()
+            .human_data_mut()
+            .unwrap()
+            .unconscious = true;
+        let ai = engine.money_ai_mut(target);
+        ai.base.current_substate = Substate::SleepingUnconscious;
+        ai.base.knocked_out_in_money_fight = true;
+    }
+
+    #[test]
+    fn victim_scan_includes_owner_and_inserts_later_equal_distance_first() {
+        let (mut engine, assets, ids) = fixture(&[500.0, 400.0, 600.0]);
+        for &target in &ids {
+            knockout(&mut engine, target);
+        }
+        engine.create_live_money_fight_victims(&assets, ids[0]);
+        assert_eq!(
+            engine.money_ai(ids[0]).money_fight_victims,
+            vec![ids[0].index(), ids[2].index(), ids[1].index()]
+        );
+    }
+
+    #[test]
+    fn money_morale_reads_current_knockout_flags_and_skips_dead_candidates() {
+        let (mut engine, mut assets, ids) = fixture(&[500.0, 600.0, 700.0, 800.0, 900.0]);
+        crate::engine::test_support::actors::edit_enemy_profile(
+            &mut assets,
+            engine.money_ai_mut(ids[0]),
+            |profile| profile.money = 40,
+        );
+        engine.money_ai_mut(ids[1]).base.current_substate = Substate::WonderingBrawlHitting;
+        knockout(&mut engine, ids[2]);
+        knockout(&mut engine, ids[3]);
+        knockout(&mut engine, ids[4]);
+        engine
+            .world
+            .entities
+            .get_mut(ids[4])
+            .unwrap()
+            .npc_data_mut()
+            .unwrap()
+            .life_points = 0;
+        assert!(!engine.wants_live_money_fight(&assets, ids[0]));
+        engine.money_ai_mut(ids[3]).base.knocked_out_in_money_fight = false;
+        assert!(engine.wants_live_money_fight(&assets, ids[0]));
+    }
+
+    #[test]
+    fn patrol_scan_overwrites_a_money_sort_key_even_when_member_is_rejected() {
+        let (mut engine, assets, ids) = fixture(&[500.0, 400.0, 800.0]);
+        knockout(&mut engine, ids[1]);
+        engine.create_live_money_fight_victims(&assets, ids[0]);
+        assert_eq!(
+            engine
+                .expect_entity(ids[1], "money key")
+                .human_data()
+                .unwrap()
+                .sorting_distance,
+            10_000.0
+        );
+        engine.money_ai_mut(ids[2]).base.theoretical_patrol = vec![ids[1]];
+        engine.initialize_patrol_for_npc(&assets, ids[2]);
+        assert_eq!(
+            engine
+                .expect_entity(ids[1], "nested patrol key")
+                .human_data()
+                .unwrap()
+                .sorting_distance,
+            160_000.0
+        );
+        assert!(engine.money_ai(ids[2]).base.patrol.is_empty());
+        assert_eq!(
+            engine.money_ai(ids[0]).money_fight_victims,
+            [ids[1].index()]
+        );
+    }
+
+    #[test]
+    fn sorting_keys_survive_native_rollback_but_not_persisted_saves_or_hashes() {
+        use robin_util::state_hash::StateHash;
+        use std::hash::Hasher;
+        let mut human = crate::element::HumanData::default();
+        let json = serde_json::to_string(&human).unwrap();
+        let binary = bitcode::encode(&human);
+        let mut before = std::collections::hash_map::DefaultHasher::new();
+        human.state_hash(&mut before);
+        human.sorting_distance = 160_000.0;
+        let mut after = std::collections::hash_map::DefaultHasher::new();
+        human.state_hash(&mut after);
+        assert_eq!(before.finish(), after.finish());
+        assert_eq!(human.clone().sorting_distance, 160_000.0);
+        assert_eq!(serde_json::to_string(&human).unwrap(), json);
+        assert_ne!(bitcode::encode(&human), binary);
+        assert_eq!(
+            bitcode::decode::<crate::element::HumanData>(&bitcode::encode(&human))
+                .unwrap()
+                .sorting_distance,
+            160_000.0
+        );
+        assert_eq!(
+            serde_json::from_str::<crate::element::HumanData>(&json)
+                .unwrap()
+                .sorting_distance,
+            0.0
+        );
+        assert_eq!(
+            bitcode::decode::<crate::element::HumanData>(&binary)
+                .unwrap()
+                .sorting_distance,
+            0.0
+        );
+    }
+
+    #[test]
+    fn enemy_rebuild_skips_unconscious_candidates_before_visibility() {
+        let (mut engine, assets, ids) = fixture(&[500.0, 600.0]);
+        knockout(&mut engine, ids[1]);
+        engine.money_ai_mut(ids[1]).base.current_substate = Substate::WonderingBrawlHitting;
+        crate::sight_obstacle::begin_parity_visibility_capture();
+        engine.create_live_money_fight_enemies(&assets, ids[0]);
+        assert!(crate::sight_obstacle::take_parity_visibility_capture().is_empty());
+        assert!(engine.money_ai(ids[0]).money_fight_enemies.is_empty());
     }
 }

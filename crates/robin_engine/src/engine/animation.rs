@@ -2638,15 +2638,14 @@ fn finish_actor_execute_result(
     let elem_idx = arm_ctx.elem_idx;
     let outcome = motion.map(|m| dispatch_arm_completion(sim, anim_type, m, arm_ctx));
 
-    let effective_motion = match outcome.unwrap_or_else(|| {
+    match outcome.unwrap_or_else(|| {
         panic!(
             "actor {entity_id:?} {anim_type:?} produced no Execute motion at {seq_id:?}/{elem_idx}"
         )
     }) {
         ExecuteOutcome::Forward(motion) => motion,
         ExecuteOutcome::Consumed => MotionState::InProgress,
-    };
-    effective_motion
+    }
 }
 
 impl EngineInner {
@@ -2716,10 +2715,7 @@ impl EngineInner {
         // movement driver. This distinction covers movement-exit animations,
         // injuries, waits, and interactions without a command allowlist.
         let selected_generic_order = self.actor_animation_selects_generic_order(entity_id);
-        let Some(operands) = self.actor_animation_operands(entity_id, selected_generic_order)
-        else {
-            return None;
-        };
+        let operands = self.actor_animation_operands(entity_id, selected_generic_order)?;
 
         self.initialize_actor_animation_placement(tcx.assets, entity_id);
 

@@ -988,10 +988,9 @@ impl EngineInner {
                                     (dx * dx + dy * dy) < 1e-4
                                 })
                                 .unwrap_or(true);
-                            let cam = d
-                                .map(|d| if direct { d.point_in } else { d.point_out })
-                                .unwrap_or(far_side_point);
-                            cam
+
+                            d.map(|d| if direct { d.point_in } else { d.point_out })
+                                .unwrap_or(far_side_point)
                         };
                         let mut turn =
                             SequenceElement::new_generic(level, Command::Turn, Some(entity_id));

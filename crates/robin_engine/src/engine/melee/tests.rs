@@ -453,7 +453,6 @@ fn install_test_melee_order(
 /// `SwordstrikeThrustA` promotes both principal opponents before
 /// the strike, so clicking a secondary opponent during a
 /// swordfight switches the primary target.
-
 /// Build a cross-sector `EnterSwordfight` dispatch where `crowding`
 /// fighters from the owner's sector already engage the opponent, and the
 /// element carries no jump line.  Returns the engine, the owner and the
@@ -547,37 +546,29 @@ mod combat;
 /// slot-search half.  So a jump-line-less element still interrupts when
 /// The swordfight-opponent count reports 3+ fighters on our side,
 /// and the PC never reaches the `TransitionRaisingSword` order.
-
 /// Counterpart of the gate above: with fewer than 3 fighters already on
 /// our side and no jump line, the original falls straight through the
 /// jump-line-present block and enters the swordfight normally
 /// during swordfight entry.
-
 /// Bud-Spencer-style line of three: PC punches the first soldier,
 /// who is launched along +X into a second soldier directly in
 /// front, and a third soldier behind the second. The flight tick
 /// should fire a domino RECEIVE_HIT_DAMAGE on both downstream
 /// soldiers, citing the PC as origin.
-
 /// The domino effect measures the literal world X/Y ground plane. An
 /// elevated victim can therefore be inside the 15-unit world radius even
 /// when projecting elevation into map Y would put it outside the radius.
-
 /// Actors behind the flight vector (negative dot product) are
 /// outside the punch arc and must not take damage.
-
 /// The Chebyshev pre-filter (maximum norm < `DOMINO_DISTANCE`) and the
 /// Euclidean check both have to fire. Place a candidate just past
 /// the radius and assert it is skipped.
-
 /// Non-upright actors (lying, dead, etc.) are excluded — they're
 /// already on the ground and the upright-only filter rejects them.
-
 /// Rolling and ladder/wall flights set `antagonist = None`, so the
 /// per-frame sweep skips them entirely. Verify by giving the flyer
 /// a None-antagonist flight even though there's a candidate
 /// directly in the flight path.
-
 /// Regression: cheat-driven `apply_concussion` on a PC must seed
 /// `concussion_healing_timeout` with the PC profile's `wake_up`,
 /// not the soldier fallback constant.  Before the asset-context

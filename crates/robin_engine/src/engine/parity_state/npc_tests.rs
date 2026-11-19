@@ -186,9 +186,9 @@ impl Engine {
             emergency_lying_box: position.use_emergency_lying_box,
             sector: sector(position.sector),
             sector_goal: sector(position.sector_goal),
-            door: door,
-            obstacle: obstacle,
-            target: target,
+            door,
+            obstacle,
+            target,
 
             world: point3(
                 position.position.x,
@@ -241,7 +241,7 @@ impl Engine {
             last_sound_id: sprite.last_sound_id,
             behind_display_order_reference: sprite.behind_display_order_ref,
             display_order_reference: sprite.display_order_ref.map(typed_entity_reference),
-            replacements: replacements,
+            replacements,
         };
 
         let resolve_ai_handle = |handle: u32| -> Value {
@@ -609,7 +609,7 @@ impl Engine {
                     "ambush_point_array_reset": enemy.ambush_point_array_reset,
                     "ambush_point_status": enemy.ambush_point_status.iter().map(|status| *status as u32).collect::<Vec<_>>(),
                     "my_seek_points": &enemy.my_seek_points,
-                    "personal_seek_point_1": enemy.personal_seek_point_1.as_ref().map(&seek_point),
+                    "personal_seek_point_1": enemy.personal_seek_point_1.as_ref().map(seek_point),
                     "personal_seek_point_2": enemy.personal_seek_point_2.as_ref().map(seek_point),
                     "seek_center": ai_position(enemy.seek_center),
                     "actual_seek_point": enemy.actual_seek_point,

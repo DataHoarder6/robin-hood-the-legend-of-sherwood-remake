@@ -124,7 +124,7 @@ impl AiOwnerCtx<'_> {
             self.engine,
             self.engine
                 .expect_entity(target, "visibility loss forecast target"),
-            selected_actor_is_passing_door(&self.engine.entities(), &self.engine.seq(), target),
+            selected_actor_is_passing_door(self.engine.entities(), self.engine.seq(), target),
         )
         .expect("visibility loss forecast requires an actor");
         let direction = self

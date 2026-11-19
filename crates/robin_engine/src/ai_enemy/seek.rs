@@ -461,7 +461,7 @@ impl EnemyAi {
         let debug_phase6 = seek_area_phase6_debug_matches(frame, creation_order);
         if debug_phase6 {
             crate::ai_enemy::parity_trace::SeekAreaPhase6::Phase6Before {
-                frame: frame,
+                frame,
                 owner_handle: self.base.me,
                 owner_creation_order: creation_order
                     .expect("phase6 diagnostic matched an owner without creation order"),
@@ -511,7 +511,7 @@ impl EnemyAi {
             self.my_seek_points.insert(0, 1111);
             if debug_phase6 {
                 crate::ai_enemy::parity_trace::SeekAreaPhase6::Phase6Personal1 {
-                    frame: frame,
+                    frame,
                     owner_creation_order: creation_order
                         .expect("phase6 diagnostic matched an owner without creation order"),
                     constructor: if seek_direction == UNDEFINED_DIRECTION {
@@ -538,7 +538,7 @@ impl EnemyAi {
         }
         if debug_phase6 {
             crate::ai_enemy::parity_trace::SeekAreaPhase6::Phase6After {
-                frame: frame,
+                frame,
                 owner_creation_order: creation_order
                     .expect("phase6 diagnostic matched an owner without creation order"),
                 personal2_inserted: insert_personal2,

@@ -10,77 +10,6 @@ use crate::position_interface::{ASPECT_RATIO, INVERSE_ASPECT_RATIO};
 use crate::profiles::ProfileRank;
 use crate::weapons::WeaponDistance;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::test_support::actors::make_test_ai_soldier;
-
-    fn add(engine: &mut EngineInner, x: f32, y: f32, z: f32, direction: i16) -> EntityId {
-        let id = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let entity = engine.world.entities.get_mut(id).unwrap();
-        entity
-            .element_data_mut()
-            .set_position(crate::coordinates::WorldPoint3D::new(x, y + z, z));
-        entity.element_data_mut().set_direction_instantly(direction);
-        id
-    }
-
-    #[test]
-    fn neighbour_ranking_uses_literal_world_coordinates() {
-        let mut engine = EngineInner::new();
-        let owner = add(&mut engine, 1231.5779, 1845.2806, 0.0, 8);
-        let first = add(&mut engine, 1159.4979, 1829.3608, 1.4621211, 7);
-        let second = add(&mut engine, 1220.2673, 1886.527, 0.0, 8);
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        engine
-            .world
-            .entities
-            .expect_ai_controller_mut(owner, format_args!("test allies"))
-            .list_us = vec![owner.index(), first.index(), second.index()];
-        assert_eq!(
-            engine.live_combat_neighbour(&assets, owner, None, true),
-            None
-        );
-        assert_eq!(
-            engine.live_combat_neighbour(&assets, owner, None, false),
-            Some(AiEntityHandle::new(second.index()))
-        );
-    }
-
-    #[test]
-    fn neighbour_distance_truncation_preserves_first_registered_tie() {
-        let mut engine = EngineInner::new();
-        let owner = add(&mut engine, 431.41672, 1755.0808, 4.6533546, 13);
-        let first = add(&mut engine, 420.24728, 1758.1467, 4.186_21, 12);
-        let second = add(&mut engine, 420.18027, 1757.8624, 4.382771, 12);
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        engine
-            .world
-            .entities
-            .expect_ai_controller_mut(owner, format_args!("test allies"))
-            .list_us = vec![owner.index(), first.index(), second.index()];
-        assert_eq!(
-            engine.live_combat_neighbour(&assets, owner, None, true),
-            Some(AiEntityHandle::new(first.index()))
-        );
-        assert_eq!(
-            engine.live_combat_neighbour(&assets, owner, None, false),
-            None
-        );
-        engine
-            .world
-            .entities
-            .expect_ai_controller_mut(owner, format_args!("test reorder"))
-            .list_us = vec![owner.index(), second.index(), first.index()];
-        assert_eq!(
-            engine.live_combat_neighbour(&assets, owner, None, true),
-            Some(AiEntityHandle::new(second.index()))
-        );
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct LiveCombatFighters<'a> {
     pub(super) engine: &'a EngineInner,
@@ -726,5 +655,76 @@ impl EngineInner {
             }
             index += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::test_support::actors::make_test_ai_soldier;
+
+    fn add(engine: &mut EngineInner, x: f32, y: f32, z: f32, direction: i16) -> EntityId {
+        let id = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let entity = engine.world.entities.get_mut(id).unwrap();
+        entity
+            .element_data_mut()
+            .set_position(crate::coordinates::WorldPoint3D::new(x, y + z, z));
+        entity.element_data_mut().set_direction_instantly(direction);
+        id
+    }
+
+    #[test]
+    fn neighbour_ranking_uses_literal_world_coordinates() {
+        let mut engine = EngineInner::new();
+        let owner = add(&mut engine, 1231.5779, 1845.2806, 0.0, 8);
+        let first = add(&mut engine, 1159.4979, 1829.3608, 1.4621211, 7);
+        let second = add(&mut engine, 1220.2673, 1886.527, 0.0, 8);
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        engine
+            .world
+            .entities
+            .expect_ai_controller_mut(owner, format_args!("test allies"))
+            .list_us = vec![owner.index(), first.index(), second.index()];
+        assert_eq!(
+            engine.live_combat_neighbour(&assets, owner, None, true),
+            None
+        );
+        assert_eq!(
+            engine.live_combat_neighbour(&assets, owner, None, false),
+            Some(AiEntityHandle::new(second.index()))
+        );
+    }
+
+    #[test]
+    fn neighbour_distance_truncation_preserves_first_registered_tie() {
+        let mut engine = EngineInner::new();
+        let owner = add(&mut engine, 431.41672, 1755.0808, 4.6533546, 13);
+        let first = add(&mut engine, 420.24728, 1758.1467, 4.186_21, 12);
+        let second = add(&mut engine, 420.18027, 1757.8624, 4.382771, 12);
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        engine
+            .world
+            .entities
+            .expect_ai_controller_mut(owner, format_args!("test allies"))
+            .list_us = vec![owner.index(), first.index(), second.index()];
+        assert_eq!(
+            engine.live_combat_neighbour(&assets, owner, None, true),
+            Some(AiEntityHandle::new(first.index()))
+        );
+        assert_eq!(
+            engine.live_combat_neighbour(&assets, owner, None, false),
+            None
+        );
+        engine
+            .world
+            .entities
+            .expect_ai_controller_mut(owner, format_args!("test reorder"))
+            .list_us = vec![owner.index(), second.index(), first.index()];
+        assert_eq!(
+            engine.live_combat_neighbour(&assets, owner, None, true),
+            Some(AiEntityHandle::new(second.index()))
+        );
     }
 }

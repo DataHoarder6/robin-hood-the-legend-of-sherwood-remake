@@ -799,9 +799,11 @@ mod tests {
             }
         }
         let exact: SimConfig = serde_json::from_value(wire).unwrap();
-        let mut gameplay = crate::gameplay_config::GameplayConfig::default();
-        gameplay.plan_quick_actions = false;
-        gameplay.control_tactical_units = true;
+        let mut gameplay = crate::gameplay_config::GameplayConfig {
+            plan_quick_actions: false,
+            control_tactical_units: true,
+            ..Default::default()
+        };
         exact.copy_gameplay_to_profile(&mut gameplay);
         assert!(!gameplay.plan_quick_actions);
         assert!(gameplay.control_tactical_units);

@@ -1186,7 +1186,7 @@ impl SoundCache {
         assert!(sample_id < 65536, "sample_id must fit in 16 bits");
         self.fx_cache.get_fx_sample(
             SampleRequest {
-                sample_present: sample_present,
+                sample_present,
                 is_3d: self.use_3d_sound,
                 ttl_init: FXCACHE_TTL_INIT,
                 ttl_increment: FXCACHE_TTL_INCREMENT,
@@ -1246,7 +1246,7 @@ impl SoundCache {
     ) -> Option<usize> {
         self.speech_cache.get_exclamation_sample(
             SampleRequest {
-                sample_present: sample_present,
+                sample_present,
                 is_3d: self.use_3d_sound,
                 ttl_init: SPEECHCACHE_TTL_INIT,
                 ttl_increment: SPEECHCACHE_TTL_INCREMENT,

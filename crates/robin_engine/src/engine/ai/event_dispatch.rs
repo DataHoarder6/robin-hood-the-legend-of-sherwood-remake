@@ -338,7 +338,7 @@ impl EngineInner {
     pub(in crate::engine) fn refresh_pc_produced_noise_for(&mut self, pc_id: EntityId) {
         let order_type = self
             .seq()
-            .current_order_for_actor(&self.entities(), pc_id)
+            .current_order_for_actor(self.entities(), pc_id)
             .map(|(_, _, order)| order.order_type)
             .unwrap_or(crate::order::OrderType::Invalid);
         self.refresh_pc_produced_noise_for_with_order(pc_id, order_type);
@@ -825,7 +825,7 @@ impl EngineInner {
         });
         let animation = self
             .seq()
-            .current_order_for_actor(&self.entities(), npc_id)
+            .current_order_for_actor(self.entities(), npc_id)
             .map(|(_, _, order)| order.order_type);
         let difficulty = self.control.sim_config.difficulty.rules();
         self.debug_refresh_view_lifecycle("refresh_view_before", npc_id, None);

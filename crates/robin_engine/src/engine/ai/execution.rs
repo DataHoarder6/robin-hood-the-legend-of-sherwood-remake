@@ -301,7 +301,8 @@ impl AiOwnerCtx<'_> {
             .ai(self.owner, "panic dispatch")
             .current_substate
             == crate::ai::Substate::FleeingPanic;
-        let handled = if panic_segment {
+
+        if panic_segment {
             self.execute_ai_common_fleeing_event(stimulus)
                 .expect("panic segment must be handled by the common fleeing dispatcher")
         } else if let Some(operation) = body_reaction {
@@ -379,8 +380,7 @@ impl AiOwnerCtx<'_> {
             self.execute_ai_enemy_event(stimulus)
         } else {
             self.execute_friendly_remaining_event(stimulus)
-        };
-        handled
+        }
     }
 
     pub(in crate::engine) fn execute_ai_think(&mut self, stimulus: &crate::ai::Stimulus) -> bool {

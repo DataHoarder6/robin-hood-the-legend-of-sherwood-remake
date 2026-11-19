@@ -138,10 +138,10 @@ impl MaterialSector {
             if a.y == p.y && b.y == p.y && p.x >= a.x.min(b.x) && p.x <= a.x.max(b.x) {
                 return true;
             }
-            if (a.y < p.y && b.y > p.y) || (a.y > p.y && b.y < p.y) {
-                if (a.x == p.x && b.x == p.x) || (a_right != b_right && left == right) {
-                    return true;
-                }
+            if ((a.y < p.y && b.y > p.y) || (a.y > p.y && b.y < p.y))
+                && ((a.x == p.x && b.x == p.x) || (a_right != b_right && left == right))
+            {
+                return true;
             }
             a = b;
         }

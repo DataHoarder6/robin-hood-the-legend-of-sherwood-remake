@@ -824,7 +824,7 @@ impl EngineInner {
                     .expect_entity(npc_id, "ambush direction")
                     .element_data()
                     .direction();
-                let (dx, dy) = crate::element::direction_vector_16(direction as i16);
+                let (dx, dy) = crate::element::direction_vector_16(direction);
                 // Ambush positions use projected map coordinates. Match the
                 // actor's map-space direction vector before testing sides;
                 // an unscaled Y can put opposite-side points on the same side.

@@ -10,382 +10,6 @@ use crate::sim_rng::SimulationContext;
 #[cfg(test)]
 mod nearest_opponent_tests;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::test_support::actors::make_test_ai_soldier;
-
-    fn combatants() -> (EngineInner, LevelAssets, EntityId, EntityId, EntityId) {
-        let mut engine = EngineInner::new();
-        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
-            &mut engine,
-            (16, 16),
-            (1000.0, 1000.0),
-        );
-        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let friend = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
-        let enemy = engine.add_test_entity(make_test_ai_soldier(Camp::Royalists));
-        for id in [owner, friend, enemy] {
-            let entity = engine.world.entities.get_mut(id).unwrap();
-            entity.element_data_mut().active = true;
-            entity.element_data_mut().set_sector(Some(sector));
-            entity
-                .element_data_mut()
-                .set_position_map(MapPoint::new(200.0, 200.0));
-            let npc = entity.npc_data_mut().unwrap();
-            npc.life_points = 100;
-            npc.view_radius = 1000;
-        }
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        (engine, assets, owner, friend, enemy)
-    }
-
-    #[test]
-    fn reconsider_lists_read_live_opponents_and_preserve_registry_order() {
-        let (mut engine, assets, owner, friend, enemy) = combatants();
-        let human = engine
-            .world
-            .entities
-            .get_mut(friend)
-            .unwrap()
-            .human_data_mut()
-            .unwrap();
-        human.opponents.add_principal(enemy, None);
-        human.opponents.add_principal(owner, None);
-        // Allied swordfighters remain candidates even when they cannot fight.
-        human.unconscious = true;
-        let lists = engine.rebuild_live_swordfight_lists(&assets, owner);
-        assert_eq!(
-            lists.nearest_friend_solo,
-            Some(AiEntityHandle::new(friend.index()))
-        );
-        assert_eq!(lists.number_of_friends, 2);
-        assert_eq!(
-            engine
-                .world
-                .entities
-                .expect_ai_controller(owner, format_args!("test allies"))
-                .list_us,
-            vec![owner.index(), friend.index()]
-        );
-        assert_eq!(
-            engine
-                .world
-                .entities
-                .expect_enemy_ai(owner, format_args!("test enemies"))
-                .list_them,
-            vec![enemy.index()]
-        );
-
-        engine
-            .world
-            .entities
-            .get_mut(friend)
-            .unwrap()
-            .human_data_mut()
-            .unwrap()
-            .opponents
-            .clear();
-        let lists = engine.rebuild_live_swordfight_lists(&assets, owner);
-        assert_eq!(lists.number_of_friends, 1);
-        assert_eq!(lists.nearest_friend_solo, None);
-    }
-
-    #[test]
-    fn observation_multiplicity_requires_attacking_state_and_reads_live_target() {
-        let (mut engine, assets, owner, friend, enemy) = combatants();
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(friend, format_args!("test ally"));
-        ai.base.current_state = AiState::Default;
-        ai.base.current_substate = Substate::AttackingSwordfight;
-        ai.base.primary_target = Some(AiEntityHandle::new(enemy.index()));
-        engine.rebuild_live_observation_lists(&assets, owner);
-        assert_eq!(
-            engine
-                .ai
-                .global
-                .primary_target_multiplicity_scratch
-                .get(&enemy.index()),
-            Some(&0)
-        );
-        engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(friend, format_args!("test ally"))
-            .base
-            .current_state = AiState::Attacking;
-        engine.rebuild_live_observation_lists(&assets, owner);
-        assert_eq!(
-            engine
-                .ai
-                .global
-                .primary_target_multiplicity_scratch
-                .get(&enemy.index()),
-            Some(&1)
-        );
-
-        engine
-            .world
-            .entities
-            .get_mut(friend)
-            .unwrap()
-            .element_data_mut()
-            .set_position(crate::coordinates::WorldPoint3D::new(200.0, 200.0, 2000.0));
-        engine.rebuild_live_observation_lists(&assets, owner);
-        assert_eq!(
-            engine
-                .ai
-                .global
-                .primary_target_multiplicity_scratch
-                .get(&enemy.index()),
-            Some(&0)
-        );
-    }
-
-    #[test]
-    fn principal_refresh_precedes_facing_rejection_without_building_tactical_views() {
-        let (mut engine, assets, owner, _, enemy) = combatants();
-        let previous = engine.add_test_entity(make_test_ai_soldier(Camp::Royalists));
-        engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .human_data_mut()
-            .unwrap()
-            .opponents
-            .add_principal(enemy, None);
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("test owner"));
-        ai.base.current_state = AiState::Attacking;
-        ai.base.current_substate = Substate::AttackingSwordfight;
-        ai.base.primary_target = Some(AiEntityHandle::new(previous.index()));
-        engine
-            .world
-            .entities
-            .get_mut(enemy)
-            .unwrap()
-            .element_data_mut()
-            .set_position_map(MapPoint::new(300.0, 200.0));
-        engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .element_data_mut()
-            .set_direction_instantly(12);
-        engine
-            .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-            .execute_reconsider_swordfight(false);
-        assert_eq!(
-            engine
-                .world
-                .entities
-                .expect_ai_controller(owner, format_args!("test target"))
-                .primary_target,
-            Some(AiEntityHandle::new(enemy.index()))
-        );
-        assert!(engine.ai.think_call_stack.is_empty());
-    }
-
-    #[test]
-    fn live_half_plane_visibility_rechecks_owner_activity_and_target_position() {
-        let (mut engine, assets, owner, _, enemy) = combatants();
-        engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .element_data_mut()
-            .set_direction_instantly(4);
-        engine
-            .world
-            .entities
-            .get_mut(enemy)
-            .unwrap()
-            .element_data_mut()
-            .set_position_map(MapPoint::new(350.0, 200.0));
-        assert!(engine.live_ai_detects_180(&assets, owner, enemy));
-        assert!(
-            engine
-                .ai
-                .view_radius_cache
-                .get(None, owner, engine.control.frame_counter)
-                .is_some()
-        );
-        engine
-            .world
-            .entities
-            .get_mut(enemy)
-            .unwrap()
-            .element_data_mut()
-            .set_position_map(MapPoint::new(50.0, 200.0));
-        assert!(!engine.live_ai_detects_180(&assets, owner, enemy));
-        engine
-            .world
-            .entities
-            .get_mut(enemy)
-            .unwrap()
-            .element_data_mut()
-            .set_position_map(MapPoint::new(350.0, 200.0));
-        engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .element_data_mut()
-            .active = false;
-        assert!(!engine.live_ai_detects_180(&assets, owner, enemy));
-    }
-
-    fn engage(engine: &mut EngineInner, owner: EntityId, target: EntityId) {
-        engine
-            .world
-            .entities
-            .get_mut(owner)
-            .unwrap()
-            .human_data_mut()
-            .unwrap()
-            .opponents
-            .add_principal(target, None);
-        engine
-            .world
-            .entities
-            .get_mut(target)
-            .unwrap()
-            .human_data_mut()
-            .unwrap()
-            .opponents
-            .add_principal(owner, None);
-        let ai = engine
-            .world
-            .entities
-            .expect_enemy_ai_mut(owner, format_args!("test swordfight"));
-        ai.base.current_state = AiState::Attacking;
-        ai.base.current_substate = Substate::AttackingSwordfight;
-        ai.base.primary_target = Some(AiEntityHandle::new(target.index()));
-    }
-
-    fn sober_combat_context() -> SimulationContext {
-        let seed = (0..1000)
-            .find(|seed| {
-                !crate::ai_enemy::drunk_combat_freezes(&SimulationContext::with_seed(*seed), 0)
-            })
-            .unwrap();
-        SimulationContext::with_seed(seed)
-    }
-
-    #[test]
-    fn lost_target_search_uses_the_refreshed_live_principal() {
-        for company in [0, 100] {
-            let (mut engine, mut assets, owner, _, previous) = combatants();
-            let target = engine.add_test_entity(crate::engine::test_support::actors::make_test_pc(
-                crate::element::Posture::Upright,
-            ));
-            let sector = engine
-                .world
-                .entities
-                .get(previous)
-                .unwrap()
-                .element_data()
-                .sector();
-            let entity = engine.world.entities.get_mut(target).unwrap();
-            entity.element_data_mut().set_sector(sector);
-            entity
-                .element_data_mut()
-                .set_position_map(MapPoint::new(350.0, 200.0));
-            entity.element_data_mut().active = false;
-            crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-            engage(&mut engine, owner, target);
-            let ai = engine
-                .world
-                .entities
-                .expect_enemy_ai_mut(owner, format_args!("test lost target"));
-            ai.company_number = company;
-            ai.base.primary_target = Some(AiEntityHandle::new(previous.index()));
-            let expected_center = engine.live_ai_position(target);
-            engine.enter_ai_think_frame(owner);
-            engine
-                .ai_ctx(&SimulationContext::with_seed(0), &assets, owner)
-                .execute_reconsider_swordfight(false);
-            let ai = engine
-                .world
-                .entities
-                .expect_enemy_ai(owner, format_args!("test lost outcome"));
-            assert_eq!(ai.missed_pc, Some(AiEntityHandle::new(target.index())));
-            assert!(ai.pc_missed);
-            assert_eq!(ai.base.seek_position, expected_center);
-            if company == 0 {
-                assert_eq!(ai.seek_center, expected_center);
-                assert_eq!(ai.base.current_state, AiState::Seeking);
-            } else {
-                assert_eq!(
-                    ai.base.current_substate,
-                    Substate::AttackingOverviewLookLeft
-                );
-            }
-            assert!(
-                engine
-                    .orders
-                    .sequence_manager
-                    .sequences_iter()
-                    .any(|sequence| {
-                        sequence.elements.iter().any(|element| {
-                            element.owner == Some(owner)
-                                && element.command == crate::element::Command::QuitSwordfight
-                        })
-                    })
-            );
-            assert_eq!(engine.ai_think_depth(), 1);
-        }
-    }
-
-    #[test]
-    fn live_swordfight_step_in_retains_exact_target_sector() {
-        let (mut engine, assets, owner, _, target) = combatants();
-        engage(&mut engine, owner, target);
-        let range = LiveCombatFighters {
-            engine: &engine,
-            assets: &assets,
-            owner,
-        }
-        .sword_range_maximal(owner.index());
-        engine
-            .world
-            .entities
-            .get_mut(target)
-            .unwrap()
-            .element_data_mut()
-            .set_position_map(MapPoint::new(200.0 + range as f32 + 80.0, 200.0));
-        let target_position = engine.live_ai_position(target);
-        engine.enter_ai_think_frame(owner);
-        engine
-            .ai_ctx(&sober_combat_context(), &assets, owner)
-            .reconsider_live_swordfight_tactics(
-                false,
-                SwordfightLists {
-                    nearest_friend_solo: None,
-                    number_of_friends: 1,
-                    number_of_swordfighting_enemies: 1,
-                },
-            );
-        assert_eq!(
-            engine
-                .world
-                .entities
-                .expect_ai_controller(owner, format_args!("test approach"))
-                .last_goto_destination,
-            target_position
-        );
-        assert!(target_position.sector.unwrap().arena_index().is_some());
-    }
-}
-
 impl EngineInner {
     fn nearest_live_opponent(&self, maurice: EntityId, rene: EntityId) -> Option<EntityId> {
         let position = self.live_ai_position(rene);
@@ -634,7 +258,7 @@ impl AiOwnerCtx<'_> {
             .engine
             .seq()
             .element_is_about_to_be_launched_or_postponed_by_current(
-                &self.engine.entities(),
+                self.engine.entities(),
                 self.owner,
                 crate::element::Command::EnterSwordfight,
             )
@@ -735,7 +359,7 @@ impl AiOwnerCtx<'_> {
         let input = extract_exact_forecast_input(
             self.engine,
             entity,
-            selected_actor_is_passing_door(&self.engine.entities(), &self.engine.seq(), target),
+            selected_actor_is_passing_door(self.engine.entities(), self.engine.seq(), target),
         )
         .expect("lost swordfight forecast requires an actor");
         let forecast = crate::ai::prepare_forecast_destination_for_ia(
@@ -1247,5 +871,381 @@ impl AiOwnerCtx<'_> {
         } else {
             self.stand_observing_combat();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::test_support::actors::make_test_ai_soldier;
+
+    fn combatants() -> (EngineInner, LevelAssets, EntityId, EntityId, EntityId) {
+        let mut engine = EngineInner::new();
+        let (sector, _) = crate::engine::test_support::extra_engine_combat::square_sector_map(
+            &mut engine,
+            (16, 16),
+            (1000.0, 1000.0),
+        );
+        let owner = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let friend = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+        let enemy = engine.add_test_entity(make_test_ai_soldier(Camp::Royalists));
+        for id in [owner, friend, enemy] {
+            let entity = engine.world.entities.get_mut(id).unwrap();
+            entity.element_data_mut().active = true;
+            entity.element_data_mut().set_sector(Some(sector));
+            entity
+                .element_data_mut()
+                .set_position_map(MapPoint::new(200.0, 200.0));
+            let npc = entity.npc_data_mut().unwrap();
+            npc.life_points = 100;
+            npc.view_radius = 1000;
+        }
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        (engine, assets, owner, friend, enemy)
+    }
+
+    #[test]
+    fn reconsider_lists_read_live_opponents_and_preserve_registry_order() {
+        let (mut engine, assets, owner, friend, enemy) = combatants();
+        let human = engine
+            .world
+            .entities
+            .get_mut(friend)
+            .unwrap()
+            .human_data_mut()
+            .unwrap();
+        human.opponents.add_principal(enemy, None);
+        human.opponents.add_principal(owner, None);
+        // Allied swordfighters remain candidates even when they cannot fight.
+        human.unconscious = true;
+        let lists = engine.rebuild_live_swordfight_lists(&assets, owner);
+        assert_eq!(
+            lists.nearest_friend_solo,
+            Some(AiEntityHandle::new(friend.index()))
+        );
+        assert_eq!(lists.number_of_friends, 2);
+        assert_eq!(
+            engine
+                .world
+                .entities
+                .expect_ai_controller(owner, format_args!("test allies"))
+                .list_us,
+            vec![owner.index(), friend.index()]
+        );
+        assert_eq!(
+            engine
+                .world
+                .entities
+                .expect_enemy_ai(owner, format_args!("test enemies"))
+                .list_them,
+            vec![enemy.index()]
+        );
+
+        engine
+            .world
+            .entities
+            .get_mut(friend)
+            .unwrap()
+            .human_data_mut()
+            .unwrap()
+            .opponents
+            .clear();
+        let lists = engine.rebuild_live_swordfight_lists(&assets, owner);
+        assert_eq!(lists.number_of_friends, 1);
+        assert_eq!(lists.nearest_friend_solo, None);
+    }
+
+    #[test]
+    fn observation_multiplicity_requires_attacking_state_and_reads_live_target() {
+        let (mut engine, assets, owner, friend, enemy) = combatants();
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(friend, format_args!("test ally"));
+        ai.base.current_state = AiState::Default;
+        ai.base.current_substate = Substate::AttackingSwordfight;
+        ai.base.primary_target = Some(AiEntityHandle::new(enemy.index()));
+        engine.rebuild_live_observation_lists(&assets, owner);
+        assert_eq!(
+            engine
+                .ai
+                .global
+                .primary_target_multiplicity_scratch
+                .get(&enemy.index()),
+            Some(&0)
+        );
+        engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(friend, format_args!("test ally"))
+            .base
+            .current_state = AiState::Attacking;
+        engine.rebuild_live_observation_lists(&assets, owner);
+        assert_eq!(
+            engine
+                .ai
+                .global
+                .primary_target_multiplicity_scratch
+                .get(&enemy.index()),
+            Some(&1)
+        );
+
+        engine
+            .world
+            .entities
+            .get_mut(friend)
+            .unwrap()
+            .element_data_mut()
+            .set_position(crate::coordinates::WorldPoint3D::new(200.0, 200.0, 2000.0));
+        engine.rebuild_live_observation_lists(&assets, owner);
+        assert_eq!(
+            engine
+                .ai
+                .global
+                .primary_target_multiplicity_scratch
+                .get(&enemy.index()),
+            Some(&0)
+        );
+    }
+
+    #[test]
+    fn principal_refresh_precedes_facing_rejection_without_building_tactical_views() {
+        let (mut engine, assets, owner, _, enemy) = combatants();
+        let previous = engine.add_test_entity(make_test_ai_soldier(Camp::Royalists));
+        engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .human_data_mut()
+            .unwrap()
+            .opponents
+            .add_principal(enemy, None);
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("test owner"));
+        ai.base.current_state = AiState::Attacking;
+        ai.base.current_substate = Substate::AttackingSwordfight;
+        ai.base.primary_target = Some(AiEntityHandle::new(previous.index()));
+        engine
+            .world
+            .entities
+            .get_mut(enemy)
+            .unwrap()
+            .element_data_mut()
+            .set_position_map(MapPoint::new(300.0, 200.0));
+        engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .element_data_mut()
+            .set_direction_instantly(12);
+        engine
+            .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+            .execute_reconsider_swordfight(false);
+        assert_eq!(
+            engine
+                .world
+                .entities
+                .expect_ai_controller(owner, format_args!("test target"))
+                .primary_target,
+            Some(AiEntityHandle::new(enemy.index()))
+        );
+        assert!(engine.ai.think_call_stack.is_empty());
+    }
+
+    #[test]
+    fn live_half_plane_visibility_rechecks_owner_activity_and_target_position() {
+        let (mut engine, assets, owner, _, enemy) = combatants();
+        engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .element_data_mut()
+            .set_direction_instantly(4);
+        engine
+            .world
+            .entities
+            .get_mut(enemy)
+            .unwrap()
+            .element_data_mut()
+            .set_position_map(MapPoint::new(350.0, 200.0));
+        assert!(engine.live_ai_detects_180(&assets, owner, enemy));
+        assert!(
+            engine
+                .ai
+                .view_radius_cache
+                .get(None, owner, engine.control.frame_counter)
+                .is_some()
+        );
+        engine
+            .world
+            .entities
+            .get_mut(enemy)
+            .unwrap()
+            .element_data_mut()
+            .set_position_map(MapPoint::new(50.0, 200.0));
+        assert!(!engine.live_ai_detects_180(&assets, owner, enemy));
+        engine
+            .world
+            .entities
+            .get_mut(enemy)
+            .unwrap()
+            .element_data_mut()
+            .set_position_map(MapPoint::new(350.0, 200.0));
+        engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .element_data_mut()
+            .active = false;
+        assert!(!engine.live_ai_detects_180(&assets, owner, enemy));
+    }
+
+    fn engage(engine: &mut EngineInner, owner: EntityId, target: EntityId) {
+        engine
+            .world
+            .entities
+            .get_mut(owner)
+            .unwrap()
+            .human_data_mut()
+            .unwrap()
+            .opponents
+            .add_principal(target, None);
+        engine
+            .world
+            .entities
+            .get_mut(target)
+            .unwrap()
+            .human_data_mut()
+            .unwrap()
+            .opponents
+            .add_principal(owner, None);
+        let ai = engine
+            .world
+            .entities
+            .expect_enemy_ai_mut(owner, format_args!("test swordfight"));
+        ai.base.current_state = AiState::Attacking;
+        ai.base.current_substate = Substate::AttackingSwordfight;
+        ai.base.primary_target = Some(AiEntityHandle::new(target.index()));
+    }
+
+    fn sober_combat_context() -> SimulationContext {
+        let seed = (0..1000)
+            .find(|seed| {
+                !crate::ai_enemy::drunk_combat_freezes(&SimulationContext::with_seed(*seed), 0)
+            })
+            .unwrap();
+        SimulationContext::with_seed(seed)
+    }
+
+    #[test]
+    fn lost_target_search_uses_the_refreshed_live_principal() {
+        for company in [0, 100] {
+            let (mut engine, mut assets, owner, _, previous) = combatants();
+            let target = engine.add_test_entity(crate::engine::test_support::actors::make_test_pc(
+                crate::element::Posture::Upright,
+            ));
+            let sector = engine
+                .world
+                .entities
+                .get(previous)
+                .unwrap()
+                .element_data()
+                .sector();
+            let entity = engine.world.entities.get_mut(target).unwrap();
+            entity.element_data_mut().set_sector(sector);
+            entity
+                .element_data_mut()
+                .set_position_map(MapPoint::new(350.0, 200.0));
+            entity.element_data_mut().active = false;
+            crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+            engage(&mut engine, owner, target);
+            let ai = engine
+                .world
+                .entities
+                .expect_enemy_ai_mut(owner, format_args!("test lost target"));
+            ai.company_number = company;
+            ai.base.primary_target = Some(AiEntityHandle::new(previous.index()));
+            let expected_center = engine.live_ai_position(target);
+            engine.enter_ai_think_frame(owner);
+            engine
+                .ai_ctx(&SimulationContext::with_seed(0), &assets, owner)
+                .execute_reconsider_swordfight(false);
+            let ai = engine
+                .world
+                .entities
+                .expect_enemy_ai(owner, format_args!("test lost outcome"));
+            assert_eq!(ai.missed_pc, Some(AiEntityHandle::new(target.index())));
+            assert!(ai.pc_missed);
+            assert_eq!(ai.base.seek_position, expected_center);
+            if company == 0 {
+                assert_eq!(ai.seek_center, expected_center);
+                assert_eq!(ai.base.current_state, AiState::Seeking);
+            } else {
+                assert_eq!(
+                    ai.base.current_substate,
+                    Substate::AttackingOverviewLookLeft
+                );
+            }
+            assert!(
+                engine
+                    .orders
+                    .sequence_manager
+                    .sequences_iter()
+                    .any(|sequence| {
+                        sequence.elements.iter().any(|element| {
+                            element.owner == Some(owner)
+                                && element.command == crate::element::Command::QuitSwordfight
+                        })
+                    })
+            );
+            assert_eq!(engine.ai_think_depth(), 1);
+        }
+    }
+
+    #[test]
+    fn live_swordfight_step_in_retains_exact_target_sector() {
+        let (mut engine, assets, owner, _, target) = combatants();
+        engage(&mut engine, owner, target);
+        let range = LiveCombatFighters {
+            engine: &engine,
+            assets: &assets,
+            owner,
+        }
+        .sword_range_maximal(owner.index());
+        engine
+            .world
+            .entities
+            .get_mut(target)
+            .unwrap()
+            .element_data_mut()
+            .set_position_map(MapPoint::new(200.0 + range as f32 + 80.0, 200.0));
+        let target_position = engine.live_ai_position(target);
+        engine.enter_ai_think_frame(owner);
+        engine
+            .ai_ctx(&sober_combat_context(), &assets, owner)
+            .reconsider_live_swordfight_tactics(
+                false,
+                SwordfightLists {
+                    nearest_friend_solo: None,
+                    number_of_friends: 1,
+                    number_of_swordfighting_enemies: 1,
+                },
+            );
+        assert_eq!(
+            engine
+                .world
+                .entities
+                .expect_ai_controller(owner, format_args!("test approach"))
+                .last_goto_destination,
+            target_position
+        );
+        assert!(target_position.sector.unwrap().arena_index().is_some());
     }
 }

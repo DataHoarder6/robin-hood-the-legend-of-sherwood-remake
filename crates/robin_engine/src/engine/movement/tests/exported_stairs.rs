@@ -448,8 +448,8 @@ fn exported_building_doors_support_player_clicks_after_reopening() {
                     }
                 );
                 assert!(!crate::engine::ai::selected_actor_is_passing_door(
-                    &engine.entities(),
-                    &engine.seq(),
+                    engine.entities(),
+                    engine.seq(),
                     owner
                 ));
                 if state != 1 {
@@ -541,8 +541,8 @@ fn exported_building_doors_support_player_clicks_after_reopening() {
                             )
                             .unwrap();
                             assert!(!crate::engine::ai::selected_actor_is_passing_door(
-                                &engine.entities(),
-                                &engine.seq(),
+                                engine.entities(),
+                                engine.seq(),
                                 owner
                             ));
                             exit_checks += 1;
@@ -588,8 +588,7 @@ fn prepared_passage_state_preserves_script_activation_and_validates_bindings() {
         let error = crate::level_data::LoadedLevel::hackable_from_json(
             &serde_json::to_vec(&invalid).unwrap(),
         )
-        .err()
-        .expect("invalid prepared passage must fail to load");
+        .expect_err("invalid prepared passage must fail to load");
         assert!(error.to_string().contains("passage"), "{error}");
     }
 }
@@ -1093,8 +1092,10 @@ fn walk_exported_lift_route(
         .with_arena_index(leave.sector_out_index.unwrap());
     // Ordinary movement between two doors on one landing does not need to
     // enter the stair. Prepared dispatch still exercises that explicit detour.
-    let requires_crossing = matches!(dispatch, StairDispatch::Prepared | StairDispatch::SoldierPrepared | StairDispatch::CivilianPrepared)
-        || source_sector != destination_sector
+    let requires_crossing = matches!(
+        dispatch,
+        StairDispatch::Prepared | StairDispatch::SoldierPrepared | StairDispatch::CivilianPrepared
+    ) || source_sector != destination_sector
         || enter.layer_out != leave.layer_out;
     let lift_sector = enter.sector_in_index.unwrap();
     let virtual_room = engine.world.fast_grid.level.sectors[usize::from(lift_sector)]
@@ -1262,15 +1263,15 @@ fn walk_exported_lift_route(
         engine.control.frame_counter += 1;
         engine.t_hourglass_phase_sequences(&assets);
         engine.hourglass_phase_paths(TickCtx::new(&sim, &assets));
-        if let Some((id, index)) = engine.entities().current_element_for_actor(owner) {
-            if engine.seq().get_element(id, index).is_some_and(|element| {
+        if let Some((id, index)) = engine.entities().current_element_for_actor(owner)
+            && engine.seq().get_element(id, index).is_some_and(|element| {
                 element
                     .orders
                     .front()
                     .is_some_and(|order| order.order_type == stop)
-            }) {
-                stop_element = Some((id, index));
-            }
+            })
+        {
+            stop_element = Some((id, index));
         }
         engine.t_tick_actor_owner_envelopes(&assets);
         tick(&mut engine, &assets, owner);
@@ -1290,8 +1291,8 @@ fn walk_exported_lift_route(
         // at its midpoint. Require ordinary lookup agreement once its explicit
         // approach movement has finished, including the destination.
         let passing = crate::engine::ai::selected_actor_is_passing_door(
-            &engine.entities(),
-            &engine.seq(),
+            engine.entities(),
+            engine.seq(),
             owner,
         );
         // Climbing preserves its approach receiver while animation motion
@@ -1716,8 +1717,8 @@ fn changing_climb_barriers_reopen_before_or_after_path_failure() {
                                 return;
                             }
                             if crate::engine::ai::selected_actor_is_passing_door(
-                                &engine.entities(),
-                                &engine.seq(),
+                                engine.entities(),
+                                engine.seq(),
                                 owner,
                             ) {
                                 return;
@@ -1983,7 +1984,7 @@ fn exported_ladder_serializes_opposing_actor_routes() {
                     .iter()
                     .map(|(owner, _, _)| engine.ent(*owner).actor_data().unwrap().active_lift)
                     .collect::<Vec<_>>();
-                for pair in active.chunks_exact(2) {
+                for pair in active.as_chunks::<2>().0 {
                     assert!(
                         !(pair[0].is_some() && pair[1].is_some()),
                         "opposing reservations overlap at placement {placement}"
@@ -2120,8 +2121,8 @@ fn audit_climb_barrier_animation(exit_phase: bool) {
                         return;
                     }
                     assert!(crate::engine::ai::selected_actor_is_passing_door(
-                        &engine.entities(),
-                        &engine.seq(),
+                        engine.entities(),
+                        engine.seq(),
                         owner
                     ));
                     engine.apply_patch(

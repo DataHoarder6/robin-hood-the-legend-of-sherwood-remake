@@ -7,52 +7,6 @@ use crate::ai::{
 use crate::ai_enemy::SeekFlags;
 use crate::profiles::ProfileRank;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::test_support::actors::make_test_ai_soldier;
-
-    #[test]
-    fn sync_reunion_waits_for_enroute_partners_last_waypoint() {
-        let mut engine = EngineInner::new();
-        let owner =
-            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
-        let partner =
-            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
-        let mut assets = LevelAssets::new();
-        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
-        engine.control.frame_counter = 1072;
-        let ai = &mut engine.observation_ai_mut(owner).base;
-        ai.current_state = AiState::Default;
-        ai.current_substate = Substate::DefaultLookingSidewardsForCharly;
-        ai.synchronize_charly = Some(AiEntityHandle::new(partner.index()));
-        ai.synchronize_index = 3;
-        ai.macro_in_progress = true;
-        ai.macro_command = vec![crate::ai::MacroOpcode::Wait as u8, 100, 0];
-        ai.macro_command_offset = 0;
-        ai.number_of_remaining_macro_bytes = 3;
-        let ai = &mut engine.observation_ai_mut(partner).base;
-        ai.current_state = AiState::Default;
-        ai.current_substate = Substate::DefaultEnroute;
-        ai.macro_in_progress = false;
-        ai.detached_patrol_path_status.current_waypoint_index = 3;
-        ai.detached_patrol_path_status.last_waypoint_index = 2;
-        engine
-            .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
-            .execute_ai_seen_charly(partner.index());
-        let ai = &engine.observation_ai(owner).base;
-        assert_eq!(ai.current_substate, Substate::DefaultSynchronizing);
-        assert_eq!(ai.macro_command_offset, 0);
-        assert_eq!(ai.number_of_remaining_macro_bytes, 3);
-        assert!(!ai.macro_timer_is_running);
-        assert_eq!(ai.when_does_timer_ring, 1092);
-        assert_eq!(
-            engine.observation_ai(partner).base.synchronizing_actors,
-            vec![owner.index()]
-        );
-    }
-}
-
 impl EngineInner {}
 
 impl AiOwnerCtx<'_> {
@@ -270,5 +224,51 @@ impl AiOwnerCtx<'_> {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::test_support::actors::make_test_ai_soldier;
+
+    #[test]
+    fn sync_reunion_waits_for_enroute_partners_last_waypoint() {
+        let mut engine = EngineInner::new();
+        let owner =
+            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
+        let partner =
+            engine.add_test_entity(make_test_ai_soldier(crate::element::Camp::Lacklandists));
+        let mut assets = LevelAssets::new();
+        crate::engine::complete_test_runtime_fixture(&mut engine, &mut assets);
+        engine.control.frame_counter = 1072;
+        let ai = &mut engine.observation_ai_mut(owner).base;
+        ai.current_state = AiState::Default;
+        ai.current_substate = Substate::DefaultLookingSidewardsForCharly;
+        ai.synchronize_charly = Some(AiEntityHandle::new(partner.index()));
+        ai.synchronize_index = 3;
+        ai.macro_in_progress = true;
+        ai.macro_command = vec![crate::ai::MacroOpcode::Wait as u8, 100, 0];
+        ai.macro_command_offset = 0;
+        ai.number_of_remaining_macro_bytes = 3;
+        let ai = &mut engine.observation_ai_mut(partner).base;
+        ai.current_state = AiState::Default;
+        ai.current_substate = Substate::DefaultEnroute;
+        ai.macro_in_progress = false;
+        ai.detached_patrol_path_status.current_waypoint_index = 3;
+        ai.detached_patrol_path_status.last_waypoint_index = 2;
+        engine
+            .ai_ctx(&crate::sim_rng::test_context(), &assets, owner)
+            .execute_ai_seen_charly(partner.index());
+        let ai = &engine.observation_ai(owner).base;
+        assert_eq!(ai.current_substate, Substate::DefaultSynchronizing);
+        assert_eq!(ai.macro_command_offset, 0);
+        assert_eq!(ai.number_of_remaining_macro_bytes, 3);
+        assert!(!ai.macro_timer_is_running);
+        assert_eq!(ai.when_does_timer_ring, 1092);
+        assert_eq!(
+            engine.observation_ai(partner).base.synchronizing_actors,
+            vec![owner.index()]
+        );
     }
 }

@@ -73,7 +73,8 @@ fn removal_cleans_all_seats_and_owned_queues_without_reordering_survivors() {
     assert!(engine.players.seats[1].locker_active);
     assert_eq!(engine.players.selection_before_user_lock, [last, first]);
     let ai = engine.ai_ctrl(observer);
-    for stimuli in [&ai.stimulus_queue] {
+    {
+        let stimuli = &ai.stimulus_queue;
         assert_eq!(stimuli.len(), 2);
         assert_eq!(
             stimuli[0].owner, historical.owner,

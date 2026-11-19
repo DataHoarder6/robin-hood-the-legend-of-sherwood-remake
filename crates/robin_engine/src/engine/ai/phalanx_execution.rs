@@ -106,14 +106,11 @@ impl EngineInner {
         merged: &mut Vec<u32>,
     ) {
         let mut index = 0;
-        loop {
-            let Some(&handle) = self
-                .enemy_ai(owner, "phalanx retained enemy")
-                .list_them
-                .get(index)
-            else {
-                break;
-            };
+        while let Some(&handle) = self
+            .enemy_ai(owner, "phalanx retained enemy")
+            .list_them
+            .get(index)
+        {
             let target = self.expect_human_id_for_ai_handle(handle, "phalanx retained target");
             let entity = self.expect_entity(target, "phalanx fighting target");
             let able = match entity {

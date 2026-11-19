@@ -55,7 +55,7 @@ impl CombatFighterAccess for Fighters<'_> {
         self.actor(handle).enemy_ai().unwrap().hth_weapon_id
     }
     fn sword_range_maximal(self, handle: u32) -> u16 {
-        self.actor(handle).enemy_ai().unwrap().sword_range as u16
+        self.actor(handle).enemy_ai().unwrap().sword_range
     }
     fn fighting_ability(self, handle: u32) -> u16 {
         self.actor(handle);

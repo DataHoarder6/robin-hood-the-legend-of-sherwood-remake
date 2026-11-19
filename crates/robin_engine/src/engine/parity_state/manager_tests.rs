@@ -88,7 +88,7 @@ impl Engine {
                             "transition": order.transition,
                             "done": order.done,
                             "id": order.order_id.get() - 1,
-                            "antagonist": order.antagonist.map(&entity).unwrap_or(Value::Null),
+                            "antagonist": order.antagonist.map(entity).unwrap_or(Value::Null),
                         })
                     })
                     .collect();
@@ -97,7 +97,7 @@ impl Engine {
                     SequenceElementData::Simple => json!({ "kind": "simple" }),
                     SequenceElementData::Interaction { antagonist } => json!({
                         "kind": "interaction",
-                        "antagonist": antagonist.map(&entity).unwrap_or(Value::Null),
+                        "antagonist": antagonist.map(entity).unwrap_or(Value::Null),
                     }),
                     SequenceElementData::Damage {
                         origin,
@@ -109,12 +109,12 @@ impl Engine {
                         ..
                     } => json!({
                         "kind": "damage",
-                        "origin": origin.map(&entity).unwrap_or(Value::Null),
+                        "origin": origin.map(entity).unwrap_or(Value::Null),
                         "damage": damage,
                         "concussion": concussion,
                         "harder_hit": is_harder_hit,
                         "sword_strike": sword_strike.map(|strike| strike as i32).unwrap_or(11),
-                        "arrow": projectile.map(&entity).unwrap_or(Value::Null),
+                        "arrow": projectile.map(entity).unwrap_or(Value::Null),
                     }),
                     SequenceElementData::Movement {
                         destination,
@@ -141,7 +141,7 @@ impl Engine {
                             "sector": sector.map(|value| value.get() as i32).unwrap_or(-1),
                             "gate": gate(*gate_id),
                             "line": line(*line_id),
-                            "target": element.map(&entity).unwrap_or(Value::Null),
+                            "target": element.map(entity).unwrap_or(Value::Null),
                             "flags": flags.bits(),
                             "tolerance": float(*tolerance),
                             "direction": direction,
@@ -181,7 +181,7 @@ impl Engine {
                                     FieldValue::Point3D { x, y, z } => point3(*x, *y, *z),
                                     FieldValue::Element(value) => entity(*value),
                                     FieldValue::OptionalElement(value) => {
-                                        value.map(&entity).unwrap_or(Value::Null)
+                                        value.map(entity).unwrap_or(Value::Null)
                                     }
                                     FieldValue::Animation(value) => json!(*value as u32),
                                     FieldValue::LineId(value) => line(Some(*value)),
@@ -205,7 +205,7 @@ impl Engine {
                 elements.push(json!({
                     "command": element_state.command as u32,
                     "level": element_state.command_level,
-                    "owner": element_state.owner.map(&entity).unwrap_or(Value::Null),
+                    "owner": element_state.owner.map(entity).unwrap_or(Value::Null),
                     "state": element_state.state as u32,
                     "priority": element_state.priority as u32,
                     "posture_after_transition": if transition_live { json!(element_state.posture_after_transition as u32) } else { Value::Null },
@@ -304,17 +304,19 @@ fn populated_manager_schemas_match_original_encoders() {
         crate::gate::GateType::Jump,
         crate::gate::GateType::None,
     ] {
-        let mut door = crate::gate::Door::default();
-        door.gate_type = gate_type;
-        door.active = true;
-        door.locked_pc = true;
-        door.locked_npc_villain_after_patch = true;
-        door.unlockable_after_patch = true;
-        door.special_authorisation_pc = true;
-        door.authorised_pc_direct = 0x21;
-        door.authorised_pc_indirect = 0x42;
-        door.point_out = MapPoint::new(-0.0, 2.5);
-        door.point_in = MapPoint::new(13.0, -9.0);
+        let door = crate::gate::Door {
+            gate_type,
+            active: true,
+            locked_pc: true,
+            locked_npc_villain_after_patch: true,
+            unlockable_after_patch: true,
+            special_authorisation_pc: true,
+            authorised_pc_direct: 0x21,
+            authorised_pc_indirect: 0x42,
+            point_out: MapPoint::new(-0.0, 2.5),
+            point_in: MapPoint::new(13.0, -9.0),
+            ..Default::default()
+        };
         inner.script_domains.interactables.doors.push(door);
     }
     let mut sequence = Sequence::new();

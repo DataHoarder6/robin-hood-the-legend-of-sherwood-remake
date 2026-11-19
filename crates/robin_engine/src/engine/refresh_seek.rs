@@ -1015,7 +1015,7 @@ impl crate::engine::EngineInner {
             CascadeFlags::NEXT_LEVEL,
         );
 
-        self.launch_gate_movement_order(tcx, active_scripts, crate::engine::movement::GateRouteRequest { entity_id: owner, source_sector: Some(path_src_sector), gate_path: gate_path, goal: GoalShape::Seek {
+        self.launch_gate_movement_order(tcx, active_scripts, crate::engine::movement::GateRouteRequest { entity_id: owner, source_sector: Some(path_src_sector), gate_path, goal: GoalShape::Seek {
                 point: resolved.destination,
                 target,
                 tolerance: resolved.tolerance,
@@ -1192,10 +1192,10 @@ impl crate::engine::EngineInner {
             CascadeFlags::NEXT_LEVEL,
         );
 
-        self.launch_gate_movement_order(tcx, active_scripts, crate::engine::movement::GateRouteRequest { entity_id: owner, source_sector: Some(src_sector), gate_path: gate_path, goal: GoalShape::Point {
+        self.launch_gate_movement_order(tcx, active_scripts, crate::engine::movement::GateRouteRequest { entity_id: owner, source_sector: Some(src_sector), gate_path, goal: GoalShape::Point {
                 point: destination,
                 tolerance: seek_distance,
-            }, goal_layer: goal_layer, base_action: action, move_after_last_door: true, speed_factor: 1.0, initial_flags: flags | MoveFlags::SEEK, prefix_elements: Vec::new(), tail_elements: // The post-seek interaction lives on the actor, not on this
+            }, goal_layer, base_action: action, move_after_last_door: true, speed_factor: 1.0, initial_flags: flags | MoveFlags::SEEK, prefix_elements: Vec::new(), tail_elements: // The post-seek interaction lives on the actor, not on this
             // transient route, so a later refresh that replaces the route
             // keeps it.
             Vec::new(), append_arrival_speech: false, append_recovery: false });
