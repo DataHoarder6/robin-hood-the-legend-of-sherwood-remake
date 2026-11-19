@@ -41,13 +41,20 @@ struct ModalVotes {
     host_result: Option<DialogResult>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ModalSyncState {
     pub(super) session_id: Option<MultiplayerSessionId>,
     occurrences: Vec<ModalOccurrenceState>,
     inbox: std::collections::VecDeque<NetEvent>,
     visible_requests: std::collections::VecDeque<VisibleModalRequest>,
+    /// The configured roster. It decides which seats a vote may come from and
+    /// who is announced, never who a page waits for — a roster seat can be
+    /// outside the simulation.
     required_players: u8,
+    /// The seats this session's simulation actually contains. A shared page
+    /// awaits these and only these (`session_seats`, and the rule it implements
+    /// is stated once on [`SessionSeats`]).
+    session_seats: SessionSeats,
     votes: Vec<ModalVotes>,
     player_names: Vec<String>,
     announced: Vec<(ModalInstanceId, ModalKind)>,
@@ -58,6 +65,34 @@ pub(super) struct ModalSyncState {
     /// When the host first saw each page blocked on acknowledgements. Cleared
     /// when the page is decided or retired.
     ack_waits: Vec<(ModalInstanceId, u64)>,
+}
+
+impl ModalSyncState {
+    pub(super) fn new(session_seats: SessionSeats) -> Self {
+        Self {
+            session_id: None,
+            occurrences: Vec::new(),
+            inbox: std::collections::VecDeque::new(),
+            visible_requests: std::collections::VecDeque::new(),
+            required_players: 0,
+            session_seats,
+            votes: Vec::new(),
+            player_names: Vec::new(),
+            announced: Vec::new(),
+            decisions: Vec::new(),
+            local_proposals: Vec::new(),
+            pending_openings: Vec::new(),
+            emitted: std::collections::BTreeMap::new(),
+            ack_waits: Vec::new(),
+        }
+    }
+
+    /// Seats a shared page awaits: the ones this session's simulation contains.
+    /// The roster is not consulted — awaiting a seat that cannot see the page
+    /// is the wait an absent peer used to turn into a stall.
+    fn await_seats(&self) -> u32 {
+        self.session_seats.mask()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -474,7 +509,7 @@ impl NetChannels {
             if now_ms.saturating_sub(started) < MODAL_ACK_BUDGET_MS {
                 continue;
             }
-            let count = sync.required_players.max(1);
+            let await_seats = sync.await_seats();
             if !sync
                 .votes
                 .iter()
@@ -492,7 +527,11 @@ impl NetChannels {
                 .iter_mut()
                 .find(|vote| vote.instance == instance && vote.kind == kind)
                 .expect("vote was just ensured");
-            let missing = (1..count)
+            // The host still decides; only peer seats in the simulation are
+            // marked, so the expiry can never claim a seat that could not have
+            // seen the page.
+            let missing = (1..crate::coop::MAX_PLAYERS as u8)
+                .filter(|seat| seat_in_mask(await_seats, PlayerId(*seat)))
                 .filter(|seat| !vote.seats[*seat as usize])
                 .collect::<Vec<_>>();
             for seat in &missing {
@@ -758,7 +797,10 @@ impl NetChannels {
         self.try_recv_transport_event()
     }
 
-    /// The admitted lobby roster must acknowledge story pages before the host closes them.
+    /// The admitted lobby roster. It decides which seats a vote may come from
+    /// and whether an opening needs announcing; the seats a page awaits are the
+    /// simulation's (`SessionSeats`), which the transport publishes and which
+    /// can shrink when a seat leaves.
     pub fn set_modal_player_count(&self, count: u8) {
         assert!((1..=crate::coop::MAX_PLAYERS as u8).contains(&count));
         self.modal_sync
@@ -907,20 +949,26 @@ impl NetChannels {
             .player_names = names;
     }
 
+    /// Who still owes an acknowledgement on this page, in the words the page
+    /// shows. On the host that is the simulation's seats that have not
+    /// answered; a peer names the seats it awaits from the host — never itself,
+    /// because it is not the barrier.
     pub fn modal_waiting_names(&self, instance: ModalInstanceId, kind: &ModalKind) -> Vec<String> {
         let sync = self.modal_sync.lock().expect("modal state lock poisoned");
         let vote = sync
             .votes
             .iter()
             .find(|vote| vote.instance == instance && vote.kind == *kind);
-        (0..sync.required_players.max(1) as usize)
-            .filter(|&i| !vote.is_some_and(|vote| vote.seats[i]))
-            .map(|i| {
+        let await_seats = sync.await_seats();
+        (0..crate::coop::MAX_PLAYERS as u8)
+            .filter(|seat| seat_in_mask(await_seats, PlayerId(*seat)))
+            .filter(|seat| !vote.is_some_and(|vote| vote.seats[*seat as usize]))
+            .map(|seat| {
                 sync.player_names
-                    .get(i)
+                    .get(seat as usize)
                     .filter(|name| !name.is_empty())
                     .cloned()
-                    .unwrap_or_else(|| format!("Player {}", i + 1))
+                    .unwrap_or_else(|| format!("Player {}", seat + 1))
             })
             .collect()
     }
@@ -974,12 +1022,16 @@ impl NetChannels {
             .modal_sync
             .lock()
             .map_err(|_| "modal state lock poisoned")?;
-        let count = sync.required_players.max(1) as usize;
+        let await_seats = sync.await_seats();
         Ok(sync
             .votes
             .iter()
             .find(|vote| vote.instance == instance && vote.kind == *kind)
-            .filter(|vote| vote.seats[..count].iter().all(|ready| *ready))
+            .filter(|vote| {
+                (0..crate::coop::MAX_PLAYERS as u8)
+                    .filter(|seat| seat_in_mask(await_seats, PlayerId(*seat)))
+                    .all(|seat| vote.seats[seat as usize])
+            })
             .and_then(|vote| vote.host_result))
     }
 
@@ -1100,11 +1152,27 @@ impl NetChannels {
 mod tests {
     use super::*;
 
+    /// A host whose roster is two players. Both seats are in the session's
+    /// simulation: the transport publishes that when the mission releases a
+    /// seat into it, and the two fixtures below are the two sides of a session.
     fn fixture() -> (NetChannels, Sender<NetEvent>, Receiver<NetOutbound>) {
         let (net, input, output, _, _) = NetChannels::new();
         net.install_session_id(MultiplayerSessionId([7; 32]))
             .unwrap();
         net.set_modal_player_count(2);
+        net.session_seats().publish(0b11);
+        (net, input, output)
+    }
+
+    /// A roster of two players where only the host simulates: seat 1 is
+    /// admitted but has not been released into the mission, so it cannot see a
+    /// shared page.
+    fn host_only_session() -> (NetChannels, Sender<NetEvent>, Receiver<NetOutbound>) {
+        let (net, input, output, _, _) = NetChannels::new();
+        net.install_session_id(MultiplayerSessionId([7; 32]))
+            .unwrap();
+        net.set_modal_player_count(2);
+        net.set_modal_player_names(vec!["Desktop".into(), "Laptop".into()]);
         (net, input, output)
     }
 
@@ -1170,6 +1238,162 @@ mod tests {
             "the host continues without the seat that never acknowledged"
         );
         assert_eq!(host.modal_wait_remaining_ms(instance, &kind, 301_000), None);
+    }
+
+    /// The #43 capture: a page drawn while a roster seat is still waiting for
+    /// its start barrier. That seat cannot see the page, so the page waits for
+    /// nobody and completes on the host's own decision.
+    #[test]
+    fn a_page_awaits_no_seat_that_is_outside_the_simulation() {
+        let kind = ModalKind::PopupText { text_id: 17 };
+        let (host, _host_in, _host_out) = host_only_session();
+        host.publish_frame(0);
+        host.modal_effect_admission()
+            .admit(std::slice::from_ref(&kind))
+            .unwrap();
+        let instance = host.present_modal(&kind, true).unwrap();
+        host.service_modal_session(true, 1_000, &mut |_, _, _| {})
+            .unwrap();
+        let waiting = host.modal_waiting_names(instance, &kind);
+        assert!(
+            !waiting.iter().any(|name| name == "Laptop"),
+            "a seat outside the simulation must never be named as awaited: {waiting:?}"
+        );
+        assert_eq!(
+            host.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+                .unwrap(),
+            ModalPublication::HostDecisionQueued,
+            "the host's own decision is the whole barrier"
+        );
+        assert_eq!(
+            host.modal_decision(instance, &kind).unwrap(),
+            Some(DialogResult::Completed)
+        );
+        assert_eq!(
+            host.modal_waiting_names(instance, &kind),
+            Vec::<String>::new(),
+            "the decided page awaits nobody"
+        );
+        assert_eq!(host.modal_wait_remaining_ms(instance, &kind, 1_000), None);
+    }
+
+    /// A seat released into the simulation after the page opened takes part:
+    /// the barrier is not weakened for the seats that can see the page.
+    #[test]
+    fn a_seat_released_into_the_simulation_joins_an_open_page() {
+        let kind = ModalKind::PopupText { text_id: 17 };
+        let (host, host_in, _host_out) = host_only_session();
+        host.publish_frame(5);
+        host.modal_effect_admission()
+            .admit(std::slice::from_ref(&kind))
+            .unwrap();
+        let instance = host.present_modal(&kind, true).unwrap();
+        host.session_seats().publish(0b11);
+        assert_eq!(
+            host.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+                .unwrap(),
+            ModalPublication::HostVoteQueued,
+            "a seat released into the mission before the page closed owes an answer"
+        );
+        assert_eq!(
+            host.modal_waiting_names(instance, &kind),
+            ["Laptop"],
+            "the page names the seat it now awaits"
+        );
+        host_in
+            .send(NetEvent::ModalProposal {
+                from: PlayerId(1),
+                proposal: ModalProposal {
+                    instance,
+                    kind: kind.clone(),
+                    result: DialogResult::Completed,
+                    requested_frame: 5,
+                },
+            })
+            .unwrap();
+        host.service_modal_session(true, 0, &mut |_, _, _| {})
+            .unwrap();
+        assert_eq!(
+            host.modal_decision(instance, &kind).unwrap(),
+            Some(DialogResult::Completed)
+        );
+    }
+
+    /// A seat that leaves stops holding the page: the mask shrinks, and the
+    /// next service tick decides with the seats that remain.
+    #[test]
+    fn a_seat_that_leaves_stops_holding_the_page() {
+        let kind = ModalKind::PopupText { text_id: 17 };
+        let (host, _host_in, _host_out) = fixture();
+        host.publish_frame(9);
+        host.modal_effect_admission()
+            .admit(std::slice::from_ref(&kind))
+            .unwrap();
+        let instance = host.present_modal(&kind, true).unwrap();
+        host.service_modal_session(true, 1_000, &mut |_, _, _| {})
+            .unwrap();
+        assert_eq!(
+            host.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+                .unwrap(),
+            ModalPublication::HostVoteQueued
+        );
+        assert_eq!(
+            host.modal_wait_remaining_ms(instance, &kind, 1_000),
+            Some(MODAL_ACK_BUDGET_MS),
+            "a simulating seat's acknowledgement is awaited with a budget"
+        );
+        host.session_seats().publish(0b1);
+        assert_eq!(
+            host.modal_waiting_names(instance, &kind),
+            Vec::<String>::new(),
+            "the departed seat is no longer named"
+        );
+        host.service_modal_session(true, 2_000, &mut |_, _, _| {})
+            .unwrap();
+        assert_eq!(
+            host.modal_decision(instance, &kind).unwrap(),
+            Some(DialogResult::Completed),
+            "the shrink releases the page without spending the budget"
+        );
+        assert_eq!(host.modal_wait_remaining_ms(instance, &kind, 2_000), None);
+    }
+
+    /// The expiry record names only seats the barrier actually counted; a
+    /// rostered seat outside the simulation is not blamed for never answering.
+    #[test]
+    fn expired_ack_names_only_the_seats_in_the_simulation() {
+        let kind = ModalKind::MissionState {
+            kind: crate::player_command::MissionStateModalKind::EndState { won: true },
+        };
+        let (host, _host_in, _host_out) = host_only_session();
+        host.set_modal_player_count(3);
+        host.publish_frame(3);
+        // The simulation holds the host and seat 2; seat 1 is admitted but not
+        // released into the mission.
+        host.session_seats().publish(0b101);
+        let instance = host.present_modal(&kind, true).unwrap();
+        host.submit_modal_outcome(instance, &kind, DialogResult::Completed, true)
+            .unwrap();
+        host.service_modal_session(true, 1_000, &mut |_, _, _| {})
+            .unwrap();
+        assert_eq!(
+            host.modal_waiting_names(instance, &kind),
+            ["Player 3"],
+            "only the simulating seat is named"
+        );
+        let mut expiries = Vec::new();
+        host.service_modal_session(true, 301_000, &mut |expired, expired_kind, missing| {
+            expiries.push((expired, expired_kind.clone(), missing.to_vec()));
+        })
+        .unwrap();
+        assert_eq!(expiries, vec![(instance, kind.clone(), vec![2])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a session's simulation always contains its host")]
+    fn a_mask_without_the_host_is_refused() {
+        let (net, _, _, _, _) = NetChannels::new();
+        net.session_seats().publish(0b10);
     }
 
     #[test]

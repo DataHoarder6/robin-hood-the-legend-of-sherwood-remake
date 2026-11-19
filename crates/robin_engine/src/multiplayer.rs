@@ -744,6 +744,60 @@ pub enum NetOutbound {
     },
 }
 
+/// Seats taking part in this session's simulation, one bit per [`PlayerId`].
+///
+/// Host-local policy, not game state: never serialized, never replayed and
+/// never on the wire, so it needs no schema version. The host's server
+/// publishes it (`crates/robin_rs/src/multiplayer/native/server.rs`) whenever
+/// the simulation's seat set changes — on admission, on loss, when the start
+/// barrier releases the mission and when the session drops every peer. A peer
+/// never publishes: it does not decide a shared page, and the host's decisions
+/// are the only authority it has.
+///
+/// This is the only set a shared page may await. `required_players` stays the
+/// configured roster; a seat in the roster that is not in this mask cannot see
+/// the page, so awaiting it would be waiting for a participant that is not in
+/// the session's simulation.
+#[derive(Clone, Debug)]
+pub struct SessionSeats(Arc<AtomicU32>);
+
+/// Bit for [`PlayerId::HOST`]. Every shared page's decision includes the host,
+/// so a mask with no published seats still names it.
+const HOST_SEAT_BIT: u32 = 1;
+
+impl Default for SessionSeats {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU32::new(HOST_SEAT_BIT)))
+    }
+}
+
+impl SessionSeats {
+    pub fn mask(&self) -> u32 {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Publish the seats the transport has released into this session's
+    /// simulation. Called by the host's server only.
+    pub fn publish(&self, mask: u32) {
+        assert_eq!(
+            mask & HOST_SEAT_BIT,
+            HOST_SEAT_BIT,
+            "a session's simulation always contains its host"
+        );
+        assert_eq!(
+            mask & !((1u32 << crate::coop::MAX_PLAYERS) - 1),
+            0,
+            "seat mask names a seat outside the roster"
+        );
+        self.0.store(mask, Ordering::Release);
+    }
+}
+
+/// Whether `seat` is a member of `mask`.
+pub fn seat_in_mask(mask: u32, seat: PlayerId) -> bool {
+    mask & (1u32 << seat.0) != 0
+}
+
 /// Channel pair + frame cursor held by the [`crate::engine_manager::EngineManager`].
 pub struct NetChannels {
     pub outgoing: Sender<NetOutbound>,
@@ -756,6 +810,8 @@ pub struct NetChannels {
     /// reads it and sends `NetMsg::InitialSnapshot` to each new peer
     /// immediately after `Welcome`.
     pub initial_snapshot: InitialSnapshot,
+    /// Seats in this session's simulation, published by the host transport.
+    session_seats: SessionSeats,
     modal_sync: Arc<Mutex<ModalSyncState>>,
     next_transition_sequence: AtomicU64,
     command_worker_closed: AtomicBool,
@@ -778,6 +834,7 @@ impl NetChannels {
         let cursor = new_frame_cursor();
         let snapshot = Arc::new(std::sync::Mutex::new(None));
         let deferred_events = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let session_seats = SessionSeats::default();
         (
             Self {
                 outgoing: out_tx,
@@ -785,7 +842,8 @@ impl NetChannels {
                 deferred_events,
                 frame_cursor: Arc::clone(&cursor),
                 initial_snapshot: Arc::clone(&snapshot),
-                modal_sync: Arc::new(Mutex::new(ModalSyncState::default())),
+                session_seats: session_seats.clone(),
+                modal_sync: Arc::new(Mutex::new(ModalSyncState::new(session_seats))),
                 next_transition_sequence: AtomicU64::new(0),
                 command_worker_closed: AtomicBool::new(false),
                 gameplay_input_enabled: AtomicBool::new(true),
@@ -795,6 +853,12 @@ impl NetChannels {
             cursor,
             snapshot,
         )
+    }
+
+    /// The seats this session's simulation contains, shared with the host's
+    /// transport so a page never awaits a seat that cannot see it.
+    pub fn session_seats(&self) -> &SessionSeats {
+        &self.session_seats
     }
 
     /// Cache an initial-state snapshot the host will offer to every
