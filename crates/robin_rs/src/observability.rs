@@ -274,7 +274,23 @@ pub(crate) fn record_terminal(operation: Option<String>, reason: impl Into<Strin
 /// The full `/state` document: last snapshot, `terminal`, and this run's
 /// evidence paths. `None` before the process has attempted a mission.
 pub(crate) fn state_document() -> Option<serde_json::Value> {
-    let surface = surface();
+    document(&surface())
+}
+
+/// [`state_document`] without waiting for the surface lock.
+///
+/// The crash hook runs inside a panic, which may have happened while this very
+/// thread held the surface: blocking there would turn a crash into a hang.
+/// `None` means "not available right now", not "nothing happened".
+pub(crate) fn state_document_if_unlocked() -> Option<serde_json::Value> {
+    match SURFACE.try_lock() {
+        Ok(surface) => document(&surface),
+        Err(std::sync::TryLockError::Poisoned(error)) => document(&error.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
+fn document(surface: &Surface) -> Option<serde_json::Value> {
     let mut document = surface.state.document()?;
     #[cfg(not(target_arch = "wasm32"))]
     let trace_log = surface.log.path().map(std::path::Path::to_path_buf);
@@ -349,6 +365,10 @@ mod tests {
 
         mission_started("Dem_Lei_MP");
         let document = state_document().expect("an attempt has started");
+        // The crash hook's non-blocking read answers from the same surface. It
+        // is compared by presence only: other tests record into the same ring,
+        // so the cursor in a second read is theirs, not this test's.
+        assert!(state_document_if_unlocked().is_some());
         let observability = &document["observability"];
         assert!(observability["trace_log"].is_string(), "{document}");
         assert!(observability["event_log"].is_string(), "{document}");

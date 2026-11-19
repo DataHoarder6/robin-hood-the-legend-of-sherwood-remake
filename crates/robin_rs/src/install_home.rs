@@ -34,6 +34,15 @@ fn install_root() -> Option<PathBuf> {
     None
 }
 
+/// The root every accessor below is built from, or `None` on the same terms.
+///
+/// Startup resolves it once for consumers that own their whole subdirectory
+/// instead of one named path — the crash hook writes its own bundle layout
+/// under `<root>/crashes` (`crate::crash::install`).
+pub fn root() -> Option<PathBuf> {
+    install_root()
+}
+
 /// Root holding `profiles.json`, `keyconfigs.json`, `language.json` and one
 /// `Profile_NNN/` directory per player profile.
 ///
@@ -128,6 +137,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         set_both(Some(home.path()), None);
 
+        assert_eq!(root(), Some(home.path().to_owned()));
         assert_eq!(save_root(), Some(home.path().join("saves")));
         assert_eq!(replay_directory(), Some(home.path().join("replays")));
         assert_eq!(
@@ -184,6 +194,7 @@ mod tests {
         let Some(data_dir) = dirs::data_dir() else {
             // One absence, reported the same way by every accessor: no caller
             // gets a relative path invented for it.
+            assert_eq!(root(), None);
             assert_eq!(save_root(), None);
             assert_eq!(replay_directory(), None);
             assert_eq!(attempt_directory(), None);
@@ -195,6 +206,7 @@ mod tests {
             return;
         };
         let base = data_dir.join("robin_hood");
+        assert_eq!(root(), Some(base.clone()));
         assert_eq!(save_root(), Some(base.join("saves")));
         assert_eq!(replay_directory(), Some(base.join("replays")));
         assert_eq!(attempt_directory(), Some(base.join("replays/attempts")));

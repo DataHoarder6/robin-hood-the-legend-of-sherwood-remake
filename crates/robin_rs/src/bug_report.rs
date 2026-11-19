@@ -143,6 +143,14 @@ pub(crate) fn clear_replay() {
         Err(error) => tracing::warn!("Cannot clear diagnostic replay: {error}"),
     }
 }
+
+/// The replay this session is recording, for the crash bundle.
+///
+/// Never waits: a panic may have happened while this thread held the lock, and
+/// a crash hook must not hang. `None` means "not available right now".
+pub(crate) fn replay_path() -> Option<PathBuf> {
+    REPLAY.try_lock().ok().and_then(|replay| replay.clone())
+}
 pub fn directory() -> Result<PathBuf> {
     crate::install_home::report_directory().context("no install directory is available for reports")
 }

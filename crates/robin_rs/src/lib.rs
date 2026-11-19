@@ -28,6 +28,8 @@ pub(crate) use leaderboard::signing as leaderboard_signing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bug_report;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod crash;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod crash_reporter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod diagnostic_context;
@@ -65,6 +67,13 @@ pub fn init_tracing() {
             // a second copy of exactly what stderr would have shown. It is opened
             // here, before the subscriber exists, and announced afterwards.
             let run_log_writer = crate::observability::install_run_log();
+            // A crash bundle lives beside that log, so the hook is installed
+            // with the same install root, once, before the first frame. Without
+            // a root there is nowhere to write one; the run-log warning below
+            // already reports that absence.
+            if let Some(root) = crate::install_home::root() {
+                crate::crash::install(&root);
+            }
             let run_log_layer = run_log_writer.map(|writer| {
                 tracing_subscriber::fmt::layer()
                     .with_ansi(false)
