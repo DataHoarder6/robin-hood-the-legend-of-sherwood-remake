@@ -1,10 +1,10 @@
 # Off-map reinforcements
 
-Status: **spine landed; the rest is not.** `SimConfig::enable_offmap_reinforcements`,
-staged garrison bodies, and `EngineInner::summon_garrison` (wake a body, publish
-it into the counters, walk it in through a reinforcement door) exist. Entry
-kinds, the AI emitter, the budget, withdrawal and the native do not. Every
-decision below was settled in a grilling session on 2026-11-19.
+Status: **entries and summon landed; the rest is not.** `SimConfig::enable_offmap_reinforcements`,
+staged garrison bodies, `EngineInner::summon_garrison`, authored entry kinds
+and the shared `place_outside_entity` exist. The AI emitter, the per-mission
+budget, withdrawal and the script native do not. Every decision below was
+settled in a grilling session on 2026-11-19.
 
 ## What this is
 
@@ -70,15 +70,18 @@ the faction field exists so both sides share one implementation.
 
 ## Entry
 
-The authored reinforcement point grows a kind (door, road/edge, stairs, jetty)
-and an optional in-map target. Doors remain the kind that requires sectors.
+`RawReinforcementPoint` has a `kind` (door, road, stairs, jetty) and an
+optional in-map `target`. `ReinforcementEntryKind::Door` is the default for
+legacy REIN data and the only kind that requires the out-of-map motion area;
+the other kinds install as `ai.global.offmap_entries` instead of gates.
 
 - Door entries use the existing `PassDoor` then `MOVE` path.
-- Edge entries use a new engine operation, `enter_from_outside(actor,
-  destination, direction)`, extracted from the `RecordEnterGame` native, which
-  becomes one of its callers. Pathing cannot cover this: `find_path` refuses a
-  goal outside the grid and cannot link a source outside it, so entering from
-  outside is a transition, never a route.
+- Edge entries place the body at the authored outside point and walk straight
+  to the target. `place_outside_entity` computes that point from the map
+  bounds and is shared with the `RecordEnterGame` native through
+  `EngineInner::enter_from_outside`. Pathing cannot cover this: `find_path`
+  refuses a goal outside the grid and cannot link a source outside it, so
+  entering from outside is a transition, never a route.
 
 ## Bodies and cost
 
@@ -132,13 +135,14 @@ before the first tick, which is what keeps replays and co-op peers in agreement.
 
 ## Work items
 
-1. `enter_from_outside` as an engine operation; `RecordEnterGame` becomes a
-   caller.
+1. ~~`enter_from_outside` as an engine operation; `RecordEnterGame` becomes a
+   caller~~ — `place_outside_entity` is the shared operation, called by both.
 2. ~~Generalise the spawn path from a PC with an optional dead body to
    `(faction, entry)`~~ — `summon_garrison` wakes an authored staged body
    instead of creating one, so the faction is a lookup and the entry is a door.
    Tier selection stays with the caller.
-3. Entry kinds and optional in-map target on the authored point type.
+3. ~~Entry kinds and optional in-map target on the authored point type~~ —
+   `ReinforcementEntryKind` and `RawReinforcementPoint::target`.
 4. ~~Budget accounting~~ — the counter/stat publication a woken body needs is
    `publish_soldier_alert_count` and `record_soldier_in_level`; the per-mission
    budget itself is still open. The summoned mark on the actor is

@@ -56,7 +56,7 @@ mod coop;
 mod purse;
 mod queries;
 mod refresh_seek;
-mod reinforcement;
+pub(crate) mod reinforcement;
 mod rollback_safe;
 mod rolling;
 pub(crate) mod script;
