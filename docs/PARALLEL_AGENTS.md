@@ -184,10 +184,13 @@ bash scripts/check-quality.sh format   # cargo fmt --all -- --check
 | `archive-unique` | an `archive/*` branch holds commits the integration ref does not have |
 | `detached-unique` | a detached `HEAD` holds commits no branch or remote contains |
 | `disk-low` | free space is below the floor |
-| `target-size`, `archive-duplicate`, `worktree-stale`, `no-integration-ref` | reported, never fatal |
+| `target-size`, `archive-duplicate`, `worktree-stale`, `upstream-drift`, `no-integration-ref` | reported, never fatal |
 
 `worktree-stale` is the one finding with a command of its own: `just
-prune-worktrees` acts on it, `doctor` only reports it.
+prune-worktrees` acts on it, `doctor` only reports it. `upstream-drift` counts
+what `fork/main` is behind `origin/main` — the fork is worth rebasing only
+while its own delta is small, and the note is where that stops being a
+surprise.
 
 `--quiet` prints only failures, for a CI or manual gate. The repo's
 `.githooks/pre-push` does not call it on purpose: a dirty shared checkout is a
