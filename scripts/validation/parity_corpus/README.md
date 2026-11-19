@@ -18,14 +18,16 @@ client resolves through the chronology beside it (the same path a player's
 
 ### `sherwood-hq-entry/`
 
-- Mission: `Sherwood` (HQ), 240 simulation frames, replay schema 76.
+- Mission: `Sherwood` (HQ), 240 simulation frames, replay schema 77.
 - Covers: the entry popup `PostInitialize` queues after its own frame's modal
   drain (dismissed on frame 1) and the crouch tutorial popup opened at frame
   151. Playback must reopen both and consume their recorded dismissals in those
   frames; a driver that dismissed a boundary modal without journaling it left
   playback waiting on an acknowledgement that did not exist and orphaned the
   tutorial's (`docs/slop/replay-modal-desync.md`, #45).
-- Made by the `robin` built at the commit that added this file:
+- Made by the `robin` of the commit it was recorded on, which must be the
+  schema the binaries replay (`REPLAY_SCHEMA_VERSION`); re-record it in the same
+  change that moves the schema, or the gate cannot open the recording:
 
   ```sh
   ROBINHOOD_DATA_DIR=/path/to/robin-hood/game \
