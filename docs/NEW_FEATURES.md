@@ -2048,7 +2048,11 @@ A list of which additional features we have added, which ones we might still wan
   prediction future, then clears future inputs/hashes/history. Only the host
   records the canonical server-ordered replay. Relay observability is stated
   in the invitation UI, and browser-link publication is a default-on persisted
-  privacy setting that can be disabled without affecting native iroh play.
+  privacy setting that can be disabled without affecting native iroh play. The
+  published browser runtime is built with the relay client and exports the
+  manifest's ticket schema (`wasm-www/scripts/build-runtime.mjs`,
+  `wasm-www/scripts/verify-runtime-multiplayer.mjs`); a browser seat joining a
+  native host is still an unproved run (`docs/slop/browser-seat.md`).
 
 - **Deterministic Spellforge Lua missions**. A versioned package contract
   supports upstream same-name Lua replacement plus explicit SCB augmentation.

@@ -1,22 +1,26 @@
 # A browser seat: can it join today, and what proves it
 
-Written 2026-11-19 against `fork/main` `ac74b98c0a90`; section 5 and items 1-2
-of section 6 were re-read on 2026-11-19 after the reconnect-attempt and
-content-write holes were closed, which is the only production change this file
-caused. The owner's question is whether a browser (wasm) seat can join
-a multiplayer session today, and what exactly proves it. Adjacent material this
-file links rather than restates: [the harness contract](../multiplayer/HARNESS.md)
-(what a row may name), [multiplayer waits without a deadline](multiplayer-unbounded-waits.md)
-(the wasm rows), [the terminal matrix](multiplayer-terminal-matrix.md) (H21–H26,
-the rows a browser row would sit beside), [the multiplayer architecture](../MULTIPLAYER.md).
+Written 2026-11-19 against `fork/main` `ac74b98c0a90`, re-read twice the same
+day: section 5 and items 1-2 of section 6 after the reconnect-attempt and
+content-write holes were closed, then the artifact section after the build plan
+was fixed. The production changes this file caused are the build plan, two wasm
+compile fixes, the compatibility export's single source and the budget bounds;
+the devShell's wasm C compiler belongs to
+[the wasm build evidence](wasm-build-host.md). The owner's question is
+whether a browser (wasm) seat can join a multiplayer session today, and what
+exactly proves it. Adjacent material this file links rather than restates: [the
+harness contract](../multiplayer/HARNESS.md) (what a row may name),
+[multiplayer waits without a deadline](multiplayer-unbounded-waits.md) (the wasm
+rows), [the terminal matrix](multiplayer-terminal-matrix.md) (H21–H26, the rows
+a browser row would sit beside), [the multiplayer architecture](../MULTIPLAYER.md).
 
 ## Verdict
 
-| Direction | State | What decides it |
+| Direction | State (2026-11-19, after the build-plan fix) | What decides it |
 | --- | --- | --- |
-| native host + browser client | **impossible today** | the browser artifact every repo script builds has no multiplayer transport, so the join dies before it reaches a relay (`wasm-www/scripts/build-runtime.mjs:13-15`) |
-| native host + browser client, hand-built artifact | **unproved** | the code path type-checks with the feature on, but no run is recorded anywhere in the tree, and the one driver cannot pass (`wasm-www/scripts/live-relay-e2e.mjs:242`) |
-| browser host + native client | **impossible by construction** | browser hosting is not implemented and its server handle type has no values (`crates/robin_rs/src/multiplayer/wasm/native_only.rs:24-25`, `crates/robin_rs/src/game_session/multiplayer/session_setup.rs:35-38`) |
+| native host + browser client, the repo's own artifact | **artifact ready, join unproved** | `wasm-www/scripts/build-runtime.mjs` now builds `audio,multiplayer` (threaded: `+wasm-threads`), so the artifact exports the real `ticketSchema` and the shell no longer refuses the invitation. No browser seat has joined a native host: no run is recorded, and the one driver is stale (`wasm-www/scripts/live-relay-e2e.mjs:242`) |
+| native host + browser client, before this change | **impossible** | the artifact every repo script built had no multiplayer transport, so the join died before it reached a relay |
+| browser host + native client | **impossible by construction** | browser hosting is not implemented and its server handle type has no values (`crates/robin_rs/src/multiplayer/wasm/native_only.rs:25-26`, `crates/robin_rs/src/game_session/multiplayer/session_setup.rs:35-38`) |
 | browser reconnect, no hang | **bounded 2026-11-19** | a reconnect attempt carries a deadline of its own, so the 60 s give-up budget is reachable while an attempt is in flight (`crates/robin_rs/src/multiplayer/wasm.rs:197`, `crates/robin_rs/src/multiplayer/client_session.rs:617-637`, `:655-673`); section 6 still lists three wasm ways to hang that no attempt bound fixes |
 
 Short names below; every path is repo-relative.
@@ -36,13 +40,13 @@ Short names below; every path is repo-relative.
 1. **Ticket or nothing.** The browser client dials a host endpoint decoded from a
    signed `rhmp3` invitation; there is no address book, no rendezvous, no
    matchmaking. `connect_client` decodes the ticket before it can bind
-   (`wasm.rs:56-58`), and the invitation must be `https`, canonical and 30
+   (`wasm.rs:61-63`), and the invitation must be `https`, canonical and 30
    minutes old at most (`join_ticket.ts:9-10`, `:183-193`, `:160-162`). A browser
    `--connect <endpoint id>` cannot work: the same field carries the ticket.
 2. **Relay only.** A browser endpoint cannot use UDP, so every byte goes through
-   the one HTTPS relay named in the ticket (`wasm.rs:1-14`, `:90-104`), and the
+   the one HTTPS relay named in the ticket (`wasm.rs:1-14`, `:95-109`), and the
    client refuses to proceed unless `endpoint.online()` completes in 15 s
-   (`wasm.rs:106-120`). The host side of the same requirement: with browser links
+   (`wasm.rs:111-125`). The host side of the same requirement: with browser links
    on, the host refuses to start if its relay is not reachable in 15 s
    (`server.rs:659-677`).
 3. **The artifact is pinned to the host's commit.** The build number comes from
@@ -66,13 +70,13 @@ The browser menu adds one more entry point — `?connect=<ticket>` as a direct
 invite listing (`crates/robin_rs/src/main_menu/multiplayer_menu.rs:1795-1832`) —
 but it decodes the same ticket, so it changes nothing about the five facts.
 
-## 2. The blocker: the artifact the scripts build has no transport
+## 2. The build plan: what it did, what it does, and what that proves
 
-The one build plan for a browser runtime passes `audio` and, threaded,
-`audio,wasm-threads` — never `multiplayer`:
+Until 2026-11-19 the one build plan for a browser runtime passed `audio` and,
+threaded, `audio,wasm-threads` — never `multiplayer`:
 
 ```
-wasm-www/scripts/build-runtime.mjs:13-15
+wasm-www/scripts/build-runtime.mjs:13-15 (before this change)
     else cargo.push('-p', 'robin_rs', '--bin', 'robin', '--no-default-features',
         '--features', threads ? 'audio,wasm-threads' : 'audio');
 ```
@@ -81,24 +85,102 @@ wasm-www/scripts/build-runtime.mjs:13-15
 relay client only under `#[cfg(target_arch = "wasm32")]` **inside** the
 feature-gated module, and the no-feature build substitutes
 `multiplayer/disabled.rs` plus `session_setup_disabled.rs`. Production staging
-takes that same plan (`wasm-www/scripts/stage-runtime-addition.mjs:13`, used by
+took that same plan (`wasm-www/scripts/stage-runtime-addition.mjs:13`, used by
 `.github/workflows/build-static-runtime.yml:95`), so the deployed
-`/wasm/<commit>/robin_bg.wasm` has no client either.
+`/wasm/<commit>/robin_bg.wasm` had no client either.
 
-What a browser does with that artifact, in order:
+What a browser did with that artifact, in order:
 
-1. `wasm_multiplayer_compatibility()` returns `ticketSchema: 0` because the
-   feature is off (`bin/robin.rs:362-365`), so `assertMultiplayerWasmCompatibility`
-   throws `loaded browser artifact does not exactly match the host-signed
-   invitation` (`boot-lifecycle.ts:146-151`). This happens before the ticket is
+1. `wasm_multiplayer_compatibility()` returned `ticketSchema: 0` because the
+   feature was off, so `assertMultiplayerWasmCompatibility` threw `loaded
+   browser artifact does not exactly match the host-signed invitation`
+   (`boot-lifecycle.ts:146-151`). This happened before the ticket was
    installed.
-2. Had the schema matched, `wasm_set_multiplayer_join_ticket` returns
+2. Had the schema matched, `wasm_set_multiplayer_join_ticket` returned
    `browser multiplayer is unavailable in this build; rebuild with
    --features multiplayer` (`cli.rs:363-368`).
 3. Had the mission started anyway, `establish` would answer with
    `multiplayer was requested but is unavailable in this build`
    (`session_setup_disabled.rs:16-19`) — and `resolve_join_ticket` refuses the
    route one layer earlier for the same reason (`cli.rs:436-446`).
+
+### The plan now carries the client
+
+`RUNTIME_FEATURES` in `wasm-www/scripts/build-runtime.mjs` is
+`audio,multiplayer`; the threaded plan appends `wasm-threads`. Both the dev
+artifact and the staged production addition inherit it, because staging calls
+the same `buildRuntime`. The choices, from the code:
+
+- **`multiplayer` with `wasm-threads` works.** They are independent: threads
+  selects the atomics/shared-memory build (`scripts/wasm-threads.cargo-config.toml`)
+  and `robin_assets/wasm-threads`; `multiplayer` adds iroh. The threaded
+  `wasm-release` artifact builds and exports the same contract as the plain one.
+- **No relay host is baked in.** The relay route is decoded from the signed
+  ticket (`wasm.rs:61-63`) and `presets::N0` names iroh's preset
+  (`wasm.rs:95-109`), not a host in this repository. The one fixed origin in
+  the browser path is the identity signer
+  (`wasm-www/src/multiplayer_identity.ts:7`, default
+  `https://identity.robinhood.phiresky.xyz/identity-signer/`), which is a page
+  build input (`VITE_IDENTITY_SIGNER_URL`) and pre-exists this feature change.
+- **The contract gains a real value, not a new field.** The published
+  manifest already carried `"ticketSchema": 3` from
+  `wasm-www/runtime-contract.json`; only the artifact disagreed, because the
+  export hard-coded `0` for a build without the feature. The manifest was
+  right and the binary was the lie.
+- **Size, measured on the same pipeline** (`wasm-release`, `-Oz`, stripped;
+  commit `e4f3712bbf0a`): `audio` alone 19,094,019 B; `audio,multiplayer`
+  21,323,868 B (+2,229,849 B, 11.7%); the production `audio,multiplayer,wasm-threads`
+  plan 21,474,874 B, so the thread mode adds 151,006 B on top.
+
+### 2.1 Proving it without a browser
+
+`wasm-www/scripts/verify-runtime-multiplayer.mjs` instantiates an artifact's
+own `robin.js` glue under Node, calls `wasm_multiplayer_compatibility()`, and
+exits non-zero unless `ticketSchema` equals `--expect-ticket-schema`. Run
+against the three builds of commit `e4f3712bbf0a`:
+
+| Build plan | `robin_bg.wasm` sha256 | Export |
+| --- | --- | --- |
+| `--features audio` (the pre-fix artifact) | `f4edf0390e9c33673cfd08e8b09ad951272e485190cfe8e565ebed8f22f03693` | `"ticketSchema":0` |
+| plan default (`audio,multiplayer`) | `7abad049da4106a8f122c6eaa4cd822b3b058dda052fdd924b4c70b68a644ac2` | `"ticketSchema":3` |
+| plan `--threads` (production: `audio,multiplayer,wasm-threads`) | `3c3d47161f1f9824fd4fe96dcb86b3858ad571365af6f26dc818de6122d068ad` | `"ticketSchema":3` |
+
+```
+$ node wasm-www/scripts/verify-runtime-multiplayer.mjs --pkg target/wasm-proof/pkg-mp \
+    --expect-ticket-schema 3
+{"engineCommit":"e4f3712bbf0ae3080675dff2e8e1af61fdbb7538","artifactShort":"e4f3712bbf0a","netProtocol":72,"ticketSchema":3}
+runtime multiplayer compatibility: ticketSchema 3 as required
+```
+
+The same command with `--expect-ticket-schema 0` against the `audio`-only build
+prints `"ticketSchema":0` and exits 0; against either multiplayer build it
+fails, so the difference is a command's exit status rather than a claim in a
+document. Staging runs this check on the optimized bytes before it writes
+`manifest.json` (`stage-runtime-addition.mjs`), so an artifact whose export
+disagrees with the published contract cannot be published.
+
+The Rust half is a lib test that runs in both gated feature sets:
+`runtime_contract::tests::browser_compatibility_names_the_schema_this_build_can_redeem`
+asserts `0` under `client` (default features) and the manifest's schema under
+`client-release` (`release` includes `multiplayer`), plus
+`browser_compatibility_serializes_in_the_canonical_shell_order` for the key
+order the shell compares.
+
+Two wasm compile failures sat between "the code type-checks" and "the bin
+builds", and both are fixed:
+
+- `main_entry/cli.rs` gave `--spec` both `#[arg(skip)]` on wasm and `arg(long)`,
+  which clap rejects: **no** wasm32 build of `robin` compiled, feature or not.
+- `multiplayer/wasm/native_only.rs` declared the browser `ServerHandle::connect_string`
+  as `Option<String>` while the shared call site (`enabled.rs:101`) wraps the
+  native `String` in `Some`. The `browser-audio` gate's
+  `--features audio,multiplayer` check failed on this before any artifact existed.
+
+A cold `wasm`/`browser-audio` build also failed in `ring`/`zstd` C compilation
+because the devShell exported the host `CC=gcc`; the shell now sets
+`CC_wasm32_unknown_unknown` to the unwrapped clang
+([the wasm build evidence](wasm-build-host.md) owns that fix), so the wasm
+target builds from a cold tree.
 
 So the failure is a build-feature refusal, not a network or protocol failure:
 there is no relay traffic to time out. The `wasm` and `browser-audio` gates prove
@@ -132,7 +214,7 @@ browser multiplayer session ended; reconnecting…       (live-relay-e2e.mjs:272
 and neither string exists in the game: the only occurrences in the tree are the
 driver's own (`grep -rn "welcomed through iroh" --glob '!target' .` → two hits,
 both in `live-relay-e2e.mjs`). The code logs
-`browser multiplayer client welcomed` at debug level (`wasm.rs:254-259`) and
+`browser multiplayer client welcomed` at debug level (`wasm.rs:263-268`) and
 `client session ended: {reason}; reconnecting...` (`client_session.rs:742`).
 Three other waits it makes do match real lines — `begin-sim barrier released`
 (`game_session/multiplayer.rs:772`), `transport reconnected; awaiting host
@@ -146,16 +228,16 @@ Nothing in the tree records a browser join having happened: no evidence
 directory, no gate invokes `live-relay-e2e.mjs` (`grep -rn live-relay-e2e
 scripts docs wasm-www/package.json` → this file and `MULTIPLAYER.md`, nothing
 else), and
-`scripts/README.md` lists `browser-game.mjs` but not the relay driver. [MULTIPLAYER.md](../MULTIPLAYER.md) `:404-411` and
-[NEW_FEATURES.md](../NEW_FEATURES.md) `:2039-2051` describe the capability as
-shipped; this file is the evidence that the shipped artifact cannot do it.
+`scripts/README.md` lists `browser-game.mjs` but not the relay driver. What the
+tree does now prove is narrower and exact: the artifact the repo builds exports
+the manifest's `ticketSchema` (§2.1), so the documented capability no longer
+dies at the shell's first check. No browser seat has joined a host.
 
 ## 4. What it would take to run it here
 
-**Blocker first: there is no command in the repo that produces a browser runtime
-with multiplayer.** Everything below works only after `build-runtime.mjs` gains a
-feature option (or the artifact is built by hand), so this section is a recipe,
-not a runbook.
+The artifact blocker is gone: `wasm-www/scripts/build-runtime.mjs` builds the
+relay client, and §2.1 checks the export. Nothing below has been run against a
+native host, so this section is still a recipe, not a runbook.
 
 Native host, same commit as the wasm artifact, browser links on (default), with
 an explicit install home so it cannot collide with another seat
@@ -333,11 +415,12 @@ row today: the corpus stops at `H20`, and H21–H26 are a proposal
 ([terminal matrix](multiplayer-terminal-matrix.md)).
 
 The smallest seam, in dependency order — each is a separate decision, and the
-first two are the ones that block everything:
+first is what blocked everything:
 
-1. **An artifact.** `wasm-www/scripts/build-runtime.mjs:13-15` needs a feature
-   option so a dev artifact can carry `multiplayer`; without it no scenario can
-   launch a browser seat. This is game work, not harness work.
+1. **An artifact.** Done: `wasm-www/scripts/build-runtime.mjs` builds
+   `audio,multiplayer` (`+wasm-threads` threaded), so a dev artifact can carry
+   the relay client and §2.1 checks its export. A scenario launcher still does
+   not exist; that is harness work.
 2. **A ticket the runner can read.** The only place a join code exists is the
    host's console log and the trace event (`session_setup.rs:352-368`);
    `/state` publishes `multiplayer.connect_string` and nothing else
@@ -369,9 +452,13 @@ has no HTTP surface.
 
 ## 8. What is unproved
 
-- Whether an `audio,multiplayer` wasm **binary** links and boots in Chrome. The
-  gate checks and links the *test* module (`lifecycle_gate.py:137-161`); the bin
-  is only `cargo check`ed.
+Proved now, and no longer listed here: the plan builds the relay client, the
+`wasm-release` threaded binary links, and its
+`wasm_multiplayer_compatibility()` reports the manifest's `ticketSchema` (§2.1).
+
+- That the artifact **boots a multiplayer mission in a browser**. Instantiation
+  and the compatibility export are proved; the boot path after
+  `wasm_set_multiplayer_join_ticket` is not.
 - Whether iroh's relay-over-WebSocket path works from a browser against a host
   built from this tree at all — no recorded run, and the one driver is stale.
 - Whether `~/Games/robin-hood-data`'s closure equals the published Demo
@@ -387,23 +474,20 @@ has no HTTP surface.
 
 ## 9. What to do next, in order
 
-1. Give `build-runtime.mjs` a feature option and record one artifact built with
-   `audio,multiplayer`; until then every browser claim is about code that no
-   binary contains.
-2. Replace the two dead waits in `live-relay-e2e.mjs` with the lines the game
-   prints (`wasm.rs:254`, `client_session.rs:742`) and run it once against that
-   artifact — that single run decides whether the browser path is real or
+1. Replace the two dead waits in `live-relay-e2e.mjs` with the lines the game
+   prints (`wasm.rs:263`, `client_session.rs:742`) and run it once against a
+   staged artifact — that single run decides whether the browser path is real or
    aspirational, and produces the first evidence this file cannot.
-3. ~~Bound the wasm reconnect attempt and the content write.~~ Done
+2. ~~Bound the wasm reconnect attempt and the content write.~~ Done
    2026-11-19: the attempt is 15 s like native (`wasm.rs:42`, `:197`) and now
    covers the content prelude it opens, and the write is 30 s (`wasm.rs:200`).
    The remaining wasm hangs are §6.3 (timer starvation) and §6.4 (bfcache),
    neither of which an attempt bound reaches.
-4. Publish the join code on `/state` (`diagnostics.rs:191`) so a runner never
+3. Publish the join code on `/state` (`diagnostics.rs:191`) so a runner never
    parses a user-facing log line, then add `proves.layer: "browser"`, the
    runner, and the peer platform field (`scenario_corpus.py:65`, `:121`, `:125`).
-5. Only then write the browser row beside H21+, with `requires: ["relay"]`
+4. Only then write the browser row beside H21+, with `requires: ["relay"]`
    declared and section 6's hermetic bootstrap given an explicit exception.
-6. Correct `MULTIPLAYER.md:404-411` and `NEW_FEATURES.md:2039-2051` to say what
-   the artifact does, not what the code path was written to do — or land items
-   1–2 and let them stay true.
+5. Correct `MULTIPLAYER.md:404-411` and `NEW_FEATURES.md:2039-2051` to say what
+   the artifact does, not what the code path was written to do — done: they now
+   name the artifact proof and the unproved join.

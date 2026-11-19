@@ -124,15 +124,23 @@ for that distribution:
 ### WebAssembly (browser)
 
 The game builds for `wasm32-unknown-unknown` and uses `wasm-bindgen`
-browser glue.  Audio is enabled for wasm builds; `ffmpeg-next` and
-OS-data-dir support stay disabled.
+browser glue.  Audio and the multiplayer relay client are enabled for wasm
+builds; `ffmpeg-next` and OS-data-dir support stay disabled.
 
     cargo build -Zbuild-std=std,panic_abort \
         --target wasm32-unknown-unknown \
         --profile wasm-dev            \
         --no-default-features         \
-        --features audio              \
+        --features audio,multiplayer  \
         -p robin_rs --bin robin
+
+`multiplayer` is not optional for a published browser runtime: without it
+`wasm_multiplayer_compatibility()` reports ticket schema 0 and the shell
+refuses every `rhmp3` invitation before any relay traffic. The relay route is
+decoded from the invitation at runtime and the identity signer origin comes
+from `VITE_IDENTITY_SIGNER_URL`, so neither is a build input of this crate.
+`wasm-www/scripts/verify-runtime-multiplayer.mjs` reads the export back from a
+built artifact.
 
 Swap `--profile wasm-dev` for `--profile wasm-release` for the smallest
 optimized build.  The release wasm profile uses `opt-level = "z"`, fat
@@ -153,9 +161,10 @@ browser. Run it before a browser change, from the build host's copy:
 supplies the C compiler `zstd-sys` needs for wasm32 (`flake.nix`).
 
 Production runtimes are the threaded build (`node wasm-www/scripts/build-runtime.mjs
---threads`, which `stage-runtime-addition.mjs` always uses): shared wasm memory
-plus a wasm-bindgen-rayon pool of min(`hardwareConcurrency`, 8) sprite-decode
-workers (`?wasm-threads=N` overrides). The pool
+--threads`, which `stage-runtime-addition.mjs` always uses): `audio,multiplayer`
+plus shared wasm memory and a wasm-bindgen-rayon pool of
+min(`hardwareConcurrency`, 8) sprite-decode workers (`?wasm-threads=N`
+overrides). The pool
 starts only when the page is `crossOriginIsolated`, which the game document
 gets from `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` in `wasm-www/deploy/public-headers.txt`.

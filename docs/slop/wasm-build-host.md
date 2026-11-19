@@ -87,8 +87,8 @@ target/wasm32-unknown-unknown/wasm-dev/robin.wasm: WebAssembly (wasm) binary ver
 
 ## The client error this exposed
 
-With the C build fixed, the suite reaches `robin_rs` and stops on one real error
-in the client, which this change did not touch (build configuration only):
+With the C build fixed, the suite reached `robin_rs` and stopped on one real
+error in the client, which this change did not touch (build configuration only):
 
 ```text
 error: `long` cannot be used with `#[arg(skip)]
@@ -98,14 +98,18 @@ error: `long` cannot be used with `#[arg(skip)]
     |         ^^^^
 ```
 
-`spec` carries `#[cfg_attr(target_arch = "wasm32", arg(skip))]` and, separately,
+`spec` carried `#[cfg_attr(target_arch = "wasm32", arg(skip))]` and, separately,
 an unconditional `#[arg(long, value_name = "PATH", requires = "headless", …)]`
-on the same field, so clap's derive sees `skip` and `long` together on wasm32.
-The attributes need to be one `cfg_attr` (`arg(...)` on native, `arg(skip)` on
-wasm32). Until it lands, the `wasm` suite is red and is not in
-`scripts/push-gate.sh`; with it, the third command compiles the client for the
-browser and the suite is a compiler for every browser change.
+on the same field, so clap's derive saw `skip` and `long` together on wasm32.
+
+**Fixed 2026-11-19**: the attributes are one `cfg_attr` now (`arg(...)` on
+native, `arg(skip)` on wasm32), so the third command compiles the client for the
+browser. A second client error sat behind it — the browser `ServerHandle::connect_string`
+returned `Option<String>` where the shared call site wraps the native `String`
+in `Some` — and it is fixed in the same change; a
+`cargo check --features audio,multiplayer` now passes.
 
 **Limit.** The suite is `cargo check`: it compiles and archives the C but never
 links, so the object-format mistake above would survive a green run. The
-`cargo build` in this file is the check that catches it.
+`cargo build` in this file is the check that catches it, and
+`wasm-www/scripts/build-runtime.mjs` is the linked production build.

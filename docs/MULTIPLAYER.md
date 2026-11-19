@@ -410,6 +410,17 @@ browser-peer replay refusal. Production QA additionally requires the isolated
 signer origin and exact ticket-selected `/wasm/<commit>` and content catalog
 to be deployed.
 
+That run does not exist yet, and the driver cannot pass as written: two of its
+waits match log lines no code emits
+([the browser-seat audit](slop/browser-seat.md#3-the-two-browser-harnesses-and-what-they-actually-assert)).
+What is proved is the artifact's side of the contract:
+`wasm-www/scripts/build-runtime.mjs` builds `audio,multiplayer` (threaded:
+`audio,multiplayer,wasm-threads`), and
+`node wasm-www/scripts/verify-runtime-multiplayer.mjs --pkg <artifact> --expect-ticket-schema 3`
+instantiates that artifact and reads `ticketSchema` 3 from
+`wasm_multiplayer_compatibility()`, against 0 from a build without the feature.
+A browser seat has not yet joined a native host.
+
 The same recorded hash chain is the oracle for cross-build agreement: the
 `parity-cross` gate replays its tracked recording corpus
 (`scripts/validation/parity_corpus/`) on a native Linux build and on the Windows

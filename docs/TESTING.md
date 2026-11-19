@@ -151,10 +151,12 @@ The wasm gate is a compile check, not a browser execution or memory-cap test.
 `scripts/remote-check.sh wasm` runs it on the build host in the devShell, which
 is also what gives `zstd-sys`'s bundled C a compiler that targets wasm32
 (`flake.nix` sets `CC_wasm32_unknown_unknown` for exactly that; the shell's
-`CC` is the host gcc). It is not in `scripts/push-gate.sh` yet: the client does
-not compile for wasm32 today — run the suite and `cargo check` names the line —
-and a gated suite that is red stops every landing. Add it to that script once
-the client compiles for the target. The separate browser-audio gate runs
+`CC` is the host gcc). The client compiles for wasm32 again since 2026-11-19
+(the `--spec` argument group and the browser `ServerHandle::connect_string`
+signature were wrong; `docs/slop/wasm-build-host.md` has the errors). It is
+still not in `scripts/push-gate.sh`: gating it would build a target no other
+suite builds on every client change, which is a cost decision, not a fact
+about the code. The separate browser-audio gate runs
 synthetic browser tests, not full-game browser rendering or audible-output
 acceptance. Native-lifecycle is a local
 provisioned gate, not public CI: it needs licensed data and a compatible host.
