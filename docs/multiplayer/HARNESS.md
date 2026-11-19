@@ -113,11 +113,15 @@ case; `invariant` and `vocabulary` are not cells.
 | H29 | process | baseline | the host presses quick-save then quick-load under two seats: a standalone multiplayer mission has no campaign to save, so quick-save writes the executor's local diagnostic and quick-load finds no quick slot; neither press ends the session, opens a page or moves the client out of agreement. asserts: `log(contains=multiplayer quick-save captured as a local diagnostic,count=1)`; `hash-equal(peers=1,every=25)`; `final-operation(operation=level_in_progress)`; `exit(peers=0,1,status=running)` | `.../game_session/live_gameplay.rs` |
 | H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
 | H31 | process | baseline | the client presses quick-load under two seats: only the host may load a session, so the press is refused in the UI and nothing moves — no page, no mission end, and the 25-frame agreement holds. asserts: `hash-equal(peers=1,every=25)`; `final-operation(operation=level_in_progress)`; `exit(peers=0,1,status=running)` | `.../game_session/live_gameplay.rs` |
+| H32 | process | fault | the host answers Completed and the client answers Restart: the host's decision ends the page on every seat, so the client's late Restart reaches a seat with no terminal page and is refused there — the session leaves on the campaign-exit snapshot the host's answer chose, and no restart snapshot is ever prepared. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelInterrupted,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `log(absent=snapshot transition prepared (Save),count=0)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
 
-The mission-end rows are H22–H29 and H31: H21 is a core row about the same
+The mission-end rows are H22–H29 and H32: H21 is a core row about the same
 page, and H30 opens a campaign session a second seat joins. The sketch in
 `docs/slop/multiplayer-terminal-matrix.md` numbers the six terminal rows
-H21–H26, one lower.
+H21–H26, one lower. Its H22 (host answers Completed, client answers Restart)
+asks whose answer wins and then says the session restarts; both cannot hold,
+and H32 settles it — the host's answer decides, so the session leaves and the
+client's Restart is refused at a seat whose page the host already closed.
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
 row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
