@@ -53,7 +53,7 @@ repo-relative.
 
 | Wait | Evidence | Trigger | Timeout | Action when it expires / the peer vanishes | Per-player state logged or shown | Consequence if it never resolves |
 | --- | --- | --- | --- | --- | --- | --- |
-| Host terminal debriefing holds for its own snapshot transition commit (`TerminalDebriefingPhase::AwaitingSnapshot`) | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Host finished the debriefing leaderboard, published `BeginSnapshotTransition`, and at least one connected peer is still in `awaiting` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session: `TerminalDebriefingProgress::SnapshotUnconfirmed` takes the same exit as an emergency end, so the campaign loop reopens the menu instead of freezing the mission | A `session_failed` event names the wait and the budget (`waited_ms`, `budget_ms`); the run log carries the same wording | Closed 2026-11-19. The wait can no longer outlive its budget; the host barrier it waits on is bounded separately (row 2). |
+| Host terminal debriefing holds for its own snapshot transition commit (`TerminalDebriefingPhase::AwaitingSnapshot`) | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Host finished the debriefing leaderboard, published `BeginSnapshotTransition`, and at least one connected peer is still in `awaiting` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session: `TerminalDebriefingProgress::SnapshotUnconfirmed` takes the same exit as an emergency end, so the campaign loop reopens the menu instead of freezing the mission | A `session_failed` event names the wait and the budget (`waited_ms`, `budget_ms`); the run log carries the same wording | Closed 2026-11-19. The wait can no longer outlive its budget; the host barrier it waits on is bounded separately (`SnapshotTransitions::awaiting`, below). |
 | Client terminal debriefing holds for the host's snapshot commit | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Client finished its debriefing with outcome `Ok`/`Load` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session with `GameCode::Quit` and reopens the menu; it does not keep waiting for a host that may never answer | The same `session_failed` event and log line as the host row | Closed 2026-11-19 with the host row: both sides of the same wait now expire. |
 | Client waits for `BeginSim` | `runtime/admission.rs:14-22` (`PeerWaitingForBegin`, `HostWaitingForBegin`, `HostWaitingForResyncBegin`); gate `runtime/multiplayer_sync.rs:60-74`; pause `multiplayer.rs:1274` | Peer adopted the snapshot and sent `ReadyToSim`, or host's mission is loaded and waiting on peers | **none** | Nothing in the game layer. Only the transport notices a dead host. | No log for the wait itself. `BeginSim` arrival logs "begin-sim barrier released" (`multiplayer.rs:625-629`). | Mission loaded but never simulated; input disabled by `set_gameplay_input_enabled(false)` (`host/transport.rs:178`). |
 | Client waits for `InitialSnapshot` after (re)connect | `runtime/admission.rs:50-57` (`PeerWaitingForSnapshot`) | `Disconnected`, or a first join before the host's snapshot cache exists | **none** | Nothing. The host skips the send silently when its `initial_snapshot` cache is empty (`server.rs:995-1010`). | Console: "Disconnected; reconnecting…" and "Reconnected; synchronizing game…" (`multiplayer.rs:519-551`). No indication that the snapshot never arrived. | Peer frozen indefinitely on a snapshot it never receives; reconnect loops never converge. |
@@ -120,16 +120,18 @@ the tick that expires the barrier commits it under the same lock, after which
 
 ## Ranked: most likely to produce a permanent hang
 
-1. **Terminal debriefing `AwaitingSnapshot`, both sides** — *closed 2026-11-19*
-   (`SNAPSHOT_CONFIRM_BUDGET`):
-   `terminal_debriefing.rs:741-747` (`tick` returns `Pending` unconditionally,
-   comment: "No timeout or local fallback"), entered from `:717` (host) and
-   `:359` (client). It is released only by `take_committed_snapshot_transition`
-   (`frame_prepare/input.rs:419-431`), which requires *every* awaiting seat to
-   have acknowledged. Nothing logs the wait, nothing is on screen, and the
-   mission is pinned in `LevelInProgress`. This is the exact wait the ticket
-   named, and the in-code comment is accurate: there is no timeout and no local
-   fallback.
+1. **Terminal debriefing `AwaitingSnapshot`, both sides — closed 2026-11-19
+   (`SNAPSHOT_CONFIRM_BUDGET`).** It is released by
+   `take_committed_snapshot_transition` (`frame_prepare/input.rs:419-431`),
+   which requires *every* awaiting seat to have acknowledged; that release now
+   races a 30 s budget on both sides (`terminal_debriefing.rs`,
+   `SNAPSHOT_CONFIRM_BUDGET`). Expiry settles the phase as
+   `SnapshotUnconfirmed`, records a `session_failed` event naming the wait and
+   the budget, and leaves the session through the same exit an emergency end
+   takes, so the campaign loop reopens the menu instead of freezing with the
+   mission pinned to `LevelInProgress` (`terminal_debriefing.rs`,
+   `frame_simulate.rs`). The host barrier it waits on is bounded separately at
+   rank 2.
 2. **Host snapshot-transition acknowledgement barrier — closed 2026-11-18
    (`45fc7fb96`, `05bca0b90`).** The deadline is stamped at prepare time
    (`server_dispatch.rs:283-287`) from the payload's own budget —
