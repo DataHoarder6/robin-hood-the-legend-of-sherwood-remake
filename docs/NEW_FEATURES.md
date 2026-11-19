@@ -1511,6 +1511,18 @@ A list of which additional features we have added, which ones we might still wan
   complete width, and Android uses a cutout-safe immersive content area.
   Disabling Adaptive Widescreen restores fixed 4:3 parity presentation.
 
+- **Zoom ladder with fixed-level HUD buttons.** The wheel, the zoom keys and
+  the gamepad POV hat now move the camera through nine stops
+  (0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 1.75, 2.0) instead of jumping
+  between the three original levels; a notch taken from a pinch value goes to
+  the next stop in that direction. The two top-right castle buttons keep the
+  original behaviour of landing exactly on 0.5x, 1x and 2x, skipping the stops
+  between them, and are anchored at the screen centre. A stop the level cannot
+  fill is refused, so widescreen maps still stop where the original stopped
+  zooming out. The three-level engine camera and the scripted camera are
+  unchanged; when a cutscene releases the view, the camera returns to the zoom
+  the player chose.
+
 - **Live Sherwood production forecast.** The Sherwood report now includes a
   compact, toggleable item-production panel built from current map stock and
   live production-zone membership. Once a mission is selected it shows exact

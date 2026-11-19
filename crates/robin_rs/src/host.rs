@@ -50,7 +50,7 @@ pub(crate) use transport::CommittedSnapshotTransition;
 pub use transport::{
     HostTransport, PendingSnapshotTransition, PendingSnapshotTransitionPayload, SnapshotSave,
 };
-pub use viewport::ViewportState;
+pub use viewport::{ViewportState, ZoomDirection};
 
 const PANNEL_HEIGHT: f32 = engine_api::PANNEL_HEIGHT;
 

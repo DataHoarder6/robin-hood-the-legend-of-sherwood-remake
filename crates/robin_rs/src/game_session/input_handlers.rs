@@ -4,7 +4,7 @@ use super::{apply_local_viewport_scroll, dispatch_local_command, set_local_follo
 use crate::console_overlay::ConsoleOverlay;
 use crate::gamepad::{GamepadDeviceInput, QaEvent, ViewportCommand};
 use crate::gfx_types::GameEvent;
-use crate::host::Host;
+use crate::host::{Host, ZoomDirection};
 use crate::input::ThreadedInput;
 use crate::input_translator::{GameAction, InputTranslator};
 use crate::save_file::GameSaveFile;
@@ -59,15 +59,17 @@ pub(super) fn handle_gamepad_events(
             ViewportCommand::Scroll(dir) => apply_local_viewport_scroll(host, *dir),
             ViewportCommand::ZoomIn => {
                 let mp = threaded_input.position();
-                host.frontend
-                    .viewport
-                    .zoom_by(2.0, Some(engine_coordinates::ScreenPoint::new(mp.x, mp.y)));
+                host.frontend.viewport.zoom_step(
+                    ZoomDirection::In,
+                    Some(engine_coordinates::ScreenPoint::new(mp.x, mp.y)),
+                );
             }
             ViewportCommand::ZoomOut => {
                 let mp = threaded_input.position();
-                host.frontend
-                    .viewport
-                    .zoom_by(0.5, Some(engine_coordinates::ScreenPoint::new(mp.x, mp.y)));
+                host.frontend.viewport.zoom_step(
+                    ZoomDirection::Out,
+                    Some(engine_coordinates::ScreenPoint::new(mp.x, mp.y)),
+                );
             }
         }
     }

@@ -10,6 +10,7 @@ use super::interactive::{
 };
 use super::*;
 use crate::game::Game;
+use crate::host::ZoomDirection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct InputModifiers {
@@ -350,7 +351,8 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         .plan
     };
     let corner_enable = CornerButtonEnable::from_engine(&manager.engine.presentation_view());
-    let zoom_enable = ZoomButtonEnable::from_engine(&manager.engine.presentation_view());
+    let zoom_enable =
+        ZoomButtonEnable::from_engine(&manager.engine.presentation_view(), &host.frontend.viewport);
     let stature = manager
         .engine
         .retrieve_stature_for_seat(host.transport.local_seat(), None);
@@ -386,14 +388,11 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         host.frontend.route_hud_event(event, true);
         if button == 1 {
             if let Some(button) = hud.zoom_layout.hit_test(mx, my, zoom_enable) {
-                let factor = match button {
-                    ZoomButton::ZoomUp => 2.0,
-                    ZoomButton::ZoomDown => 0.5,
+                let direction = match button {
+                    ZoomButton::ZoomUp => ZoomDirection::In,
+                    ZoomButton::ZoomDown => ZoomDirection::Out,
                 };
-                host.frontend.viewport.zoom_by(
-                    factor,
-                    Some(engine_coordinates::ScreenPoint::new(mx as f32, my as f32)),
-                );
+                host.frontend.viewport.zoom_to_original_level(direction);
             } else if corner.is_some() {
                 if let Some(button) = hud.corner_layout.hit_test(mx, my, corner_enable) {
                     dispatch_corner_button_left_click(

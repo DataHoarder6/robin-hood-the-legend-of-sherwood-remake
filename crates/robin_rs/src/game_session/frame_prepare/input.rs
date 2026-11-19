@@ -11,6 +11,7 @@ use crate::game_session::live_gameplay::{
     LiveGameplayContext, LiveGameplayInput, drive_live_gameplay_input,
 };
 use crate::game_session::runtime::{FrameContractStage, TimelineRuntime};
+use crate::host::ZoomDirection;
 
 fn begin_interactive_frame(
     ingress: MissionIngress<'_>,
@@ -197,8 +198,14 @@ fn apply_host_view_input(
                 GameAction::ScrollRight => {
                     apply_local_viewport_scroll(host, ScrollDirection::Right)
                 }
-                GameAction::ZoomIn => host.frontend.viewport.zoom_by(2.0, Some(mouse_position)),
-                GameAction::ZoomOut => host.frontend.viewport.zoom_by(0.5, Some(mouse_position)),
+                GameAction::ZoomIn => host
+                    .frontend
+                    .viewport
+                    .zoom_step(ZoomDirection::In, Some(mouse_position)),
+                GameAction::ZoomOut => host
+                    .frontend
+                    .viewport
+                    .zoom_step(ZoomDirection::Out, Some(mouse_position)),
                 _ => {}
             }
         }

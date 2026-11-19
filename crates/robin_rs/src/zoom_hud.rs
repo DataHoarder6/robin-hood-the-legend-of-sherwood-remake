@@ -1,11 +1,11 @@
 //! Zoom HUD buttons (zoom-in / zoom-out).
 //!
-//! The two zoom widgets sit on the top-right parchment scroll.  Their enable mask
-//! comes from `Engine::is_zoom_up_possible` / `is_zoom_down_possible`
-//! and an in-flight transition pins the active widget to
-//! visually-pressed for the duration of the zoom animation.  Every
-//! one of those states is derived directly from the engine queries
-//! each frame.
+//! The two zoom widgets sit on the top-right parchment scroll. They jump
+//! between the original zoom levels (0.5x, 1x, 2x), skipping the finer ladder
+//! stops the wheel and the zoom keys use. Their enable mask comes from the
+//! engine's transition lock plus the host viewport's reachable directions, and
+//! an in-flight scripted zoom pins the active widget to visually-pressed for
+//! the duration of the zoom animation.
 //!
 //! Button sprites come from the `RHID_ZOOM_UP` / `RHID_ZOOM_DOWN`
 //! BTTN resources.  The four sub-ids encode interaction state:
@@ -14,6 +14,7 @@
 //! missing in the resource pack.
 
 use crate::gfx_types::{Point, Rect as ScreenRect};
+use crate::host::ZoomDirection;
 use robin_engine::engine as engine_api;
 #[cfg(test)]
 use robin_engine::player_command::PlayerCommand;
@@ -33,10 +34,10 @@ pub enum ZoomButton {
 
 /// Which zoom buttons are interactable this frame.
 ///
-/// Derived from `Engine::is_zoom_possible`, `is_zoom_up_possible`
-/// and `is_zoom_down_possible`. `selected_*` is set while a zoom
-/// transition is in flight — the active widget reads enabled +
-/// selected for the duration of the animation.
+/// The engine decides whether a scripted zoom transition is in flight; the
+/// host viewport decides whether there is a zoom to move to. `selected_*` is
+/// set while a zoom transition is in flight — the active widget reads enabled
+/// + selected for the duration of the animation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ZoomButtonEnable {
     pub zoom_up: bool,
@@ -46,18 +47,24 @@ pub struct ZoomButtonEnable {
 }
 
 impl ZoomButtonEnable {
-    /// Snapshot the current enable mask from the engine's zoom-state
-    /// queries.  A transition-in-progress clears both buttons via
-    /// `is_zoom_possible`; we then re-open the specific direction
-    /// that's active so its widget stays visually "pressed" for the
-    /// duration.
-    pub fn from_engine(engine: &engine_api::PresentationView<'_>) -> Self {
+    /// Snapshot the current enable mask.  A transition-in-progress clears both
+    /// buttons via `is_zoom_possible`; we then re-open the specific direction
+    /// that's active so its widget stays visually "pressed" for the duration.
+    ///
+    /// The reachable directions come from the host zoom, not the engine's
+    /// three-level camera: a pinch can leave the host between levels, and the
+    /// buttons must follow what the player can actually do next.
+    pub fn from_engine(
+        engine: &engine_api::PresentationView<'_>,
+        viewport: &crate::host::ViewportState,
+    ) -> Self {
         let gated = engine.is_zoom_possible();
         let zoom_up_in_progress = engine.is_zoom_up_in_progress();
         let zoom_down_in_progress = engine.is_zoom_down_in_progress();
         Self {
-            zoom_up: (gated && engine.is_zoom_up_possible()) || zoom_up_in_progress,
-            zoom_down: (gated && engine.is_zoom_down_possible()) || zoom_down_in_progress,
+            zoom_up: (gated && viewport.can_zoom_step(ZoomDirection::In)) || zoom_up_in_progress,
+            zoom_down: (gated && viewport.can_zoom_step(ZoomDirection::Out))
+                || zoom_down_in_progress,
             selected_up: zoom_up_in_progress,
             selected_down: zoom_down_in_progress,
         }
@@ -242,9 +249,11 @@ mod tests {
             4096.0,
         )
         .expect("engine");
+        let mut viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(4096.0, 4096.0);
 
         // Idle state: both directions available at zoom_factor = 1.0.
-        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view());
+        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view(), &viewport);
         assert!(mask.zoom_up);
         assert!(mask.zoom_down);
         assert!(!mask.selected_up);
@@ -262,11 +271,65 @@ mod tests {
                 .with_hourglass(false),
             )
             .expect("zoom command admission");
-        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view());
+        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view(), &viewport);
         assert!(mask.zoom_up);
         assert!(mask.selected_up);
         assert!(!mask.zoom_down);
         assert!(!mask.selected_down);
+    }
+
+    #[test]
+    fn enable_mask_follows_the_host_zoom_not_the_engine_level() {
+        use robin_engine::campaign::Campaign;
+        use robin_engine::engine::LevelAssets;
+
+        let mut assets = LevelAssets::new();
+        let mut engine = engine_api::Engine::new_for_test_with_level_size(
+            1024.0,
+            768.0,
+            Campaign::default(),
+            &mut assets,
+            4096.0,
+            4096.0,
+        )
+        .expect("engine");
+        let mut viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(4096.0, 4096.0);
+
+        // The engine still sits at its normal level, but a pinch took the
+        // host to the floor: zooming out must be refused, zooming in allowed.
+        viewport.zoom_factor = 0.5;
+        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view(), &viewport);
+        assert!(mask.zoom_up);
+        assert!(!mask.zoom_down);
+
+        viewport.zoom_factor = 2.0;
+        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view(), &viewport);
+        assert!(!mask.zoom_up);
+        assert!(mask.zoom_down);
+    }
+
+    #[test]
+    fn enable_mask_refuses_zoom_out_the_map_cannot_fill() {
+        use robin_engine::campaign::Campaign;
+        use robin_engine::engine::LevelAssets;
+
+        let mut assets = LevelAssets::new();
+        let mut engine = engine_api::Engine::new_for_test_with_level_size(
+            1024.0,
+            768.0,
+            Campaign::default(),
+            &mut assets,
+            1100.0,
+            900.0,
+        )
+        .expect("engine");
+        let mut viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(1100.0, 900.0);
+
+        let mask = ZoomButtonEnable::from_engine(&engine.presentation_view(), &viewport);
+        assert!(mask.zoom_up);
+        assert!(!mask.zoom_down);
     }
 
     #[test]

@@ -1,6 +1,30 @@
 //! Client-local camera and touch motion.
 use super::*;
 
+/// Player-facing zoom ladder. The three original levels are stops; the values
+/// between them give the wheel, the zoom keys and the gamepad finer steps
+/// without changing the renderer or the engine's three-level director camera.
+pub const ZOOM_STOPS: [f32; 9] = [0.5, 0.625, 0.75, 0.875, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+/// The zoom levels the original game shipped with. The HUD zoom buttons jump
+/// between these, skipping the ladder stops in between.
+pub const ORIGINAL_ZOOM_LEVELS: [f32; 3] = [0.5, 1.0, 2.0];
+
+pub const MIN_ZOOM: f32 = 0.5;
+pub const MAX_ZOOM: f32 = 2.0;
+
+/// Direction of a zoom request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoomDirection {
+    In,
+    Out,
+}
+
+/// A zoom value within this distance of a ladder stop is that stop. Pinch
+/// zoom leaves arbitrary values, and the wheel must still find the next stop
+/// rather than skip over an exact one.
+const STOP_EPSILON: f32 = 0.001;
+
 /// Host-local viewport state. This is deliberately outside
 /// `robin_engine`: screen size, mouse anchoring, render culling, and
 /// local scroll/zoom are presentation concerns and may differ on every
@@ -13,6 +37,10 @@ pub struct ViewportState {
     pub old_zoom_factor: f32,
     pub screen_size: ScreenSize,
     pub level_size: MapSize,
+    /// The zoom the player last chose. A scripted camera may move the view and
+    /// change the zoom; this is what the viewport returns to when the director
+    /// releases the view.
+    player_zoom_factor: f32,
     touch_motion: TouchCameraMotion,
 }
 
@@ -35,6 +63,7 @@ impl ViewportState {
             old_zoom_factor: 1.0,
             screen_size: ScreenSize::new(screen_width, screen_height),
             level_size: MapSize::ZERO,
+            player_zoom_factor: 1.0,
             touch_motion: TouchCameraMotion::default(),
         }
     }
@@ -68,6 +97,7 @@ impl ViewportState {
         if !before.owns_view && !after.owns_view {
             return;
         }
+        let released = before.owns_view && !after.owns_view;
         if before.zoom_factor != after.zoom_factor {
             // Script zooms retain the local focal point until a pan or jump
             // explicitly chooses a new one.
@@ -95,6 +125,12 @@ impl ViewportState {
             // An explicit jump (including jump+unlock in one tick), or a
             // follow-camera update, still adopts the scripted framing.
             self.adopt_director_camera(after.view_position, view_size, after.zoom_factor);
+        }
+
+        if released {
+            // The script is done with the camera: hand it back at the zoom the
+            // player chose, keeping the focal point it left behind.
+            self.zoom_to(self.player_zoom_factor, None);
         }
     }
 
@@ -152,11 +188,89 @@ impl ViewportState {
     }
 
     pub fn zoom_by(&mut self, factor: f32, mouse_screen: Option<ScreenPoint>) {
-        let next = (self.zoom_factor * factor).clamp(0.5, 2.0);
+        let next = (self.zoom_factor * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom_to(next, mouse_screen);
+    }
+
+    /// One notch of the player zoom ladder, anchored at the mouse when the
+    /// caller has one. A stop the map cannot fill is refused, which is the
+    /// host-side form of the original's "you cannot zoom out past the map".
+    pub fn zoom_step(&mut self, direction: ZoomDirection, anchor: Option<ScreenPoint>) {
+        let Some(next) = self.next_stop(direction) else {
+            return;
+        };
+        self.zoom_to(next, anchor);
+        self.player_zoom_factor = next;
+    }
+
+    /// The HUD zoom buttons jump between the original levels, skipping the
+    /// ladder stops. The jump is anchored at the screen centre so a large
+    /// change cannot fling the view towards a corner cursor.
+    pub fn zoom_to_original_level(&mut self, direction: ZoomDirection) {
+        let Some(next) = self.next_original_level(direction) else {
+            return;
+        };
+        self.zoom_to(next, None);
+        self.player_zoom_factor = next;
+    }
+
+    /// Whether [`Self::zoom_step`] would move the camera.
+    pub fn can_zoom_step(&self, direction: ZoomDirection) -> bool {
+        self.next_stop(direction).is_some()
+    }
+
+    fn next_stop(&self, direction: ZoomDirection) -> Option<f32> {
+        let current = self.effective_zoom();
+        let next = match direction {
+            ZoomDirection::In => ZOOM_STOPS.iter().copied().find(|stop| *stop > current),
+            ZoomDirection::Out => ZOOM_STOPS
+                .iter()
+                .rev()
+                .copied()
+                .find(|stop| *stop < current),
+        }?;
+        self.view_fits(next).then_some(next)
+    }
+
+    fn next_original_level(&self, direction: ZoomDirection) -> Option<f32> {
+        let current = self.effective_zoom();
+        let next = match direction {
+            ZoomDirection::In => ORIGINAL_ZOOM_LEVELS
+                .iter()
+                .copied()
+                .find(|level| *level > current),
+            ZoomDirection::Out => ORIGINAL_ZOOM_LEVELS
+                .iter()
+                .rev()
+                .copied()
+                .find(|level| *level < current),
+        }?;
+        self.view_fits(next).then_some(next)
+    }
+
+    /// Pinch zoom leaves arbitrary values; treat one within [`STOP_EPSILON`]
+    /// of a stop as that stop so the ladder does not skip over it.
+    fn effective_zoom(&self) -> f32 {
+        ZOOM_STOPS
+            .iter()
+            .copied()
+            .find(|stop| (*stop - self.zoom_factor).abs() < STOP_EPSILON)
+            .unwrap_or(self.zoom_factor)
+    }
+
+    /// Whether the level covers the whole view at `zoom`. Mirrors the engine's
+    /// `is_zoom_down_possible` rule against the host's own canvas.
+    fn view_fits(&self, zoom: f32) -> bool {
+        self.screen_size.x / zoom <= self.level_size.x
+            && (self.screen_size.y - PANNEL_HEIGHT) / zoom <= self.level_size.y
+    }
+
+    fn zoom_to(&mut self, next: f32, anchor: Option<ScreenPoint>) {
+        let next = next.clamp(MIN_ZOOM, MAX_ZOOM);
         if (next - self.zoom_factor).abs() < f32::EPSILON {
             return;
         }
-        let anchor = mouse_screen.unwrap_or_else(|| {
+        let anchor = anchor.unwrap_or_else(|| {
             ScreenPoint::new(self.screen_size.x * 0.5, self.screen_size.y * 0.5)
         });
         let before = self.screen_to_map_unchecked(anchor);
@@ -205,11 +319,12 @@ impl ViewportState {
         let anchor = self.screen_to_map_unchecked(previous_centroid);
         self.old_view_position = self.view_position;
         self.old_zoom_factor = self.zoom_factor;
-        self.zoom_factor = (self.zoom_factor * scale).clamp(0.5, 2.0);
+        self.zoom_factor = (self.zoom_factor * scale).clamp(MIN_ZOOM, MAX_ZOOM);
         self.view_position = MapPoint::new(
             anchor.x - centroid.x / self.zoom_factor,
             anchor.y - centroid.y / self.zoom_factor,
         );
+        self.player_zoom_factor = self.zoom_factor;
         self.clip_view();
         true
     }
@@ -516,6 +631,159 @@ mod viewport_touch_tests {
             0.5,
         );
         assert_eq!(viewport.view_position, MapPoint::new(744.0, 1048.0));
+    }
+
+    #[test]
+    fn zoom_step_walks_the_ladder_and_stops_at_the_ends() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+
+        for expected in [1.25, 1.5, 1.75, 2.0] {
+            viewport.zoom_step(ZoomDirection::In, None);
+            close(viewport.zoom_factor, expected);
+        }
+        viewport.zoom_step(ZoomDirection::In, None);
+        close(viewport.zoom_factor, 2.0);
+
+        for expected in [1.75, 1.5, 1.25, 1.0, 0.875, 0.75, 0.625, 0.5] {
+            viewport.zoom_step(ZoomDirection::Out, None);
+            close(viewport.zoom_factor, expected);
+        }
+        viewport.zoom_step(ZoomDirection::Out, None);
+        close(viewport.zoom_factor, 0.5);
+    }
+
+    #[test]
+    fn zoom_step_from_an_off_ladder_value_moves_in_the_travel_direction() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.zoom_factor = 1.37;
+
+        viewport.zoom_step(ZoomDirection::In, None);
+        close(viewport.zoom_factor, 1.5);
+
+        viewport.zoom_factor = 1.37;
+        viewport.zoom_step(ZoomDirection::Out, None);
+        close(viewport.zoom_factor, 1.25);
+    }
+
+    #[test]
+    fn zoom_to_original_level_skips_the_ladder_stops() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+
+        viewport.zoom_to_original_level(ZoomDirection::In);
+        close(viewport.zoom_factor, 2.0);
+        viewport.zoom_to_original_level(ZoomDirection::In);
+        close(viewport.zoom_factor, 2.0);
+        viewport.zoom_to_original_level(ZoomDirection::Out);
+        close(viewport.zoom_factor, 1.0);
+        viewport.zoom_to_original_level(ZoomDirection::Out);
+        close(viewport.zoom_factor, 0.5);
+        viewport.zoom_to_original_level(ZoomDirection::Out);
+        close(viewport.zoom_factor, 0.5);
+
+        viewport.zoom_factor = 1.37;
+        viewport.zoom_to_original_level(ZoomDirection::Out);
+        close(viewport.zoom_factor, 1.0);
+        viewport.zoom_to_original_level(ZoomDirection::In);
+        close(viewport.zoom_factor, 2.0);
+    }
+
+    #[test]
+    fn zoom_to_original_level_keeps_the_screen_centre_fixed() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.view_position = MapPoint::new(1000.0, 900.0);
+        let centre = ScreenPoint::new(512.0, 384.0);
+        let anchor = viewport.screen_to_map_unchecked(centre);
+
+        viewport.zoom_to_original_level(ZoomDirection::In);
+
+        close(viewport.zoom_factor, 2.0);
+        let moved = viewport.screen_to_map_unchecked(centre);
+        close(moved.x, anchor.x);
+        close(moved.y, anchor.y);
+    }
+
+    #[test]
+    fn zoom_step_refuses_a_stop_the_map_cannot_fill() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        // 1024 / 0.875 = 1170 map pixels wide: the ladder's first step out
+        // would show more map than the level has.
+        viewport.set_level_size(1100.0, 900.0);
+
+        viewport.zoom_step(ZoomDirection::Out, None);
+        close(viewport.zoom_factor, 1.0);
+        viewport.zoom_to_original_level(ZoomDirection::Out);
+        close(viewport.zoom_factor, 1.0);
+        assert!(!viewport.can_zoom_step(ZoomDirection::Out));
+        assert!(viewport.can_zoom_step(ZoomDirection::In));
+    }
+
+    #[test]
+    fn player_zoom_returns_when_the_director_releases_the_view() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.zoom_step(ZoomDirection::In, None);
+        close(viewport.zoom_factor, 1.25);
+
+        let view_size = ScreenSize::new(1024.0, 768.0);
+        let idle = engine_api::DirectorCameraFrame {
+            view_position: MapPoint::new(100.0, 200.0),
+            zoom_factor: 1.0,
+            slide_target: None,
+            owns_view: false,
+        };
+        let scripted = engine_api::DirectorCameraFrame {
+            zoom_factor: 2.0,
+            owns_view: true,
+            ..idle
+        };
+        viewport.advance_director_camera(idle, scripted, view_size);
+        close(viewport.zoom_factor, 2.0);
+
+        let released = engine_api::DirectorCameraFrame {
+            owns_view: false,
+            ..scripted
+        };
+        viewport.advance_director_camera(scripted, released, view_size);
+        close(viewport.zoom_factor, 1.25);
+    }
+
+    #[test]
+    fn pinch_counts_as_the_player_zoom_to_restore() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.begin_touch_transform(true);
+        viewport.apply_touch_transform(
+            ScreenPoint::new(400.0, 300.0),
+            ScreenVec::new(0.0, 0.0),
+            1.37,
+        );
+        close(viewport.zoom_factor, 1.37);
+
+        let view_size = ScreenSize::new(1024.0, 768.0);
+        let idle = engine_api::DirectorCameraFrame {
+            view_position: MapPoint::new(100.0, 200.0),
+            zoom_factor: 1.0,
+            slide_target: None,
+            owns_view: false,
+        };
+        let scripted = engine_api::DirectorCameraFrame {
+            zoom_factor: 0.5,
+            owns_view: true,
+            ..idle
+        };
+        viewport.advance_director_camera(idle, scripted, view_size);
+        close(viewport.zoom_factor, 0.5);
+
+        let released = engine_api::DirectorCameraFrame {
+            owns_view: false,
+            ..scripted
+        };
+        viewport.advance_director_camera(scripted, released, view_size);
+        close(viewport.zoom_factor, 1.37);
     }
 
     #[test]
