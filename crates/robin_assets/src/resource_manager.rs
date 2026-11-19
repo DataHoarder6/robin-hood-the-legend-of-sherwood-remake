@@ -1056,6 +1056,34 @@ impl ResourceManager {
         self.get_strings(id).map(<[String]>::len)
     }
 
+    /// Replace a whole text table, keeping its id and archive position.
+    ///
+    /// The id must already name a string table: a translation may rewrite a
+    /// table, never invent one.
+    pub fn set_strings(&mut self, id: ResourceId, strings: Vec<String>) -> Result<()> {
+        if !self.has_string_resource(id) {
+            bail!("string resource {id}: not found");
+        }
+        self.ensure_strings_loaded(id)?;
+        self.data.strings.insert(id, strings);
+        Ok(())
+    }
+
+    /// Replace one string in a text table, keeping the table's shape.
+    pub fn set_string(&mut self, id: ResourceId, sub_id: usize, value: String) -> Result<()> {
+        self.ensure_strings_loaded(id)?;
+        let strings = self
+            .data
+            .strings
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("string resource {id}: not found"))?;
+        let slot = strings
+            .get_mut(sub_id)
+            .ok_or_else(|| anyhow!("string resource {id}: sub_id {sub_id} out of range"))?;
+        *slot = value;
+        Ok(())
+    }
+
     /// Number of strings already resident in a decoded resource manager.
     ///
     /// Shipping manifests contain eagerly decoded resources and are shared by
@@ -2112,6 +2140,30 @@ mod tests {
                 .unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn string_setters_replace_in_place_and_reject_unknown_tables() {
+        let mut manager = ResourceManager::new();
+        manager
+            .data
+            .strings
+            .insert(1_000_507, vec!["a".into(), "b".into(), "c".into()]);
+
+        manager
+            .set_string(1_000_507, 1, "Lietuvių".to_owned())
+            .unwrap();
+        assert_eq!(manager.get_string(1_000_507, 1).unwrap(), "Lietuvių");
+        assert_eq!(manager.get_string_count(1_000_507).unwrap(), 3);
+
+        manager
+            .set_strings(1_000_507, vec!["x".to_owned()])
+            .unwrap();
+        assert_eq!(manager.get_string_count(1_000_507).unwrap(), 1);
+        assert_eq!(manager.get_string(1_000_507, 0).unwrap(), "x");
+
+        assert!(manager.set_string(1_000_507, 1, "y".to_owned()).is_err());
+        assert!(manager.set_strings(999, vec![]).is_err());
     }
 
     #[test]
