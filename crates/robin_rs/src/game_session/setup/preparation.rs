@@ -235,10 +235,8 @@ pub(super) fn resolve_background_dims(
         };
     let (bg_pixel_dims, bg_pending) = match pending_terrain.try_take_ready() {
         Ok(decoded) => {
-            match install_decoded_terrain(decoded, &mut pre_decoded_bg, &mut pre_decoded_mm) {
-                Ok(dims) => (dims, None),
-                Err(message) => return Err(message),
-            }
+            let dims = install_decoded_terrain(decoded, &mut pre_decoded_bg, &mut pre_decoded_mm)?;
+            (dims, None)
         }
         Err(pending) => match pending.known_dimensions().or_else(|| {
             crate::level_loading_host::probe_background_map_dims_with_files(
@@ -252,9 +250,10 @@ pub(super) fn resolve_background_dims(
             Some((w, h)) => ((w as f32, h as f32), Some(pending)),
             None => {
                 let decoded = pending.join_now_or_redecode(&mut |_| {});
-                match install_decoded_terrain(decoded, &mut pre_decoded_bg, &mut pre_decoded_mm) {
-                    Ok(dims) => (dims, None),
-                    Err(message) => return Err(message),
+                {
+                    let dims =
+                        install_decoded_terrain(decoded, &mut pre_decoded_bg, &mut pre_decoded_mm)?;
+                    (dims, None)
                 }
             }
         },
@@ -399,7 +398,7 @@ pub(super) fn load_mission_binaries(
             profiles,
             level_directory,
             &mut progress,
-            &files,
+            files,
         )
         .map_err(|e| MissionError::asset(format!("Level load failed: {e}")))
     }

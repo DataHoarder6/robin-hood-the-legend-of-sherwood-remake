@@ -825,7 +825,7 @@ pub(super) async fn drain_pending_dialogues(
                     let replay_result = pop_matching_dismissal(replay_modal_dismissals, kind);
                     let modal_net = host.transport.net().map(|net| {
                         net.present_modal(
-                            &kind,
+                            kind,
                             host.transport.local_seat() == engine_player_command::PlayerId::HOST,
                         )
                         .expect("session modal admission");

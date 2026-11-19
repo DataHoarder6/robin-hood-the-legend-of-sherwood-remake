@@ -109,13 +109,13 @@ impl ProfileDomain {
             })?;
             let profile_id = active.id;
             let next = profile_derived_state(profiles, &state)?;
-            if let Some(id) = removed_profile {
-                if let Err(error) = services.profile_store.quarantine_profile_saves(id) {
-                    let restored = services.profile_store.restore_profile_saves(id);
-                    return Err(format!(
-                        "quarantine placeholder saves: {error}; restore={restored:?}"
-                    ));
-                }
+            if let Some(id) = removed_profile
+                && let Err(error) = services.profile_store.quarantine_profile_saves(id)
+            {
+                let restored = services.profile_store.restore_profile_saves(id);
+                return Err(format!(
+                    "quarantine placeholder saves: {error}; restore={restored:?}"
+                ));
             }
 
             let persistence = services

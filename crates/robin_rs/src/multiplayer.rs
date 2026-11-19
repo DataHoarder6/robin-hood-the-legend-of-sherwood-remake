@@ -75,13 +75,16 @@ impl NetChannels {
     }
 
     /// Couple the channel bundle to its transport owner.
+    ///
+    /// The conversion stays inside `map`: without the `multiplayer` feature
+    /// `MultiplayerRuntime` is uninhabited, so `Some(runtime.into())` never
+    /// returns and rustc lints it unreachable.
+    #[allow(clippy::unnecessary_map_on_constructor)]
     pub fn attach_runtime(&mut self, runtime: impl Into<MultiplayerRuntime>) {
         assert!(
             self.runtime.is_none(),
             "multiplayer channels already have an attached runtime"
         );
-        // Convert inside `map`: without the feature `MultiplayerRuntime` is
-        // uninhabited, and a direct `Some(runtime.into())` is linted unreachable.
         self.runtime = Some(runtime).map(Into::into);
     }
 

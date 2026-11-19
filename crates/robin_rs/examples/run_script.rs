@@ -143,7 +143,8 @@ mod tests {
 
     #[test]
     fn authored_empty_remains_an_explicit_stop() {
-        for opcode in [0] {
+        {
+            let opcode = 0;
             let (stop, ip, frames) = run_script(fixture(opcode), "Probe", "Initialize").unwrap();
             assert!(matches!(stop, StopReason::HitEmpty));
             assert!(ip <= 1);

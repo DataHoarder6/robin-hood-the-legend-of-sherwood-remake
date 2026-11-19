@@ -638,6 +638,27 @@ fn validate_depth_mask(
         .checked_mul(2)
         .ok_or_else(|| "occlusion depth byte count overflow".to_string())
 }
+/// Developer-only A/B control, deliberately absent from the product UI.
+fn mask_atlas_enabled() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    let value = web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok())
+        .and_then(|params| params.get("mask-atlas"));
+    #[cfg(not(target_arch = "wasm32"))]
+    let value = std::env::var("ROBIN_MASK_ATLAS").ok();
+    match value.as_deref() {
+        None | Some("1") => true,
+        Some("0") => false,
+        Some(other) => {
+            tracing::warn!(
+                value = other,
+                "Invalid mask atlas override; expected 0 or 1"
+            );
+            true
+        }
+    }
+}
 
 #[cfg(test)]
 mod mask_upload_tests {
@@ -666,27 +687,5 @@ mod mask_upload_tests {
         assert!(validate_depth_mask(7, 3, 2, 8).is_err());
         assert!(validate_depth_mask(6, 3, 2, 2).is_err());
         assert!(validate_depth_mask(0, 0, 2, 8).is_err());
-    }
-}
-
-/// Developer-only A/B control, deliberately absent from the product UI.
-fn mask_atlas_enabled() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    let value = web_sys::window()
-        .and_then(|window| window.location().search().ok())
-        .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok())
-        .and_then(|params| params.get("mask-atlas"));
-    #[cfg(not(target_arch = "wasm32"))]
-    let value = std::env::var("ROBIN_MASK_ATLAS").ok();
-    match value.as_deref() {
-        None | Some("1") => true,
-        Some("0") => false,
-        Some(other) => {
-            tracing::warn!(
-                value = other,
-                "Invalid mask atlas override; expected 0 or 1"
-            );
-            true
-        }
     }
 }

@@ -1328,7 +1328,7 @@ mod tests {
         );
         let attempts = unarchived.missions[1].attempt_history().attempts();
         assert_eq!(attempts.len(), 2);
-        let repeated = vec![
+        let repeated = [
             attempts[1].clone(),
             attempts[0].clone(),
             attempts[1].clone(),

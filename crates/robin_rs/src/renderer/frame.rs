@@ -634,7 +634,7 @@ impl FrameState {
                 encoder,
                 &self.ui_target_texture,
                 presentation_target,
-                [dx as f32, dy as f32, dst_w, dst_h],
+                [dx, dy, dst_w, dst_h],
             );
         }
     }

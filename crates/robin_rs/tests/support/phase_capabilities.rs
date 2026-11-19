@@ -787,7 +787,7 @@ fn production_render_and_audio_capabilities_exclude_broad_authority() {
             vec!["frontend", "sound", "options", "local_seat", "application"],
         ),
     ] {
-        let view = item_struct(&syntax, name).expect("production capability exists");
+        let view = item_struct(syntax, name).expect("production capability exists");
         let fields: Vec<_> = view
             .fields
             .iter()

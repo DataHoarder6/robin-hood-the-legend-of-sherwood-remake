@@ -232,7 +232,9 @@ pub(crate) fn capture(gpu: GpuContext, configuration: &std::path::Path) {
         );
         let (_, _, after) = renderer.try_capture_frame_rgba().unwrap();
         let changed = before
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .zip(after.chunks_exact(4))
             .filter(|(a, b)| a != b)
             .count();

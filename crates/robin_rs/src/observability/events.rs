@@ -283,7 +283,7 @@ fn new_run_id() -> String {
     static PROCESS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         format!(
             "{}-{}",
-            jiff::Zoned::now().strftime("%Y%m%dT%H%M%S").to_string(),
+            jiff::Zoned::now().strftime("%Y%m%dT%H%M%S"),
             process_tag()
         )
     });
@@ -306,6 +306,7 @@ pub(crate) struct EventsPage {
 /// slow or disconnected install home must not hold up `/state` or `/events`,
 /// which exist precisely for a game thread that is stuck.
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
 pub(super) struct EventFile {
     file: Option<std::fs::File>,
     path: Option<PathBuf>,
@@ -315,16 +316,6 @@ pub(super) struct EventFile {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl Default for EventFile {
-    fn default() -> Self {
-        Self {
-            file: None,
-            path: None,
-            written: 0,
-        }
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 static EVENT_FILE: std::sync::LazyLock<std::sync::Mutex<EventFile>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(EventFile::default()));

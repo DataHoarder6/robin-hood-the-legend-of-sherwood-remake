@@ -496,14 +496,11 @@ mod tests {
                             .1
                         };
                         let travel = (v.length() - 2 - height).max(0) as usize;
-                        let expected = if travel == 0 {
-                            v.offset()
-                        } else {
-                            (((position - v.origin() - 1 - grab).max(0) as usize * v.max_offset()
-                                + travel / 2)
-                                / travel)
-                                .min(v.max_offset())
-                        };
+                        let expected = ((position - v.origin() - 1 - grab).max(0) as usize
+                            * v.max_offset()
+                            + travel / 2)
+                            .checked_div(travel)
+                            .map_or(v.offset(), |offset| offset.min(v.max_offset()));
                         v.drag_to(position, grab);
                         assert_eq!(v.offset(), expected);
                     }

@@ -216,10 +216,10 @@ impl BugReportModalState {
                 Keycode::Right => field.move_caret_right(),
                 Keycode::Home => field.move_caret_home(),
                 Keycode::End => field.move_caret_end(),
-                _ => return,
+                _ => (),
             },
             GameEvent::TextInput { .. } => {}
-            _ => return,
+            _ => (),
         }
     }
 

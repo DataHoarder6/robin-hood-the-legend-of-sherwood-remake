@@ -628,22 +628,22 @@ impl ReplayLifecycle {
                 modals,
             ));
         }
-        if let Some((presentation, effects)) = &self.seek_start {
-            if let Some(sidecar) = crate::replay_seek::take(player.data()) {
-                let count = sidecar.checkpoints.len();
-                match seek::ReplaySeekCache::import_from_start(
-                    sidecar,
-                    player.data(),
-                    presentation.clone(),
-                    effects.clone(),
-                ) {
-                    Ok(cache) => {
-                        self.seek_cache = cache;
-                        tracing::info!(checkpoints = count, "imported replay seek sidecar");
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "replay seek sidecar rejected; using local checkpoints")
-                    }
+        if let Some((presentation, effects)) = &self.seek_start
+            && let Some(sidecar) = crate::replay_seek::take(player.data())
+        {
+            let count = sidecar.checkpoints.len();
+            match seek::ReplaySeekCache::import_from_start(
+                sidecar,
+                player.data(),
+                presentation.clone(),
+                effects.clone(),
+            ) {
+                Ok(cache) => {
+                    self.seek_cache = cache;
+                    tracing::info!(checkpoints = count, "imported replay seek sidecar");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "replay seek sidecar rejected; using local checkpoints")
                 }
             }
         }
@@ -861,12 +861,12 @@ impl ReplayLifecycle {
             ReplayFrameOrdinal::ZERO,
             "bootstrap save must be registered before the first recorded frame"
         );
-        if let Some(recorder) = self.recording.recorder() {
-            if recorder.has_archive() {
-                // The central capture hook already wrote the durable frame-zero marker.
-                self.bootstrap_save = Some((identity, marker));
-                return;
-            }
+        if let Some(recorder) = self.recording.recorder()
+            && recorder.has_archive()
+        {
+            // The central capture hook already wrote the durable frame-zero marker.
+            self.bootstrap_save = Some((identity, marker));
+            return;
         }
         self.record_save(identity, ordinal, TimelineFrame::ZERO, marker.state_hash);
         self.bootstrap_save = Some((identity, marker));

@@ -544,15 +544,14 @@ async fn execute_load(
         // restored engine while the recorder still owns the pre-load timeline.
         let mirror = completion.mirrors_continue().then(|| save.save().clone());
         let applied = load::apply(save, engine, host, game, assets)?;
-        if let Some(mirror) = mirror {
-            if let Err(error) = save_manager.write_loaded_continue_background(
+        if let Some(mirror) = mirror
+            && let Err(error) = save_manager.write_loaded_continue_background(
                 mirror,
                 profiles,
                 thumb_ref,
             ) {
                 tracing::warn!("Continue mirror after load could not start: {error:#}");
             }
-        }
         Ok(applied.outcome(completion))
     }.await;
     match result {

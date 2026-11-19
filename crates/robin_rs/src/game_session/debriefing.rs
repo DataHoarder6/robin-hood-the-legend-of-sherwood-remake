@@ -147,7 +147,7 @@ pub(super) fn drive_lost_sherwood_gate(
     let cursor = default_modal_cursor(
         &mut presentation.sprites.cursor_renderer,
         &mut resources.cursor,
-        &mut presentation.renderer,
+        &presentation.renderer,
     );
     if state
         .modal

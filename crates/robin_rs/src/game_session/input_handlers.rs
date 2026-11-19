@@ -302,52 +302,6 @@ pub(super) fn handle_console_overlay_events(
         }
     }
 }
-
-#[cfg(test)]
-mod gamepad_admission_tests {
-    use super::*;
-
-    #[test]
-    fn modal_controller_input_cannot_move_viewport_or_admit_commands() {
-        let mut host = Host::scratch(640.0, 480.0);
-        host.frontend.viewport.view_position = engine_coordinates::MapPoint::new(400.0, 300.0);
-        let position = host.frontend.viewport.view_position;
-        let zoom = host.frontend.viewport.zoom_factor;
-        let (engine, _assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
-        let manager = engine_manager_api::EngineManager::new(engine);
-        let mut input = ThreadedInput::new();
-        let mut commands = FrameCommands::new();
-        let mut device = GamepadDeviceInput::default();
-        for button in [
-            crate::gfx_types::GamepadButton::DPadUp,
-            crate::gfx_types::GamepadButton::DPadRight,
-            crate::gfx_types::GamepadButton::South,
-            crate::gfx_types::GamepadButton::East,
-            crate::gfx_types::GamepadButton::Select,
-        ] {
-            device.fold(&GameEvent::GamepadButton {
-                which: 1,
-                button,
-                pressed: true,
-            });
-        }
-        for _ in 0..3 {
-            handle_gamepad_events(
-                &mut host,
-                &manager,
-                &mut input,
-                &mut commands,
-                &mut device,
-                false,
-            );
-        }
-        assert_eq!(host.frontend.viewport.view_position, position);
-        assert_eq!(host.frontend.viewport.zoom_factor, zoom);
-        assert!(commands.commands.is_empty());
-        assert!(input.drain_synthetic_events().is_empty());
-    }
-}
-
 pub(super) fn handle_local_gamepads(
     host: &mut Host,
     engine: &Engine,
@@ -450,33 +404,31 @@ pub(super) fn handle_local_gamepads(
             .drain_synthetic_events()
             .iter()
             .any(|event| matches!(event, GameEvent::MouseUp(_, _, 1)))
-        {
-            if let Some(map) =
+            && let Some(map) =
                 viewport.screen_to_map(engine_coordinates::ScreenPoint::new(point[0], point[1]))
-            {
-                let primary_input = std::mem::take(&mut host.frontend.input);
-                crate::host_mouse::publish_mouse_spatial_hit_for_seat(
-                    engine,
-                    host,
-                    map,
-                    Default::default(),
-                    seat,
-                );
-                let clicks = crate::game_input::resolve_left_click_for_seat(
-                    host,
-                    engine,
-                    assets,
-                    map,
-                    Default::default(),
-                    seat,
-                );
-                host.frontend.input = primary_input;
-                commands.commands.extend(
-                    clicks
-                        .into_iter()
-                        .map(|command| PlayerInput::new(seat, command)),
-                );
-            }
+        {
+            let primary_input = std::mem::take(&mut host.frontend.input);
+            crate::host_mouse::publish_mouse_spatial_hit_for_seat(
+                engine,
+                host,
+                map,
+                Default::default(),
+                seat,
+            );
+            let clicks = crate::game_input::resolve_left_click_for_seat(
+                host,
+                engine,
+                assets,
+                map,
+                Default::default(),
+                seat,
+            );
+            host.frontend.input = primary_input;
+            commands.commands.extend(
+                clicks
+                    .into_iter()
+                    .map(|command| PlayerInput::new(seat, command)),
+            );
         }
         commands.commands.extend(
             output
@@ -502,5 +454,50 @@ pub(super) fn handle_local_gamepads(
             };
             commands.commands.push(PlayerInput::new(seat, command));
         }
+    }
+}
+
+#[cfg(test)]
+mod gamepad_admission_tests {
+    use super::*;
+
+    #[test]
+    fn modal_controller_input_cannot_move_viewport_or_admit_commands() {
+        let mut host = Host::scratch(640.0, 480.0);
+        host.frontend.viewport.view_position = engine_coordinates::MapPoint::new(400.0, 300.0);
+        let position = host.frontend.viewport.view_position;
+        let zoom = host.frontend.viewport.zoom_factor;
+        let (engine, _assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        let manager = engine_manager_api::EngineManager::new(engine);
+        let mut input = ThreadedInput::new();
+        let mut commands = FrameCommands::new();
+        let mut device = GamepadDeviceInput::default();
+        for button in [
+            crate::gfx_types::GamepadButton::DPadUp,
+            crate::gfx_types::GamepadButton::DPadRight,
+            crate::gfx_types::GamepadButton::South,
+            crate::gfx_types::GamepadButton::East,
+            crate::gfx_types::GamepadButton::Select,
+        ] {
+            device.fold(&GameEvent::GamepadButton {
+                which: 1,
+                button,
+                pressed: true,
+            });
+        }
+        for _ in 0..3 {
+            handle_gamepad_events(
+                &mut host,
+                &manager,
+                &mut input,
+                &mut commands,
+                &mut device,
+                false,
+            );
+        }
+        assert_eq!(host.frontend.viewport.view_position, position);
+        assert_eq!(host.frontend.viewport.zoom_factor, zoom);
+        assert!(commands.commands.is_empty());
+        assert!(input.drain_synthetic_events().is_empty());
     }
 }

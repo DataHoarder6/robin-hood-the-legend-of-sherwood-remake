@@ -326,15 +326,15 @@ impl SoundManager {
                 );
                 let length = entry.as_ref().map_or(0, |info| info.sample_length_ms);
                 pending.length_ms = length;
-                if pending.settings.sound_type == SoundType::Exclamation {
-                    if let Some(actor_id) = pending.actor_id {
-                        resolved_exclamations.push(ResolvedHostExclamation {
-                            actor_id,
-                            identifier: pending.settings.identifier,
-                            exclamation_id: pending.settings.identifier as u16,
-                            length_ms: length,
-                        });
-                    }
+                if pending.settings.sound_type == SoundType::Exclamation
+                    && let Some(actor_id) = pending.actor_id
+                {
+                    resolved_exclamations.push(ResolvedHostExclamation {
+                        actor_id,
+                        identifier: pending.settings.identifier,
+                        exclamation_id: pending.settings.identifier as u16,
+                        length_ms: length,
+                    });
                 }
             }
 

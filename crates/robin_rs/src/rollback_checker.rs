@@ -388,6 +388,11 @@ fn collect_optional_diffs(
         })),
     }
 }
+impl Default for RollbackChecker {
+    fn default() -> Self {
+        Self::new(Arc::new(LevelAssets::new()), None)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -479,11 +484,5 @@ mod tests {
                 json!({"path": "changed[1].x", "live": true, "replayed": null}),
             ]
         );
-    }
-}
-
-impl Default for RollbackChecker {
-    fn default() -> Self {
-        Self::new(Arc::new(LevelAssets::new()), None)
     }
 }

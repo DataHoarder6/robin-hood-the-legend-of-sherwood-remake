@@ -508,7 +508,7 @@ mod tests {
     fn a_pointer_click_buys_the_row_under_the_cursor() {
         let mut state = panel(PURSE);
         let row = 5;
-        let y = ROW_Y + row as i32 * ROW_H + ROW_H / 2;
+        let y = ROW_Y + row * ROW_H + ROW_H / 2;
         let x = ROW_X + 20;
         let outcome = state.handle_events(&tap(x, y), MenuTransform::centered(640, 480));
         assert_eq!(

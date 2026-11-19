@@ -262,6 +262,50 @@ fn clip_cell(points: &[[f32; 2]], a: [f32; 2], b: [f32; 2]) -> Vec<[f32; 2]> {
     }
     output
 }
+impl SplitView {
+    pub fn contains(&self, point: [f32; 2]) -> bool {
+        self.polygon.len() >= 3
+            && (0..self.polygon.len()).all(|index| {
+                let a = self.polygon[index];
+                let b = self.polygon[(index + 1) % self.polygon.len()];
+                (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]) >= -0.01
+            })
+    }
+    pub fn clamp_cursor(&self, point: [f32; 2]) -> [f32; 2] {
+        if self.contains(point) {
+            return point;
+        }
+        let mut low = 0.;
+        let mut high = 1.;
+        for _ in 0..16 {
+            let t = (low + high) * 0.5;
+            let p = [
+                self.site[0] + (point[0] - self.site[0]) * t,
+                self.site[1] + (point[1] - self.site[1]) * t,
+            ];
+            if self.contains(p) {
+                low = t;
+            } else {
+                high = t;
+            }
+        }
+        [
+            self.site[0] + (point[0] - self.site[0]) * low,
+            self.site[1] + (point[1] - self.site[1]) * low,
+        ]
+    }
+    pub fn viewport(&self, base: &crate::host::ViewportState) -> crate::host::ViewportState {
+        let mut viewport = base.clone();
+        // Each group's center must stay inside its cell even at map edges.
+        // Clamping to the map bounds can otherwise hide a hero behind another
+        // camera's polygon. The renderer supplies empty space outside the map.
+        viewport.view_position = robin_engine::coordinates::MapPoint::new(
+            self.center[0] - self.site[0] / viewport.zoom_factor,
+            self.center[1] - self.site[1] / viewport.zoom_factor,
+        );
+        viewport
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -365,50 +409,5 @@ mod tests {
             assert!((point.x - view.site[0]).abs() < 0.001);
             assert!((point.y - view.site[1]).abs() < 0.001);
         }
-    }
-}
-
-impl SplitView {
-    pub fn contains(&self, point: [f32; 2]) -> bool {
-        self.polygon.len() >= 3
-            && (0..self.polygon.len()).all(|index| {
-                let a = self.polygon[index];
-                let b = self.polygon[(index + 1) % self.polygon.len()];
-                (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]) >= -0.01
-            })
-    }
-    pub fn clamp_cursor(&self, point: [f32; 2]) -> [f32; 2] {
-        if self.contains(point) {
-            return point;
-        }
-        let mut low = 0.;
-        let mut high = 1.;
-        for _ in 0..16 {
-            let t = (low + high) * 0.5;
-            let p = [
-                self.site[0] + (point[0] - self.site[0]) * t,
-                self.site[1] + (point[1] - self.site[1]) * t,
-            ];
-            if self.contains(p) {
-                low = t;
-            } else {
-                high = t;
-            }
-        }
-        [
-            self.site[0] + (point[0] - self.site[0]) * low,
-            self.site[1] + (point[1] - self.site[1]) * low,
-        ]
-    }
-    pub fn viewport(&self, base: &crate::host::ViewportState) -> crate::host::ViewportState {
-        let mut viewport = base.clone();
-        // Each group's center must stay inside its cell even at map edges.
-        // Clamping to the map bounds can otherwise hide a hero behind another
-        // camera's polygon. The renderer supplies empty space outside the map.
-        viewport.view_position = robin_engine::coordinates::MapPoint::new(
-            self.center[0] - self.site[0] / viewport.zoom_factor,
-            self.center[1] - self.site[1] / viewport.zoom_factor,
-        );
-        viewport
     }
 }

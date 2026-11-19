@@ -725,7 +725,7 @@ impl HostFrontend {
         self.input
             .feedback
             .marked_pc_ids
-            .extend(fx.pending_mark_pc_ids.drain(..));
+            .append(&mut fx.pending_mark_pc_ids);
         let code = fx.code;
         fx.code = GameCode::default();
         fx.skip_render = false;
@@ -927,8 +927,7 @@ impl HostFrontend {
     fn promote_deferred_exclamation_stop(audio: &mut HostAudio, actor_index: u32) {
         let had_deferred_stop = audio
             .deferred
-            .iter()
-            .any(|request| *request == DeferredAudioRequest::StopExclamation(actor_index));
+            .contains(&DeferredAudioRequest::StopExclamation(actor_index));
         if had_deferred_stop {
             audio
                 .deferred

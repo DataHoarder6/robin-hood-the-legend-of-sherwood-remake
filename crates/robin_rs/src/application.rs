@@ -492,10 +492,10 @@ impl ApplicationContext {
                 .iter()
                 .any(|profile| profile.id == *id)
         });
-        if key_configs.configs.len() != previous_keys {
-            if let Err(error) = key_configs.save() {
-                tracing::warn!("Cannot persist orphan key-configuration cleanup: {error}");
-            }
+        if key_configs.configs.len() != previous_keys
+            && let Err(error) = key_configs.save()
+        {
+            tracing::warn!("Cannot persist orphan key-configuration cleanup: {error}");
         }
         for profile in &player_profiles.profiles {
             let entry = key_configs.entry_or_default(profile.id);

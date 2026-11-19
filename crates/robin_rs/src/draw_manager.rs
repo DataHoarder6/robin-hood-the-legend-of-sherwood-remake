@@ -743,7 +743,7 @@ mod tests {
         let view = MapBBox::from_coords(10.25, 20.5, 110.25, 120.5);
         let input = MapBBox::from_coords(-5.0, 30.75, 60.5, 140.0);
         for zoom in [0.0, 0.5, 1.0, 1.25, 2.0] {
-            dm.update_drawing_parameters(0, view.clone(), zoom);
+            dm.update_drawing_parameters(0, view, zoom);
             let clipped = dm.clip_box(&input).unwrap();
             assert_eq!(
                 (clipped.min.x, clipped.min.y, clipped.max.x, clipped.max.y),

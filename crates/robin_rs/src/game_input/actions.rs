@@ -22,7 +22,7 @@ impl ActionClickContext {
         }
     }
     fn to_3d(
-        &self,
+        self,
         engine: &Engine,
         assets: &LevelAssets,
         point: MapPoint,

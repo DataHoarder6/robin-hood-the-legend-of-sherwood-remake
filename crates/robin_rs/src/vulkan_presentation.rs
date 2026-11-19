@@ -163,18 +163,17 @@ pub(crate) fn configure(
     // SAFETY: only optional native configuration flags are changed before configure.
     if let (Some(d), Some(s)) = (unsafe { device.as_hal::<Vulkan>() }, unsafe {
         surface.as_hal::<Vulkan>()
-    }) {
-        if d.enabled_device_extensions().contains(&TIMING) {
-            match surface_stages(d.shared_instance(), d.raw_physical_device(), &s) {
-                Ok(supported) => unsafe {
-                    s.set_swapchain_create_flags(vk::SwapchainCreateFlagsKHR::from_raw(
-                        if supported.is_some() { 0x200 | 0x40 } else { 0 },
-                    ))
-                },
-                Err(e) => {
-                    tracing::warn!(target: "presentation_perf", error = %e, "surface timing disabled");
-                    unsafe { s.set_swapchain_create_flags(vk::SwapchainCreateFlagsKHR::empty()) };
-                }
+    }) && d.enabled_device_extensions().contains(&TIMING)
+    {
+        match surface_stages(d.shared_instance(), d.raw_physical_device(), &s) {
+            Ok(supported) => unsafe {
+                s.set_swapchain_create_flags(vk::SwapchainCreateFlagsKHR::from_raw(
+                    if supported.is_some() { 0x200 | 0x40 } else { 0 },
+                ))
+            },
+            Err(e) => {
+                tracing::warn!(target: "presentation_perf", error = %e, "surface timing disabled");
+                unsafe { s.set_swapchain_create_flags(vk::SwapchainCreateFlagsKHR::empty()) };
             }
         }
     }

@@ -134,20 +134,19 @@ pub(super) fn handle_mouse_input(
                 GameEvent::MouseMove { x, y, .. } => Some([x as f32, y as f32]),
                 _ => None,
             };
-            if let Some(point) = point {
-                if point[1] < ctx.screen_height as f32 - robin_engine::engine::PANNEL_HEIGHT
-                    && ctx
-                        .host
-                        .frontend
-                        .split_screen
-                        .views
-                        .iter()
-                        .find(|view| view.members.contains(&ctx.host.transport.local_seat().0))
-                        .is_some_and(|view| !view.contains(point))
-                {
-                    cancel_left_pointer(ctx.host, ctx.frame_cmds);
-                    continue;
-                }
+            if let Some(point) = point
+                && point[1] < ctx.screen_height as f32 - robin_engine::engine::PANNEL_HEIGHT
+                && ctx
+                    .host
+                    .frontend
+                    .split_screen
+                    .views
+                    .iter()
+                    .find(|view| view.members.contains(&ctx.host.transport.local_seat().0))
+                    .is_some_and(|view| !view.contains(point))
+            {
+                cancel_left_pointer(ctx.host, ctx.frame_cmds);
+                continue;
             }
         }
         match *event {
@@ -2370,7 +2369,7 @@ impl SherwoodCtx<'_> {
                         return Ok(HandlerAction::Exit(GameCode::Quit));
                     }
                     game.show_campaign_map();
-                    return Ok(HandlerAction::Proceed);
+                    Ok(HandlerAction::Proceed)
                 }
                 SherwoodCampaignFlow::MissionDescription {
                     mission_index,
@@ -2434,7 +2433,7 @@ impl SherwoodCtx<'_> {
                         MissionChoice::None => game.show_campaign_map(),
                     }
                     game.persistent.campaign_map_displayed = false;
-                    return Ok(HandlerAction::Proceed);
+                    Ok(HandlerAction::Proceed)
                 }
                 SherwoodCampaignFlow::Confirmation { mut state, action } => {
                     let resources =
@@ -2459,14 +2458,14 @@ impl SherwoodCtx<'_> {
                                 &mut frame.stage_commands(),
                                 &PlayerCommand::QuitMissionRequested,
                             );
-                            return Ok(HandlerAction::Proceed);
+                            Ok(HandlerAction::Proceed)
                         }
                         SherwoodConfirmationAction::ReturnToMap => {
                             // The mission stays committed; the map re-opens on
                             // top so another can be picked. Re-selecting here
                             // used to hit the history-replay assertion.
                             game.show_campaign_map();
-                            return Ok(HandlerAction::Proceed);
+                            Ok(HandlerAction::Proceed)
                         }
                         SherwoodConfirmationAction::StartMission {
                             men_to_blazon: true,
@@ -2489,7 +2488,7 @@ impl SherwoodCtx<'_> {
                                 &mut frame.stage_commands(),
                                 &PlayerCommand::SetMenToBlazonConversionMode { on: false },
                             );
-                            return Ok(HandlerAction::Proceed);
+                            Ok(HandlerAction::Proceed)
                         }
                         SherwoodConfirmationAction::StartMission {
                             men_to_blazon: false,
@@ -2505,7 +2504,7 @@ impl SherwoodCtx<'_> {
                                 return Ok(HandlerAction::Proceed);
                             }
                             callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
-                            return Ok(HandlerAction::Exit(GameCode::LevelInterrupted));
+                            Ok(HandlerAction::Exit(GameCode::LevelInterrupted))
                         }
                     }
                 }
@@ -2538,11 +2537,9 @@ impl SherwoodCtx<'_> {
                     match outcome {
                         None => {
                             *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel { state });
-                            return Ok(HandlerAction::Proceed);
+                            Ok(HandlerAction::Proceed)
                         }
-                        Some(ingame_menu::PerksPanelOutcome::Close) => {
-                            return Ok(HandlerAction::Proceed);
-                        }
+                        Some(ingame_menu::PerksPanelOutcome::Close) => Ok(HandlerAction::Proceed),
                         Some(outcome) => {
                             if let Some(command) = outcome.player_command() {
                                 dispatch_local_command(
@@ -2552,7 +2549,7 @@ impl SherwoodCtx<'_> {
                                 );
                             }
                             *sherwood_flow = Some(SherwoodCampaignFlow::PerksPanel { state });
-                            return Ok(HandlerAction::Proceed);
+                            Ok(HandlerAction::Proceed)
                         }
                     }
                 }

@@ -1579,7 +1579,7 @@ pub(super) fn setup_local_seat(
     // Runtime input still owns disconnect/reconnect handling.
     if host.transport.net().is_none() && args.multiplayer.expected_players.is_some() {
         for seat in 1..engine.sim_config().coop.players {
-            let player_id = robin_engine::player_command::PlayerId(seat as u8);
+            let player_id = robin_engine::player_command::PlayerId(seat);
             engine
                 .connect_seat(assets, player_id, format!("Player {}", seat + 1))
                 .expect("bootstrap local co-op ConnectSeat admission");

@@ -441,7 +441,7 @@ pub(crate) fn upload_pending_batch_at(
         .timeout(std::time::Duration::from_secs(120))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let mut paths = std::fs::read_dir(&directory)?.collect::<std::io::Result<Vec<_>>>()?;
+    let mut paths = std::fs::read_dir(directory)?.collect::<std::io::Result<Vec<_>>>()?;
     paths.sort_by_key(|entry| entry.file_name());
     let paths: Vec<_> = paths
         .into_iter()

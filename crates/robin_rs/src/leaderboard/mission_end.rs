@@ -933,7 +933,7 @@ impl MissionEndTask<Arc<[u8]>> for ReplayExportTask {
         match self.0.try_recv() {
             Ok(result) => Some(
                 result
-                    .map(|compact| Arc::<[u8]>::from(compact))
+                    .map(Arc::<[u8]>::from)
                     .map_err(|error| error.to_string()),
             ),
             Err(async_channel::TryRecvError::Empty) => None,

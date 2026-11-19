@@ -5082,7 +5082,7 @@ mod capture_tests {
                     &state.graph,
                     &state.assets,
                     ProgressViewState {
-                        selected: selected,
+                        selected,
                         presentation: mode,
                         show_achievement_badges: true,
                         lifetime_totals: state.lifetime_totals,

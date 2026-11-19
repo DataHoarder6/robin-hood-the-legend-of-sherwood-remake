@@ -456,7 +456,7 @@ mod tests {
         for (name, mut cache) in prepared.batches {
             // Timestamps and source paths belong only to disposable disk caches.
             cache.sources.clear();
-            hash.update(&bitcode::encode(&(name, cache)));
+            hash.update(bitcode::encode(&(name, cache)));
         }
         hash.finalize().into()
     }
@@ -622,7 +622,7 @@ mod tests {
         let family = temp.path().join("family");
         std::fs::create_dir_all(family.join("Data/Characters")).unwrap();
         family::encode_custom_sprite_family(
-            &[character.clone()],
+            std::slice::from_ref(&character),
             &family.join("Data/Characters/knights.sprites.vq.zst"),
         )
         .unwrap();

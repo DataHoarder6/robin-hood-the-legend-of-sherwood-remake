@@ -393,7 +393,7 @@ mod tests {
             assert_eq!(outcome.restore().unwrap().is_continue, continued);
             assert!(matches!(
                 &outcome.event,
-                Some(super::SaveLoadEvent::LoadApplied { snapshot: _, .. })
+                Some(super::SaveLoadEvent::LoadApplied { .. })
             ));
             assert!(outcome.transition().is_none());
         }

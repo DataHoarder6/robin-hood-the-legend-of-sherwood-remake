@@ -38,7 +38,7 @@ pub(crate) enum MultiplayerAdmissionEvent {
     },
 }
 
-fn canonicalize_player_input_order(inputs: &mut Vec<PlayerInput>) {
+fn canonicalize_player_input_order(inputs: &mut [PlayerInput]) {
     inputs.sort_by_key(|input| input.player_id.0);
 }
 
@@ -535,17 +535,16 @@ impl NetDrain<'_> {
                             .insert(from.0, (now.wrapping_sub(nonce), now));
                         self.host.frontend.pending_pings.remove(&from.0);
                     }
-                } else if let Some(net) = self.host.transport.net() {
-                    if let Err(error) =
+                } else if let Some(net) = self.host.transport.net()
+                    && let Err(error) =
                         net.outgoing
                             .send(robin_engine::multiplayer::NetOutbound::Latency {
                                 to: from,
                                 nonce,
                                 reply: true,
                             })
-                    {
-                        tracing::warn!(%error, "latency reply failed");
-                    }
+                {
+                    tracing::warn!(%error, "latency reply failed");
                 }
             }
             NetEvent::Input {
@@ -1417,7 +1416,7 @@ pub(super) fn drain_mission_network(
                 seat,
                 session_id,
             );
-            return Err(error.into());
+            return Err(error);
         }
     };
     let mut clock_pause = false;

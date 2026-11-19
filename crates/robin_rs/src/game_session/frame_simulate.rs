@@ -1234,7 +1234,7 @@ impl InteractiveFrameSimulation {
             let cursor = default_modal_cursor(
                 &mut presentation.sprites.cursor_renderer,
                 &mut resources.cursor,
-                &mut presentation.renderer,
+                &presentation.renderer,
             );
             let application_context = host.application_context().clone();
             let task_outcome = task.tick(
@@ -1600,7 +1600,8 @@ impl InteractiveFrameSimulation {
             ));
             let simulation_frame = frame.hourglass_input();
             frame.admit_simulation();
-            let result = game.run_engine_tick(
+
+            game.run_engine_tick(
                 &mut host.frontend,
                 &mut host.audio,
                 &mut host.effects,
@@ -1612,9 +1613,7 @@ impl InteractiveFrameSimulation {
                 simulation_frame,
                 false,
                 paused,
-            );
-
-            result
+            )
         });
 
         // ── Drain pending script-RPC requests ──

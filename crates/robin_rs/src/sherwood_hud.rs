@@ -106,13 +106,16 @@ impl SherwoodRail {
     /// Whether the rail offers `button` in this situation.
     pub fn present(self, button: SherwoodButton) -> bool {
         use SherwoodButton::*;
-        match (self, button) {
-            (Self::InMission, StartMission | QuitMission) => true,
-            (Self::PreCommit, DisplayCampaignMap | PerksPanel) => true,
-            (Self::PostCommit, GoToExit | StartMission | QuitMission | PerksPanel) => true,
-            (Self::PreCommit | Self::PostCommit, SherwoodTrading) => true,
-            _ => false,
-        }
+        matches!(
+            (self, button),
+            (Self::InMission, StartMission | QuitMission)
+                | (Self::PreCommit, DisplayCampaignMap | PerksPanel)
+                | (
+                    Self::PostCommit,
+                    GoToExit | StartMission | QuitMission | PerksPanel
+                )
+                | (Self::PreCommit | Self::PostCommit, SherwoodTrading)
+        )
     }
 
     /// The offered buttons, in draw and hit-test order.

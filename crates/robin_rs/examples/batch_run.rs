@@ -6,7 +6,6 @@
 use robin_assets::scb;
 use robin_engine::natives::{NativeContext, ScriptState};
 use robin_engine::script_manager::{ScriptManager, ScriptProgram};
-use robin_engine::vm::Opcode;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -192,6 +191,7 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use robin_engine::vm::Opcode;
 
     // Minimal real SCB encoding exercises the same directory/parser/program
     // path as the command-line tool; this is not a replacement interpreter.

@@ -533,7 +533,7 @@ impl InteractiveFrameFinish<'_, '_, '_> {
             world,
             frontend,
             &frame,
-            &mut callbacks.save_manager,
+            &callbacks.save_manager,
         );
         let profiling = super::frame_perf::enabled();
         let phase_start = super::frame_perf::start(profiling);

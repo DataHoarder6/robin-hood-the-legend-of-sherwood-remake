@@ -816,7 +816,7 @@ mod tests {
             let mut partial_coverage = 0;
             for row in pixels.chunks_exact(pitch) {
                 assert!(row[width * 4..].iter().all(|&byte| byte == 0x55));
-                for pixel in row[..width * 4].chunks_exact(4) {
+                for pixel in row[..width * 4].as_chunks::<4>().0 {
                     if pixel[3] == 0 {
                         assert_eq!(&pixel[..3], &[0, 0, 0]);
                     } else {

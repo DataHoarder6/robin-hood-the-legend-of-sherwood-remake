@@ -189,19 +189,19 @@ fn upgrade_header(header: &mut serde_json::Value) -> Result<u32> {
             || ((43..=56).contains(&version) && (43..=56).contains(&REPLAY_SCHEMA_VERSION)),
         "replay schema {version} needs an input migration before upgrading to {REPLAY_SCHEMA_VERSION}"
     );
-    if version < 55 || version == 57 {
-        if let Some(campaign) = header.get_mut("campaign") {
-            let bytes: Vec<u8> = serde_json::from_value(campaign.clone())
-                .context("read embedded replay campaign bytes")?;
-            let migrated = if version < 49 {
-                campaign_v48::migrate(&bytes)?
-            } else if version < 55 {
-                campaign_v54::migrate(&bytes)?
-            } else {
-                campaign_v57::migrate(&bytes)?
-            };
-            *campaign = serde_json::to_value(migrated)?;
-        }
+    if (version < 55 || version == 57)
+        && let Some(campaign) = header.get_mut("campaign")
+    {
+        let bytes: Vec<u8> = serde_json::from_value(campaign.clone())
+            .context("read embedded replay campaign bytes")?;
+        let migrated = if version < 49 {
+            campaign_v48::migrate(&bytes)?
+        } else if version < 55 {
+            campaign_v54::migrate(&bytes)?
+        } else {
+            campaign_v57::migrate(&bytes)?
+        };
+        *campaign = serde_json::to_value(migrated)?;
     }
     if let Some(config) = header.get_mut("sim_config").and_then(|v| v.as_object_mut()) {
         config.remove("bypass_fog_sprites_crash");

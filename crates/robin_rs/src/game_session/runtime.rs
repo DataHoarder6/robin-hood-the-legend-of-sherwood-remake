@@ -410,7 +410,8 @@ impl MissionRuntime {
             );
             let frame = mission_frame.hourglass_input();
             mission_frame.admit_simulation();
-            let result = self.world.game.run_engine_tick(
+
+            self.world.game.run_engine_tick(
                 &mut self.world.host.frontend,
                 &mut self.world.host.audio,
                 &mut self.world.host.effects,
@@ -422,9 +423,7 @@ impl MissionRuntime {
                 frame,
                 false,
                 policy.paused,
-            );
-
-            result
+            )
         })
     }
 
@@ -1744,6 +1743,15 @@ fn transition_phase(phase: &mut MissionPhase, expected: MissionPhase, next: Miss
         *phase, next
     );
     *phase = next;
+}
+impl MissionFrame {
+    pub(super) fn refresh_live_sound_boundary(&mut self, engine: &Engine, assets: &LevelAssets) {
+        super::tick::refresh_live_sound_boundary(
+            &mut self.external_facts.sound_boundary,
+            engine,
+            assets,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4127,7 +4135,7 @@ mod tests {
             fn marker() {}
         }
         impl<T: ?Sized> AmbiguousIfClone<()> for T {}
-        impl<T: ?Sized + Clone> AmbiguousIfClone<u8> for T {}
+        impl<T: Clone> AmbiguousIfClone<u8> for T {}
         let _ = <MissionFrame as AmbiguousIfClone<_>>::marker;
     }
 
@@ -4650,16 +4658,6 @@ mod tests {
             &mut phase,
             MissionPhase::Simulation,
             MissionPhase::Bookkeeping,
-        );
-    }
-}
-
-impl MissionFrame {
-    pub(super) fn refresh_live_sound_boundary(&mut self, engine: &Engine, assets: &LevelAssets) {
-        super::tick::refresh_live_sound_boundary(
-            &mut self.external_facts.sound_boundary,
-            engine,
-            assets,
         );
     }
 }

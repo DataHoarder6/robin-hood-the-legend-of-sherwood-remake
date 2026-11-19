@@ -268,7 +268,7 @@ pub(super) fn init_recording(
                                     &archive.directory().join(archive.current_chunk()),
                                 );
                             if let Err(error) = crate::set_replay_log_file(
-                                &archive.directory().join("replay.debug.log"),
+                                archive.directory().join("replay.debug.log"),
                             ) {
                                 tracing::warn!("Failed to create replay log: {error}");
                             }

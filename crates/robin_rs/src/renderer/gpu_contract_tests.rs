@@ -23,8 +23,8 @@ fn verify_mouse_trail_pixels(gpu: GpuContext) {
         renderer.begin_gpu_frame_clear();
         trail.render(&way, &mut renderer);
         let used_alpha = (31 * level) >> 5;
-        let pixel = (((0xFC80u16 & 0xF800) >> 5) * used_alpha & 0xF800)
-            | (((0xFC80u16 & 0x07E0) >> 5) * used_alpha & 0x07E0);
+        let pixel = ((((0xFC80u16 & 0xF800) >> 5) * used_alpha) & 0xF800)
+            | ((((0xFC80u16 & 0x07E0) >> 5) * used_alpha) & 0x07E0);
         let (r, g, b) = robin_util::color::rgb565_to_rgb8(pixel);
         assert_eq!(
             renderer.try_capture_frame_rgba().unwrap(),
@@ -161,7 +161,9 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
             assert_eq!((actual.0, actual.1), (expected.0, expected.1));
             let displaced_pixels = actual
                 .2
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .zip(expected.2.chunks_exact(4))
                 .filter(|(actual, expected)| actual != expected)
                 .count();
@@ -174,7 +176,7 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
             renderer.begin_gpu_frame_clear();
             crate::blit_to_map::render_background_decals(&frontend, &viewport, &mut renderer);
             let isolated = renderer.try_capture_frame_rgba().unwrap();
-            for (i, pixel) in isolated.2.chunks_exact(4).enumerate() {
+            for (i, pixel) in isolated.2.as_chunks::<4>().0.iter().enumerate() {
                 let x = (((i % 16) as f32 + 0.5) / zoom + view.x).floor() as i32;
                 let y = (((i / 16) as f32 + 0.5) / zoom + view.y).floor() as i32;
                 let expected_pixel = if (8..17).contains(&x) && (8..15).contains(&y) {
