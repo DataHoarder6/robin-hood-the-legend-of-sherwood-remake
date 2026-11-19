@@ -99,6 +99,15 @@ impl Peer {
         self.host.transport.net().unwrap()
     }
 
+    /// Model the host transport publishing the seats it released into this
+    /// session's simulation (`multiplayer/native/server.rs`,
+    /// `ServerPeers::publish_session_seats`). This harness substitutes socket
+    /// delivery, so the publication that delivery performs happens here; the
+    /// server tests prove the production caller and its seat set.
+    fn publish_simulation_seats(&self, mask: u32) {
+        self.net().session_seats().publish(mask);
+    }
+
     fn drain(&mut self) -> bool {
         let result = drain_mission_network(
             &mut self.timeline,
@@ -316,6 +325,9 @@ fn pair() -> (Peer, Peer, Link) {
         robin_engine::replay::state_hash(&host.manager.engine),
         robin_engine::replay::state_hash(&client.manager.engine)
     );
+    // `BeginSim` released seat 1 into the mission, so the transport published
+    // both seats: a page now awaits the peer.
+    host.publish_simulation_seats(0b11);
     (host, client, link)
 }
 
@@ -416,9 +428,13 @@ fn modal_session_delayed_surface_and_delivery_matrix() {
                                 && !client.gate.is_pending()
                             {
                                 if !host_first {
+                                    // A peer is not the barrier, so it names
+                                    // only the host whose decision it awaits;
+                                    // it never names a seat whose participation
+                                    // it cannot verify.
                                     assert_eq!(
                                         client.net().modal_waiting_names(occurrence.0, &kind),
-                                        ["Desktop", "Laptop"]
+                                        ["Desktop"]
                                     );
                                 }
                                 client.click();
@@ -527,11 +543,12 @@ fn modal_session_reconnect_recovers_lost_ack_and_next_scroll() {
         link.pump(&mut host, &mut client, false);
     }
     client.draw();
-    assert_eq!(
+    assert!(
         client
             .net()
-            .modal_waiting_names(client.visible.as_ref().unwrap().0, &kind),
-        ["Laptop"]
+            .modal_waiting_names(client.visible.as_ref().unwrap().0, &kind)
+            .is_empty(),
+        "a peer names only the host whose decision it awaits, never itself"
     );
     client.click();
     link.capture(&host, &client);
@@ -732,6 +749,103 @@ fn a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim() {
         MultiplayerAdmission::Running,
         "the replacement mission's BeginSim must release this peer"
     );
+}
+
+/// The #43 capture's second strand, at the story layer: the mission opens a
+/// page at frame 0 of a restarted campaign mission while the peer's replacement
+/// transport is admitted but still in `PeerWaitingForBegin`. The peer cannot
+/// see a page in that state, so the page must complete on the host's own
+/// decision instead of holding the mission for a seat that is not simulating.
+///
+/// The seat set is published by the host's transport
+/// (`multiplayer/native/server.rs`), whose tests prove it withholds a seat
+/// until the start barrier releases it; this harness substitutes socket
+/// delivery, so it publishes the same fact here.
+#[test]
+fn a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim() {
+    use crate::game_session::runtime::MultiplayerAdmission;
+
+    let mut host = Peer::new_at(PlayerId::HOST, 0);
+    let mut client = Peer::new_at(PlayerId(1), 0);
+    client
+        .incoming
+        .send(NetEvent::InitialSnapshot {
+            frame: 0,
+            engine_bytes: host.manager.engine.encode_native_snapshot(),
+        })
+        .unwrap();
+    client.drain();
+    assert_eq!(
+        client.timeline.multiplayer().admission(),
+        MultiplayerAdmission::PeerWaitingForBegin { snapshot_frame: 0 },
+        "the restart leaves the peer waiting for the replacement mission's start"
+    );
+    // The host's own admission hold runs until the start barrier releases; it
+    // is a different wait (H20), and the page must not add one on top.
+    assert!(host.drain());
+
+    // The transport has not released seat 1 into the mission, so the published
+    // mask is the host alone (its default) and the page owes the peer nothing.
+    let kind = ModalKind::PopupText { text_id: 17 };
+    host.emit(std::slice::from_ref(&kind));
+    host.draw();
+    let instance = host.visible.as_ref().expect("the page opened").0;
+    let waiting = host.net().modal_waiting_names(instance, &kind);
+    assert!(
+        !waiting.iter().any(|name| name == "Laptop"),
+        "a seat that cannot see the page must not be named as awaited: {waiting:?}"
+    );
+    host.click();
+    assert_eq!(
+        host.completed.len(),
+        1,
+        "the page completes on the host's decision instead of holding the mission"
+    );
+    assert!(!host.net().story_barrier_pending());
+    assert!(
+        host.net()
+            .modal_wait_remaining_ms(instance, &kind, 0)
+            .is_none(),
+        "a page that awaits nobody has no countdown to run out"
+    );
+}
+
+/// The other half of the same rule: a page drawn after the start barrier
+/// released the seat still awaits it, so the mask can only narrow the barrier
+/// to the seats that are really in the mission.
+#[test]
+fn a_page_awaits_a_seat_released_into_the_mission() {
+    let (mut host, mut client, mut link) = pair();
+    let kind = ModalKind::PopupText { text_id: 17 };
+    host.emit(std::slice::from_ref(&kind));
+    host.draw();
+    let instance = host.visible.as_ref().expect("the page opened").0;
+    host.click();
+    assert!(
+        host.gate.is_pending(),
+        "a seat in the mission owes the page an answer"
+    );
+    assert_eq!(host.net().modal_waiting_names(instance, &kind), ["Laptop"]);
+    for _ in 0..8 {
+        link.pump(&mut host, &mut client, false);
+        client.draw();
+        if client
+            .visible
+            .as_ref()
+            .is_some_and(|(opened, _)| *opened == instance)
+            && !client.gate.is_pending()
+        {
+            client.click();
+        }
+        host.draw();
+    }
+    assert_eq!(
+        host.completed.len(),
+        1,
+        "the released seat's acknowledgement completes the page"
+    );
+    assert!(!host.net().story_barrier_pending());
+    assert!(!client.net().story_barrier_pending());
 }
 
 #[test]

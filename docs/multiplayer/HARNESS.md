@@ -15,9 +15,10 @@ returns, **SM** stays at a modal, **DC** two peers pick one character, **HX**
 host exits. Barriers named below: `content-ready` and `snapshot-adopt` are
 transport admission (`.../multiplayer/native/server.rs`); `begin-sim` is
 `ReadyBarrier` and `transition-commit` is `SnapshotTransitions`
-(`.../multiplayer/native/server_protocol.rs`); `modal-ack` is the shared-story
-barrier. A barrier is *reached* when a peer is at it and *released* when it is
-past it, so `running` never satisfies `content-ready` or `snapshot-adopt`. The
+(`.../multiplayer/native/server_protocol.rs`); `modal-ack` is the shared-page
+barrier, which counts only the seats in the session's simulation (H21). A
+barrier is *reached* when a peer is at it and *released* when it is past it, so
+`running` never satisfies `content-ready` or `snapshot-adopt`. The
 process layer schedules a fault only on a fact that persists — a frame counter, a
 set `begin_sim_frame`, a seat — because both pre-acknowledgement admission
 phases (`peer_waiting_for_snapshot`, `peer_waiting_for_begin`) are shorter than
@@ -86,6 +87,7 @@ case; `invariant` and `vocabulary` are not cells.
 | H18 | transport | fault | content admission needs no seat: a client reaches `content-ready` and is later admitted with a seat. asserts: `barrier(name=content-ready,state=reached)`; `seat(seat=1,owns=true)` | `host_content_preflight_uses_no_seat_then_exact_resume_reconnects` |
 | H19 | process | fault | host exit with a seat admitted — the kill is anchored on the monotonic `begin_sim_frame`, the only fact that says the seat was admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row. asserts: `log(contains=giving up on reconnection,count=1)`; `exit(peers=1,status=nonzero)` | `.../multiplayer/client_session.rs` |
 | H20 | core | fault | a prepare whose commit frame is lost with the transport generation that received it never suppresses the replacement mission: the peer adopts the replacement snapshot, and a fresh `BeginSim` releases it to `running` (the #43 deadlock). asserts: `barrier(name=snapshot-adopt,state=reached)`; `barrier(name=begin-sim,state=released)` | `story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim` |
+| H21 | core | invariant | the `modal-ack` barrier counts only seats in this session's simulation: a page drawn while a roster seat is still waiting for `BeginSim` completes on the host's decision, and a seat the start barrier released before the page closed still owes an answer. asserts: `barrier(name=modal-ack,state=released)` | `story_regression::a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim` + `a_page_awaits_a_seat_released_into_the_mission` |
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
 row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
