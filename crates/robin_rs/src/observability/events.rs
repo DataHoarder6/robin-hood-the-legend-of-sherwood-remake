@@ -17,8 +17,11 @@ use tracing::Level;
 /// holds a whole failed session with room to spare; the file holds the rest.
 pub(crate) const RING_CAPACITY: usize = 512;
 
-/// Default and maximum `/events` page sizes.
+/// Default and maximum `/events` page sizes. Only the RPC endpoint pages the
+/// ring, so these exist with it (and in tests).
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) const DEFAULT_PAGE: usize = 100;
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) const MAX_PAGE: usize = 1000;
 
 /// This run's file stops growing at this size; the ring keeps serving and the
@@ -39,6 +42,8 @@ pub(super) const EVENT_FILE_NAME: &str = "events.jsonl";
 pub(crate) enum EventKind {
     MissionStarted,
     /// This process hosts the session; the endpoint and seat are its own.
+    /// Hosting exists only with the multiplayer transport.
+    #[cfg(feature = "multiplayer")]
     HostStarted,
     Admission,
     /// A peer joined, either by its `ConnectSeat` or this process dialing out.
@@ -243,6 +248,7 @@ impl EventRing {
     /// Events with `seq >= since`, oldest first, at most `limit`. `next_seq` is
     /// always this ring's true cursor, so a `since` from another run cannot be
     /// echoed back as if the session were merely quiet.
+    #[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
     pub(super) fn page(&self, since: Option<u64>, limit: usize) -> EventsPage {
         let since = since.unwrap_or(0);
         let events: Vec<Value> = self
@@ -293,6 +299,7 @@ fn new_run_id() -> String {
 
 /// One `/events` page. `run` identifies the process run serving it and
 /// `next_seq` is the cursor to pass back as `since`.
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 #[derive(Debug, Serialize)]
 pub(crate) struct EventsPage {
     pub(crate) run: String,

@@ -1,6 +1,7 @@
 //! Read-only RPC diagnostic builders. No request queue or transport ownership.
 use crate::http_server::ReplayStatus;
 use crate::http_server::SessionFacts;
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 use crate::http_server::{Reply, ReplyBody, RpcError};
 use robin_engine::engine::{Engine, LevelAssets};
 #[cfg(any(feature = "script-rpc", target_arch = "wasm32"))]
@@ -63,6 +64,7 @@ pub(crate) fn list_natives_json() -> serde_json::Value {
 /// status, the browser bridge to a rejected promise. Neither goes near the
 /// mission queue, which is exactly what stops answering when the game thread
 /// deadlocks or the mission ends.
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) fn state_reply() -> Reply {
     // No mission has reached an RPC boundary yet; there is no last-known state
     // to report, and inventing one would be a lie with a timestamp.
@@ -75,6 +77,7 @@ pub(crate) fn state_reply() -> Reply {
 ///
 /// `limit` defaults to [`crate::observability::DEFAULT_PAGE`] and is capped by
 /// the ring; `since` is the previous page's `next_seq`.
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) fn events_document(
     since: Option<u64>,
     limit: Option<usize>,

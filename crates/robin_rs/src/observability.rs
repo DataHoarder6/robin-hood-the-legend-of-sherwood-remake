@@ -22,7 +22,9 @@ mod state;
 
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-pub(crate) use events::{DEFAULT_PAGE, Event, EventKind, EventsPage, MAX_PAGE};
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
+pub(crate) use events::{DEFAULT_PAGE, EventsPage, MAX_PAGE};
+pub(crate) use events::{Event, EventKind};
 
 /// Everything this process knows about itself that survives a mission.
 struct Surface {
@@ -152,6 +154,11 @@ pub(crate) fn event(kind: EventKind, message: impl Into<String>) -> Event {
 }
 
 /// Events with `seq >= since`, oldest first, at most `limit`.
+///
+/// The paging surface of the ring: `/events` is the only reader, so it exists
+/// only where the RPC endpoint does (native `script-rpc`, the browser bridge)
+/// and in tests.
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) fn events_page(since: Option<u64>, limit: usize) -> EventsPage {
     #[cfg(test)]
     if let Some(page) = isolated_ring(|ring| ring.page(since, limit.min(MAX_PAGE))) {
@@ -273,6 +280,10 @@ pub(crate) fn record_terminal(operation: Option<String>, reason: impl Into<Strin
 
 /// The full `/state` document: last snapshot, `terminal`, and this run's
 /// evidence paths. `None` before the process has attempted a mission.
+///
+/// Served by `/state`, so it exists only where the RPC endpoint does; the crash
+/// hook uses [`state_document_if_unlocked`], which is always compiled.
+#[cfg(any(test, feature = "script-rpc", target_arch = "wasm32"))]
 pub(crate) fn state_document() -> Option<serde_json::Value> {
     document(&surface())
 }
