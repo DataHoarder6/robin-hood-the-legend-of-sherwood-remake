@@ -264,6 +264,18 @@ impl EventRing {
     }
 }
 
+/// What separates two runs started inside the same second. A browser page has
+/// no process id and is itself the run, so the stamp alone names it.
+#[cfg(not(target_arch = "wasm32"))]
+fn process_tag() -> String {
+    std::process::id().to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn process_tag() -> String {
+    "web".to_owned()
+}
+
 /// This ring's run identifier. `seq` is per process, so the value that changes
 /// when a new process starts is what a poller compares.
 fn new_run_id() -> String {
@@ -272,7 +284,7 @@ fn new_run_id() -> String {
         format!(
             "{}-{}",
             jiff::Zoned::now().strftime("%Y%m%dT%H%M%S").to_string(),
-            std::process::id()
+            process_tag()
         )
     });
     let generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
