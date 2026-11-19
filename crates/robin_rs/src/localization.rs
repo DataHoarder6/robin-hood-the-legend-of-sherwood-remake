@@ -232,6 +232,12 @@ const LANGUAGE_DEFINITIONS: &[LanguageDefinition] = &[
         aliases: &["pl-PL", "pl_PL", "polish"],
     },
     LanguageDefinition {
+        locale: "lt-LT",
+        lcid: "1063",
+        native_name: "Lietuvių",
+        aliases: &["lt-LT", "lt_LT", "lithuanian", "lt"],
+    },
+    LanguageDefinition {
         locale: "pt-BR",
         lcid: "1046",
         native_name: "Português (Brasil)",
@@ -698,7 +704,7 @@ pub fn locale_prefers_truetype(files: &SbFileSystem) -> bool {
     let locale = files.presentation_locale();
     matches!(
         locale.as_deref().map(locale_primary).as_deref(),
-        Some("ja" | "zh" | "ko" | "th" | "ru" | "pl" | "cs")
+        Some("ja" | "zh" | "ko" | "th" | "ru" | "pl" | "cs" | "lt")
     )
 }
 
@@ -1224,6 +1230,42 @@ mod tests {
     }
 
     #[test]
+    fn lithuanian_pack_is_discovered_from_its_lcid_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("1063/Data");
+        std::fs::create_dir_all(root.join("Text")).unwrap();
+        let files = Arc::new(SbFileSystem::new(Arc::new(
+            robin_util::asset_fs::AssetVfs::new(),
+        )));
+        files
+            .set_primary_path(dir.path().to_str().unwrap())
+            .unwrap();
+        files
+            .set_presentation_locale(Some("1063"), None, Some("lt-LT"))
+            .expect("configure fixture locale");
+
+        let mut text = b"SRES\0\x01\0\0\x01\0\0\0TEXT".to_vec();
+        text.extend_from_slice(&MENU_TEXT_TABLES[0].to_le_bytes());
+        text.extend_from_slice(&0u32.to_le_bytes());
+        text.extend_from_slice(&(MINIMUM_CORE_MENU_STRINGS as u16).to_le_bytes());
+        for _ in 0..MINIMUM_CORE_MENU_STRINGS {
+            text.extend_from_slice(&1u16.to_le_bytes());
+            text.extend_from_slice(&(b'A' as u16).to_le_bytes());
+        }
+        std::fs::write(root.join("Text/Level.res"), &text).unwrap();
+
+        let definition = definition_for_locale("lt-LT").expect("lt-LT must be defined");
+        assert_eq!(definition.lcid, "1063");
+        assert!(find_loose_root(definition, &files).is_some());
+        assert!(validate_loose_pack("lt-LT", "1063", &files).is_ok());
+        assert!(locale_prefers_truetype(&files));
+
+        // A directory without its Level.res is not a pack.
+        std::fs::remove_file(root.join("Text/Level.res")).unwrap();
+        assert!(find_loose_root(definition, &files).is_none());
+    }
+
+    #[test]
     fn legacy_preferences_without_visibility_migrate() {
         let decoded: LocalizationPreferences =
             serde_json::from_str(r#"{"selection":"auto"}"#).unwrap();
@@ -1514,7 +1556,9 @@ mod tests {
     /// port-owned text in English.
     #[test]
     fn unshipped_locales_fall_back_to_english_feature40_text() {
-        for locale in ["pt-PT", "pt-BR", "zh-TW", "zh-CN", "ko-KR", "th-TH"] {
+        for locale in [
+            "pt-PT", "pt-BR", "zh-TW", "zh-CN", "ko-KR", "th-TH", "lt-LT",
+        ] {
             for &key in FEATURE40_PORT_TEXT_KEYS {
                 assert_eq!(feature40_text::text(locale, key), None);
                 assert_eq!(port_text(Some(locale), key), port_text(Some("en-US"), key));
@@ -1770,7 +1814,7 @@ mod tests {
     fn font_policy_uses_each_readers_selected_language_not_its_root_spelling() {
         let files = SbFileSystem::new(Arc::new(robin_util::asset_fs::AssetVfs::new()));
         for language in [
-            "ja-JP", "zh-CN", "ko-KR", "th-TH", "ru-RU", "pl-PL", "cs-CZ",
+            "ja-JP", "zh-CN", "ko-KR", "th-TH", "ru-RU", "pl-PL", "cs-CZ", "lt-LT",
         ] {
             files
                 .set_presentation_locale(Some("1033"), None, Some(language))
