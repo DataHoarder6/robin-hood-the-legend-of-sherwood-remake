@@ -7,44 +7,13 @@
     "runner": "scripts/validation/multiplayer_e2e.py"
   },
   "peers": [
-    {
-      "seat": 0,
-      "role": "host"
-    },
-    {
-      "seat": 1,
-      "role": "client"
-    }
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
   ],
   "expect": [
-    {
-      "assert": "barrier",
-      "barrier": "begin-sim",
-      "state": "released"
-    },
-    {
-      "assert": "hash-equal",
-      "peers": [
-        0,
-        1
-      ],
-      "every": 25
-    },
-    {
-      "assert": "mission",
-      "peers": [
-        0,
-        1
-      ],
-      "count": 1
-    },
-    {
-      "assert": "exit",
-      "peers": [
-        0,
-        1
-      ],
-      "status": "running"
-    }
+    { "assert": "barrier", "barrier": "begin-sim", "state": "released" },
+    { "assert": "hash-equal", "peers": [1], "every": 25 },
+    { "assert": "mission", "peers": [0, 1], "count": 1 },
+    { "assert": "exit", "peers": [0, 1], "status": "running" }
   ]
 }

@@ -104,7 +104,7 @@ case; `invariant` and `vocabulary` are not cells.
 | H19 | process | fault | host exit with a seat admitted — the kill is anchored on the monotonic `begin_sim_frame`, the only fact that says the seat was admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row. asserts: `log(contains=giving up on reconnection,count=1)`; `exit(peers=1,status=nonzero)` | `.../multiplayer/client_session.rs` |
 | H20 | core | fault | a prepare whose commit frame is lost with the transport generation that received it never suppresses the replacement mission: the peer adopts the replacement snapshot, and a fresh `BeginSim` releases it to `running` (the #43 deadlock). asserts: `barrier(name=snapshot-adopt,state=reached)`; `barrier(name=begin-sim,state=released)` | `story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim` |
 | H21 | core | invariant | the `modal-ack` barrier counts only seats in this session's simulation: a page drawn while a roster seat is still waiting for `BeginSim` completes on the host's decision, and a seat the start barrier released before the page closed still owes an answer. asserts: `barrier(name=modal-ack,state=released)` | `story_regression::a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim` + `a_page_awaits_a_seat_released_into_the_mission` |
-| H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=0,1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
+| H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
 row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
@@ -183,7 +183,11 @@ contract.
 `last_compared_hash_frame`, not from the engine: it needs at least two compared
 frames, and a step wider than `every` passes only when the peer advanced far
 enough that the samples could not have seen the boundary between; the
-exact-boundary comparison itself is what the row's named Rust test pins.
+exact-boundary comparison itself is what the row's named Rust test pins. Only a
+seat that receives hashes compares: the authoritative host publishes
+`StateHash` and a client's publication of one is refused as host-only, so a
+host's field is always null and a process row names the joining seats —
+`hash-equal(peers=0,1,…)` is a claim no process run can settle.
 
 `transition.payload` is the `SnapshotTransitionPayload` variant the host
 committed — `"Save"` or `{"CampaignExit": "<GameCode wire name>"}` — because the exit code

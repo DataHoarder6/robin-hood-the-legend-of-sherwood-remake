@@ -86,10 +86,17 @@ conversion.
 - **H30** (`scripts/validation/scenarios/H30.json`, process layer): a host with
   `--mp-campaign` advertises a session, a second seat from its own install joins
   with no local save, both seats are `running` and in the same mission
-  (`/state.map`), and the guest's `/state` reports the host's
-  `expected_players: 2`. Evidence:
-  `build-host:~/campaign-e2e-H30-20261119-152728` (`verdict: observed`, 319
-  samples).
+  (`/state.map`), the guest's `/state` reports the host's
+  `expected_players: 2`, and the guest compares the host's hash against its own
+  every 25 frames with no desync. Its `hash-equal` names seat 1 alone: the host
+  publishes `StateHash` and a client's publication of one is refused as
+  host-only (`multiplayer/client_outgoing.rs`), so a host's
+  `last_compared_hash_frame` is null forever and a process row that named seat 0
+  could never settle — H30 as first written asserted `peers=0,1` and hung at
+  130 s with the session otherwise healthy (`…-20261119-160134`, both seats on
+  `lincoln`, the guest comparing 24 frames, 0 desyncs). Evidence:
+  `build-host:~/campaign-e2e-H30-20261119-160955` (`verdict: observed`, snapshot
+  `a8ebef54c`).
 
 ## Found, not fixed (all reproduced on this base)
 
