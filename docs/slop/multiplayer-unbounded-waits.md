@@ -3,12 +3,14 @@
 Audit of every place one participant's progress depends on a message another
 participant may never send. Read-only: no production code was changed.
 
-Last verified: 2026-11-19, `fork/main` @ `ed1a378fe`. Written against
+Last verified: 2026-11-19, `fork/main` @ `ac74b98c0`. Written against
 `5e1d2b17e`; ranks 2 and 3 were bounded before `af1f3f779` (`45fc7fb96`,
 `9ff945a46`, `05bca0b90`) and the earlier re-check of this file said otherwise,
 so their rows now sit in "Waits that do have deadlines" and the ranked entries
-state the new behaviour. Each open ranked item is closed by a change that gives
-the wait a budget and a named consequence, never by a note in this file.
+state the new behaviour. Rank 5 was bounded before this re-check as well, with
+one hole: the browser attempt was unbounded, so the budget was never read. Each
+open ranked item is closed by a change that gives the wait a budget and a named
+consequence, never by a note in this file.
 
 Scope: `crates/robin_rs/src/game_session/terminal_debriefing.rs`,
 `crates/robin_rs/src/multiplayer/native/{server.rs,server_protocol.rs,peer_sessions.rs}`,
@@ -59,9 +61,9 @@ repo-relative.
 | Client waits for `InitialSnapshot` after (re)connect | `runtime/admission.rs:50-57` (`PeerWaitingForSnapshot`) | `Disconnected`, or a first join before the host's snapshot cache exists | **none** | Nothing. The host skips the send silently when its `initial_snapshot` cache is empty (`server.rs:995-1010`). | Console: "Disconnected; reconnecting…" and "Reconnected; synchronizing game…" (`multiplayer.rs:519-551`). No indication that the snapshot never arrived. | Peer frozen indefinitely on a snapshot it never receives; reconnect loops never converge. |
 | Story / terminal modal acknowledgement barrier | `modal_session.rs:19-22` (`requires_modal_acknowledgements`), `:632-671` (votes), `:828-845` (unanimous over the roster), `:751-761` (`story_barrier_pending`); pause `multiplayer.rs:1295-1303` | Any shared story modal, and any `FinalDebriefing`/`MissionState EndState` page, while another seat is admitted | **none** | Nothing. The roster (`required_players`) is set once at `install_session` (`host/transport.rs:177`) and never shrinks when a seat leaves. | Host UI shows "Waiting for Player 2…" from `modal_waiting_names` (`modal_net.rs:159-164`) for scripted story modals only. The terminal debriefing uses `ModalDismissalGate` (`terminal_debriefing.rs:224-225`, `modal_net.rs:16-103`), which shows no waiting text at all. | Simulation paused for every participant. One player who never opens the page (or left the session) freezes everyone until they return. |
 | Host waits for a peer's modal decision (debriefing popup and final page) | `terminal_debriefing.rs:628-648` (`AwaitingMissionAuthority`, `AwaitingFinalAuthority`), `modal_net.rs:58-103` | Host clicked continue on a debriefing page that requires acknowledgements | **none** | Nothing; the gate stays `AwaitingAuthority` and retries publication each UI tick. | None on screen; `tracing::error!` only when publication itself fails (`modal_net.rs:105-110`). | Host debriefing hangs with the page still open. Combined with the two rows above, a peer that disconnects at mission end deadlocks both sides. |
-| Mission-end debriefing waits for its own command echo | `terminal_debriefing.rs:1105-1112` (`pending_terminal_debriefing` re-queued while `mission_attempt_sequence` has not advanced) | After the engine returns a terminal exit code, in any multiplayer mission | **none** | Nothing. The echo needs frames to advance; `pause_simulation` is true while `transport.reconnecting()` (`multiplayer.rs:1274`), so a disconnect at mission end stops the very echo being awaited. | "waiting for authoritative mission completion update" is logged once (`terminal_debriefing.rs:1147-1152`). | Frozen frame with no debriefing UI. Feeds the modal deadlock above. |
-| Client reconnect loop (`SessionEnd::Drop`) | `client_session.rs:718-840`; backoff constants `:51-52` | Any transport loss | **no cap** — "reconnecting with exponential backoff" never gives up; `RECONNECT_BACKOFF = 500 ms`, `MAX_RECONNECT_BACKOFF = 10 s` | Each attempt is bounded (native), then sleeps and retries forever. No attempt limit, no "host gone" verdict. | Warn per drop: `client session ended: {reason}; reconnecting...`, plus the console line. | Client is unusable indefinitely if the host never comes back. Nothing returns the player to the main menu. |
-| Browser reconnect attempt | `wasm.rs:192` (`reconnect_attempt: None`), used at `client_session.rs:762` | Browser transport loss | **none** — `None` means "the phase is unbounded apart from cancellation" (`client_session.rs:139-141`) | Nothing; the whole attempt (connect + Hello + Welcome read, `handshake_frame: None` too) can wait forever, so the loop above never even reaches its backoff. | Same drop warnings, none for the hung attempt. | Browser peer wedges inside one reconnect attempt with no UI feedback. |
+| Mission-end debriefing waits for its own command echo | `terminal_debriefing.rs:1105-1112` (`pending_terminal_debriefing` re-queued while `mission_attempt_sequence` has not advanced) | After the engine returns a terminal exit code, in any multiplayer mission | **none** — but no longer permanent: the pause it waits behind expires (rank 5) | The echo needs frames, and `pause_simulation` is true while `transport.reconnecting()` (`multiplayer.rs:1456`, from `host/transport.rs:256`); a disconnect at mission end still withholds them, so the client now leaves the session when the reconnect budget is spent instead of waiting for an echo that cannot arrive | "waiting for authoritative mission completion update" is logged once (`terminal_debriefing.rs:1147-1152`), then the give-up names the host and the budget | Bounded by rank 5: a disconnect at mission end ends the client's session within `RECONNECT_BUDGET` rather than freezing it. The echo itself is still not a wait with its own deadline. |
+| Client reconnect loop (`SessionEnd::Drop`) | `client_session.rs:790-870`, `:643-680` (`ReconnectStep`, `give_up_on_reconnect`), budget `:56` (`RECONNECT_BUDGET`) | Any transport loss | **60 s** wall clock for the whole loop, one attempt never longer than what is left of it | Gives up: one `warn!("multiplayer: giving up on reconnection")` and a `NetEvent::Fatal` timeout naming *which* host was being dialled and the budget it spent; the game loop turns that fatal into `SessionEnd` (`multiplayer.rs:719-727`) and the client leaves the session, so H19's non-zero exit still holds | Warn per drop: `client session ended: {reason}; reconnecting...`, then one warn per failed attempt; console: "Disconnected; reconnecting…" | Closed 2026-11-19. The loop was already capped when this audit was re-read (the row below it contradicted H19); the budget is now a cap on the whole loop, and every attempt is bounded, so it cannot be outlived. |
+| Browser reconnect attempt | `wasm.rs:38-43` (`RECONNECT_ATTEMPT_TIMEOUT`), `:194-205` | Browser transport loss | **15 s**, the same bound the native attempt uses, capped further by what is left of the budget | The attempt ends as a failed attempt, the loop retries under the same budget and gives up as the row above does. The browser writes frames under a 30 s bound too (`content_write`), so no write in an attempt is unbounded either | Same drop warnings; a failed attempt now logs `reconnect failed: …; will retry in …` | Closed 2026-11-19 (`reconnect_attempt: None` removed from the field's type). Before the fix one attempt could wait forever, so the 60 s budget was never read and the browser peer wedged inside it. |
 | Client waits for the host's frame schedule | `game_session/multiplayer.rs:1243-1272`; `timing.rs:33-64` | Peer has no (or a stale) `StateHash` schedule; the schedule is the only clock the peer accepts | **none** | `clock_pause = true`, so simulation is held. `prediction_limit_reached` caps how far it may run ahead, not how long it may wait. | Throttled once per second: "multiplayer: waiting for host frame schedule" with `scheduled_frame`, `until_frame_ms` (`multiplayer.rs:1257-1267`). | Peer's world stops advancing while the app stays responsive. Only the transport's own loss detection ever breaks it. |
 | Host waits for a peer's late-input resync | `game_session/multiplayer.rs:1140-1176` (`HostResynchronizing` + `send_ready_to_sim`), `:1113-1125` | A peer input arrived below the rewind horizon, or a client rollback failed | **none** | Host sets the resync admission state and waits for the same `ReadyBarrier` described above. | "multiplayer: waiting for authoritative rollback recovery" / "dropping every peer for full-snapshot resynchronization" (`server_dispatch.rs:239-251`). | Host frozen at the resync boundary; the barrier can only be satisfied by the peers it just dropped. |
 | Peer stream read has no application deadline | `server.rs:1333` (peer reader `read_frame` with no deadline), `client_session.rs:862` (client reader likewise) | A stream stays open with no traffic (host wedged, NAT blackhole without QUIC loss detection) | **none at this layer** | Nothing. Detection is delegated entirely to QUIC/Iroh defaults; the endpoint is built from `presets::N0` with no `TransportConfig` override (`multiplayer/identity.rs:85-95`). | None. | Both sides believe the session is alive. See "Unclassified" — the effective QUIC idle limit was not verified on this host. |
@@ -76,10 +78,12 @@ the constants the transports actually read, not comments.
 
 | Wait | Value | Evidence |
 | --- | --- | --- |
-| Whole initial connect attempt | 15 s (checked between attempts) | `client_session.rs:48` `INITIAL_CONNECT_TIMEOUT`; enforced `:400-405` |
-| Native handshake frame / initial attempt / reconnect attempt / post-content Welcome | 15 s each | `native.rs:59`; `native/client.rs:230-234` |
+| Whole initial connect attempt | 15 s (checked between attempts) | `client_session.rs:48` `INITIAL_CONNECT_TIMEOUT`; enforced `:409-414` |
+| Client reconnect loop after a drop | 60 s wall clock for the whole loop | `client_session.rs:56` `RECONNECT_BUDGET`; spent-check on the drop (`:807-816`) and before every attempt (`:852-867`) |
+| Client reconnect attempt, whole (connect + Hello + Welcome + the content prelude it opened) | 15 s on both platforms, capped by what is left of the budget | `reconnect_step` (`client_session.rs:655-673`), `attempt_reconnect` (`:617-637`); `native/client.rs:233`, `wasm.rs:42` |
+| Native handshake frame / initial attempt / post-content Welcome | 15 s each | `native.rs:59`; `native/client.rs:231-235` |
 | Browser initial attempt | 5 s | `wasm.rs:37`; `wasm.rs:191` |
-| Browser post-content Welcome, content chunk idle | 30 s | `wasm.rs:38`; `wasm.rs:193-195` |
+| Browser post-content Welcome, content write, content chunk idle | 30 s | `wasm.rs:38`; `wasm.rs:194-196` |
 | Native content chunk idle | 30 s | `native.rs:62` |
 | Native content transfer budget | 30 min (the constant is named `CONTENT_DECISION_TIMEOUT`) | `native.rs:63`; `native/client.rs:237` |
 | Browser content transfer / content decision | 15 min / 30 min | `wasm.rs:39-40` |
@@ -188,14 +192,31 @@ the tick that expires the barrier commits it under the same lock, after which
    `pause_simulation`. The roster never shrinks. Only scripted story modals
    show "Waiting for …" (`modal_net.rs:159-164`); the terminal pages show
    nothing, so the host sees a frozen mission with an open debriefing page.
-5. **Client reconnect with no cap, and simulation paused throughout** —
-   `client_session.rs:718-840` retries forever (500 ms → 10 s backoff) with no
-   attempt limit, while `multiplayer.rs:1274` keeps `pause_simulation` true. The
-   debriefing command echo below needs frames, and this pause is what withholds
-   them, so a host that disappears at mission end deadlocks the client through
-   two independent waits. On wasm the situation is worse:
-   `reconnect_attempt: None` (`wasm.rs:192`) means a single attempt can hang
-   forever.
+5. **Client reconnect — closed 2026-11-19, after this audit's own two rows
+   disagreed.** The loop was already capped when re-read: `RECONNECT_BUDGET`
+   is 60 s (`client_session.rs:56`) and a spent budget publishes a fatal and
+   returns (`:807-816` on the drop, `:852-867` before each attempt), which the
+   game loop turns into leaving the session (`multiplayer.rs:719-727`) — the
+   behaviour H19 asserts. The real hole was the browser: `reconnect_attempt:
+   None` (`wasm.rs:192`) left one whole attempt unbounded, so the budget was
+   never read and a peer wedged *inside* an attempt with a frozen world. The
+   attempt is now a plain `Duration` in `ClientTimings` — an unbounded attempt
+   is no longer representable — 15 s on both platforms (`native/client.rs:233`,
+   `wasm.rs:42`), and both cover the *whole* attempt
+   including the content prelude it opens (`attempt_reconnect`, `:617-637`);
+   previously only the handshake was inside the deadline. `reconnect_step`
+   (`:655-673`) caps every attempt at what is left of the budget, so the loop
+   is bounded by 60 s and not by "60 s plus the attempt that was running".
+   Giving up logs
+   `multiplayer: giving up on reconnection` once and publishes a fatal naming
+   the host it dialled and the budget it spent (`give_up_on_reconnect`,
+   `:676-680`); that fatal is what leaves the mission, so the
+   `pause_simulation` held by `reconnecting()` (`multiplayer.rs:1456`) is
+   released by the same event. Proved by
+   `a_spent_reconnect_budget_ends_the_session_with_the_timeout`,
+   `an_attempt_is_capped_by_what_is_left_of_the_budget` and
+   `giving_up_publishes_the_fatal_that_ends_the_session`
+   (`client_session.rs` tests; H19 keeps the process-level claim).
 
 Runner-up: **debriefing command echo** — `terminal_debriefing.rs:1105-1112`.
 Cheap to hit whenever the mission ends during a reconnect, and it feeds
