@@ -359,27 +359,9 @@ pub fn wasm_set_multiplayer_join_ticket(
 pub fn wasm_multiplayer_compatibility() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     use serde::Serialize as _;
 
-    #[cfg(feature = "multiplayer")]
-    let ticket_schema = robin_rs::multiplayer::join_ticket::JOIN_TICKET_SCHEMA;
-    #[cfg(not(feature = "multiplayer"))]
-    let ticket_schema = 0;
-
-    #[derive(serde::Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Compatibility<'a> {
-        engine_commit: &'a str,
-        artifact_short: &'a str,
-        net_protocol: u32,
-        ticket_schema: u32,
-    }
-    Compatibility {
-        engine_commit: robin_rs::replay_format::ENGINE_SOURCE_COMMIT,
-        artifact_short: robin_rs::replay_format::ENGINE_VERSION_HASH,
-        net_protocol: robin_engine::multiplayer::NET_PROTOCOL_VERSION,
-        ticket_schema,
-    }
-    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-    .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
+    robin_rs::runtime_contract::BrowserRuntimeCompatibility::current()
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|error| wasm_bindgen::JsValue::from_str(&error.to_string()))
 }
 
 /// Register one host-preloaded asset before `wasm_boot` starts the game loop.
