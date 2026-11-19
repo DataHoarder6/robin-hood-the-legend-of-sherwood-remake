@@ -442,6 +442,19 @@ impl EngineInner {
             }
             ApplyQuitMissionUpdates { .. } => self.apply_quit_mission_updates_command(tcx, cmd),
             QuitMissionRequested => self.apply_quit_mission_requested_command(),
+            ForceMissionEnd { .. } if seat != PlayerId::HOST.0 as usize => {
+                // The session authority ends a mission. A client that latched
+                // one locally would end a mission its host is still running.
+                tracing::warn!(seat, "refused a mission-end trigger from a non-host seat");
+            }
+            ForceMissionEnd { result } => {
+                // One attempt has one outcome: a second trigger after the flags
+                // were latched is the same decision arriving twice, not a new
+                // ending, so the refusal is a debug note rather than an error.
+                if let Err(reason) = self.end_mission(*result) {
+                    tracing::debug!(%reason, "mission-end trigger was already satisfied");
+                }
+            }
             TeleportSelectedToPoint { .. } => {
                 self.apply_teleport_selected_to_point_command(tcx, cmd)
             }

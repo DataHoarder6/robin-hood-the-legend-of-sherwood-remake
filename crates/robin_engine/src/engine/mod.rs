@@ -999,6 +999,45 @@ impl EngineInner {
         tracing::info!("EngineInner: mission quit");
     }
 
+    /// End the running mission with exactly the quit flag its own decision
+    /// would latch.
+    ///
+    /// This is the developer trigger's engine half, not a second ending: the
+    /// tick's mission phase owns everything that follows from these flags —
+    /// `finalize_mission_script`, the returned `GameCode`, the terminal
+    /// debriefing, the leaderboard and the campaign handoff. A mission that
+    /// already ended refuses the request instead of latching a second outcome,
+    /// because the flag it would set is already consumed.
+    pub(crate) fn end_mission(
+        &mut self,
+        result: crate::game_operation::MissionResult,
+    ) -> Result<(), String> {
+        let state = &self.mission_domain.state;
+        if state.quit_won || state.quit_lost || state.quit_interrupted {
+            return Err("mission already ended; the terminal flow owns the session".to_owned());
+        }
+        match result {
+            crate::game_operation::MissionResult::Won => {
+                // The victory the script's own condition latches, without the
+                // one-frame "leave mission" banner: there is nothing left to
+                // leave, so the hint would announce a mission that is over.
+                self.mission_domain.state.mission_won = true;
+                self.mission_domain.state.quit_won = true;
+            }
+            crate::game_operation::MissionResult::Lost => {
+                self.mission_domain.state.quit_lost = true;
+            }
+            crate::game_operation::MissionResult::Aborted => {
+                self.mission_domain.state.quit_interrupted = true;
+            }
+        }
+        tracing::info!(
+            ?result,
+            "developer trigger ended the mission; the next tick returns its code"
+        );
+        Ok(())
+    }
+
     /// Apply end-of-mission updates.
     ///
     /// Marks the mission done, counts soldiers, resets PC comas, and —

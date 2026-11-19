@@ -1243,6 +1243,19 @@ pub enum PlayerCommand {
     /// abort path).  The tick's own flag-reading arms then convert
     /// these into the matching mission-end `GameCode`.
     QuitMissionRequested,
+    /// The developer trigger (`POST /mission-result`) ended the mission on
+    /// purpose: a victory, a defeat, or an abandonment.
+    ///
+    /// It rides the command stream so every seat latches the same decision at
+    /// the same frame — a mission end is not a host-only fact — and the tick's
+    /// own mission phase turns the flag into the `GameCode`, so the terminal
+    /// debriefing, the leaderboard and the campaign handoff are the ones a
+    /// script-driven end reaches. Only the host seat may issue it; a client's
+    /// copy is refused by the engine, and the HTTP surface refuses the request
+    /// before it reaches the wire.
+    ForceMissionEnd {
+        result: crate::game_operation::MissionResult,
+    },
     /// F7 `TELEPORT` cheat — teleport every currently-selected PC to
     /// the mouse map position.  The first selected PC lands on
     /// `dest`; subsequent PCs keep their relative offset from it.

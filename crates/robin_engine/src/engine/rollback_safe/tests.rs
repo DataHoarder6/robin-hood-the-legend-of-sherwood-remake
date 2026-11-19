@@ -2,6 +2,72 @@ use super::*;
 use crate::engine::SimCommand;
 
 #[test]
+fn a_mission_end_command_latches_the_flag_its_tick_reads() {
+    use crate::game_operation::{GameCode, MissionResult};
+    use crate::player_command::PlayerCommand;
+    for (result, code) in [
+        (MissionResult::Won, GameCode::LevelSucceeded),
+        (MissionResult::Lost, GameCode::LevelFailed),
+        (MissionResult::Aborted, GameCode::LevelInterrupted),
+    ] {
+        let (mut engine, assets) = frame_api_fixture();
+        let latched = engine
+            .advance_frame(
+                &assets,
+                SimulationFrameInput::new(vec![PlayerCommand::ForceMissionEnd { result }.into()]),
+            )
+            .expect("apply the mission-end command");
+        assert_eq!(
+            latched.events.code,
+            GameCode::LevelInProgress,
+            "{result:?} latches a flag; the mission phase is what returns"
+        );
+        // The flag is the one the mission phase reads, so the ending code is
+        // the next tick's and the finalization that goes with it is the real
+        // one, not a second path.
+        let ending = engine
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("advance past the latched quit flag");
+        assert_eq!(ending.events.code, code, "{result:?}");
+        // One attempt records one outcome: the same decision arriving again is
+        // a no-op rather than a second ending.
+        assert!(
+            engine
+                .inner
+                .end_mission(result)
+                .expect_err("the mission already ended")
+                .contains("already ended")
+        );
+    }
+}
+
+#[test]
+fn only_the_host_seat_ends_a_mission() {
+    use crate::game_operation::{GameCode, MissionResult};
+    use crate::player_command::{PlayerCommand, PlayerId};
+    let (mut engine, assets) = frame_api_fixture();
+    engine
+        .advance_frame(
+            &assets,
+            SimulationFrameInput::new(vec![SimCommand::new(
+                PlayerId(1),
+                PlayerCommand::ForceMissionEnd {
+                    result: MissionResult::Won,
+                },
+            )]),
+        )
+        .expect("a client's mission-end command is refused, not applied");
+    assert!(
+        !engine.inner.mission().quit_won,
+        "a client's trigger must not latch the host's mission end"
+    );
+    let output = engine
+        .advance_frame(&assets, SimulationFrameInput::default())
+        .expect("the mission keeps running");
+    assert_eq!(output.events.code, GameCode::LevelInProgress);
+}
+
+#[test]
 fn presentation_coma_status_uses_exact_campaign_identity() {
     let (mut engine, _) = frame_api_fixture();
     let profile = crate::profiles::CharacterProfileIdx(6);

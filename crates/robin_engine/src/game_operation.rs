@@ -51,6 +51,47 @@ impl GameCode {
     }
 }
 
+/// The three ways a running mission can be ended on purpose.
+///
+/// The developer trigger (`POST /mission-result`) names one of these instead of
+/// a `GameCode`: the result is the decision, and the code the mission ends on is
+/// what [`MissionResult::game_code`] returns — the same arms the tick's
+/// mission-end checks return, so the terminal flow, the debriefing and the
+/// campaign handoff are the ones a script-driven end reaches.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MissionResult {
+    Won,
+    Lost,
+    Aborted,
+}
+
+impl MissionResult {
+    /// The `GameCode` the next tick's mission phase returns for this result.
+    ///
+    /// `won` and `lost` are the codes the script's own quit flags produce;
+    /// `aborted` is `QuitMissionRequested`'s, which is why an abandoned mission
+    /// is not a defeat and reads the level's retreat debriefing.
+    pub fn game_code(self) -> GameCode {
+        match self {
+            Self::Won => GameCode::LevelSucceeded,
+            Self::Lost => GameCode::LevelFailed,
+            Self::Aborted => GameCode::LevelInterrupted,
+        }
+    }
+}
+
 /// FFI-compatible struct: `{ GameCode code; SaveGame* save_game; }`.
 ///
 /// The `save_game` pointer is opaque (`void*`) on the Rust side.
@@ -188,6 +229,28 @@ mod tests {
         assert_eq!(GameCode::Quit as i32, 6);
         assert_eq!(GameCode::LevelLoad as i32, 7);
         assert_eq!(GameCode::LevelSave as i32, 8);
+    }
+
+    #[test]
+    fn each_mission_result_names_the_code_its_tick_returns() {
+        assert_eq!(MissionResult::Won.game_code(), GameCode::LevelSucceeded);
+        assert_eq!(MissionResult::Lost.game_code(), GameCode::LevelFailed);
+        assert_eq!(
+            MissionResult::Aborted.game_code(),
+            GameCode::LevelInterrupted
+        );
+        // The wire spelling of the request body is the serde spelling, so a
+        // scenario's `"result": "lost"` is the value the engine latches.
+        for (result, name) in [
+            (MissionResult::Won, "won"),
+            (MissionResult::Lost, "lost"),
+            (MissionResult::Aborted, "aborted"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&result).unwrap(),
+                format!("\"{name}\"")
+            );
+        }
     }
 
     #[test]
