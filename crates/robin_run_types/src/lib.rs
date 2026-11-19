@@ -117,7 +117,9 @@ pub const FRAME_TIME_MS: u32 = 40;
 /// Version 74 adds the purchased-perk flags to campaign PC status.
 /// Version 75 adds the per-PC "no friendly-fire damage" flag.
 /// Version 76 adds the per-PC "no friendly-fire knockback" flag.
-pub const REPLAY_SCHEMA_VERSION: u32 = 76;
+/// Version 77 removes the mission-end title-card acknowledgement: the debriefing
+/// is the only terminal summary a seat dismisses.
+pub const REPLAY_SCHEMA_VERSION: u32 = 77;
 
 /// Wire-format protocol version shared by the engine and the leaderboard wire
 /// protocol. Bump on any breaking change to `NetMsg` or

@@ -122,54 +122,44 @@ pub(super) enum ModalDecisionSource {
 
 /// Terminal presentation, profile promotion and the load picker are adapters;
 /// the valid recorded decision order is independent of those process owners.
+///
+/// There is one terminal page. The mission-end title card that used to precede
+/// it asked a Yes/No question whose answer both branches discarded, and the
+/// debriefing it led to already carries the same title; a page that asks what it
+/// cannot act on is not a decision, so the debriefing is the only boundary a
+/// seat acknowledges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct TerminalDecisionOrder {
-    popup: ModalKind,
     final_page: ModalKind,
     stage: TerminalDecisionStage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum TerminalDecisionStage {
-    MissionState,
     FinalDebriefing,
     Settled,
 }
 
 impl TerminalDecisionOrder {
-    pub(super) fn new(won: bool, text_id: robin_engine::player_command::DebriefingTextId) -> Self {
+    pub(super) fn new(text_id: robin_engine::player_command::DebriefingTextId) -> Self {
         Self {
-            popup: ModalKind::MissionState {
-                kind: robin_engine::player_command::MissionStateModalKind::EndState { won },
-            },
             final_page: ModalKind::FinalDebriefing { text_id },
-            stage: TerminalDecisionStage::MissionState,
+            stage: TerminalDecisionStage::FinalDebriefing,
         }
     }
 
     pub(super) fn current_kind(&self) -> Option<ModalKind> {
         match self.stage {
-            TerminalDecisionStage::MissionState => Some(self.popup.clone()),
             TerminalDecisionStage::FinalDebriefing => Some(self.final_page.clone()),
             TerminalDecisionStage::Settled => None,
         }
     }
 
-    pub(super) fn accept(
-        &mut self,
-        kind: &ModalKind,
-        result: DialogResult,
-    ) -> Result<(), &'static str> {
+    pub(super) fn accept(&mut self, kind: &ModalKind) -> Result<(), &'static str> {
         if self.current_kind().as_ref() != Some(kind) {
             return Err("terminal decision does not match the active session boundary");
         }
         self.stage = match self.stage {
-            TerminalDecisionStage::MissionState => {
-                if !matches!(result, DialogResult::Completed | DialogResult::Aborted) {
-                    return Err("mission-state decision must be completed or aborted");
-                }
-                TerminalDecisionStage::FinalDebriefing
-            }
             TerminalDecisionStage::FinalDebriefing => TerminalDecisionStage::Settled,
             TerminalDecisionStage::Settled => {
                 unreachable!("settled terminal boundary has no current kind")
@@ -314,11 +304,19 @@ impl SessionModalScheduler {
         replay: &mut ReplayModalDismissals,
         source: ModalDecisionSource,
     ) -> Option<PlayerCommand> {
-        if source == ModalDecisionSource::Recorded && replay.iter().any(|command| matches!(command,
-            PlayerCommand::ModalDismiss { kind: ModalKind::FinalDebriefing { .. }
-                | ModalKind::MissionState { kind: robin_engine::player_command::MissionStateModalKind::EndState { .. } }, .. }
-        )) {
-            TerminalAdapter::ReadOnlyReplay.admit_campaign_transition()
+        if source == ModalDecisionSource::Recorded
+            && replay.iter().any(|command| {
+                matches!(
+                    command,
+                    PlayerCommand::ModalDismiss {
+                        kind: ModalKind::FinalDebriefing { .. },
+                        ..
+                    }
+                )
+            })
+        {
+            TerminalAdapter::ReadOnlyReplay
+                .admit_campaign_transition()
                 .unwrap_or_else(|error| panic!("{error}"));
         }
         if self.active.is_none() {
@@ -692,20 +690,15 @@ mod tests {
     }
 
     #[test]
-    fn terminal_decisions_require_popup_then_final_without_fabricated_completion() {
-        let mut order = TerminalDecisionOrder::new(false, DebriefingTextId::Lose { index: 3 });
+    fn terminal_decisions_have_one_boundary_and_no_fabricated_completion() {
+        let mut order = TerminalDecisionOrder::new(DebriefingTextId::Lose { index: 3 });
         let final_page = ModalKind::FinalDebriefing {
             text_id: DebriefingTextId::Lose { index: 3 },
         };
-        assert!(order.accept(&final_page, DialogResult::Aborted).is_err());
-        let popup = order.current_kind().unwrap();
-        assert!(order.accept(&popup, DialogResult::Restart).is_err());
-        assert_eq!(order.current_kind(), Some(popup.clone()));
-        order.accept(&popup, DialogResult::Completed).unwrap();
         assert_eq!(order.current_kind(), Some(final_page.clone()));
-        order.accept(&final_page, DialogResult::Aborted).unwrap();
+        order.accept(&final_page).unwrap();
         assert_eq!(order.current_kind(), None);
-        assert!(order.accept(&final_page, DialogResult::Completed).is_err());
+        assert!(order.accept(&final_page).is_err());
         assert!(
             TerminalAdapter::Interactive
                 .admit_campaign_transition()

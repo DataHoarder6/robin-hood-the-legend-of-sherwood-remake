@@ -207,10 +207,9 @@ struct TerminalDebriefingPage {
 }
 
 enum TerminalDebriefingPhase {
-    MissionState(crate::ingame_menu::MissionStatePopupState),
-    /// Includes retrying a failed publication as well as awaiting a successfully
-    /// proposed client decision; the gate retains that distinction and outcome.
-    AwaitingMissionAuthority,
+    /// The mission-end page. It is the first boundary a seat acknowledges: the
+    /// title card that used to precede it asked a question both answers routed
+    /// past, and the page repeats its title.
     Debriefing(crate::ingame_menu::DebriefingModalState),
     LoadPicker {
         picker: crate::ingame_menu::SavePickerModalState,
@@ -232,10 +231,8 @@ enum TerminalDebriefingPhase {
 
 pub(super) struct TerminalDebriefingState {
     decisions: super::session_policy::TerminalDecisionOrder,
-    popup_dismissal: ModalDismissalGate,
     final_dismissal: ModalDismissalGate,
     exit_code: GameCode,
-    popup_kind: engine_player_command::ModalKind,
     page: TerminalDebriefingPage,
     phase: TerminalDebriefingPhase,
     leaderboard_preparation: Option<super::leaderboard_runtime::MissionEndPreparation>,
@@ -253,7 +250,6 @@ pub(super) struct PendingTerminalDebriefing {
     exit_code: GameCode,
     terminal_mission_id: u32,
     previous_attempt_sequence: u64,
-    popup_title: Option<String>,
 }
 
 impl PendingTerminalDebriefing {
@@ -263,13 +259,11 @@ impl PendingTerminalDebriefing {
         exit_code: GameCode,
         terminal_mission_id: u32,
         previous_attempt_sequence: u64,
-        popup_title: Option<String>,
     ) -> Self {
         Self {
             exit_code,
             terminal_mission_id,
             previous_attempt_sequence,
-            popup_title,
         }
     }
 
@@ -398,40 +392,22 @@ impl TerminalDebriefingState {
     fn new(
         context: &mut TerminalDebriefingContext<'_>,
         exit_code: GameCode,
-        popup_title: String,
         page: TerminalDebriefingPage,
         leaderboard_preparation: super::leaderboard_runtime::MissionEndPreparation,
     ) -> Self {
-        let popup_kind = engine_player_command::ModalKind::MissionState {
-            kind: engine_player_command::MissionStateModalKind::EndState {
-                won: page.end.is_won(),
-            },
-        };
         let resources = context
             .resources
             .menu
             .as_ref()
             .expect("terminal modal resources were checked before state construction");
-        let phase =
-            TerminalDebriefingPhase::MissionState(crate::ingame_menu::MissionStatePopupState::new(
-                &context.presentation.renderer,
-                resources,
-                popup_title.clone(),
-                page.end,
-                None,
-            ));
+        let phase = Self::debriefing_phase(&page, resources);
         Self {
-            popup_dismissal: ModalDismissalGate::default(),
             final_dismissal: ModalDismissalGate::default(),
-            decisions: super::session_policy::TerminalDecisionOrder::new(
-                page.end.is_won(),
-                match page.kind {
-                    engine_player_command::ModalKind::FinalDebriefing { text_id } => text_id,
-                    _ => unreachable!("terminal page identity"),
-                },
-            ),
+            decisions: super::session_policy::TerminalDecisionOrder::new(match page.kind {
+                engine_player_command::ModalKind::FinalDebriefing { text_id } => text_id,
+                _ => unreachable!("terminal page identity"),
+            }),
             exit_code,
-            popup_kind,
             page,
             phase,
             leaderboard_preparation: Some(leaderboard_preparation),
@@ -461,10 +437,7 @@ impl TerminalDebriefingState {
                 serde_json::to_string(&current).expect("ModalKind serializes")
             ));
         }
-        if self.http_result.is_some()
-            || self.popup_dismissal.is_pending()
-            || self.final_dismissal.is_pending()
-        {
+        if self.http_result.is_some() || self.final_dismissal.is_pending() {
             return Err(
                 "terminal modal already retains a local decision pending publication or authority"
                     .to_owned(),
@@ -480,17 +453,20 @@ impl TerminalDebriefingState {
         Ok(())
     }
 
-    fn begin_debriefing(&self, resources: &IngameMenuResources) -> TerminalDebriefingPhase {
+    fn debriefing_phase(
+        page: &TerminalDebriefingPage,
+        resources: &crate::ingame_menu::IngameMenuResources,
+    ) -> TerminalDebriefingPhase {
         TerminalDebriefingPhase::Debriefing(crate::ingame_menu::DebriefingModalState::new(
             resources,
             crate::ingame_menu::DebriefingContent {
-                body: self.page.body.clone(),
-                stat: Some(&self.page.mission_stat),
-                mission_length_seconds: self.page.mission_length,
-                end: self.page.end,
-                restart_allowed: self.page.restart_allowed,
-                quick_load_key: self.page.quick_load_key,
-                restart_snapshot_exists: self.page.restart_snapshot_exists,
+                body: page.body.clone(),
+                stat: Some(&page.mission_stat),
+                mission_length_seconds: page.mission_length,
+                end: page.end,
+                restart_allowed: page.restart_allowed,
+                quick_load_key: page.quick_load_key,
+                restart_snapshot_exists: page.restart_snapshot_exists,
                 start_at_stat: false,
             },
         ))
@@ -509,37 +485,13 @@ impl TerminalDebriefingState {
         })
     }
 
-    fn record_popup_decision(
-        &mut self,
-        context: &mut TerminalDebriefingContext<'_>,
-        result: engine_player_command::DialogResult,
-    ) {
-        self.decisions
-            .accept(&self.popup_kind, result)
-            .unwrap_or_else(|error| panic!("terminal popup admission: {error}"));
-        self.popup_dismissal.retire();
-        context
-            .frame
-            .modal_dismissals
-            .push(engine_player_command::PlayerCommand::ModalDismiss {
-                kind: self.popup_kind.clone(),
-                result,
-            });
-        let resources = context
-            .resources
-            .menu
-            .as_ref()
-            .expect("terminal modal resources disappeared during mission-state transition");
-        self.phase = self.begin_debriefing(resources);
-    }
-
     fn finish_final_decision(
         &mut self,
         context: &mut TerminalDebriefingContext<'_>,
         result: engine_player_command::DialogResult,
     ) -> TerminalDebriefingProgress {
         self.decisions
-            .accept(&self.page.kind, result)
+            .accept(&self.page.kind)
             .unwrap_or_else(|error| panic!("terminal final admission: {error}"));
         self.final_dismissal.retire();
         context
@@ -586,16 +538,6 @@ impl TerminalDebriefingState {
 
     fn tick(&mut self, context: &mut TerminalDebriefingContext<'_>) -> TerminalDebriefingProgress {
         if let Some((kind, result)) = self.http_result.take() {
-            if kind == self.popup_kind {
-                if let Some(result) =
-                    Self::publish_or_accept_local(context, kind, result, &mut self.popup_dismissal)
-                {
-                    self.record_popup_decision(context, result);
-                } else {
-                    self.phase = TerminalDebriefingPhase::AwaitingMissionAuthority;
-                }
-                return TerminalDebriefingProgress::Pending;
-            }
             if kind == self.page.kind {
                 if let TerminalDebriefingPhase::LoadPicker { picker, .. } = &mut self.phase {
                     picker.close(&mut context.presentation.renderer);
@@ -610,68 +552,8 @@ impl TerminalDebriefingState {
             }
             panic!("validated terminal HTTP modal kind changed before tick")
         }
-        if let Some(result) =
-            pop_matching_dismissal(&mut context.frame.replay_modal_dismissals, &self.popup_kind)
-        {
-            self.record_popup_decision(context, result);
-            return TerminalDebriefingProgress::Pending;
-        }
 
         match &mut self.phase {
-            TerminalDebriefingPhase::MissionState(state) => {
-                if let Some(result) = Self::poll_authoritative_decision(
-                    context,
-                    self.popup_kind.clone(),
-                    &mut self.popup_dismissal,
-                ) {
-                    self.record_popup_decision(context, result);
-                    return TerminalDebriefingProgress::Pending;
-                }
-                let resources = context
-                    .resources
-                    .menu
-                    .as_ref()
-                    .expect("terminal mission-state resources disappeared");
-                let cursor = default_modal_cursor(
-                    &mut context.presentation.sprites.cursor_renderer,
-                    &mut context.resources.cursor,
-                    &mut context.presentation.renderer,
-                );
-                let Some(confirmed) = state.tick(&mut ModalScreenIo {
-                    window: context.window,
-                    renderer: &mut context.presentation.renderer,
-                    resources,
-                    cursor: Some(&cursor),
-                }) else {
-                    return TerminalDebriefingProgress::Pending;
-                };
-                let result = if confirmed {
-                    engine_player_command::DialogResult::Completed
-                } else {
-                    engine_player_command::DialogResult::Aborted
-                };
-                if let Some(result) = Self::publish_or_accept_local(
-                    context,
-                    self.popup_kind.clone(),
-                    result,
-                    &mut self.popup_dismissal,
-                ) {
-                    self.record_popup_decision(context, result);
-                } else {
-                    self.phase = TerminalDebriefingPhase::AwaitingMissionAuthority;
-                }
-                TerminalDebriefingProgress::Pending
-            }
-            TerminalDebriefingPhase::AwaitingMissionAuthority => {
-                if let Some(result) = Self::poll_authoritative_decision(
-                    context,
-                    self.popup_kind.clone(),
-                    &mut self.popup_dismissal,
-                ) {
-                    self.record_popup_decision(context, result);
-                }
-                TerminalDebriefingProgress::Pending
-            }
             TerminalDebriefingPhase::Debriefing(_) => self.tick_debriefing_page(context),
             TerminalDebriefingPhase::LoadPicker { .. } => self.tick_load_picker(context),
             TerminalDebriefingPhase::AwaitingFinalAuthority => {
@@ -942,7 +824,7 @@ impl TerminalDebriefingState {
                     Ok(selection) => Some(selection),
                     Err(error) => {
                         tracing::error!(%error, "debriefing selection was removed before acceptance");
-                        self.phase = self.begin_debriefing(resources);
+                        self.phase = Self::debriefing_phase(&self.page, resources);
                         return TerminalDebriefingProgress::Pending;
                     }
                 };
@@ -1025,7 +907,6 @@ fn settle_terminal_debriefing(
     let PendingTerminalDebriefing {
         exit_code,
         terminal_mission_id,
-        popup_title,
         ..
     } = pending;
     if exit_code == GameCode::LevelSucceeded {
@@ -1075,7 +956,7 @@ fn settle_terminal_debriefing(
         context.host.audio.sound.play_jingle(jingle, backend);
     }
 
-    let Some(popup_title) = popup_title else {
+    let Some(end) = crate::ingame_menu::MissionEndKind::from_exit_code(exit_code) else {
         return TerminalDebriefingProgress::Complete;
     };
     if context.resources.menu.is_none() {
@@ -1083,8 +964,6 @@ fn settle_terminal_debriefing(
         return TerminalDebriefingProgress::Complete;
     }
 
-    let end = crate::ingame_menu::MissionEndKind::from_exit_code(exit_code)
-        .unwrap_or_else(|| panic!("terminal debriefing received non-terminal {exit_code:?}"));
     let outcome = leaderboard_outcome(exit_code).unwrap_or_else(|| {
         panic!("terminal debriefing received non-attempt operation {exit_code:?}")
     });
@@ -1106,13 +985,7 @@ fn settle_terminal_debriefing(
         )
         .unwrap_or_else(|error| panic!("mission-end leaderboard capture failed: {error}"));
     let page = terminal_debriefing_page(context, end, terminal_mission_id);
-    let state = TerminalDebriefingState::new(
-        context,
-        exit_code,
-        popup_title,
-        page,
-        leaderboard_preparation,
-    );
+    let state = TerminalDebriefingState::new(context, exit_code, page, leaderboard_preparation);
     context.ui.terminal_debriefing = Some(state);
     TerminalDebriefingProgress::Pending
 }
@@ -1180,8 +1053,6 @@ pub(super) fn drive_tick_exit_modals(
         context.manager.engine.sim_config().difficulty,
         context.manager.engine.campaign().mission_attempt_sequence,
     );
-    let popup_title = crate::ingame_menu::MissionEndKind::from_exit_code(exit_code)
-        .map(|end| end.popup_message().to_owned());
     tracing::info!(
         ?exit_code,
         local_seat = ?context.host.transport.local_seat(),
@@ -1192,7 +1063,6 @@ pub(super) fn drive_tick_exit_modals(
         exit_code,
         terminal_mission_id,
         previous_attempt_sequence,
-        popup_title,
     });
     // Hold the operation in progress while the deterministic terminal command
     // is applied and the frame-driven debrief/leaderboard sequence settles.
@@ -1208,13 +1078,9 @@ mod tests {
         use robin_engine::player_command::{DebriefingTextId, ModalKind};
         let text_id = DebriefingTextId::from_outcome(true, 0);
         TerminalDebriefingState {
-            decisions: super::super::session_policy::TerminalDecisionOrder::new(true, text_id),
-            popup_dismissal: ModalDismissalGate::default(),
+            decisions: super::super::session_policy::TerminalDecisionOrder::new(text_id),
             final_dismissal: ModalDismissalGate::default(),
             exit_code: GameCode::LevelSucceeded,
-            popup_kind: ModalKind::MissionState {
-                kind: engine_player_command::MissionStateModalKind::EndState { won: true },
-            },
             page: TerminalDebriefingPage {
                 kind: ModalKind::FinalDebriefing { text_id },
                 body: String::new(),
@@ -1226,7 +1092,7 @@ mod tests {
                 end: crate::ingame_menu::MissionEndKind::Won,
                 mission_stat: Default::default(),
             },
-            phase: TerminalDebriefingPhase::AwaitingMissionAuthority,
+            phase: TerminalDebriefingPhase::AwaitingFinalAuthority,
             leaderboard_preparation: None,
             local_load: None,
             http_result: None,
@@ -1257,10 +1123,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let manager = selected_catalog(root.path());
         let mut state = terminal_state();
-        state
-            .decisions
-            .accept(&state.popup_kind, DialogResult::Completed)
-            .unwrap();
         for (slot, catalog) in [(0, None), (99, Some(&manager))] {
             assert!(
                 state
@@ -1283,10 +1145,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut manager = selected_catalog(root.path());
         let mut state = terminal_state();
-        state
-            .decisions
-            .accept(&state.popup_kind, DialogResult::Completed)
-            .unwrap();
         state
             .queue_http_result(
                 state.page.kind.clone(),
@@ -1430,76 +1288,57 @@ mod tests {
         use robin_engine::multiplayer::{MultiplayerSessionId, NetChannels};
         use robin_engine::player_command::DialogResult;
         let mut state = terminal_state();
-        let popup = state.popup_kind.clone();
+        let kind = state.page.kind.clone();
         state
-            .queue_http_result(popup.clone(), DialogResult::Aborted, None)
+            .queue_http_result(kind.clone(), DialogResult::Aborted, None)
             .unwrap();
         assert!(
             state
-                .queue_http_result(popup.clone(), DialogResult::Completed, None)
+                .queue_http_result(kind.clone(), DialogResult::Completed, None)
                 .is_err()
         );
         assert_eq!(
             state.http_result.take(),
-            Some((popup.clone(), DialogResult::Aborted))
+            Some((kind.clone(), DialogResult::Aborted))
         );
 
-        for final_page in [false, true] {
-            let (net, _incoming, outgoing, _, _) = NetChannels::new();
-            net.install_session_id(MultiplayerSessionId([9; 32]))
-                .unwrap();
-            drop(outgoing);
-            let kind = if final_page {
-                state.page.kind.clone()
-            } else {
-                popup.clone()
-            };
-            let modal = crate::ingame_menu::ModalNet::new(&net, kind.clone(), true);
-            let gate = if final_page {
-                &mut state.final_dismissal
-            } else {
-                &mut state.popup_dismissal
-            };
-            let result = if final_page {
-                DialogResult::Load { slot: 7 }
-            } else {
-                DialogResult::Aborted
-            };
-            assert_eq!(gate.request(result, Some(&modal)), None);
-            assert_eq!(gate.poll(Some(&modal)), None);
-            assert!(
-                state
-                    .queue_http_result(kind.clone(), DialogResult::Completed, None)
-                    .is_err()
-            );
-            assert!(state.http_result.is_none());
-            assert_eq!(
-                state.current_kind(),
-                Some(kind.clone()),
-                "failed publication cannot advance terminal decision order"
-            );
-            let (replacement, _incoming, outgoing, _, _) = NetChannels::new();
-            replacement
-                .install_session_id(MultiplayerSessionId([9; 32]))
-                .unwrap();
-            let replacement = crate::ingame_menu::ModalNet::new(&replacement, kind.clone(), true);
-            let gate = if final_page {
-                &mut state.final_dismissal
-            } else {
-                &mut state.popup_dismissal
-            };
-            assert_eq!(gate.poll(Some(&replacement)), Some(result));
-            assert!(matches!(
-                outgoing.try_recv().unwrap(),
-                robin_engine::multiplayer::NetOutbound::ModalDecision(
-                    robin_engine::multiplayer::ModalDecision {
-                        result: observed,
-                        ..
-                    }
-                ) if observed == result
-            ));
-            state.decisions.accept(&kind, result).unwrap();
-        }
+        let (net, _incoming, outgoing, _, _) = NetChannels::new();
+        net.install_session_id(MultiplayerSessionId([9; 32]))
+            .unwrap();
+        drop(outgoing);
+        let modal = crate::ingame_menu::ModalNet::new(&net, kind.clone(), true);
+        let gate = &mut state.final_dismissal;
+        let result = DialogResult::Load { slot: 7 };
+        assert_eq!(gate.request(result, Some(&modal)), None);
+        assert_eq!(gate.poll(Some(&modal)), None);
+        assert!(
+            state
+                .queue_http_result(kind.clone(), DialogResult::Completed, None)
+                .is_err()
+        );
+        assert!(state.http_result.is_none());
+        assert_eq!(
+            state.current_kind(),
+            Some(kind.clone()),
+            "failed publication cannot advance terminal decision order"
+        );
+        let (replacement, _incoming, outgoing, _, _) = NetChannels::new();
+        replacement
+            .install_session_id(MultiplayerSessionId([9; 32]))
+            .unwrap();
+        let replacement = crate::ingame_menu::ModalNet::new(&replacement, kind.clone(), true);
+        let gate = &mut state.final_dismissal;
+        assert_eq!(gate.poll(Some(&replacement)), Some(result));
+        assert!(matches!(
+            outgoing.try_recv().unwrap(),
+            robin_engine::multiplayer::NetOutbound::ModalDecision(
+                robin_engine::multiplayer::ModalDecision {
+                    result: observed,
+                    ..
+                }
+            ) if observed == result
+        ));
+        state.decisions.accept(&kind).unwrap();
         assert_eq!(state.current_kind(), None);
     }
 
@@ -1724,9 +1563,7 @@ mod tests {
     #[test]
     fn aborted_page_dismissal_returns_to_the_campaign() {
         use crate::ingame_menu::MissionEndKind;
-        use robin_engine::player_command::{
-            DebriefingTextId, DialogResult, MissionStateModalKind, ModalKind,
-        };
+        use robin_engine::player_command::{DebriefingTextId, DialogResult, ModalKind};
 
         // The abandon command ends the level as `LevelInterrupted`, which is
         // its own page. Missions that define an abandoned variant select the
@@ -1736,22 +1573,10 @@ mod tests {
         assert_eq!(debriefing_text_table_id(end, 100, 200), 200);
         let text_id = DebriefingTextId::from_outcome(end.is_won(), 1);
 
-        let mut decisions =
-            super::super::session_policy::TerminalDecisionOrder::new(end.is_won(), text_id);
-        let popup = decisions.current_kind().unwrap();
-        assert_eq!(
-            popup,
-            ModalKind::MissionState {
-                kind: MissionStateModalKind::EndState { won: false },
-            }
-        );
-        decisions
-            .accept(&popup, DialogResult::Completed)
-            .expect("mission-state page dismissal");
+        let mut decisions = super::super::session_policy::TerminalDecisionOrder::new(text_id);
         let page = decisions.current_kind().unwrap();
-        decisions
-            .accept(&page, DialogResult::Completed)
-            .expect("debriefing page dismissal");
+        assert_eq!(page, ModalKind::FinalDebriefing { text_id });
+        decisions.accept(&page).expect("debriefing page dismissal");
         assert_eq!(decisions.current_kind(), None);
 
         // Dismissing the aborted page settles on Continue: the session loop

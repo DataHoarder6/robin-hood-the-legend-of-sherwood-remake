@@ -279,6 +279,14 @@ widget exists. The common modal batch lifecycle selects the next presentation;
 widgets bind to that existing occurrence and submit local outcomes. Every
 admitted player must acknowledge a story before the host publishes its decision.
 
+Mission end is a narrative, not a question. The debriefing page is the only
+terminal summary: it carries the win/lose title itself, it is the page a seat
+acknowledges, and its dismissal result decides what happens next. The separate
+mission-end title card that used to precede it asked Yes/No and routed both
+answers into that same debriefing (#48); it was an acknowledgement barrier with
+no decision behind it, so it is gone and a second terminal summary is not a
+thing the flow can grow back.
+
 The session drain services acknowledgements and retains authoritative decisions
 while simulation is paused, independently of widget polling. A shared story's
 close does not wait for a future simulation frame: the client may be paused one

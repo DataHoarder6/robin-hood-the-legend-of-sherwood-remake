@@ -2124,10 +2124,8 @@ mod tests {
             let mut debrief = MissionFrame::new(1);
             debrief.bind_timeline(timeline.current_frame());
             debrief.modal_dismissals.push(PlayerCommand::ModalDismiss {
-                kind: robin_engine::player_command::ModalKind::MissionState {
-                    kind: robin_engine::player_command::MissionStateModalKind::EndState {
-                        won: true,
-                    },
+                kind: robin_engine::player_command::ModalKind::FinalDebriefing {
+                    text_id: robin_engine::player_command::DebriefingTextId::Win { index: 0 },
                 },
                 result: robin_engine::player_command::DialogResult::Completed,
             });

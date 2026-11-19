@@ -2937,11 +2937,14 @@ hourglass transient, trading unavailable — stays on the rail drawn disabled.
 
 Abandoning a live mission ends the level as `LevelInterrupted` and now shows
 the original's third mission-end page: the retail "Mission aborted" title
-(menu-text id 26) on the mission-state popup and the debriefing parchment,
+(menu-text id 26) on the debriefing parchment,
 with the level's lose-table text at the index the mission script selected
 (`ChooseVictoryDefeatText`). The dismissal path is the same as the won and
 lost pages — the campaign map reopens with the attempt recorded as
 `Interrupted`. The confirmation before it asks the retail question for the
 state it was opened in — the abort question (id 238) while the mission is
-unfinished, the won-leave question (id 235) once it is won. Evidence, the
-strings and the ids are in [mission-end pages](slop/MISSION_END_PAGES.md).
+unfinished, the won-leave question (id 235) once it is won. A lost mission no
+longer asks anything between the defeat and its debriefing: the title card that
+used to sit there asked Yes/No and ran the same transition either way.
+Evidence, the strings and the ids are in
+[mission-end pages](slop/MISSION_END_PAGES.md).

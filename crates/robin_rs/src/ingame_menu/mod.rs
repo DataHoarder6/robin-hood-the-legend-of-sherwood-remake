@@ -156,15 +156,6 @@ impl MissionEndKind {
             Self::Lost | Self::Aborted => MT_MSG_REALLY_ABORT_MISSION,
         }
     }
-
-    /// Line shown in the mission-state confirmation before the debriefing.
-    pub fn popup_message(self) -> &'static str {
-        match self {
-            Self::Won => "Mission Won",
-            Self::Lost => "Mission Lost",
-            Self::Aborted => "Mission Abandoned",
-        }
-    }
 }
 
 #[cfg(test)]

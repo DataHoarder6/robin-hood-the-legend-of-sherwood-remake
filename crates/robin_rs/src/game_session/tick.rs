@@ -1131,13 +1131,10 @@ pub(super) fn run_forward_ticks_with_session_modals(
                     staged_post_commands = transaction.post_commands().len(),
                     "stepped tick ended the mission; staged its campaign update"
                 );
-                let popup_title = crate::ingame_menu::MissionEndKind::from_exit_code(code)
-                    .map(|end| end.popup_message().to_owned());
                 *handoff = Some(super::terminal_debriefing::PendingTerminalDebriefing::new(
                     code,
                     terminal_mission_id,
                     previous_attempt_sequence,
-                    popup_title,
                 ));
                 game.operation
                     .set(robin_engine::game_operation::GameCode::LevelInProgress);

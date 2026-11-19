@@ -3,7 +3,9 @@
 The original game presents one mission-end page per terminal outcome, and an
 abandoned mission is its own outcome, not a lost one. The port stages the same
 page through the terminal debriefing flow (`game_session/terminal_debriefing.rs`)
-and now selects the original's third title for an interrupted mission.
+and now selects the original's third title for an interrupted mission. Every
+path that ends the *process* rather than the mission is in
+[mission-end exit paths](mission-end-exit-paths.md).
 
 ## Evidence
 
@@ -51,10 +53,17 @@ line is invented.
 `QuitMissionRequested` sets `quit_interrupted`; the tick calls
 `finalize_mission_script(…, true)` and returns `LevelInterrupted`. The terminal
 flow pages that outcome as `MissionEndKind::Aborted`: retail title id 26 on the
-mission-state popup and on the debriefing page, lose table for the body. The
-dismissal path is unchanged — `DialogResult::Completed` settles to
-`SettledDebriefingOutcome::Ok`, the session keeps `LevelInterrupted`, and the
-campaign map reopens with the attempt recorded as `Interrupted`.
+debriefing page, lose table for the body. The dismissal path is unchanged —
+`DialogResult::Completed` settles to `SettledDebriefingOutcome::Ok`, the session
+keeps `LevelInterrupted`, and the campaign map reopens with the attempt recorded
+as `Interrupted`.
+
+The debriefing is the only terminal page. A mission-state title card used to
+precede it as a Yes/No confirmation whose two answers both ran the same
+transition into that page, so it asked a question it could not act on and then
+repeated the debriefing's own title; it was removed (#48). The mission-state
+popup still exists, but only as the rail's abandon confirmation below, where a
+question does have two different outcomes.
 
 ## The leave / abandon confirmation
 

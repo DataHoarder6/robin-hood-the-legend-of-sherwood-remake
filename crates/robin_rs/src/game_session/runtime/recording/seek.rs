@@ -113,9 +113,6 @@ impl ReplaySeekCache {
                 if matches!(
                     modal,
                     robin_engine::player_command::ModalKind::FinalDebriefing { .. }
-                        | robin_engine::player_command::ModalKind::MissionState {
-                            kind: robin_engine::player_command::MissionStateModalKind::EndState { .. }
-                        }
                 ) {
                     if checkpoints.peek().is_some() {
                         return Err("terminal transition precedes a seek checkpoint".into());
@@ -297,8 +294,8 @@ mod tests {
                             input: Default::default(),
                             host_controls: if ordinal == 501 {
                                 vec![ReplayHostControl::ModalDismiss {
-                                    modal: robin_engine::player_command::ModalKind::MissionState {
-                                        kind: robin_engine::player_command::MissionStateModalKind::EndState { won: true },
+                                    modal: robin_engine::player_command::ModalKind::FinalDebriefing {
+                                        text_id: robin_engine::player_command::DebriefingTextId::Win { index: 0 },
                                     },
                                     result: robin_engine::player_command::DialogResult::Completed,
                                 }]
