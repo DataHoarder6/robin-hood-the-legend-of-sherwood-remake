@@ -982,6 +982,9 @@ async fn run_mission_body(
                 return MissionOutcome::new(campaign, rng_seed, sim_config, Err(error));
             }
         }
+        // The mission this pass runs, which a load may not replace: a direct
+        // launch was given one profile, and `LevelLoad` may only re-enter it.
+        let mission_profile_id = campaign.missions[mission_idx].profile(profiles).id;
         let outcome = run_mission_with_seed(
             window,
             callbacks,
@@ -997,6 +1000,74 @@ async fn run_mission_body(
             MultiplayerSetupFailurePolicy::Fatal,
         )
         .await;
+        if matches!(&outcome.result, Ok(GameCode::LevelLoad)) {
+            let Some(request) = outcome.transition else {
+                return MissionOutcome::new(
+                    outcome.campaign,
+                    outcome.rng_seed,
+                    outcome.sim_config,
+                    Err(MissionError::launch(
+                        "a direct mission left for a load with no pending load to apply",
+                    )),
+                );
+            };
+            if request.mission_id() != mission_profile_id {
+                return MissionOutcome::new(
+                    outcome.campaign,
+                    outcome.rng_seed,
+                    outcome.sim_config,
+                    Err(MissionError::launch(format!(
+                        "a direct mission for profile {mission_profile_id} cannot load profile {}",
+                        request.mission_id()
+                    ))),
+                );
+            }
+            if let Err(error) = request.validate_slot(&callbacks.save_manager) {
+                return MissionOutcome::new(
+                    outcome.campaign,
+                    outcome.rng_seed,
+                    outcome.sim_config,
+                    Err(MissionError::launch(format!(
+                        "direct load selection became invalid: {error:#}"
+                    ))),
+                );
+            }
+            // A multiplayer restart is a snapshot load, not `LevelRestart`:
+            // the replacement mission is rebuilt from the exact assets the
+            // save's descriptor names, and the host's own pre-mission snapshot
+            // is applied to it on its first frame — the state the peers adopted
+            // from the committed transition. The consumed mission's lease is
+            // dropped before the exact descriptor is mounted, as it is for the
+            // campaign loop's cross-mission load.
+            args = args.with_content(crate::main_entry::MissionContent::default());
+            let (loaded_idx, loaded_location, resolved) = match prepare_cold_save_mission(
+                &callbacks.application_context(),
+                profiles,
+                request.save(),
+            )
+            .await
+            {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    return MissionOutcome::new(
+                        outcome.campaign,
+                        outcome.rng_seed,
+                        outcome.sim_config,
+                        Err(error),
+                    );
+                }
+            };
+            mission_idx = loaded_idx;
+            location = loaded_location;
+            let save = request.save();
+            (rng_seed, sim_config) = save.engine.mission_start_simulation();
+            campaign = save.engine.campaign().clone();
+            callbacks.queue_operation(SaveLoadRequest::ApplyLoad(request.into_load()));
+            args = args
+                .with_content(crate::main_entry::MissionContent::exact_assets(resolved))
+                .continuing_host_session();
+            continue;
+        }
         if !matches!(&outcome.result, Ok(GameCode::LevelRestart)) {
             return outcome;
         }
