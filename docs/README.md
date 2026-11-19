@@ -12,6 +12,8 @@
 - [Presentation decisions](PRESENTATION.md) — the zoom ladder and what a viewport larger than the level shows
 - [Defect ledger](DEFECTS.md) — one row per diagnosed defect: class, reproduction, the check that proves it, status
 - [New features and remaining product work](NEW_FEATURES.md)
+- [Off-map reinforcements](OFF_MAP_REINFORCEMENTS.md) — flag, summon path, budget and script native
+- [Argument bundling candidates](SIGNATURE_BUNDLING_CANDIDATES.md)
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
 - [Android build and packaging](../android/README.md)
