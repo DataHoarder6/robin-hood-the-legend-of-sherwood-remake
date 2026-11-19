@@ -522,6 +522,17 @@ impl InteractiveFrameFinish<'_, '_, '_> {
         } = runtime;
         let mut startup_timer = (runtime.frame_number() <= 1)
             .then(|| super::setup::PhaseTimer::new("first mission presentation"));
+        // A report requested from any surface (pause menu, console, HTTP) is
+        // gathered here, at the one boundary where the tick's own state, the
+        // modal stack and the transport are all live. Writing starts on a
+        // worker thread; nothing in this frame waits for it.
+        super::report::drain_requested(
+            runtime,
+            world,
+            frontend,
+            &frame,
+            &mut callbacks.save_manager,
+        );
         let profiling = super::frame_perf::enabled();
         let phase_start = super::frame_perf::start(profiling);
         finish_interactive_audio(runtime, world, frontend, callbacks);

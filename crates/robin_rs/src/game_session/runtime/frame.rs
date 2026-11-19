@@ -301,6 +301,14 @@ impl MissionFrame {
         &self.commands.commands
     }
 
+    /// External actions staged for after this frame's simulation, read by the
+    /// bug-report snapshot so a stuck mission shows what it was about to run.
+    pub(in crate::game_session) fn post_external_actions(
+        &self,
+    ) -> &[robin_engine::engine::ExternalAction] {
+        &self.post_external_actions
+    }
+
     /// Network drains partition one frame arbitrarily. Order the complete
     /// batch before execution and recording, preserving each seat's wire order.
     pub(in crate::game_session) fn order_multiplayer_commands(&mut self) {

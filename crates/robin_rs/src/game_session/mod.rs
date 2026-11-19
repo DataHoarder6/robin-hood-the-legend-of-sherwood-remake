@@ -19,6 +19,7 @@ mod loading_progress;
 mod modal_state;
 mod mouse_input;
 mod multiplayer;
+mod report;
 pub(crate) use multiplayer::record_modal_expiry;
 mod render;
 pub(crate) mod replay_init;
