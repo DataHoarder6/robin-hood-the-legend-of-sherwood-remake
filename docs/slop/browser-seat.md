@@ -1,7 +1,9 @@
 # A browser seat: can it join today, and what proves it
 
-Written 2026-11-19 against `fork/main` `ac74b98c0a90`. Read-only: no production
-code was changed. The owner's question is whether a browser (wasm) seat can join
+Written 2026-11-19 against `fork/main` `ac74b98c0a90`; section 5 and items 1-2
+of section 6 were re-read on 2026-11-19 after the reconnect-attempt and
+content-write holes were closed, which is the only production change this file
+caused. The owner's question is whether a browser (wasm) seat can join
 a multiplayer session today, and what exactly proves it. Adjacent material this
 file links rather than restates: [the harness contract](../multiplayer/HARNESS.md)
 (what a row may name), [multiplayer waits without a deadline](multiplayer-unbounded-waits.md)
@@ -15,7 +17,7 @@ the rows a browser row would sit beside), [the multiplayer architecture](../MULT
 | native host + browser client | **impossible today** | the browser artifact every repo script builds has no multiplayer transport, so the join dies before it reaches a relay (`wasm-www/scripts/build-runtime.mjs:13-15`) |
 | native host + browser client, hand-built artifact | **unproved** | the code path type-checks with the feature on, but no run is recorded anywhere in the tree, and the one driver cannot pass (`wasm-www/scripts/live-relay-e2e.mjs:242`) |
 | browser host + native client | **impossible by construction** | browser hosting is not implemented and its server handle type has no values (`crates/robin_rs/src/multiplayer/wasm/native_only.rs:24-25`, `crates/robin_rs/src/game_session/multiplayer/session_setup.rs:35-38`) |
-| browser reconnect, no hang | **real hang, wasm-only** | a reconnect attempt has no deadline, so the 60 s give-up budget is never consulted while one attempt is in flight (`crates/robin_rs/src/multiplayer/wasm.rs:192`, `crates/robin_rs/src/multiplayer/client_session.rs:791`) |
+| browser reconnect, no hang | **bounded 2026-11-19** | a reconnect attempt carries a deadline of its own, so the 60 s give-up budget is reachable while an attempt is in flight (`crates/robin_rs/src/multiplayer/wasm.rs:197`, `crates/robin_rs/src/multiplayer/client_session.rs:617-637`, `:655-673`); section 6 still lists three wasm ways to hang that no attempt bound fixes |
 
 Short names below; every path is repo-relative.
 
@@ -250,53 +252,53 @@ under `/wasm/<commit>/` on the page origin.
 
 ## 5. The wasm budgets: which are real, which are holes
 
-`wasm.rs:189-200` is the whole wasm timing table; every value is consumed by
+`wasm.rs:194-205` is the whole wasm timing table; every value is consumed by
 `client_session.rs`, so none is a comment:
 
 | Wait | Wasm value | Consumed at | Native value |
 | --- | --- | --- | --- |
-| one whole initial attempt | 5 s | `wasm.rs:191` → `client_session.rs:401` | 15 s (`native/client.rs:232`) |
-| one whole reconnect attempt | **none** | `wasm.rs:192` → `:791` | 15 s (`native/client.rs:233`) |
-| each Hello write / Welcome read | **none** | `wasm.rs:190` → `:345-358` | 15 s (`native/client.rs:231`) |
-| post-content Welcome | 30 s | `wasm.rs:194` → `:424-429` | 15 s |
-| content chunk idle | 30 s | `wasm.rs:196` → `:503-507` | 30 s |
-| content transfer | 15 min | `wasm.rs:197` → `:495-514` | 30 min |
-| content decision | 30 min | `wasm.rs:198` → `:475-481` | **none** (`native/client.rs:239`) |
-| content readiness | 5 min | `wasm.rs:199` → `:520-526` | **none** (`native/client.rs:240`) |
-| content write | **none** | `wasm.rs:195` → `:483-489`, `:531-537`, `:544-548`, `:597`, `:606` | 30 s (`native/client.rs:236`) |
-| reconnect give-up budget | 60 s | `wasm.rs:193` → `:752-758`, `:863-867` | same 60 s |
+| one whole initial attempt | 5 s | `wasm.rs:196` → `client_session.rs:401` | 15 s (`native/client.rs:232`) |
+| one whole reconnect attempt | 15 s | `wasm.rs:42`, `:197` → `client_session.rs:617-637` | 15 s (`native/client.rs:233`) |
+| each Hello write / Welcome read | **none** | `wasm.rs:195` → `:345-358` | 15 s (`native/client.rs:231`) |
+| post-content Welcome | 30 s | `wasm.rs:199` → `:424-429` | 15 s |
+| content chunk idle | 30 s | `wasm.rs:201` → `:503-507` | 30 s |
+| content transfer | 15 min | `wasm.rs:202` → `:495-514` | 30 min |
+| content decision | 30 min | `wasm.rs:203` → `:475-481` | **none** (`native/client.rs:239`) |
+| content readiness | 5 min | `wasm.rs:204` → `:520-526` | **none** (`native/client.rs:240`) |
+| content write | 30 s | `wasm.rs:200` → `:480`, `:528`, `:541`, `:551`, `:588`, `:598` | 30 s (`native/client.rs:236`) |
+| reconnect give-up budget | 60 s | `wasm.rs:198` → `:807-816`, `:852-867` | same 60 s |
 
-So the audit's browser rows are accurate as far as they go: the content decision,
-transfer and readiness budgets exist and are enforced (`wasm.rs:198-199`), and
-the browser reconnect attempt is genuinely `None` (`wasm.rs:192`). Two things it
-does not say:
+The two wasm-only holes this table used to show are closed: the reconnect attempt
+was `None` (so a single attempt could outlive the 60 s budget that is read only
+between attempts) and `content_write` was `None` (a `SendStream` write during
+content admission could wait forever, where native bounds the same call at 30 s).
+Both now carry the native numbers, and `reconnect_attempt` is a plain `Duration`
+in `ClientTimings`, so an unbounded attempt is not representable. What the table
+still says, and no attempt bound fixes:
 
-- `handshake_frame: None` (`wasm.rs:190`) is only masked on the *first* connect by
-  the 5 s attempt wrapper. On reconnect it is unmasked, because the reconnect
-  attempt is the unbounded call.
-- `content_write: None` (`wasm.rs:195`) is a second wasm-only hole: a `SendStream`
-  write during content admission waits forever, where native bounds the same call
-  at 30 s. `write_frame_within` treats `None` as "await, unbounded"
-  (`client_session.rs:278-290`).
+- `handshake_frame: None` (`wasm.rs:195`) is never itself a deadline; it is only
+  safe because every call site sits inside an attempt that has one — the 5 s
+  initial attempt or the 15 s reconnect attempt. Nothing enforces that nesting.
+- the content decision, transfer and readiness budgets are enforced
+  (`wasm.rs:203-204`), and each is longer than any one attempt.
 
 ## 6. Wasm-specific ways to hang that are real today
 
 Beyond what the native rows already cover. Each is a code fact; the ones marked
 *unproved* need a run to confirm the trigger, not the mechanism.
 
-1. **A reconnect attempt never expires, so the give-up budget cannot fire.**
-   `reconnect_started` is set on the drop (`client_session.rs:751`) and
-   `reconnect_gave_up` is consulted before the sleep (`:752-758`) and after a
-   *completed* attempt (`:863-867`) — never while one is in flight. With
-   `reconnect_attempt: None` (`wasm.rs:192`) the connect + Hello + Welcome can
-   wait forever, and the browser shows a frozen frame with no menu return. Native
-   is bounded at 15 s per attempt (`native/client.rs:233`), which is what makes
-   H19 (`docs/multiplayer/HARNESS.md:87`) true for native only.
-2. **A content-admission write never expires.** `content_write: None`
-   (`wasm.rs:195`); the write is awaited unbounded in the decision, readiness and
-   prepared paths (`client_session.rs:483-489`, `:531-537`, `:544-548`). *Unproved:*
-   what makes a relay `SendStream` write stall without closing — relay
-   backpressure after a socket loss is the plausible trigger.
+1. **A reconnect attempt never expires — closed 2026-11-19.** The budget was
+   read on the drop (`client_session.rs:807-816`) and after a *completed* attempt
+   (`:855-867`), never while one was in flight, so with `reconnect_attempt: None`
+   the connect + Hello + Welcome could wait forever with a frozen frame. The
+   attempt is now 15 s on both platforms (`wasm.rs:42`, `native/client.rs:233`),
+   covers the content prelude it opens (`attempt_reconnect`, `:617-637`), and is
+   capped by what is left of the budget (`reconnect_step`, `:655-673`).
+2. **A content-admission write never expires — closed 2026-11-19.**
+   `content_write: None` (`wasm.rs:200`) left the decision, readiness and
+   prepared writes (`client_session.rs:480`, `:528`, `:541`) unbounded, where
+   `write_frame_within` treats `None` as "await, unbounded", and native bounds
+   the same calls at 30 s. The browser now uses its own 30 s frame bound.
 3. **Budgets are JS timers on the thread that runs the game.** The client is a
    `spawn_local` future (`wasm.rs:60`) and every timeout is
    `gloo_timers::future::sleep` (`wasm.rs:169-173`), i.e. a `setTimeout` that can
@@ -308,7 +310,8 @@ Beyond what the native rows already cover. Each is a code fact; the ones marked
 4. **bfcache freezes a live session.** `pagehide` only aborts boot work when the
    page is not persisted (`main.ts:367-370`); a persisted page keeps its wasm
    state and loses its relay socket for an unbounded wall-clock time. On restore
-   it enters the unbounded reconnect attempt above. `browser-game.mjs:366-382`
+   it enters a reconnect whose attempts are bounded (item 1) but whose budget is
+   a `setTimeout` on a thread that just resumed (item 3). `browser-game.mjs:366-382`
    exercises restore for a single-player session, so the shape is reachable.
 5. **No process to kill.** H19's proof is "gives up and exits non-zero"
    (`docs/multiplayer/HARNESS.md:87`). A browser has no exit: the fatal becomes a
@@ -389,9 +392,11 @@ has no HTTP surface.
    prints (`wasm.rs:254`, `client_session.rs:742`) and run it once against that
    artifact — that single run decides whether the browser path is real or
    aspirational, and produces the first evidence this file cannot.
-3. Bound the wasm reconnect attempt (`wasm.rs:192` → a 15 s value, matching
-   native) and the content write (`wasm.rs:195` → 30 s). Both are one-line
-   changes with an existing native precedent, and both are wasm-only hangs.
+3. ~~Bound the wasm reconnect attempt and the content write.~~ Done
+   2026-11-19: the attempt is 15 s like native (`wasm.rs:42`, `:197`) and now
+   covers the content prelude it opens, and the write is 30 s (`wasm.rs:200`).
+   The remaining wasm hangs are §6.3 (timer starvation) and §6.4 (bfcache),
+   neither of which an attempt bound reaches.
 4. Publish the join code on `/state` (`diagnostics.rs:191`) so a runner never
    parses a user-facing log line, then add `proves.layer: "browser"`, the
    runner, and the peer platform field (`scenario_corpus.py:65`, `:121`, `:125`).
