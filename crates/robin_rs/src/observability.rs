@@ -225,6 +225,13 @@ pub(crate) fn application_exit(reason: &str) {
     .record();
 }
 
+/// Publish the page this peer is presenting, or `None` when nothing is on
+/// screen. Called by the terminal flow with the decision it validates commands
+/// against, so `/state` and `/command` cannot disagree about the screen.
+pub(crate) fn publish_presentation(presentation: Option<serde_json::Value>) {
+    surface().state.publish_presentation(presentation);
+}
+
 // ── `/state` ───────────────────────────────────────────────────────────
 
 /// A mission attempt begins: its own generation, its own terminal, and no

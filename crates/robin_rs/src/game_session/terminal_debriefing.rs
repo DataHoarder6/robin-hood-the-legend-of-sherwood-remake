@@ -420,6 +420,20 @@ impl TerminalDebriefingState {
         self.decisions.current_kind()
     }
 
+    /// What this peer is presenting, and the results the page accepts.
+    ///
+    /// `/state` publishes this instead of a second description of the screen:
+    /// the decision order is the same value `queue_http_result` validates a
+    /// command against, so a client that reads it and sends one of these
+    /// results cannot be told its modal changed underneath it.
+    pub(super) fn presentation(&self) -> Option<serde_json::Value> {
+        let kind = self.current_kind()?;
+        Some(serde_json::json!({
+            "kind": kind,
+            "results": ["Completed", "Restart", "Aborted", "Load"],
+        }))
+    }
+
     pub(super) fn queue_http_result(
         &mut self,
         kind: engine_player_command::ModalKind,
@@ -991,8 +1005,32 @@ fn settle_terminal_debriefing(
 }
 
 /// Advance the terminal mission-state/debrief/load sequence by one outer frame.
+/// Drive the mission-end narrative for one frame.
+///
+/// The page a peer is presenting is also what `/state` reports, because the
+/// only description of the screen that cannot drift is the decision order the
+/// terminal flow itself validates commands against. A harness (or an agent)
+/// reading `/state` therefore learns which dismissal to send without guessing
+/// the debriefing's text index.
 pub(super) fn drive_tick_exit_modals(
     mut context: TerminalDebriefingContext<'_>,
+) -> TerminalDebriefingProgress {
+    let progress = drive_tick_exit_modals_inner(&mut context);
+    let presentation = if progress == TerminalDebriefingProgress::Pending {
+        context
+            .ui
+            .terminal_debriefing
+            .as_ref()
+            .and_then(TerminalDebriefingState::presentation)
+    } else {
+        None
+    };
+    crate::observability::publish_presentation(presentation);
+    progress
+}
+
+fn drive_tick_exit_modals_inner(
+    context: &mut TerminalDebriefingContext<'_>,
 ) -> TerminalDebriefingProgress {
     if context.playing_back {
         // Terminal records already carry ApplyQuitMissionUpdates. Reopening
@@ -1006,7 +1044,7 @@ pub(super) fn drive_tick_exit_modals(
         return TerminalDebriefingProgress::Inactive;
     }
     if let Some(mut state) = context.ui.terminal_debriefing.take() {
-        let progress = state.tick(&mut context);
+        let progress = state.tick(context);
         if progress == TerminalDebriefingProgress::Pending {
             context.ui.terminal_debriefing = Some(state);
         }
@@ -1026,7 +1064,7 @@ pub(super) fn drive_tick_exit_modals(
             attempt_sequence = context.manager.engine.campaign().mission_attempt_sequence,
             "mission completion update applied; opening debriefing"
         );
-        return settle_terminal_debriefing(&mut context, pending);
+        return settle_terminal_debriefing(context, pending);
     }
 
     let Some(exit_code) = context.tick_exit_code else {
@@ -1251,6 +1289,33 @@ mod tests {
                 .unwrap()
                 .http_result
                 .is_none()
+        );
+    }
+
+    /// `/state` must name the page the peer validates commands against, or a
+    /// client cannot send the dismissal it is looking at: the debriefing kind
+    /// carries the mission script's text index, which nobody else can guess.
+    #[test]
+    fn the_presentation_is_the_decision_order_the_flow_validates() {
+        let mut state = terminal_state();
+        let kind = state.current_kind().expect("a page is current");
+        let presentation = state.presentation().expect("a debriefing is on screen");
+        assert_eq!(
+            presentation["kind"],
+            serde_json::to_value(&kind).expect("a modal kind serializes")
+        );
+        assert_eq!(
+            presentation["results"],
+            serde_json::json!(["Completed", "Restart", "Aborted", "Load"])
+        );
+
+        state
+            .decisions
+            .accept(&kind)
+            .expect("the page accepts its own kind");
+        assert!(
+            state.presentation().is_none(),
+            "a settled page presents nothing"
         );
     }
 

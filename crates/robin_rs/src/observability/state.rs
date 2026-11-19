@@ -41,6 +41,10 @@ pub(super) struct StateSurface {
     /// The generation whose terminal is already recorded. One outcome records
     /// once, whichever writer reaches the surface first.
     terminal_generation: Option<u64>,
+    /// What this peer is presenting and waiting on, when the session is blocked
+    /// on a page. The terminal flow publishes the decision it validates commands
+    /// against, so this is the screen described by the thing that acts on it.
+    presentation: Option<Value>,
 }
 
 impl StateSurface {
@@ -50,6 +54,11 @@ impl StateSurface {
         self.generation += 1;
         self.terminal = None;
         self.terminal_generation = None;
+        self.presentation = None;
+    }
+
+    pub(super) fn publish_presentation(&mut self, presentation: Option<Value>) {
+        self.presentation = presentation;
     }
 
     pub(super) fn publish(&mut self, snapshot: Value) {
@@ -114,6 +123,11 @@ impl StateSurface {
                 "multiplayer": null,
             }),
         };
+        // A page that is on screen is part of what `/state` answers, whether or
+        // not the mission that presented it is still answering from its own
+        // snapshot: the terminal block says how the mission ended, this says
+        // what the peer is still waiting for.
+        document["presentation"] = self.presentation.clone().unwrap_or(Value::Null);
         document["terminal"] = match self.terminal.as_ref() {
             Some(terminal) => serde_json::to_value(terminal).expect("terminal block serializes"),
             None => Value::Null,
@@ -153,6 +167,27 @@ mod tests {
         let document = surface.document().unwrap();
         assert_eq!(document["frame"], 120);
         assert_eq!(document["terminal"], Value::Null);
+    }
+
+    /// The page on screen belongs to the attempt that presented it: a new
+    /// mission starts with nothing on screen, and a stale presentation would
+    /// tell a client to dismiss a modal that no longer exists.
+    #[test]
+    fn a_presentation_is_answered_and_a_new_attempt_clears_it() {
+        let mut surface = StateSurface::default();
+        surface.publish(snapshot(10, "LevelInProgress"));
+        surface.publish_presentation(Some(serde_json::json!({
+            "kind": {"FinalDebriefing": {"text_id": {"Win": {"index": 0}}}},
+            "results": ["Completed", "Restart", "Aborted", "Load"],
+        })));
+        let document = surface.document().unwrap();
+        assert_eq!(
+            document["presentation"]["kind"]["FinalDebriefing"],
+            serde_json::json!({"text_id": {"Win": {"index": 0}}})
+        );
+        surface.mission_started();
+        let document = surface.document().unwrap();
+        assert_eq!(document["presentation"], Value::Null);
     }
 
     #[test]

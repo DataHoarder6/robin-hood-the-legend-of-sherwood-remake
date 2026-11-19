@@ -77,6 +77,7 @@ count to report before it.
    "final_operation": "level_in_progress",
    "connect_string": "{\"id\":…,\"addrs\":[…]}"
  },
+ "presentation": null,
  "terminal": null,
  "observability": {
    "trace_log": "/home/you/.local/share/robin_hood/logs/robin-20261118T101500.log",
@@ -92,6 +93,22 @@ count to report before it.
 `payload` `"Save"` or `{"CampaignExit": "<GameCode wire name>"}` and `awaiting`
 the seats whose acknowledgement the host's commit still waits for.
 `connect_string` is the host's dial address and `null` on a client.
+
+`presentation` is what the peer is looking at and waiting on, or `null` when
+nothing blocks it. The terminal flow publishes the same decision order it
+validates `/command` dismissals against, so a client can send the exact
+`ModalDismiss` without guessing an index:
+
+```json
+{"presentation": {
+   "kind": {"FinalDebriefing": {"text_id": {"Lose": {"index": 2}}}},
+   "results": ["Completed", "Restart", "Aborted", "Load"]}}
+```
+
+`kind` is the `ModalKind` to name in the `ModalDismiss` command and `results`
+are the `DialogResult` variants the page accepts; `Load` carries a `{"slot": n}`
+the client chooses. A page that is gone is `null` again, and a new mission
+attempt starts with `null`.
 
 `terminal` is `null` while a mission is producing snapshots. A mission that
 ended sets it, and the snapshot stays the last one published:
