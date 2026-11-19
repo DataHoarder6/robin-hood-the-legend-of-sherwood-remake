@@ -153,6 +153,8 @@ case "$1" in
         node --test wasm-www/scripts/build-runtime.test.mjs
         test -f scripts/test_portable_linker.py
         python3 -m unittest discover -s scripts -p test_portable_linker.py
+        python3 -m unittest discover -s scripts -p test_triage_bug_bundle.py
+        python3 -m unittest discover -s scripts -p test_defect_ledger.py
         test -f scripts/validation/save_load_live_test.py
         python3 -m unittest discover -s scripts/validation -p save_load_live_test.py
         python3 -m unittest discover -s scripts/validation -p capture_live_test.py

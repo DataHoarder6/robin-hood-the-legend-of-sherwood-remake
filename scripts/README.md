@@ -24,6 +24,7 @@ live corpus or deployment. See `docs/TESTING.md` for package and fixture gates.
 - `test_doctor.sh`, `test_reconcile_main.sh`, `test_prune_worktrees.sh`: fixture regressions for the three, on synthetic repositories in a temp dir.
 - `land.sh`: the loop's landing command — fetch the integration tip, rebase onto it when the branch is behind, gate the tree that will land, push, and read the remote back. `test_land.sh` is the rebase/no-op/conflict regression, on a bare repository and a stub gate.
 - `push-gate.sh`: the suites a landing owes, selected from the diff; it refuses a worktree the push would not carry. `test_push_gate.sh` is the dirty-tree and untracked-file regression.
+- `triage_bug_bundle.py`: prints the `docs/DEFECTS.md` row a bug-report bundle supports, with the `--replay` command that reproduces it; class and check stay `?` because choosing them is the diagnosis. `--check` refuses a bundle with no replay or no description. `test_triage_bug_bundle.py` is its fixture regression, and `test_defect_ledger.py` checks that every row names a class, a status and a check that exists.
 - `release/`: native release authoring/publishing and its tests; see its own README.
 
 ## Replay evidence and campaigns

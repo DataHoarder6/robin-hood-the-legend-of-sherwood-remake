@@ -102,6 +102,11 @@ because a bundle carries saves, a replay and the player's own words.
 - `GET /bug-reports/by-session/<session id>` — every report of one session, in
   arrival order.
 
+A bundle on disk is turned into a row of [DEFECTS.md](DEFECTS.md) by
+`scripts/triage_bug_bundle.py <bundle>`: it prints the fields the row needs and
+the `--replay` command that reproduces the defect. It prints the class and the
+check as `?`, because choosing them is the diagnosis.
+
 ## The receiver
 
 Same process and the same environment as the crash side; `CRASH_TOKEN`,
