@@ -279,6 +279,85 @@ impl MissionScript {
         }
     }
 
+    /// Bounded description of the script's persistent state for a bug report.
+    ///
+    /// The global instance's heap *is* the mission's objective state: the
+    /// authored `StartUp` member variables (`mission_won`, `objectives_done`,
+    /// …) that decide whether the level's end announcement ever runs. Naming
+    /// them here is what makes "the mission finished but the message never
+    /// came" diagnosable from a report. Per-actor heaps are counted, not
+    /// pasted: a level has hundreds of them and they are re-derivable from the
+    /// mission script plus the save.
+    pub fn diagnostic_state(&self) -> serde_json::Value {
+        let counts = self.instance_counts();
+        serde_json::json!({
+            "script_name": self.script_name,
+            "instance_counts": {
+                "actors": counts.actors,
+                "zones": counts.zones,
+                "targets": counts.targets,
+                "scrolls": counts.scrolls,
+                "waypoints": counts.waypoints,
+            },
+            "global": self.diagnostic_instance(&self.instance),
+            "computed_locations": self.state.computed_locations.len(),
+            "sequence_recording_open": self.state.sequence_recorder.is_some(),
+            "actor_heaps": "counted only: one heap per actor script instance is re-derivable from the script and the save",
+        })
+    }
+
+    /// The named member variables of one persistent instance.
+    fn diagnostic_instance(&self, instance: &ScriptInstance) -> serde_json::Value {
+        let classes = &self.scb().classes;
+        let Some(class) = classes.get(instance.class_idx()) else {
+            return serde_json::json!({
+                "class": null,
+                "members": null,
+                "unavailable": format!(
+                    "instance class index {} is outside the {} loaded classes",
+                    instance.class_idx(),
+                    classes.len()
+                ),
+            });
+        };
+        let heap = &instance.vm.heap;
+        let members: serde_json::Map<String, serde_json::Value> = class
+            .member_variables
+            .iter()
+            .map(|member| {
+                let value = match member.ty.tag {
+                    crate::scb::TypeTag::Bool | crate::scb::TypeTag::Int => {
+                        read_i32(heap, member.address)
+                            .map(serde_json::Value::from)
+                            .unwrap_or_else(|| {
+                                serde_json::json!({
+                                    "unreadable": format!(
+                                        "{} bytes at heap offset {}",
+                                        heap.len(),
+                                        member.address
+                                    )
+                                })
+                            })
+                    }
+                    crate::scb::TypeTag::Float => read_f32(heap, member.address)
+                        .map(serde_json::Value::from)
+                        .unwrap_or_else(|| {
+                            serde_json::json!({
+                                "unreadable": format!(
+                                    "{} bytes at heap offset {}",
+                                    heap.len(),
+                                    member.address
+                                )
+                            })
+                        }),
+                    tag => serde_json::json!({"type": format!("{tag:?}")}),
+                };
+                (member.name.clone(), value)
+            })
+            .collect();
+        serde_json::json!({"class": class.class_name, "members": members})
+    }
+
     fn script_instance(&self, key: ScriptVmKey) -> Option<&ScriptInstance> {
         match key {
             ScriptVmKey::Global => Some(&self.instance),
@@ -729,4 +808,19 @@ pub struct ScriptInstanceCounts {
     pub targets: usize,
     pub scrolls: usize,
     pub waypoints: usize,
+}
+
+/// Read one 32-bit member at `address` from an instance heap, or `None` when
+/// the member lies outside it — a truncated or older heap must read as
+/// unreadable, never as zero.
+fn read_i32(heap: &[u8], address: i32) -> Option<i32> {
+    let start = usize::try_from(address).ok()?;
+    let bytes = heap.get(start..start + 4)?;
+    Some(i32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn read_f32(heap: &[u8], address: i32) -> Option<f32> {
+    let start = usize::try_from(address).ok()?;
+    let bytes = heap.get(start..start + 4)?;
+    Some(f32::from_le_bytes(bytes.try_into().ok()?))
 }
