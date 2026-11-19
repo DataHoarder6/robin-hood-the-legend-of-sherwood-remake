@@ -80,6 +80,10 @@
               # rust-toolchain.toml pins the compiler, rustfmt and the wasm
               # target; rustup is what honours that pin.
               pkgs.rustup
+              # The `client` and `client-release` suites run under nextest: one
+              # process per test, one scheduler across binaries. It runs no
+              # doctests, which those suites keep on `cargo test --doc`.
+              pkgs.cargo-nextest
               # `.cargo/config.toml` points the linker at
               # scripts/clang-wild-linker.sh, which links with clang+wild when
               # both exist and falls back to the (much slower) system cc when

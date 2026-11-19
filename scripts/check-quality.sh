@@ -44,11 +44,15 @@ case "$1" in
         ;;
     parity) cargo test --locked -p robin_parity ;;
     client)
-        cargo test --locked -p robin_rs
+        # nextest runs each test in its own process on one scheduler, which is
+        # where the wall time goes on a workspace with this many test binaries.
+        # It runs no doctests, so they stay on `cargo test`.
+        cargo nextest run --locked -p robin_rs
+        cargo test --locked -p robin_rs --doc
         cargo build --locked -p robin_rs --bin robin
         ;;
     client-release)
-        cargo test --locked -p robin_rs --lib --no-default-features --features release
+        cargo nextest run --locked -p robin_rs --lib --no-default-features --features release
         cargo build --locked -p robin_rs --bin robin --no-default-features --features release
         cargo check --locked -p robin_rs --example audio_decode_bench --no-default-features --features release
         ;;
