@@ -347,12 +347,10 @@ impl NetChannels {
                         if self
                             .unanimous_modal_result(proposal.instance, &proposal.kind)?
                             .is_none()
-                        {
-                            if let Err(error) =
+                            && let Err(error) =
                                 self.publish_modal_progress(proposal.instance, &proposal.kind)
-                            {
-                                tracing::error!(%error, "modal progress publication failed; retaining acknowledgement");
-                            }
+                        {
+                            tracing::error!(%error, "modal progress publication failed; retaining acknowledgement");
                         }
                     }
                     self.record_visible_modal_request(VisibleModalRequest {
@@ -415,10 +413,10 @@ impl NetChannels {
                 .filter_map(|state| state.active.map(|id| (id, state.kind.clone())))
                 .collect();
             for (instance, kind) in active {
-                if requires_modal_acknowledgements(&kind) {
-                    if let Err(error) = self.resolve_modal_consensus(instance, &kind) {
-                        tracing::error!(%error, "modal decision publication failed; retaining consensus for retry");
-                    }
+                if requires_modal_acknowledgements(&kind)
+                    && let Err(error) = self.resolve_modal_consensus(instance, &kind)
+                {
+                    tracing::error!(%error, "modal decision publication failed; retaining consensus for retry");
                 }
             }
         }
