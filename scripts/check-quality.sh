@@ -82,9 +82,15 @@ case "$1" in
         : "${ROBINHOOD_DATA_DIR:?Set ROBINHOOD_DATA_DIR to the game root containing Data/}"
         evidence=${ROBIN_E2E_EVIDENCE:-$(mktemp -d "${TMPDIR:-/tmp}/robin-multiplayer-e2e.XXXXXX")}
         printf 'multiplayer-e2e evidence: %s\n' "$evidence" >&2
+        # One scenario at a time by default: a fault fires at frame N, so a
+        # client starved of cores reaches N late and the suite reports a timing
+        # artefact as a defect. Each scenario owns its display, data dir and
+        # ports, so raising ROBIN_E2E_JOBS is safe once the whole corpus has been
+        # measured at that width on this host.
         exec python3 scripts/validation/multiplayer_e2e.py \
             --binary "$ROBIN_E2E_BINARY" --data "$ROBINHOOD_DATA_DIR" \
-            --snapshot "$(git rev-parse HEAD)" --evidence "$evidence"
+            --snapshot "$(git rev-parse HEAD)" --evidence "$evidence" \
+            --jobs "${ROBIN_E2E_JOBS:-1}"
         ;;
     parity-cross)
         # Linux x Windows replay-hash parity: every recording in the tracked
@@ -160,6 +166,7 @@ case "$1" in
         bash scripts/test_reconcile_main.sh
         bash scripts/test_land.sh
         bash scripts/test_push_gate.sh
+        bash scripts/test_build_host.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every

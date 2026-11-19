@@ -5,10 +5,13 @@ The runner's process, signal and display work needs a provisioned Linux host
 document and a recorded trace, so it runs without a display.
 """
 
+import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -655,6 +658,59 @@ class PrerequisiteTest(unittest.TestCase):
             (installed / "datadir.txt").write_text("/game")
             after = suite.snapshot_facts(suite.install_facts(Path(root) / "account-data"))
             self.assertNotEqual(before, after)
+
+
+def record_run(identifier):
+    """A scenario stand-in that survives pickling into a worker process.
+
+    Module-level, because `run_selected` pickles the callable for its pool. It
+    reports its own start and end so the test can measure overlap across
+    processes; `time.monotonic` is CLOCK_MONOTONIC on Linux and therefore
+    comparable between them.
+    """
+    started = time.monotonic()
+    time.sleep(0.15)
+    ended = time.monotonic()
+    with open(os.environ["ROBIN_E2E_TEST_LOG"], "a") as log:
+        log.write(json.dumps({"id": identifier, "start": started, "end": ended}) + "\n")
+    return identifier
+
+
+class RunSelectedTest(unittest.TestCase):
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp())
+        os.environ["ROBIN_E2E_TEST_LOG"] = str(self.work / "runs.jsonl")
+
+    def tearDown(self):
+        os.environ.pop("ROBIN_E2E_TEST_LOG", None)
+        shutil.rmtree(self.work)
+
+    def overlap(self):
+        events = []
+        for line in (self.work / "runs.jsonl").read_text().splitlines():
+            run = json.loads(line)
+            events.append((run["start"], 1))
+            events.append((run["end"], -1))
+        live = peak = 0
+        for _, delta in sorted(events):
+            live += delta
+            peak = max(peak, live)
+        return peak
+
+    def test_one_job_runs_everything_in_selection_order(self):
+        selected = ["H12", "H14", "H19"]
+        self.assertEqual(suite.run_selected(selected, record_run, 1), selected)
+        self.assertEqual(self.overlap(), 1)
+
+    def test_a_pool_keeps_selection_order_and_never_exceeds_its_jobs(self):
+        selected = ["H12", "H14", "H19", "H30"]
+        self.assertEqual(suite.run_selected(selected, record_run, 2), selected)
+        peak = self.overlap()
+        self.assertLessEqual(peak, 2, "more scenarios ran at once than --jobs allowed")
+        self.assertGreaterEqual(peak, 2, "the pool ran the scenarios one at a time")
+
+    def test_a_single_selection_never_starts_a_pool(self):
+        self.assertEqual(suite.run_selected(["H12"], record_run, 4), ["H12"])
 
 
 if __name__ == "__main__":

@@ -43,7 +43,10 @@ run never shares a display or a network with another session.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import functools
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -1472,6 +1475,39 @@ def run_scenario(identifier, expanded, options, evidence):
     return summary, run
 
 
+def run_one(identifier, *, scenarios, defaults, contract, binary, data, snapshot, evidence):
+    """One scenario, with everything it needs spelled out.
+
+    A module-level function with keyword arguments rather than a closure: the
+    parallel path pickles this callable, and a closure cannot be pickled.
+    """
+    expanded = scenario_corpus.expanded(identifier, scenarios, defaults, contract)
+    arguments = argparse.Namespace(binary=binary, data=data, snapshot=snapshot)
+    return run_scenario(identifier, expanded, arguments, evidence)
+
+
+def run_selected(selected, run, jobs):
+    """Run every selected scenario, up to `jobs` at a time, in selection order.
+
+    A scenario owns its display, its install-isolated data directory and its
+    ports, so two of them do not collide. They do share the host's cores, which
+    is why `jobs` is the caller's decision and not this function's: the gate
+    runs one at a time because its faults fire at frame N, and a starved client
+    reaches frame N late.
+
+    Processes, not threads: a scenario installs signal handlers, and Python only
+    allows that on a process's main thread. `fork` keeps the child's `__main__`
+    — and therefore the callable being pickled — identical to the parent's.
+    """
+    if jobs <= 1 or len(selected) <= 1:
+        return [run(identifier) for identifier in selected]
+    context = multiprocessing.get_context("fork")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs,
+                                                mp_context=context) as pool:
+        futures = [pool.submit(run, identifier) for identifier in selected]
+        return [future.result() for future in futures]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", type=Path, required=True,
@@ -1484,7 +1520,13 @@ def main(argv=None):
     parser.add_argument("--scenarios", type=Path, default=CORPUS)
     parser.add_argument("--only", action="append", metavar="ID", default=None,
                         help="run one selected scenario (operator debugging; the gate runs all)")
+    parser.add_argument("--jobs", type=int, default=1, metavar="N",
+                        help="run up to N scenarios at once (default 1). A scenario is "
+                             "frame-timed and shares the host's cores, so raise this only "
+                             "after measuring the whole corpus on the host.")
     options = parser.parse_args(argv)
+    if options.jobs < 1:
+        parser.error(f"--jobs takes a positive count, not {options.jobs}")
     raw = list(sys.argv[1:]) if argv is None else list(argv)
 
     missing = require_prerequisites(options.binary, options.data)
@@ -1536,14 +1578,15 @@ def main(argv=None):
         binary = snapshot_client(options.binary.resolve(strict=True), evidence, suite)
         (evidence / "binary.sha256").write_text(suite["binary_sha256"] + "\n")
         subprocess.run(["ip", "link", "set", "lo", "up"], check=True, timeout=10)
-        for identifier in selected:
-            expanded = scenario_corpus.expanded(identifier, scenarios, defaults, contract)
-            arguments = argparse.Namespace(binary=binary, data=options.data.resolve(),
-                                           snapshot=options.snapshot)
-            result, run = run_scenario(identifier, expanded, arguments, evidence)
+        run = functools.partial(run_one, scenarios=scenarios, defaults=defaults,
+                                contract=contract, binary=binary,
+                                data=options.data.resolve(),
+                                snapshot=options.snapshot, evidence=evidence)
+        for identifier, (result, run_dir) in zip(selected,
+                                                 run_selected(selected, run, options.jobs)):
             suite["scenarios"][identifier] = {"verdict": result["verdict"],
                                               "failures": result["failures"],
-                                              "evidence": str(run)}
+                                              "evidence": str(run_dir)}
             suite["verdicts"][identifier] = result["verdict"]
     except PrerequisiteMissing as error:
         suite["prerequisites_missing"] = [str(error)]
