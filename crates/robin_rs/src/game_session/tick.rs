@@ -2741,10 +2741,11 @@ mod tests {
         }
     }
 
-    /// The mission-end page and the step policy are one decision path: the
-    /// same dismissal publishes the same authoritative decision either way.
+    /// The mission-end page and the step policy hand the session the same
+    /// decision: the page validates it and lets the modal gate publish, the
+    /// step authors the identical kind and result at once.
     #[test]
-    fn terminal_and_step_dismissals_author_the_same_host_decision() {
+    fn terminal_and_step_dismissals_name_the_same_host_decision() {
         use robin_engine::player_command::{DebriefingTextId, DialogResult, ModalKind};
 
         let dismissal = crate::http_server::HttpModalDismissal {
@@ -2757,10 +2758,9 @@ mod tests {
         let (terminal_host, terminal_out) = session_host(PlayerId::HOST, 3);
         authorize_terminal_http_dismissal(&terminal_host, &dismissal)
             .expect("a host authorizes the terminal page's dismissal");
-        let terminal_decision = published_decision(&terminal_out);
         assert!(
             terminal_out.try_recv().is_err(),
-            "one dismissal publishes one decision"
+            "the mission-end page leaves its decision to the modal gate"
         );
 
         let (step_host, step_out) = session_host(PlayerId::HOST, 3);
@@ -2768,9 +2768,8 @@ mod tests {
             .expect("a host authorizes a step's dismissal");
         let step_decision = published_decision(&step_out);
 
-        assert_eq!(terminal_decision, step_decision);
-        assert_eq!(terminal_decision.kind, dismissal.kind);
-        assert_eq!(terminal_decision.result, dismissal.result);
+        assert_eq!(step_decision.kind, dismissal.kind);
+        assert_eq!(step_decision.result, dismissal.result);
     }
 
     /// A client may only acknowledge a terminal page: the modal gate publishes
