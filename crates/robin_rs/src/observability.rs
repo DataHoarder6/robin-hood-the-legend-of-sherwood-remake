@@ -153,7 +153,62 @@ pub(crate) fn event(kind: EventKind, message: impl Into<String>) -> Event {
 
 /// Events with `seq >= since`, oldest first, at most `limit`.
 pub(crate) fn events_page(since: Option<u64>, limit: usize) -> EventsPage {
+    #[cfg(test)]
+    if let Some(page) = isolated_ring(|ring| ring.page(since, limit.min(MAX_PAGE))) {
+        return page;
+    }
     surface().events.page(since, limit.min(MAX_PAGE))
+}
+
+// ── A test's own event ring ────────────────────────────────────────────
+//
+// The ring is process-global because one process is one run. The lib test
+// binary runs hundreds of runs in one process, so a test that asserts on an
+// exact sequence reads the records its neighbours emit in the same window
+// (measured 2026-11-19: a reconnect test saw another test's disconnect and
+// concluded it had evicted a seat). A test that needs the exact sequence
+// installs a ring of its own for the duration; production never does, and the
+// shared file keeps recording the process narrative either way.
+
+#[cfg(test)]
+thread_local! {
+    static ISOLATED_EVENTS: std::cell::RefCell<Option<events::EventRing>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Restores the shared ring when the test that installed an isolated one ends.
+#[cfg(test)]
+pub(crate) struct SessionEventsIsolation(());
+
+#[cfg(test)]
+impl Drop for SessionEventsIsolation {
+    fn drop(&mut self) {
+        ISOLATED_EVENTS.with(|ring| *ring.borrow_mut() = None);
+    }
+}
+
+/// Record this thread's events in a fresh ring instead of the process's.
+#[cfg(test)]
+pub(crate) fn isolate_session_events() -> SessionEventsIsolation {
+    ISOLATED_EVENTS.with(|ring| *ring.borrow_mut() = Some(events::EventRing::default()));
+    SessionEventsIsolation(())
+}
+
+#[cfg(test)]
+fn isolated_ring<T>(use_ring: impl FnOnce(&mut events::EventRing) -> T) -> Option<T> {
+    ISOLATED_EVENTS.with(|ring| ring.borrow_mut().as_mut().map(use_ring))
+}
+
+/// True when the event went to this thread's isolated ring, so the caller can
+/// leave the process ring and the shared file alone.
+#[cfg(test)]
+pub(crate) fn record_in_isolated_ring(
+    kind: EventKind,
+    seat: Option<u8>,
+    frame: Option<u32>,
+    detail: &serde_json::Value,
+) -> bool {
+    isolated_ring(|ring| ring.push(kind, seat, frame, detail.clone())).is_some()
 }
 
 // ── `/state` ───────────────────────────────────────────────────────────
@@ -210,12 +265,20 @@ pub(crate) fn state_document() -> Option<serde_json::Value> {
     let event_log: Option<std::path::PathBuf> = None;
     // `next_event_seq` is the cursor a poller passes to `/events` to see only
     // what happens after this snapshot; `event_run` names the run it belongs
-    // to, so a cursor from an earlier run is recognisable.
+    // to, so a cursor from an earlier run is recognisable. A test with its own
+    // ring must see that ring's cursor, or the cursor it reads here would page
+    // the process ring instead.
+    #[cfg(test)]
+    let (event_run, next_event_seq) =
+        isolated_ring(|ring| (ring.run().to_owned(), ring.next_seq()))
+            .unwrap_or_else(|| (surface.events.run().to_owned(), surface.events.next_seq()));
+    #[cfg(not(test))]
+    let (event_run, next_event_seq) = (surface.events.run().to_owned(), surface.events.next_seq());
     document["observability"] = serde_json::json!({
         "trace_log": trace_log,
         "event_log": event_log,
-        "event_run": surface.events.run(),
-        "next_event_seq": surface.events.next_seq(),
+        "event_run": event_run,
+        "next_event_seq": next_event_seq,
     });
     Some(document)
 }

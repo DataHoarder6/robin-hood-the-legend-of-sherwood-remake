@@ -96,14 +96,25 @@ machine-local `rustc-wrapper` measured 310 s -> 222 s for a from-scratch rebuild
 and an out-of-tree shared `CARGO_TARGET_DIR` reused nothing across copies (511
 crates recompiled). The copy is the thing to keep warm.
 
-The push that updates the integration branch is gated by
-`.githooks/pre-push`: it runs `format` and `client-release` when anything under
-`crates/` or a gate script changed, `engine` when engine crates did, `tooling`
-when anything under `scripts/`, `tools/` or `.githooks/` did, on the build host through one
-`scripts/remote-check.sh --suites` call over a single synced copy, and refuses
-the push on the first failure. `SKIP_PUSH_GATE=1` exists for a
-deliberately red branch. Review branches are not gated; the push that lands them
-is. GitHub Actions is not part of this: no push in this repository has ever
+The push that updates the integration branch is gated. The suites a landing owes
+are selected in one place, `scripts/push-gate.sh`: `format` and `client-release`
+when anything under `crates/` or a gate script changed, `engine` when engine
+crates did, `tooling` when anything under `scripts/`, `tools/` or `.githooks/`
+did, plus the scenario corpus when `docs/multiplayer/HARNESS.md` or the scenarios
+changed. They run on the build host through one `scripts/remote-check.sh
+--suites` call over a single synced copy, and the first failure stops the
+landing.
+
+Two entry points run that gate. `scripts/land.sh` is the loop's landing command:
+it gates the diff since `fork/main` and only then pushes `HEAD`, because git
+starts its receive-pack conversation before any hook and a seven-minute gate
+holds that conversation idle long enough that the push dies with SIGPIPE after
+the suites pass (measured 2026-11-19 on every long gated push). `.githooks/pre-push`
+runs the same script for a hand-run `git push`, so a push of `main` never lands
+ungated. `SKIP_PUSH_GATE=1` exists for a deliberately red branch — the push is
+then a request for review, not an integration — and for the push `land.sh`
+already gated. Review branches are not gated; the push that lands them is.
+GitHub Actions is not part of this: no push in this repository has ever
 produced a run (#26), so a workflow gate would be decoration. Editing
 `docs/multiplayer/HARNESS.md` also re-validates the corpus, because that file's
 matrix, its `asserts:` clauses and each row's `proves` binding are what the corpus

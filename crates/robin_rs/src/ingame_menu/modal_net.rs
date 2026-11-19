@@ -726,6 +726,7 @@ mod tests {
 
     #[test]
     fn an_expired_acknowledgement_is_recorded_with_no_modal_surface_bound() {
+        let _events = crate::observability::isolate_session_events();
         let (net, _incoming, _outgoing) = fixture();
         net.set_modal_player_count(2);
         let kind = ModalKind::PopupText { text_id: 17 };

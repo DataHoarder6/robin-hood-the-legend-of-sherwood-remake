@@ -144,13 +144,20 @@ impl Event {
         else {
             unreachable!("an event kind serializes as its wire name")
         };
-        let record = super::surface()
-            .events
-            .push(kind, seat, frame, detail.clone());
-        // The ring is already consistent; the file has its own lock so a stalled
-        // install home blocks neither this thread's readers nor `/state`.
-        #[cfg(not(target_arch = "wasm32"))]
-        append(&record);
+        #[cfg(test)]
+        let isolated = super::record_in_isolated_ring(kind, seat, frame, &detail);
+        #[cfg(not(test))]
+        let isolated = false;
+        if !isolated {
+            let record = super::surface()
+                .events
+                .push(kind, seat, frame, detail.clone());
+            // The ring is already consistent; the file has its own lock so a
+            // stalled install home blocks neither this thread's readers nor
+            // `/state`. A test with its own ring is not reading the file.
+            #[cfg(not(target_arch = "wasm32"))]
+            append(&record);
+        }
         let detail_text = serde_json::to_string(&detail).expect("session event detail serializes");
         match level {
             Level::WARN => tracing::warn!(
@@ -206,7 +213,7 @@ impl EventRing {
         self.next_seq
     }
 
-    fn push(
+    pub(super) fn push(
         &mut self,
         kind: EventKind,
         seat: Option<u8>,

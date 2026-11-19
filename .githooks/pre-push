@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # Gate the push that updates the integration branch.
 #
-# GitHub Actions creates no run for a push in this repository (issue #26), so the
-# last place a gate can run before `main` moves is here. The suites follow the
-# diff: anything under `crates/` runs `client-release`, engine crates also run
-# `engine`, a Rust change is formatted, anything under `scripts/` or `tools/`
-# runs `tooling`, and the scenario corpus is validated by its own Python gate.
-# `SKIP_PUSH_GATE=1`
-# is for a deliberately red branch — the push is then a request for review, not
-# an integration.
+# The gate itself lives in `scripts/push-gate.sh`, because `scripts/land.sh` runs
+# the same suites before it opens the connection: git talks to the remote before
+# this hook runs, so a long gate here holds an idle connection and the push can
+# die with SIGPIPE after the suites pass (measured 2026-11-19). This hook stays
+# for a hand-run `git push`, so no push of `main` goes ungated by accident.
 #
-# Only `refs/heads/main` is gated: a review branch may be pushed red, and the
-# push that lands it is gated like any other.
+# `SKIP_PUSH_GATE=1` is for a deliberately red branch — the push is then a
+# request for review, not an integration — and for the push `land.sh` already
+# gated.
 set -euo pipefail
 
 [ "${SKIP_PUSH_GATE:-0}" = 1 ] && exit 0
@@ -20,87 +18,12 @@ integration=refs/heads/main
 repository=$(git rev-parse --show-toplevel)
 cd -- "$repository"
 
-gated=0
 while read -r _local_ref local_sha remote_ref remote_sha; do
     [ "$remote_ref" = "$integration" ] || continue
     # A deletion moves nothing into the integration branch.
     [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
     if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
-        # A first push of the integration branch has no base to diff against:
-        # run every suite rather than guess that it is clean.
-        changed=crates/
-    else
-        changed=$(git diff --name-only "$remote_sha" "$local_sha")
+        exec bash scripts/push-gate.sh "" "$local_sha"
     fi
-    printf '%s\n' "$changed" > /tmp/robin-push-gate-paths.$$
-    gated=1
-    # The suites compile the working tree, but the push lands a commit. If the two
-    # differ, the gate proves a tree nobody else will ever build.
-    if ! git diff --quiet "$local_sha" -- .; then
-        printf 'pre-push: the worktree differs from the commit being pushed:\n' >&2
-        git diff --name-only "$local_sha" -- . | sed 's/^/pre-push:   /' >&2
-        printf 'pre-push: commit them first — the suites would otherwise compile a tree that is not pushed.\n' >&2
-        exit 1
-    fi
-    # Untracked files are not pushed either. They cannot silently change a file
-    # the commit carries, but a new module or scenario the gate compiles while
-    # nobody else has it is still a gate that proves the wrong tree, so say so.
-    untracked=$(git ls-files --others --exclude-standard)
-    if [ -n "$untracked" ]; then
-        printf 'pre-push: untracked files are in the tree the suites compile but not in the push:\n' >&2
-        printf '%s\n' "$untracked" | sed 's/^/pre-push:   /' >&2
-    fi
+    exec bash scripts/push-gate.sh "$remote_sha" "$local_sha"
 done
-
-[ "$gated" = 1 ] || exit 0
-
-paths=$(cat /tmp/robin-push-gate-paths.$$)
-rm -f /tmp/robin-push-gate-paths.$$
-
-# The suites follow the diff, so a Python-only change never pays for a Rust
-# build and a Rust change never skips the suite that compiles it.
-crates_changed=0
-engine_changed=0
-tools_changed=0
-printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
-printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
-printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_changed=1
-
-suites=()
-if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    suites+=(format client-release)
-fi
-if [ "$engine_changed" = 1 ]; then
-    suites+=(engine)
-fi
-# `tooling` is the allowlisted shell/Python gate for everything under `scripts/`
-# and `tools/`; it is green on the build host (issue #40).
-if [ "$tools_changed" = 1 ]; then
-    suites+=(tooling)
-fi
-
-# The scenario corpus keeps its own cheap gate beside `tooling`: this runs the
-# real corpus against docs/multiplayer/HARNESS.md, where the suite's unit tests
-# only exercise the checker on synthetic contracts.
-if printf '%s\n' "$paths" | grep -qE '^(scripts/validation/(scenarios/|scenario_corpus\.py)|docs/multiplayer/HARNESS\.md)'; then
-    printf 'pre-push: scenario corpus\n' >&2
-    python3 scripts/validation/scenario_corpus.py || {
-        printf 'pre-push: the corpus does not match docs/multiplayer/HARNESS.md.\n' >&2
-        exit 1
-    }
-fi
-if [ ${#suites[@]} -eq 0 ]; then
-    printf 'pre-push: no gated path changed; nothing to run.\n' >&2
-    exit 0
-fi
-
-# One remote-check call for the whole push: it syncs this checkout once and runs
-# every suite under the copy's lock, so a later suite reuses what the earlier
-# one built. remote-check pushes this checkout to the build host, and that push
-# would enter this hook again; the copy is a build cache, not an integration.
-printf 'pre-push: %s\n' "${suites[*]}" >&2
-SKIP_PUSH_GATE=1 bash scripts/remote-check.sh --suites "${suites[@]}" || {
-    printf 'pre-push: %s failed; the integration branch stays where it is.\n' "${suites[*]}" >&2
-    printf 'pre-push: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2
-    exit 1
-}
