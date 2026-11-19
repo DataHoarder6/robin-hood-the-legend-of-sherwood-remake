@@ -93,7 +93,6 @@ struct PcSlot<'e> {
     is_selected: bool,
     is_dead: bool,
     is_coma: bool,
-    is_sword_fighting: bool,
     is_guarded: bool,
     has_trumpet: bool,
 }
@@ -108,15 +107,14 @@ impl<'e> PcSlot<'e> {
             .any(|(_, selection, _)| selection.contains(&pc_id));
 
         // ── Extract PC-specific state for overlay rendering ──
-        let (is_dead, is_coma, is_sword_fighting, is_guarded, has_trumpet) = match entity {
+        let (is_dead, is_coma, is_guarded, has_trumpet) = match entity {
             Some(pc_entity @ Entity::Pc(pc)) => (
                 pc.pc.life_points <= 0,
                 is_pc_in_coma(engine, pc_entity),
-                pc_entity.is_in_melee_combat(),
                 pc.pc.guard.is_some(),
                 pc.pc.trumpet_enabled,
             ),
-            _ => (false, false, false, false, false),
+            _ => (false, false, false, false),
         };
         Self {
             slot,
@@ -126,7 +124,6 @@ impl<'e> PcSlot<'e> {
             is_selected,
             is_dead,
             is_coma,
-            is_sword_fighting,
             is_guarded,
             has_trumpet,
         }
@@ -424,7 +421,9 @@ impl HudDrawCtx<'_> {
         let vis_top = sh - pos_visage;
         self.draw_pc_visage(pc, sh, vis_top);
 
-        if pc.is_sword_fighting {
+        if pc.entity.is_some_and(|entity| {
+            portrait_swords_visible([entity], pc.is_selected, self.engine.frame_counter())
+        }) {
             self.draw_pc_fighting_overlay(pc, vis_top);
         }
 
@@ -493,15 +492,10 @@ impl HudDrawCtx<'_> {
         }
     }
 
-    /// Fighting sword overlay (period=10 frames).
+    /// Fighting sword overlay (period=10 frames, shared with the name text).
     /// Positioned at visage top-left, per-character bitmap (91×44 px).
-    /// When selected the sword is always visible; otherwise it blinks
-    /// on the odd half of each 10-frame cycle.
     fn draw_pc_fighting_overlay(&mut self, pc: &PcSlot<'_>, vis_top: u16) {
-        let fighting_visible =
-            pc.is_selected || (self.engine.frame_counter() / 10).is_multiple_of(2);
-        if fighting_visible
-            && let Some(ent) = pc.entity
+        if let Some(ent) = pc.entity
             && let Some(kind) = pc_action_character_kind(ent, self.profiles)
             && let Some(sid) = self.portraits.get_fighting_surface(kind)
         {

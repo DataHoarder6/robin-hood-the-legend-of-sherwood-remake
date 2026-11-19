@@ -1148,3 +1148,35 @@ pub(crate) fn verify_portrait_gpu_ownership(renderer: &mut Renderer, other: &mut
         &[248, 252, 248, 255] // Native RGB565 channel expansion uses left shifts.
     );
 }
+
+#[test]
+fn portrait_swords_drop_with_melee_even_while_the_sword_is_still_drawn() {
+    use robin_engine::element::{ActorPc, Entity, EntityId};
+    use robin_engine::element_kinds::ActionState;
+    use robin_engine::entity_id::SoldierId;
+
+    // The exit animation keeps a drawn sword after the last opponent is gone.
+    // The red-swords badge — and therefore the name hiding — must stop with
+    // the fight, not with the animation.
+    let make = |fighting: bool| {
+        let mut pc = ActorPc {
+            element: Default::default(),
+            actor: Default::default(),
+            human: Default::default(),
+            pc: Default::default(),
+        };
+        pc.actor.action_state = ActionState::WaitingSword;
+        let mut entity = Entity::Pc(pc);
+        if fighting {
+            entity.human_data_mut().unwrap().opponents =
+                vec![EntityId::Soldier(SoldierId(3))].into();
+        }
+        entity
+    };
+
+    let fighting = make(true);
+    assert!(super::portrait_swords_visible([&fighting], true, 0));
+
+    let after_fight = make(false);
+    assert!(!super::portrait_swords_visible([&after_fight], true, 0));
+}

@@ -13,7 +13,7 @@ use crate::native_font::{self, Font};
 use crate::renderer::Renderer;
 use crate::ui_panel::{
     PortraitBarItem, PortraitCache, PortraitTarget, portrait_bar_items, portrait_slot_count,
-    slot_left_x,
+    portrait_swords_visible, slot_left_x,
 };
 use robin_engine::character_kind as engine_character_kind;
 use robin_engine::coordinates as engine_coordinates;
@@ -740,10 +740,13 @@ fn render_portrait_text_gpu(
 
         let x = slot_left_x(sw, slot as u16, slot_count) as i32;
 
-        let is_sword_fighting =
-            matches!(entity, Entity::Pc(pc) if pc.actor.action_state.is_sword());
-        let sword_visible =
-            is_sword_fighting && (is_selected || (engine.frame_counter() / 10).is_multiple_of(2));
+        let sword_visible = portrait_swords_visible(
+            item.members()
+                .iter()
+                .filter_map(|member| engine.get_entity(*member)),
+            is_selected,
+            engine.frame_counter(),
+        );
 
         let vis_top = (sh - pos_visage) as i32;
         if !sword_visible {

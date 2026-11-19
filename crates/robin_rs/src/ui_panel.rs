@@ -38,6 +38,19 @@ use robin_engine::minimap::HitMask;
 use robin_engine::profiles::Action;
 use robin_engine::titbit::SpriteRow;
 
+/// The crossed-swords badge and the portrait name are the two faces of the
+/// same state: while a fighter's badge is showing, its name is covered. Both
+/// renderers must key off this one predicate — a drawn sword is not a fight,
+/// and a fight ending must reveal the name on that very frame.
+pub(crate) fn portrait_swords_visible<'a>(
+    entities: impl IntoIterator<Item = &'a Entity>,
+    is_selected: bool,
+    frame_counter: u32,
+) -> bool {
+    (is_selected || (frame_counter / 10).is_multiple_of(2))
+        && entities.into_iter().any(Entity::is_in_melee_combat)
+}
+
 // ─── Layout constants ─────────────────────────────────────────────
 
 /// Horizontal margin on each side of the portrait area (pixels).
@@ -901,14 +914,11 @@ impl HudDrawCtx<'_> {
         selected: bool,
     ) {
         let engine = self.engine;
-        let is_sword_fighting = item.members().iter().any(|member| {
-            engine
-                .get_entity(*member)
-                .is_some_and(|entity| entity.is_in_melee_combat())
-        });
-        let fighting_visible = selected || (engine.frame_counter() / 10).is_multiple_of(2);
-        if is_sword_fighting
-            && fighting_visible
+        let entities = item
+            .members()
+            .iter()
+            .filter_map(|member| engine.get_entity(*member));
+        if portrait_swords_visible(entities, selected, engine.frame_counter())
             && let Some(surface) = self
                 .portraits
                 .get_fighting_surface(CharacterKind::MerryManA)
