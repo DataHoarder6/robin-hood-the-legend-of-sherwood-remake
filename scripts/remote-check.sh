@@ -13,12 +13,15 @@
 #                                           # several suites, one synced tree
 #   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
-#   scripts/remote-check.sh --prune         # delete every copy but this one
+#   scripts/remote-check.sh --prune         # delete copies whose worktree is gone
 #   scripts/remote-check.sh --prune-stale [DAYS]
 #                                           # delete copies untouched for DAYS (default 7)
 #
 # The suites run under flock, so two agents on one copy queue instead of
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
+# They also take one of the host's build slots (ROBIN_BUILD_SLOTS, default 3),
+# which is what keeps four copies from running forty-eight compilers on twelve
+# cores; each slot hands Cargo its share of the cores.
 set -euo pipefail
 
 # Nothing below reads stdin, and callers feed scripts to `bash -s`: a child that
@@ -29,6 +32,8 @@ exec </dev/null
 host=${ROBIN_BUILD_HOST:-build-host}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
+slots=${ROBIN_BUILD_SLOTS:-3}
+slot_dir="~/$remote_root/.slots"
 
 usage() {
     awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
@@ -185,16 +190,25 @@ EOF
         ;;
     --prune)
         require_host
-        keep=$(copy_name "${2:-}")
+        # A copy whose worktree is gone is a cache nothing can reach. Keep every
+        # copy that still has an owner — the live worktrees, plus this run's
+        # copy — and delete the rest. Age is the wrong test: a copy can be a
+        # week old and still be the only build cache its worktree has.
+        keep=$(bash "$repository/scripts/live-worktrees.sh" |
+            { cat; copy_name "${2:-}"; } | sort -u |
+            sed 's/.*/"&"/' | paste -sd' ' -)
         # Only real copies: the root is shared, and a cache or scratch directory
         # someone keeps beside the copies is not this script's to delete.
         ssh "$host" bash -s <<EOF
 set -euo pipefail
 cd ~/$remote_root 2>/dev/null || exit 0
+keep=($keep)
 for d in */; do
     d=\${d%/}
-    [ "\$d" = '$keep' ] && continue
     [ -f "\$d/Cargo.toml" ] || continue
+    kept=0
+    for k in "\${keep[@]}"; do [ "\$d" = "\$k" ] && kept=1; done
+    [ "\$kept" = 1 ] && continue
     rm -rf -- "\$d" "\$d.lock"
 done
 du -sh ~/$remote_root 2>/dev/null || true
@@ -252,6 +266,8 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
+    env SCCACHE_BASEDIRS="$HOME/$remote_root/$name" \\
+    bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
 else
@@ -261,6 +277,8 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
+    env SCCACHE_BASEDIRS="$HOME/$remote_root/$name" \\
+    bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash scripts/check-quality.sh ${requested[0]}
 EOF
 fi
