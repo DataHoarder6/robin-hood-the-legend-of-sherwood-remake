@@ -3,16 +3,21 @@
 Audit of every place one participant's progress depends on a message another
 participant may never send.
 
-Last verified: 2026-11-19, `fork/main` @ `4ff153ba6`, after rank 4 was closed
+Last verified: 2026-11-19, `fork/main` @ `b26272454`, after rank 4 was closed
 (#46). Written against `5e1d2b17e`; ranks 2 and 3 were bounded before
 `af1f3f779` (`45fc7fb96`, `9ff945a46`, `05bca0b90`) and the earlier re-check of
 this file said otherwise, so their rows now sit in "Waits that do have
 deadlines" and the ranked entries state the new behaviour. Rank 5 was bounded
 before this re-check as well, with one hole: the browser attempt was unbounded,
 so the budget was never read. Rank 4 is closed too: the page now awaits only the
-seats that are in the session's simulation. Each open ranked item is closed by a
-change that gives the wait a budget and a named
-consequence, never by a note in this file.
+seats that are in the session's simulation. The `BeginSim` and post-reconnect
+`InitialSnapshot` rows were the same kind of miss in the other direction:
+`40bd332f1` (2026-11-17 22:44, after this file's first pass at `5e1d2b17e`,
+16:49) had already given every admission phase a budget, and the re-check did
+not re-read those two rows. They now sit in "Waits that do have deadlines",
+proved by `every_inter_process_admission_wait_expires_naming_its_phase` beside
+the budget. Each open ranked item is closed by a change that gives the wait a
+budget and a named consequence, never by a note in this file.
 
 Scope: `crates/robin_rs/src/game_session/terminal_debriefing.rs`,
 `crates/robin_rs/src/multiplayer/native/{server.rs,server_protocol.rs,peer_sessions.rs}`,
@@ -59,8 +64,6 @@ repo-relative.
 | --- | --- | --- | --- | --- | --- | --- |
 | Host terminal debriefing holds for its own snapshot transition commit (`TerminalDebriefingPhase::AwaitingSnapshot`) | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Host finished the debriefing leaderboard, published `BeginSnapshotTransition`, and at least one connected peer is still in `awaiting` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session: `TerminalDebriefingProgress::SnapshotUnconfirmed` takes the same exit as an emergency end, so the campaign loop reopens the menu instead of freezing the mission | A `session_failed` event names the wait and the budget (`waited_ms`, `budget_ms`); the run log carries the same wording | Closed 2026-11-19. The wait can no longer outlive its budget; the host barrier it waits on is bounded separately (`SnapshotTransitions::awaiting`, below). |
 | Client terminal debriefing holds for the host's snapshot commit | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Client finished its debriefing with outcome `Ok`/`Load` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session with `GameCode::Quit` and reopens the menu; it does not keep waiting for a host that may never answer | The same `session_failed` event and log line as the host row | Closed 2026-11-19 with the host row: both sides of the same wait now expire. |
-| Client waits for `BeginSim` | `runtime/admission.rs:14-22` (`PeerWaitingForBegin`, `HostWaitingForBegin`, `HostWaitingForResyncBegin`); gate `runtime/multiplayer_sync.rs:60-74`; pause `multiplayer.rs:1274` | Peer adopted the snapshot and sent `ReadyToSim`, or host's mission is loaded and waiting on peers | **none** | Nothing in the game layer. Only the transport notices a dead host. | No log for the wait itself. `BeginSim` arrival logs "begin-sim barrier released" (`multiplayer.rs:625-629`). | Mission loaded but never simulated; input disabled by `set_gameplay_input_enabled(false)` (`host/transport.rs:178`). |
-| Client waits for `InitialSnapshot` after (re)connect | `runtime/admission.rs:50-57` (`PeerWaitingForSnapshot`) | `Disconnected`, or a first join before the host's snapshot cache exists | **none** | Nothing. The host skips the send silently when its `initial_snapshot` cache is empty (`server.rs:995-1010`). | Console: "Disconnected; reconnecting…" and "Reconnected; synchronizing game…" (`multiplayer.rs:519-551`). No indication that the snapshot never arrived. | Peer frozen indefinitely on a snapshot it never receives; reconnect loops never converge. |
 | Mission-end debriefing waits for its own command echo | `terminal_debriefing.rs:1105-1112` (`pending_terminal_debriefing` re-queued while `mission_attempt_sequence` has not advanced) | After the engine returns a terminal exit code, in any multiplayer mission | **none** — but no longer permanent: the pause it waits behind expires (rank 5) | The echo needs frames, and `pause_simulation` is true while `transport.reconnecting()` (`multiplayer.rs:1456`, from `host/transport.rs:256`); a disconnect at mission end still withholds them, so the client now leaves the session when the reconnect budget is spent instead of waiting for an echo that cannot arrive | "waiting for authoritative mission completion update" is logged once (`terminal_debriefing.rs:1147-1152`), then the give-up names the host and the budget | Bounded by rank 5: a disconnect at mission end ends the client's session within `RECONNECT_BUDGET` rather than freezing it. The echo itself is still not a wait with its own deadline. |
 | Client reconnect loop (`SessionEnd::Drop`) | `client_session.rs:790-870`, `:643-680` (`ReconnectStep`, `give_up_on_reconnect`), budget `:56` (`RECONNECT_BUDGET`) | Any transport loss | **60 s** wall clock for the whole loop, one attempt never longer than what is left of it | Gives up: one `warn!("multiplayer: giving up on reconnection")` and a `NetEvent::Fatal` timeout naming *which* host was being dialled and the budget it spent; the game loop turns that fatal into a failed mission (`multiplayer.rs:719-727`), so the client leaves the session with a non-zero exit, which is what H19 asserts | Warn per drop: `client session ended: {reason}; reconnecting...`, then one warn per failed attempt; console: "Disconnected; reconnecting…" | Closed 2026-11-19. The loop was already capped when this audit was re-read (the row below it contradicted H19); the budget is now a cap on the whole loop, and every attempt is bounded, so it cannot be outlived. |
 | Browser reconnect attempt | `wasm.rs:38-43` (`RECONNECT_ATTEMPT_TIMEOUT`), `:194-205` | Browser transport loss | **15 s**, the same bound the native attempt uses, capped further by what is left of the budget | The attempt ends as a failed attempt, the loop retries under the same budget and gives up as the row above does. The browser writes frames under a 30 s bound too (`content_write`), so no write in an attempt is unbounded either | Same drop warnings; a failed attempt now logs `reconnect failed: …; will retry in …` | Closed 2026-11-19 (`reconnect_attempt: None` removed from the field's type). Before the fix one attempt could wait forever, so the 60 s budget was never read and the browser peer wedged inside it. |
@@ -100,13 +103,15 @@ the constants the transports actually read, not comments.
 | Matchmaking Start debounce (gives an in-flight Join time to arrive) | 750 ms | `matchmaking.rs:818-824` |
 | Matchmaking listing soft TTL | 60 s | `matchmaking.rs:36` |
 | Synchronized start gate once `BeginSim` arrives | host clock + 500 ms | `server.rs:287-292`; opened at `multiplayer_sync.rs:61-69` |
+| Admission wait for an initial snapshot (peer join and rejoin) | 180 s (`ADMISSION_BUDGET_MS`), per phase, tracked in process uptime | `runtime/multiplayer_sync.rs:19` (constant, sized above the host's 120 s load budget plus its one ready-barrier extension), `:92-141` (the wait and its expiry); entered at `runtime/admission.rs:86-88` and `runtime/multiplayer_sync.rs:44`; polled every frame at `game_session/multiplayer.rs:1409` |
+| Admission wait for `BeginSim` (peer after the snapshot, and the host) | 180 s, the same per-phase budget, re-armed when the phase changes | `runtime/multiplayer_sync.rs:116-124` (start per phase), `:125-139` (expiry); entered at `runtime/admission.rs:89-94` (peer) and `:105-114` (host); pause it holds `game_session/multiplayer.rs:1456` |
 | Host snapshot-transition acknowledgement barrier (`SnapshotTransitions::awaiting`) | 60 s + 1 s per 64 KiB of payload | `robin_engine/src/multiplayer.rs:260` (`TRANSITION_COMMIT_MS`), `:286` (`transition_budget`); stamped `server_dispatch.rs:283-287`; expired on the 500 ms tick `server.rs:866-874` |
 | Host ready barrier (`ReadyBarrier::candidate`) | 120 s, refreshed once for a seat admitted mid-wait | `server_protocol.rs:23` (`READY_BUDGET_MS`), `:89-104` (wait start, one extension, expiry); expired on the same tick `server.rs:316-327` |
 | Shared-page acknowledgement barrier (`ModalSyncState`, story pages and the mission-end page, and the host's wait for a peer's decision on either) | 300 s, and only for the seats in the session's simulation | `robin_engine/src/multiplayer/modal_session.rs:26` (`MODAL_ACK_BUDGET_MS`); await set `session_seats` (`multiplayer.rs:762`) published from `server.rs:250-273`; expiry `modal_session.rs:481-548`; publication `:1016-1038`; message `ingame_menu/modal_net.rs:160-180` |
 
-The synchronized start gate, the two host barriers and the shared-page barrier
-above resolve on a clock. Every remaining row in the first table waits for a
-message that may never arrive.
+The synchronized start gate, the two host barriers, the shared-page barrier and
+the two admission waits above resolve on a clock. Every remaining row in the
+first table waits for a message that may never arrive.
 
 The shared-page barrier counts the simulation's seats, not the roster. The
 roster is `required_players` (`modal_session.rs:804`, written once from
@@ -141,6 +146,23 @@ deadline is stamped at prepare time, so a disconnect that calls
 cannot push the deadline out: the deadline is absolute from prepare time, and
 the tick that expires the barrier commits it under the same lock, after which
 `retain_for_reconnect` finds no pending transition and does nothing.
+
+The admission budget expires into a third shape: the phase keeps its state (an
+expiry is not an adoption), `record_session_failure` writes the `session_failed`
+event and the pinned diagnostics bundle naming the reason, the phase, the seat
+and the session (`game_session/multiplayer.rs:1413-1420`,
+`multiplayer/diagnostics.rs:105`), and the typed
+`SessionProtocolFailure::AdmissionTimeout` names the phase and the time spent
+(`game_session/multiplayer.rs:93-101`). The `Err` ends the mission
+(`game_session/mod.rs:724-729`) and `acknowledge_menu_launch` shows its text on
+the menu (`main_entry/run.rs:1049-1058`); `pause_simulation` is recomputed from
+the live phase every frame (`multiplayer.rs:1456`), so the hold is released by
+the message or ends with the session. The behaviour is stated once in
+[MULTIPLAYER.md](../MULTIPLAYER.md) `:250-257`; the proof is
+`every_inter_process_admission_wait_expires_naming_its_phase`,
+`a_phase_change_starts_a_full_budget` and
+`a_running_session_clears_the_wait_and_never_expires`
+(`runtime/multiplayer_sync.rs`).
 
 ## Ranked: most likely to produce a permanent hang
 

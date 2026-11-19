@@ -318,9 +318,11 @@ Beyond what the native rows already cover. Each is a code fact; the ones marked
    menu return (`MULTIPLAYER.md:262-266`) whose path on wasm is unproved, so no
    browser row can carry an `exit` assertion — it needs a different observation.
 
-Not wasm-specific and already documented: the `BeginSim` and `InitialSnapshot`
-waits have no game-layer deadline ([multiplayer waits](multiplayer-unbounded-waits.md) `:58-59`),
-and those apply to a browser seat unchanged.
+Not wasm-specific: the `BeginSim` and `InitialSnapshot` waits are bounded by the
+180 s admission budget ([multiplayer waits](multiplayer-unbounded-waits.md), the
+admission rows of "Waits that do have deadlines"), which is read from process
+uptime once per frame rather than by a timer, so a browser that never returns to
+its game loop cannot observe it either (item 3 above).
 
 ## 7. What is missing for a browser row beside H21+
 
