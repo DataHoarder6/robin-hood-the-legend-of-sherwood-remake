@@ -33,7 +33,9 @@ impl ServerHandle {
         match *self {}
     }
 
-    pub(in crate::multiplayer) fn connect_string(&self) -> Option<String> {
+    /// The native signature, so the one shared call site in `enabled.rs` needs
+    /// no target-specific arm; an uninhabited `self` makes the body unreachable.
+    pub(in crate::multiplayer) fn connect_string(&self) -> String {
         match *self {}
     }
 
