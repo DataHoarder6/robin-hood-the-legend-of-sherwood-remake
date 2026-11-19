@@ -237,6 +237,10 @@ pub(super) struct TerminalDebriefingState {
     phase: TerminalDebriefingPhase,
     leaderboard_preparation: Option<super::leaderboard_runtime::MissionEndPreparation>,
     local_load: Option<TerminalLoadSelection>,
+    /// When this peer started waiting for the commit that confirms the mission
+    /// end. A wait with no deadline froze the whole session (audit item 1), so
+    /// the wait is bounded and its expiry names itself.
+    snapshot_wait_since: Option<std::time::Instant>,
     http_result: Option<(
         engine_player_command::ModalKind,
         engine_player_command::DialogResult,
@@ -280,7 +284,21 @@ pub(super) enum TerminalDebriefingProgress {
     Pending,
     Complete,
     EmergencyExit,
+    /// The snapshot that confirms the mission end never committed. Leaving the
+    /// session is the only honest outcome: the authority that could confirm it
+    /// is gone, and waiting is what froze the screen the audit called out.
+    SnapshotUnconfirmed,
 }
+
+/// How long a peer waits for the commit that confirms the mission end.
+///
+/// The host publishes the transition as it finishes its debriefing and commits
+/// it once the seats that are connected acknowledge it; a client waits for that
+/// commit. Both sides used to wait forever, which froze the session with the
+/// mission pinned to `LevelInProgress` and no screen (audit item 1). The wait is
+/// generous — the leaderboard handoff runs first — and it is a wait on the
+/// session's own boundary, not on a player's decision.
+const SNAPSHOT_CONFIRM_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Explicit owners borrowed by the blocking terminal graphical flow.
 pub(super) struct TerminalDebriefingContext<'a> {
@@ -367,6 +385,13 @@ impl TerminalDebriefingState {
         matches!(self.phase, TerminalDebriefingPhase::AwaitingSnapshot)
     }
 
+    /// Whether the wait for the confirmation commit has outlived its budget.
+    /// `now` is a parameter so the test does not have to sleep through it.
+    fn snapshot_wait_expired(&self, now: std::time::Instant) -> bool {
+        self.snapshot_wait_since
+            .is_some_and(|since| now.duration_since(since) >= SNAPSHOT_CONFIRM_BUDGET)
+    }
+
     fn await_remote_snapshot(
         &mut self,
         outcome: &SettledDebriefingOutcome,
@@ -386,6 +411,7 @@ impl TerminalDebriefingState {
         // when the host eventually chooses the same numeric answer.
         self.local_load = None;
         self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
+        self.snapshot_wait_since = Some(std::time::Instant::now());
         true
     }
 
@@ -412,6 +438,7 @@ impl TerminalDebriefingState {
             phase,
             leaderboard_preparation: Some(leaderboard_preparation),
             local_load: None,
+            snapshot_wait_since: None,
             http_result: None,
         }
     }
@@ -648,6 +675,7 @@ impl TerminalDebriefingState {
                         ),
                     );
                     self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
+                    self.snapshot_wait_since = Some(std::time::Instant::now());
                     context.game.operation.set(GameCode::LevelInProgress);
                     return TerminalDebriefingProgress::Pending;
                 }
@@ -672,9 +700,30 @@ impl TerminalDebriefingState {
                 }
             }
             TerminalDebriefingPhase::AwaitingSnapshot => {
-                // No timeout or local fallback: normal ingress owns snapshot
-                // commits and fatal disconnects. Replay never enters this hold;
-                // its recorded restore may already have run before this phase.
+                // The commit is the authority's confirmation of the mission end.
+                // A peer that never sees it — because the authority died, or the
+                // transition never committed — used to wait here forever with the
+                // mission pinned to `LevelInProgress` and nothing on screen.
+                // Replay never enters this hold; its recorded restore may already
+                // have run before this phase.
+                if self.snapshot_wait_expired(std::time::Instant::now()) {
+                    let since = self
+                        .snapshot_wait_since
+                        .expect("awaiting the snapshot commit without a start");
+                    let waited = since.elapsed();
+                    crate::observability::event(
+                        crate::observability::EventKind::SessionFailed,
+                        format!(
+                            "multiplayer: mission end was never confirmed after {:.0}s; leaving the session",
+                            waited.as_secs_f64()
+                        ),
+                    )
+                    .warn()
+                    .field("waited_ms", waited.as_millis() as u64)
+                    .field("budget_ms", SNAPSHOT_CONFIRM_BUDGET.as_millis() as u64)
+                    .record();
+                    return TerminalDebriefingProgress::SnapshotUnconfirmed;
+                }
                 TerminalDebriefingProgress::Pending
             }
         }
@@ -1131,6 +1180,7 @@ mod tests {
                 mission_stat: Default::default(),
             },
             phase: TerminalDebriefingPhase::AwaitingFinalAuthority,
+            snapshot_wait_since: None,
             leaderboard_preparation: None,
             local_load: None,
             http_result: None,
@@ -1330,6 +1380,23 @@ mod tests {
             let mut state = terminal_state();
             assert!(!state.await_remote_snapshot(&SettledDebriefingOutcome::Ok, replay, seat));
         }
+    }
+
+    /// The wait for the confirmation commit is bounded: the authority that could
+    /// confirm it may never answer, and a screen that waits forever is the hang
+    /// the audit ranked first.
+    #[test]
+    fn an_unconfirmed_snapshot_wait_gives_up_when_its_budget_ends() {
+        use robin_engine::player_command::PlayerId;
+        let mut state = terminal_state();
+        assert!(!state.awaiting_snapshot());
+        assert!(state.await_remote_snapshot(&SettledDebriefingOutcome::Ok, false, PlayerId(1)));
+        assert!(state.awaiting_snapshot());
+
+        let start = std::time::Instant::now();
+        assert!(!state.snapshot_wait_expired(start));
+        assert!(!state.snapshot_wait_expired(start + SNAPSHOT_CONFIRM_BUDGET / 2));
+        assert!(state.snapshot_wait_expired(start + SNAPSHOT_CONFIRM_BUDGET));
     }
 
     #[test]

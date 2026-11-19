@@ -1474,13 +1474,20 @@ impl InteractiveFrameSimulation {
         if terminal_progress == TerminalDebriefingProgress::Pending {
             modal_rendered_this_frame = true;
         }
-        if terminal_progress == TerminalDebriefingProgress::EmergencyExit
-            || lost_sherwood_progress == LostSherwoodGateProgress::Exit
+        if matches!(
+            terminal_progress,
+            TerminalDebriefingProgress::EmergencyExit
+                | TerminalDebriefingProgress::SnapshotUnconfirmed
+        ) || lost_sherwood_progress == LostSherwoodGateProgress::Exit
         {
-            let reason = if terminal_progress == TerminalDebriefingProgress::EmergencyExit {
-                "the mission-end page settled as an emergency end"
-            } else {
-                "the lost-Sherwood gate settled as an exit"
+            let reason = match terminal_progress {
+                TerminalDebriefingProgress::EmergencyExit => {
+                    "the mission-end page settled as an emergency end"
+                }
+                TerminalDebriefingProgress::SnapshotUnconfirmed => {
+                    "the mission end was never confirmed by the session"
+                }
+                _ => "the lost-Sherwood gate settled as an exit",
             };
             crate::observability::application_exit(reason);
             let application_context = host.application_context().clone();
