@@ -897,6 +897,24 @@ fn standalone_multiplayer_finished(
         )
 }
 
+/// Whether the transport outlives this mission.
+///
+/// A session is kept only for a mission that ended and a launch that keeps
+/// running: the next mission reuses the same peers. A forced-mission run ends
+/// the application, so preserving its session would tell the peers the host is
+/// continuing and then leave them reconnecting to an endpoint no process will
+/// serve; a failed mission has no next mission at all.
+fn preserves_multiplayer_session(
+    args: &crate::main_entry::MissionRequest,
+    config: engine_api::SimConfig,
+    result: &Result<GameCode, MissionError>,
+) -> bool {
+    match result {
+        Ok(code) => !standalone_multiplayer_finished(args, config, *code),
+        Err(_) => false,
+    }
+}
+
 /// Which mission to construct and the deterministic simulation it starts
 /// with. Restart and replay admission replace all four together.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1043,7 +1061,8 @@ async fn run_mission_with_seed(
     {
         InteractiveBuildOutcome::Ready(mut mission) => {
             let result = mission.run(window, callbacks, profiles, args).await;
-            mission.finish(result)
+            let preserve_session = preserves_multiplayer_session(args, start.sim_config, &result);
+            mission.finish(result, preserve_session)
         }
         InteractiveBuildOutcome::Finished(outcome) => outcome,
     };
@@ -1093,6 +1112,49 @@ mod required_state_tests {
             &args,
             config,
             GameCode::LevelSucceeded
+        ));
+    }
+
+    #[test]
+    fn a_standalone_multiplayer_mission_has_no_session_to_preserve() {
+        use super::*;
+        let mut args = crate::main_entry::MissionRequest::default();
+        let mut config = robin_engine::engine::SimConfig::default();
+        config.coop.campaign = false;
+        // Not a multiplayer launch: nothing to preserve and nothing to strand.
+        assert!(preserves_multiplayer_session(
+            &args,
+            config,
+            &Ok(GameCode::LevelSucceeded)
+        ));
+        args.multiplayer.expected_players = Some(2);
+        for code in [
+            GameCode::LevelSucceeded,
+            GameCode::LevelFailed,
+            GameCode::LevelInterrupted,
+        ] {
+            // The application ends with the mission, so a preserved session
+            // would be a promise to peers that no process keeps.
+            assert!(!preserves_multiplayer_session(&args, config, &Ok(code)));
+        }
+        // Restart re-enters the same mission in this process, and campaign
+        // multiplayer selects the next mission: both keep their peers.
+        assert!(preserves_multiplayer_session(
+            &args,
+            config,
+            &Ok(GameCode::LevelRestart)
+        ));
+        config.coop.campaign = true;
+        assert!(preserves_multiplayer_session(
+            &args,
+            config,
+            &Ok(GameCode::LevelSucceeded)
+        ));
+        // A mission that failed to run has no next mission to hand over.
+        assert!(!preserves_multiplayer_session(
+            &args,
+            config,
+            &Err(MissionError::replay("boom".to_string()))
         ));
     }
 

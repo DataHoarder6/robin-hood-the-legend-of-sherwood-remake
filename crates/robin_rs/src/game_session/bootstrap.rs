@@ -1156,7 +1156,19 @@ impl BuiltInteractiveMission {
         self.mission.run(&mut services).await
     }
 
-    pub(super) fn finish(mut self, result: Result<GameCode, MissionError>) -> MissionOutcome {
+    /// Retire the mission's presentation and decide the transport's fate.
+    ///
+    /// `preserve_session` is the caller's verdict that another mission follows
+    /// in this process: only then does the server hand its peers a continuation
+    /// instead of announcing that the host left. Peers cannot tell a preserved
+    /// session whose process then exits from a live one, so the caller decides
+    /// it from the same fact the outer session loop does
+    /// (`preserves_multiplayer_session`).
+    pub(super) fn finish(
+        mut self,
+        result: Result<GameCode, MissionError>,
+        preserve_session: bool,
+    ) -> MissionOutcome {
         self.mission
             .runtime
             .world
@@ -1164,7 +1176,7 @@ impl BuiltInteractiveMission {
             .host
             .frontend
             .retire_mission(&mut self.mission.frontend.presentation.renderer);
-        if result.is_ok() {
+        if preserve_session {
             self.mission
                 .runtime
                 .preserve_multiplayer_session_for_next_mission();
