@@ -1,8 +1,9 @@
 # Off-map reinforcements
 
-Status: **design agreed, not implemented.** Every decision below was settled in a
-grilling session on 2026-11-19; nothing here describes code that exists beyond
-the "already there" list.
+Status: **model landed; the summon path is not.** `SimConfig::enable_offmap_reinforcements`
+and staged garrison bodies exist; the summon event, entry kinds, AI emission,
+withdrawal and the native do not. Every decision below was settled in a grilling
+session on 2026-11-19.
 
 ## What this is
 
@@ -83,7 +84,8 @@ and an optional in-map target. Doors remain the kind that requires sectors.
 Roster-based, per faction. Staged bodies are parked with `active = false` — the
 state persists, the slot is kept, and the tick cost is zero, because the engine
 has no culling and no simulation distance: every active entity is simulated
-every frame.
+every frame. `RawSoldier::staged` authors one; a staged body is left out of the
+alert population and the mission statistics until a summon wakes it.
 
 Per-mission budgets: a total, a concurrent cap on live summoned actors, and
 separate pools for the player's gang and the enemy garrison. Summoned actors are
@@ -111,8 +113,11 @@ recently seen the player, a cooldown between summons, and a hard stop below Red.
 (`crates/robin_engine/src/engine/global_options.rs`) is the deterministic
 simulation config: serialised, state-hashed, copied into the engine before the
 first tick. The precedent is `enable_unbinding`, a post-port interaction that is
-on by default and has no launch flag; `from_options` hardcodes it, and so will
-this.
+on by default and has no launch flag; `from_options` hardcodes it, and so does
+this. That one also has an in-game gameplay-settings entry; this flag
+deliberately does not, because the value must be fixed before the first tick. It
+is a `RankedSimulationConfigField`, so a ranked board pins it like every other
+simulation-affecting setting.
 
 One flag covers the whole feature. With it off, the level behaves exactly as it
 does today: no summon event, no budget accounting, alarm escalation unchanged,

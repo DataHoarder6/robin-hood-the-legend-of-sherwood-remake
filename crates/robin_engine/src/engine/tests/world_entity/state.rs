@@ -3,6 +3,24 @@ use crate::element::Human as _;
 use crate::engine::TickCtx;
 
 #[test]
+fn inactive_garrison_soldier_does_not_join_the_alert_population() {
+    use crate::element::Camp;
+
+    let mut engine = EngineInner::new();
+    let active = engine.add_test_entity(make_test_ai_soldier(Camp::Lacklandists));
+    let mut staged = make_test_ai_soldier(Camp::Lacklandists);
+    staged.element_data_mut().active = false;
+    let staged = engine.add_test_entity(staged);
+
+    assert!(engine.get_entity(active).unwrap().element_data().active);
+    assert!(!engine.get_entity(staged).unwrap().element_data().active);
+    assert_eq!(
+        engine.ai.global.green_alert_soldiers, 1,
+        "a staged body is in the level's slot table but not in its garrison"
+    );
+}
+
+#[test]
 fn live_state_changes_preserve_formation_links_then_clear_both_reciprocals() {
     use crate::ai::{AiEntityHandle, AiState, Substate};
     let mut engine = EngineInner::new();

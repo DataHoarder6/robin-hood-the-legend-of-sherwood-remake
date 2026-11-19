@@ -1372,6 +1372,7 @@ impl EngineInner {
             Self::scale_coop_enemy_health(entity, coop_health_percent);
         }
         if entity.is_soldier()
+            && entity.element_data().active
             && let Some(ai) = entity.ai_controller()
         {
             let count = match ai.current_music_alert_status {
