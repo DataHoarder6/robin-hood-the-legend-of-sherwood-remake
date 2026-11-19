@@ -41,6 +41,7 @@ fn dispatch_test_context() -> (super::ServerContext, Receiver<NetEvent>) {
         speech_timing_locale: None,
         frame_cursor: Arc::new(AtomicU32::new(10)),
         initial_snapshot: Arc::new(StdMutex::new(None)),
+        session_seats: Default::default(),
         content: None,
         cancellation: Arc::new(super::AtomicBool::new(false)),
         shutdown_tx,
@@ -1171,6 +1172,7 @@ fn real_iroh_seat_connects_and_ready_begins_gameplay() {
             outgoing_rx: server_out_rx,
             frame_cursor: Arc::new(AtomicU32::new(0)),
             initial_snapshot: Arc::new(StdMutex::new(None)),
+            session_seats: Default::default(),
         },
         None,
     )
@@ -1244,6 +1246,7 @@ fn five_player_coop_routes_chat_and_peer_latency() {
             outgoing_rx: server_out_rx,
             frame_cursor: Arc::new(AtomicU32::new(0)),
             initial_snapshot: Arc::new(StdMutex::new(None)),
+            session_seats: Default::default(),
         },
         None,
     )
@@ -1458,5 +1461,146 @@ fn story_modal_progress_recovers_authenticated_names_before_sim_seat_admission()
     let recovered = context.peers.lock().modals.messages();
     assert!(
         matches!(recovered.as_slice(), [NetMsg::ModalProgress(progress)] if progress == &remote)
+    );
+}
+
+/// Facts the seat-mask assertions print when they fail: the published mask and
+/// the transport state it is derived from.
+fn seat_facts(context: &super::ServerContext) -> String {
+    let peers = context.peers.lock();
+    format!(
+        "mask={:#b} sim_connected={:?} begun={} expected={}",
+        context.session_seats.mask(),
+        peers.sessions.sim_connected_seats().collect::<Vec<_>>(),
+        peers.readiness.begun.is_some(),
+        peers.sessions.expected_players(),
+    )
+}
+
+/// A shared page may only await seats that are in this session's simulation.
+/// The #43 capture found the host drawing a page at frame 0 of a restarted
+/// mission and waiting for a seat that was still in `PeerWaitingForBegin`:
+/// admitted, but not yet released into the mission, so it could not have seen
+/// the page.
+#[test]
+fn session_seat_mask_withholds_a_seat_until_the_start_barrier_releases_it() {
+    let (context, _events) = dispatch_test_context();
+    let owner = PeerOwner::Native([11; 32]);
+    let (sender, mut writer) = unbounded_channel();
+    let claim = {
+        let mut peers = context.peers.lock();
+        peers.readiness.host_frame = Some(0);
+        peers.sessions.claim_seat(owner, "peer", sender).unwrap()
+    };
+
+    // Admission puts the seat on the mission's stream, but its `BeginSim` has
+    // not been released: it cannot simulate, so no page may await it.
+    super::connect_all_provisional_seats(&context);
+    assert!(
+        context.peers.lock().sessions.is_sim_connected(&claim.seat),
+        "{}",
+        seat_facts(&context)
+    );
+    assert_eq!(
+        context.session_seats.mask(),
+        0b1,
+        "a seat still waiting for BeginSim is not in the simulation: {}",
+        seat_facts(&context)
+    );
+
+    // Ready plus the host frame releases the barrier, and the seat is released
+    // into the mission on the same tick it is published.
+    context
+        .peers
+        .lock()
+        .sessions
+        .record_ready(claim.seat, claim.generation, 0)
+        .unwrap();
+    super::retry_begin_sim(&context);
+    assert_eq!(
+        context.session_seats.mask(),
+        0b11,
+        "the release puts the seat in the simulation: {}",
+        seat_facts(&context)
+    );
+    // Admission also broadcast the seat's `ConnectSeat` input down the same
+    // writer, so look for the release among the messages it queued.
+    let queued = std::iter::from_fn(|| writer.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        queued
+            .iter()
+            .any(|message| matches!(message, super::super::NetMsg::BeginSim { .. })),
+        "the published seat is exactly the seat the release reached: {queued:?}"
+    );
+}
+
+/// A seat that leaves stops holding a page, and a full-snapshot
+/// resynchronization drops every seat back to the host alone: both are changes
+/// to the set the page counts, so both are published.
+#[test]
+fn session_seat_mask_shrinks_when_the_seat_leaves() {
+    let (context, _events) = dispatch_test_context();
+    let owner = PeerOwner::Native([12; 32]);
+    let (sender, _writer) = unbounded_channel();
+    let claim = {
+        let mut peers = context.peers.lock();
+        peers.readiness.host_frame = Some(0);
+        peers.sessions.claim_seat(owner, "peer", sender).unwrap()
+    };
+    super::connect_all_provisional_seats(&context);
+    context
+        .peers
+        .lock()
+        .sessions
+        .record_ready(claim.seat, claim.generation, 0)
+        .unwrap();
+    super::retry_begin_sim(&context);
+    assert_eq!(
+        context.session_seats.mask(),
+        0b11,
+        "both seats are simulating: {}",
+        seat_facts(&context)
+    );
+
+    super::release_peer_session(&context, PlayerId(claim.seat), owner, claim.generation);
+    assert_eq!(
+        context.session_seats.mask(),
+        0b1,
+        "a seat that left stops being awaited without spending a budget: {}",
+        seat_facts(&context)
+    );
+}
+
+#[test]
+fn session_seat_mask_drops_every_seat_when_the_session_resynchronizes() {
+    let (context, _events) = dispatch_test_context();
+    let owner = PeerOwner::Native([13; 32]);
+    let (sender, _writer) = unbounded_channel();
+    let claim = {
+        let mut peers = context.peers.lock();
+        peers.readiness.host_frame = Some(0);
+        peers.sessions.claim_seat(owner, "peer", sender).unwrap()
+    };
+    super::connect_all_provisional_seats(&context);
+    context
+        .peers
+        .lock()
+        .sessions
+        .record_ready(claim.seat, claim.generation, 0)
+        .unwrap();
+    super::retry_begin_sim(&context);
+    assert_eq!(
+        context.session_seats.mask(),
+        0b11,
+        "both seats are simulating: {}",
+        seat_facts(&context)
+    );
+
+    super::super::server_dispatch::drop_all_peers_for_snapshot(&context, "resync test".into());
+    assert_eq!(
+        context.session_seats.mask(),
+        0b1,
+        "every peer must re-enter the replacement mission's start barrier: {}",
+        seat_facts(&context)
     );
 }

@@ -236,6 +236,7 @@ mod tests {
                 outgoing_rx: server_out_rx,
                 frame_cursor: server_cursor,
                 initial_snapshot: server_snapshot,
+                session_seats: Default::default(),
             },
             None,
         )
@@ -366,6 +367,7 @@ mod tests {
                 outgoing_rx: server_out_rx,
                 frame_cursor: server_cursor,
                 initial_snapshot: server_snapshot,
+                session_seats: Default::default(),
             },
             Some(hosted),
         )
@@ -557,6 +559,7 @@ mod tests {
                 outgoing_rx: server_out_rx,
                 frame_cursor: server_cursor,
                 initial_snapshot: server_snapshot,
+                session_seats: Default::default(),
             },
             None,
         )

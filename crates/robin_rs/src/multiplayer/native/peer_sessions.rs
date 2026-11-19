@@ -114,6 +114,15 @@ impl PeerSessions {
             .filter_map(|(seat, session)| session.sim_connected.then_some(seat))
     }
 
+    /// Seats that can take part in the mission right now: admitted, and
+    /// attached to a writer that can still deliver to them. A detached writer
+    /// is a reconnect in progress, so that seat is not one until it returns.
+    pub(super) fn simulation_seats(&self) -> impl Iterator<Item = &u8> {
+        self.seats.iter().filter_map(|(seat, session)| {
+            (session.sim_connected && session.sender.is_some()).then_some(seat)
+        })
+    }
+
     #[cfg(test)]
     pub(super) fn is_sim_connected(&self, seat: &u8) -> bool {
         self.seats

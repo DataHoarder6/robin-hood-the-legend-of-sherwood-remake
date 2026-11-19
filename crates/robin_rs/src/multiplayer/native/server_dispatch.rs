@@ -225,6 +225,9 @@ fn drop_peer_for_snapshot(context: &Arc<ServerContext>, player_id: PlayerId, rea
             reason: reason.clone(),
         });
         drop(sender);
+        // The seat has no writer until it reconnects, so no shared page may
+        // await it in the meantime.
+        super::publish_session_seats(context);
     } else {
         tracing::warn!(
             ?player_id,
@@ -236,7 +239,7 @@ fn drop_peer_for_snapshot(context: &Arc<ServerContext>, player_id: PlayerId, rea
 
 /// `NetOutbound::ReconnectAllForSnapshot`: reset readiness and drop every
 /// peer for full-snapshot resynchronization.
-fn drop_all_peers_for_snapshot(context: &Arc<ServerContext>, reason: String) {
+pub(super) fn drop_all_peers_for_snapshot(context: &ServerContext, reason: String) {
     let senders = {
         let mut peers = context.peers.lock();
         peers.readiness.reset();
@@ -254,6 +257,9 @@ fn drop_all_peers_for_snapshot(context: &Arc<ServerContext>, reason: String) {
         });
     }
     drop(senders);
+    // Every seat left the simulation until the replacement mission releases
+    // its own start barrier, so no shared page may await one in the meantime.
+    super::publish_session_seats(context);
 }
 
 /// `NetOutbound::BeginSnapshotTransition`: queue Prepare to every current

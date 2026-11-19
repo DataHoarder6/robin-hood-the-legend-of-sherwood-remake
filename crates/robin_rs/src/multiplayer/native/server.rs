@@ -236,6 +236,39 @@ impl ServerPeers {
             modals: Default::default(),
         }
     }
+
+    /// Publish the seats this session's simulation contains.
+    ///
+    /// A seat is in it once the transport released it into the mission: the
+    /// start barrier has committed (so `BeginSim` was sent to every attached
+    /// admitted seat), no snapshot transition is pending (a seat admitted
+    /// during one has not been released into either mission), and its writer is
+    /// still attached (a detached one cannot be sent the page). Before that,
+    /// every admitted peer is still waiting for `BeginSim` — the state the #43
+    /// capture found a shared page waiting on — so the mask is the host alone.
+    /// A shared page then decides on the host's own outcome instead of waiting
+    /// for a seat that cannot see it.
+    pub(super) fn publish_session_seats(&self, seats: &robin_engine::multiplayer::SessionSeats) {
+        let mut mask = 1u32;
+        if self.readiness.begun.is_some() && self.transitions.pending().is_none() {
+            for seat in self.sessions.simulation_seats() {
+                mask |= 1u32 << *seat;
+            }
+        }
+        seats.publish(mask);
+    }
+}
+
+/// Publish [`ServerPeers::publish_session_seats`] to the game loop.
+///
+/// Called after every mutation of the admitted seat set, outside the peer lock:
+/// admission (`connect_all_provisional_seats`), release
+/// (`release_peer_session`), eviction (every `maybe_begin_sim_locked` caller),
+/// the start barrier's release (`retry_begin_sim`, the ready dispatch) and a
+/// full-snapshot resynchronization, which drops every seat.
+pub(super) fn publish_session_seats(context: &ServerContext) {
+    let peers = context.peers.lock();
+    peers.publish_session_seats(&context.session_seats);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -290,6 +323,9 @@ pub(super) fn commit_snapshot_transition(
     // the commit frame has drained. All participants rebuild the transport
     // against the replacement mission and re-enter through its ready barrier.
     drop(senders);
+    // Every writer is detached until the replacement mission admits its seats
+    // again, so no shared page may await one in the meantime.
+    publish_session_seats(context);
 }
 
 /// Host monotonic milliseconds. Every barrier deadline is expressed in this
@@ -362,6 +398,9 @@ pub(super) struct ServerContext {
     pub(super) speech_timing_locale: Option<String>,
     pub(super) frame_cursor: FrameCursor,
     pub(super) initial_snapshot: InitialSnapshot,
+    /// The game loop's seat mask: this session's simulation, published on every
+    /// change so a shared page never awaits a seat that is not in it.
+    pub(super) session_seats: robin_engine::multiplayer::SessionSeats,
     pub(super) content: Option<HostedModContent>,
     pub(super) cancellation: Arc<AtomicBool>,
     pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
@@ -426,6 +465,8 @@ pub struct ServerChannels {
     pub frame_cursor: FrameCursor,
     /// Latest full snapshot handed to joining peers.
     pub initial_snapshot: InitialSnapshot,
+    /// The seats in the game loop's simulation, which a shared page may await.
+    pub session_seats: robin_engine::multiplayer::SessionSeats,
 }
 
 impl crate::multiplayer::NetChannels {
@@ -433,6 +474,7 @@ impl crate::multiplayer::NetChannels {
     /// for [`start_server_in_campaign`].
     pub fn new_server() -> (Self, ServerChannels) {
         let (channels, incoming_tx, outgoing_rx, frame_cursor, initial_snapshot) = Self::new();
+        let session_seats = channels.session_seats().clone();
         (
             channels,
             ServerChannels {
@@ -440,6 +482,7 @@ impl crate::multiplayer::NetChannels {
                 outgoing_rx,
                 frame_cursor,
                 initial_snapshot,
+                session_seats,
             },
         )
     }
@@ -484,6 +527,7 @@ pub(super) fn start_server_inner(
         outgoing_rx,
         frame_cursor,
         initial_snapshot,
+        session_seats,
     } = channels;
     let campaign_lease = campaign.reserve_server()?;
     robin_engine::multiplayer::validate_display_name(&host_nickname)
@@ -550,11 +594,15 @@ pub(super) fn start_server_inner(
         speech_timing_locale,
         frame_cursor,
         initial_snapshot,
+        session_seats,
         content,
         cancellation: Arc::clone(&cancellation),
         shutdown_tx: shutdown_tx.clone(),
         started: std::time::Instant::now(),
     });
+    // The session starts with its host alone in the simulation: no peer has
+    // been released into it, so no shared page may await one.
+    publish_session_seats(&context);
 
     let (startup_tx, startup_rx) =
         std::sync::mpsc::sync_channel::<Result<(EndpointId, EndpointAddr), MultiplayerError>>(1);
@@ -774,8 +822,12 @@ pub(super) fn retry_begin_sim(context: &ServerContext) {
         Err(error) => {
             tracing::error!(%error, "multiplayer ready barrier could not produce a start time");
             fail_server(context, error);
+            return;
         }
     }
+    // Releasing the barrier puts every admitted peer into the simulation; an
+    // expiry instead evicts the peers that never became ready.
+    publish_session_seats(context);
 }
 
 /// Release newly connected seats into simulation: replay the cached start
@@ -843,6 +895,10 @@ pub(super) fn connect_all_provisional_seats(context: &ServerContext) {
     let connected_seats = seats.iter().map(|(seat, _)| *seat).collect::<Vec<_>>();
     publish_connect_seats(context, seats);
     finish_seat_connections(context, &connected_seats);
+    // A seat admitted after the mission began is in its simulation as soon as
+    // the cached `BeginSim` is queued for it; a seat admitted before it is not,
+    // and `publish_session_seats` keeps it out until the barrier releases.
+    publish_session_seats(context);
 }
 
 /// Poll every bounded barrier so a peer that stops answering cannot freeze
@@ -894,6 +950,10 @@ async fn run_barrier_watchdog(context: Arc<ServerContext>) {
                 return;
             }
         }
+        // Expiry evicts the seats that never became ready; the commit above
+        // ends the generation, so the replacement mission starts with its host
+        // alone. Both are changes to the simulation's seat set.
+        publish_session_seats(&context);
     }
 }
 
@@ -1197,6 +1257,8 @@ pub(super) fn release_peer_session(
     let Some(was_sim_connected) = release else {
         return;
     };
+    // The seat left this session's simulation: no shared page may await it.
+    publish_session_seats(context);
     if was_sim_connected && !context.cancellation.load(Ordering::Acquire) {
         let now = context.frame_cursor.load(Ordering::Relaxed);
         let target = now.saturating_add(INPUT_DELAY_FRAMES);
@@ -1555,6 +1617,9 @@ pub(super) fn apply_authenticated_peer_message(
                 }
             };
             announce_begin_sim(context, begin);
+            // `maybe_begin_sim_locked` either releases the barrier or evicts
+            // the seats that never became ready.
+            publish_session_seats(context);
         }
         NetMsg::SnapshotTransitionReady { id } => {
             if id.session_id != context.session_id {
