@@ -875,7 +875,8 @@ pub(super) fn start_active_popup_scroll_batch(
 
     let mut pending = VecDeque::with_capacity(text_ids.len());
     for text_id in text_ids {
-        let (text, picture_id) = if let Some(descriptors) = level_descriptors.as_ref() {
+        let (text, picture_id, popup_table) = if let Some(descriptors) = level_descriptors.as_ref()
+        {
             let table_id = descriptors.popup_text.text_table_id;
             let text = usize::try_from(text_id)
                 .ok()
@@ -895,12 +896,13 @@ pub(super) fn start_active_popup_scroll_batch(
                 .get(text_id as usize)
                 .copied()
                 .unwrap_or(RHID_DEFAULT_POPUP_SCROLL_PICTURE);
-            (text, pid)
+            (text, pid, table_id)
         } else {
             tracing::warn!("DisplayPopupText({text_id}): level descriptors unavailable");
             (
                 "No popup texts for the current level !".to_string(),
                 RHID_DEFAULT_POPUP_SCROLL_PICTURE,
+                0,
             )
         };
         let picture = ctx
@@ -908,19 +910,7 @@ pub(super) fn start_active_popup_scroll_batch(
             .as_mut()
             .expect("checked above")
             .picture_from(ctx.renderer, text_res, picture_id);
-        let narration_path =
-            if text_res.has_resource(robin_assets::resource_manager::NARRATION_WAVE_TABLE) {
-                usize::try_from(text_id)
-                    .ok()
-                    .and_then(|index| {
-                        text_res
-                            .get_sample(robin_assets::resource_manager::NARRATION_WAVE_TABLE, index)
-                            .ok()
-                    })
-                    .map(str::to_owned)
-            } else {
-                None
-            };
+        let narration_path = narration_clip(text_res, popup_table, text_id);
         let kind = engine_player_command::ModalKind::PopupText { text_id };
         let replay_result = None;
         pending.push_back(PopupScrollItem {
@@ -937,6 +927,21 @@ pub(super) fn start_active_popup_scroll_batch(
     }
 
     (!pending.is_empty()).then(|| ModalBatch::new(pending))
+}
+
+/// A language pack narrates a popup by shipping
+/// `Data/Text/Narration/<text table>_<text id>.ogg`. Popup ids restart in every
+/// mission, so the table id is part of the name; a pack without the clip is
+/// silent.
+fn narration_clip(text_res: &ResourceManager, table_id: i32, text_id: i32) -> Option<String> {
+    if table_id == 0 {
+        return None;
+    }
+    let candidate = format!("Data/Text/Narration/{table_id}_{text_id}.ogg");
+    text_res
+        .try_exists(&candidate)
+        .filter(|exists| *exists)
+        .map(|_| candidate)
 }
 
 pub(super) fn start_active_sherwood_report(

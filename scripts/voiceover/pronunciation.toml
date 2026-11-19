@@ -1,0 +1,20 @@
+# Name respellings for the synthesiser.
+#
+# `lt-LT` Chirp 3 HD supports no custom lexicon and no phoneme input, so a name
+# it stresses wrongly can only be fixed by changing the input text. `display`
+# keeps the correct orthography for the subtitle; `spoken` carries the
+# respelling. Left column is the orthographic form, right column what the
+# synthesiser receives.
+
+[names]
+"Robin" = "Robinas"
+"Sherwood" = "Šervudas"
+"Nottingham" = "Notingamas"
+"Locksley" = "Loksli"
+"Godwin" = "Godvinas"
+"Stutely" = "Stiutlis"
+"Scathlock" = "Skatlokas"
+"Gisbourne" = "Gisburnas"
+"Marian" = "Marijana"
+"Tuck" = "Takas"
+"Longchamps" = "Longšanas"

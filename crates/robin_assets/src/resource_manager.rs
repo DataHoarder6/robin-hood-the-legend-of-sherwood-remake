@@ -40,13 +40,6 @@ use robin_engine::coordinates::CursorHotspot;
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Wave table that maps a popup text id to its narration clip path.
-///
-/// The retail archive does not use this id; a language pack adds the node and
-/// the port resolves narration through it. Retail `Level.res` ids stop at
-/// `1_000_507`.
-pub const NARRATION_WAVE_TABLE: ResourceId = 1_000_600;
-
 /// Resource identifier (signed 32-bit; `-1` is the "no resource" sentinel).
 pub type ResourceId = i32;
 
@@ -1059,6 +1052,14 @@ impl ResourceManager {
             .get(&id)
             .map(Vec::as_slice)
             .ok_or_else(|| anyhow!("string resource {id}: not found"))
+    }
+
+    /// Whether the manager's file system can see `path` in the selected
+    /// locale layer. Probes the archive reader; never reads the payload.
+    pub fn try_exists(&self, path: &str) -> Option<bool> {
+        self.files
+            .as_ref()
+            .and_then(|files| files.try_exists(path).ok())
     }
 
     /// Number of strings in a string-table resource.

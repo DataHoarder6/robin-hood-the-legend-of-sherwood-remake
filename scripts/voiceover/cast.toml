@@ -1,0 +1,34 @@
+# Who speaks which line. Lithuanian Chirp 3 HD voices; the names are Google's
+# shared roster, not Lithuanian native speakers.
+#
+# `encoding` is the API's audioEncoding; OGG_OPUS is transcoded to Ogg Vorbis
+# 44.1 kHz mono before it reaches the pack, because that is what the retail
+# dialogue clips are.
+
+[narrator]
+voice = "lt-LT-Chirp3-HD-Charon"
+encoding = "OGG_OPUS"
+
+[robin]
+voice = "lt-LT-Chirp3-HD-Orus"
+encoding = "OGG_OPUS"
+
+[marian]
+voice = "lt-LT-Chirp3-HD-Aoede"
+encoding = "OGG_OPUS"
+
+[tuck]
+voice = "lt-LT-Chirp3-HD-Iapetus"
+encoding = "OGG_OPUS"
+
+[sheriff]
+voice = "lt-LT-Chirp3-HD-Fenrir"
+encoding = "OGG_OPUS"
+
+[soldier]
+voice = "lt-LT-Chirp3-HD-Schedar"
+encoding = "OGG_OPUS"
+
+[villager]
+voice = "lt-LT-Chirp3-HD-Puck"
+encoding = "OGG_OPUS"

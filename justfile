@@ -21,3 +21,15 @@ ship-dev:
 # One-shot read-only report of build-host state and the local checkout.
 build-status:
     scripts/build-status.sh
+
+# Lithuanian voice-over: measure the batch (add --dry-run to skip the network).
+voiceover-synth *args:
+    python3 scripts/voiceover/synth.py {{args}}
+
+# Lithuanian voice-over: assemble the 1063/ language pack.
+voiceover-pack *args:
+    python3 scripts/voiceover/pack.py {{args}}
+
+# Lithuanian voice-over: offline pipeline tests.
+voiceover-test:
+    python3 -m unittest discover -s scripts/voiceover/tests

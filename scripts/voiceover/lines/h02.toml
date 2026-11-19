@@ -1,0 +1,440 @@
+# H02: 55 lines, 6751 characters of English.
+[[line]]
+id = 1000018
+index = 0
+display = "Confessions of an Outlaw"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000018
+index = 1
+display = "Fair Marian, the love of Robin's youth, lives in Nottingham…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000018
+index = 2
+display = "Before leaving for the crusades, Robin was planning to ask the fair Marian for her hand. Although he is no longer an outlaw, he is convinced the girl could help him. Perhaps she will be able to tell him what has become of Godwin? Or help our hero to recover his rights? To find out, Robin will have to take the risk of venturing into Nottingham once more..."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 0
+display = "Good evening, my child.  Take a seat.  In nomine patris…"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 1
+display = "Your voice is quite strange, Father …  Have you perhaps been sampling rather more of your abbey's delicious ale than is reasonable?"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 2
+display = "My child, it would be to give poor thanks to our Creator if we couldn't appreciate the fruits of the earth and our labours …"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 3
+display = "That's an original point of view …  But your voice has never been so strange before …But you aren't Friar Tuck!"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 4
+display = "Shhh!  Calm down, Marian, it's me, Robin!  Robin of Locksley!"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 5
+display = "Robin?  I daren't believe it!  They said  you were dead in the Holy Land …So where's Friar Tuck?"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 6
+display = "Hm, Friar Tuck is …. meditating.   Yes, that's it, he's meditating.  Very deeply.  I think he'll be meditating for a few more hours yet …"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 7
+display = "Poor Friar Tuck!"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 8
+display = "Alas, Marian, it was the only way I could meet you …  The Sheriff is after me,  he's frightened I'm going to claim my inheritance."
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 9
+display = "It's true.  Your poor father.  Oh Robin, I was so frightened when I heard you were dead.  But what are you going to do?  The Sheriff is deceitful and cruel, he will never agree to give you back your lands!  Where will you live?"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 10
+display = "Well, I mean … with some friends, we're  sheltering in Sherwood Forest and …"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 11
+display = "What?  Are you the bandit, the outlaw that the Sheriff is looking for, that Robin Hood?"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 12
+display = "Don't worry, Marian, my merry men and I have sworn only to ambush the Sheriff's men, in order to give back to the poor the money that he has squeezed out of them!"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 13
+display = "I can't allow you to continue, Robin!  Something must be done …  I'm sure that Prince John would listen to your complaints against the Sheriff of Nottingham, you must meet him."
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 14
+display = "But where can I meet him?  And would he agree to receive a simple outlaw?"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 15
+display = "I'll  help you, my friend.  The Prince is coming to the region soon.  We will go and see him together, I'll speak for you.  Meanwhile, take care of yourself, my good Robin.  Leave before somebody discovers poor Friar Tuck's \"meditations\"!  I'll contact you, go on, go!"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 16
+display = "I've missed you, Marian."
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 17
+display = "I know, Robin.  Go on, go, don't take any more risks!"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 18
+display = "You're right, till we meet again, Marian!"
+spoken = ""
+voice = "robin"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000445
+index = 19
+display = "Till we meet again, Robin!  Take care…"
+spoken = ""
+voice = "marian"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 0
+display = "Robin is back in Nottingham. The danger is considerable, but it's such a long time since he's seen Marian! But how will he find her? Where does she live now? Robin doesn't know… He will have to ask the inhabitants of the town, but without rousing the suspicion of the loathsome Sheriff or his men... But Robin's greatest fear is that Marian will refuse to speak to one who is no more than an outlaw..."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 1
+display = "It seems unlikely that this well-fed monk will agree to help you to find Marian! It would be better to knock him out, so you can take his place. Hiding his body in the vestry seems like a good idea, but be careful, you must not harm him!"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 2
+display = "The coast is clear: all Robin has to do now is go and hide in the confessional to wait for Marian!"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 3
+display = "\"Oh dear! I almost forgot to tie this big monk up and hide him in the vestry!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 4
+display = "Robin is the only person Marian wants to talk to!"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 5
+display = "\"The Sheriff's brother-in-law is a malicious man! He takes advantage of the Sheriff's influence to impose heavy taxes on the town's craftsmen. He hides his treasure in his house. He deserves to be taught a good lesson!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 6
+display = "According to the beggar, this is where the Sheriff's brother-in-law lives."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 7
+display = "\"Oh! My poor son! He was such a good boy, and so brave! But it was madness to oppose the Sheriff's men as he did! Ah, my dear child! His body is being displayed as an example, at least that's what they said! And I, his poor mother, have nothing left… Not even the comfort of being able to bury him in hallowed ground!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 8
+display = "The son of the old woman that Robin met was sentenced to hanging. The Sheriff ordered that his body remain on public display for one week, to serve as an example. His poor mother would certainly be grateful if Robin were to take down his body so that she could bury it..."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 9
+display = "\"Oh! Master Robin! What a generous soul! Such a noble heart! Tomorrow I will send for a chaplain who will help me lay my beloved son to rest, but this evening, I will pray for his salvation, and for yours too, if you permit me.\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 10
+display = "Wanted: Robin Hood; Guilty of saving the bandit Stutely from his just punishment; Reward: £50"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 11
+display = "\"Each evening, Lady Marian meets her confessor in the church at Nottingham. Strange, for one whose soul is so pure!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 12
+display = "\"Lady Marian? Doesn't ring any bells…\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 13
+display = "\"Lady Marian? A particularly pious person, the truth be known! But I know not where she can be found…\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 14
+display = "\"This is Lady Marian's residence.\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 15
+display = "\"Lady Marian's confessor is a rather awkward character. He may well not want to let you near her.\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 16
+display = "\"Lady Marian? But she's not at home at the moment! The Sheriff has invited her to supper!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000122
+index = 17
+display = "The corpse has been taken down. Now we must take it to that poor woman…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000351
+index = 0
+display = "Only Prince John could allow Robin to recover his lands and his honour, though it will not be easy to obtain an audience with him... But, perhaps he would agree to talk to Marian?"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000351
+index = 1
+display = "Only Prince John could allow Robin to recover his lands and his honour, though it will not be easy to obtain an audience with him... But, perhaps he would agree to talk to Marian?"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000352
+index = 0
+display = "After the capture of our young Hero, Marian sunk into a state of melancholy, and… What? Yes, all right, it's not very romantic, although melancholy is quite a romantic feeling, if you think about it… OK, OK, load a savegame game then…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000352
+index = 1
+display = "\"Alas! You've just lost the last person on your team who has one of the skills required for this Mission! There's no way you can pull it off now… You've lost!\""
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 0
+display = "Marian is the only one that can help Robin now. He must find her."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 1
+display = "But where can she be? Perhaps the beggars know something…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 2
+display = "The best way to meet Marian is to wait for her in the confessional."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 3
+display = "But first you must ensure you have the right confessor. Why not knock him out, tie him up and then hide him in the vestry?"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 4
+display = "Marian will help Robin; all we need to do is leave Nottingham before the alarm is raised…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 5
+display = "The body of the son of a poor woman has been put on public display. We must take it down from the gallows!"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 6
+display = "We must deliver the body of the woman's son to her, so that she can give him a proper burial."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 7
+display = "The Sheriff's brother-in-law is sure to have a large stash of money at home…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 8
+display = "Robin has discovered where Marian is living."
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
+
+[[line]]
+id = 1000284
+index = 9
+display = "Maid Marian is having supper with the Sheriff! There must be another way of making contact with her: we must keep questioning the beggars…"
+spoken = ""
+voice = "narrator"
+provenance = "machine-draft"
