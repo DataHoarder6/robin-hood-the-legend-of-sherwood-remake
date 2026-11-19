@@ -205,3 +205,122 @@ robin_util::deny_deserialize!(
     MultiplayerSync,
     "multiplayer session gates are live timeline authority, not a saved game"
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game_session::multiplayer::MultiplayerAdmissionEvent;
+
+    /// The phases whose release belongs to another process: a peer's join and
+    /// rejoin wait for `InitialSnapshot`, then for `BeginSim`, and a host waits
+    /// for its peers' `BeginSim`. Each carries its own wording, so the expiry
+    /// names the wait instead of a generic timeout.
+    const INTER_PROCESS_WAITS: [(MultiplayerAdmission, &str); 3] = [
+        (
+            MultiplayerAdmission::PeerWaitingForSnapshot,
+            "peer waiting for an initial snapshot",
+        ),
+        (
+            MultiplayerAdmission::PeerWaitingForBegin {
+                snapshot_frame: 8_101,
+            },
+            "peer waiting for BeginSim",
+        ),
+        (
+            MultiplayerAdmission::HostWaitingForBegin,
+            "host waiting for BeginSim",
+        ),
+    ];
+
+    /// The injected uptime is the whole clock: a wait that never receives its
+    /// message expires exactly at the budget and its error names the phase and
+    /// the time spent, with the phase still un-adopted so expiry cannot pass
+    /// for progress.
+    #[test]
+    fn every_inter_process_admission_wait_expires_naming_its_phase() {
+        let _events = crate::observability::isolate_session_events();
+        let budget = ADMISSION_BUDGET_MS as u32;
+        for (waiting, label) in INTER_PROCESS_WAITS {
+            let mut sync = MultiplayerSync::new(true, true);
+            sync.admission = waiting;
+            assert!(
+                sync.admission_paused(0, 1_000).unwrap(),
+                "{label} must hold simulation"
+            );
+            assert!(
+                sync.admission_paused(0, 1_000 + budget - 1).unwrap(),
+                "{label} is inside its budget"
+            );
+            let error = sync
+                .admission_paused(0, 1_000 + budget)
+                .expect_err("a phase that never progresses must end the session");
+            assert!(
+                matches!(
+                    error,
+                    MultiplayerSessionError::Protocol(
+                        SessionProtocolFailure::AdmissionTimeout { state, waited_ms }
+                    ) if state == waiting && waited_ms == ADMISSION_BUDGET_MS
+                ),
+                "{label} expired as {error:?}"
+            );
+            assert!(
+                error.to_string().contains(label),
+                "{label} must be named in {error}"
+            );
+            assert_eq!(
+                sync.admission, waiting,
+                "expiry ends the session; it does not adopt the phase"
+            );
+        }
+    }
+
+    /// `MultiplayerAdmission`'s snapshot frame is part of the phase identity, so
+    /// a rejoin that adopts the host's snapshot starts the `BeginSim` budget
+    /// afresh instead of inheriting what the snapshot wait already spent.
+    #[test]
+    fn a_phase_change_starts_a_full_budget() {
+        let mut sync = MultiplayerSync::new(true, false);
+        let budget = ADMISSION_BUDGET_MS as u32;
+        // The snapshot wait spends its whole budget without progress.
+        assert!(sync.admission_paused(0, 0).unwrap());
+        assert!(sync.admission_paused(0, budget - 1).unwrap());
+        sync.admission
+            .apply(MultiplayerAdmissionEvent::InitialSnapshotAdopted { frame: 8_101 })
+            .unwrap();
+        // The adoption anchors the `BeginSim` wait at `budget`, so the time the
+        // snapshot wait spent is not charged to it.
+        assert!(sync.admission_paused(0, budget).unwrap());
+        assert!(
+            sync.admission_paused(0, budget + budget - 1).unwrap(),
+            "the adopted snapshot must not count against the BeginSim budget"
+        );
+        let error = sync
+            .admission_paused(0, budget + budget)
+            .expect_err("the second phase's own budget still expires");
+        assert!(
+            error.to_string().contains("peer waiting for BeginSim"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A running session is never held, however long its uptime runs: the
+    /// budget applies to a wait, not to the session.
+    #[test]
+    fn a_running_session_clears_the_wait_and_never_expires() {
+        let mut sync = MultiplayerSync::new(true, false);
+        sync.admission
+            .apply(MultiplayerAdmissionEvent::InitialSnapshotAdopted { frame: 0 })
+            .unwrap();
+        sync.admission
+            .apply(MultiplayerAdmissionEvent::BeginSim {
+                frame: 0,
+                start_epoch_ms: 0,
+            })
+            .unwrap();
+        assert!(!sync.admission_paused(0, u32::MAX).unwrap());
+        assert!(sync.admission_wait.is_none());
+        // A session that requires no admission is never held either.
+        let mut single_player = MultiplayerSync::new(false, false);
+        assert!(!single_player.admission_paused(0, u32::MAX).unwrap());
+    }
+}
