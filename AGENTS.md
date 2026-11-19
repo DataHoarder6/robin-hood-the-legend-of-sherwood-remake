@@ -57,6 +57,8 @@
 - A read-only question that took real digging ends by writing its answer to
   `docs/slop/<topic>.md` and linking the files it names; an answer only in a
   reply is paid for again by the next session.
+- A defect seen in a session becomes a row of `docs/DEFECTS.md` before it
+  becomes a fix: class, reproduction, and the check that fails without it.
 
 ## Searching
 
