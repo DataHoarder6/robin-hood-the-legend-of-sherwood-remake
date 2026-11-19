@@ -14,288 +14,6 @@ use super::{
 use robin_engine::{engine::SimConfig, multiplayer::DistributedModOffer, player_command::PlayerId};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn offer() -> DistributedModOffer {
-        DistributedModOffer {
-            schema_version: 1,
-            full_mod_sha256: [1; 32],
-            spellforge_package_sha256: None,
-            spellforge_vm_abi: None,
-            encoded_bytes: 1,
-            mission_basename: "Mission".into(),
-            mission_rhm_entry: "Data/Levels/Mission.rhm".into(),
-            map_filename: "Mission".into(),
-            title: "Mission".into(),
-            claimed_author: "Author".into(),
-            version: "1".into(),
-            source_url: "https://example.invalid".into(),
-            license: "CC0-1.0".into(),
-            host_endpoint_id: "endpoint-key".into(),
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn session_publication_is_complete_for_both_speech_authorities() {
-        let HandshakeAction::Welcome(mut welcome) =
-            ClientHandshake::new("endpoint-key".into(), None)
-                .receive(Some(welcome()))
-                .unwrap()
-        else {
-            panic!("expected Welcome")
-        };
-        for locale in [None, Some("eng".to_owned())] {
-            let mut published: Option<ClientSessionMetadata> = None;
-            assert!(
-                published.is_none(),
-                "pending is not base-installation timing"
-            );
-            welcome.speech_timing_locale = locale.clone();
-            let content = offer();
-            published =
-                Some(ClientSessionMetadata::from_welcome(&welcome, Some(content.clone())).unwrap());
-            let session = published.unwrap();
-            assert_eq!(session.seat, welcome.seat);
-            assert_eq!(session.session_id, welcome.session_id);
-            assert_eq!(session.mission_id, welcome.mission_id);
-            assert_eq!(session.mission_seed, welcome.mission_seed);
-            assert_eq!(session.sim_config, welcome.sim_config);
-            assert_eq!(session.speech_timing_locale, locale);
-            assert_eq!(session.admitted_content.as_ref(), Some(&content));
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn session_publication_rejects_content_for_another_mission() {
-        let HandshakeAction::Welcome(welcome) = ClientHandshake::new("endpoint-key".into(), None)
-            .receive(Some(welcome()))
-            .unwrap()
-        else {
-            panic!("expected Welcome")
-        };
-        let mut content = offer();
-        content.mission_basename = "OtherMission".into();
-        assert!(ClientSessionMetadata::from_welcome(&welcome, Some(content)).is_err());
-        assert!(ClientSessionMetadata::from_welcome(&welcome, None).is_ok());
-    }
-
-    fn welcome() -> NetMsg {
-        NetMsg::Welcome {
-            your_seat: PlayerId(1),
-            mission_id: "Mission".into(),
-            mission_seed: 7,
-            sim_config: SimConfig::default(),
-            speech_timing_locale: Some("eng".into()),
-            session_id: MultiplayerSessionId([2; 32]),
-            host_nickname: "Host".into(),
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn every_direction_checks_exact_limit_before_allocation() {
-        for policy in [
-            InboundFramePolicy::ClientHello,
-            InboundFramePolicy::ClientToServer,
-            InboundFramePolicy::ServerToClient,
-        ] {
-            for class in [
-                NetFrameClass::Control,
-                NetFrameClass::Input,
-                NetFrameClass::Snapshot,
-                NetFrameClass::Content,
-            ] {
-                let mut header = [0; 5];
-                header[0] = class as u8;
-                match policy.limit(class) {
-                    Some(limit) => {
-                        header[1..].copy_from_slice(&(limit as u32).to_le_bytes());
-                        assert_eq!(decode_header(header, policy).unwrap(), (class, limit));
-                        header[1..].copy_from_slice(&((limit + 1) as u32).to_le_bytes());
-                        assert!(decode_header(header, policy).is_err());
-                    }
-                    None => assert!(decode_header(header, policy).is_err()),
-                }
-            }
-            assert!(decode_header([255, 0, 0, 0, 0], policy).is_err());
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn frame_codec_preserves_wire_bytes_and_rejects_misclassification() {
-        let message = welcome();
-        let (header, bytes) = encode_frame(&message).unwrap();
-        assert_eq!(bytes, encode_msg(&message));
-        assert_eq!(header[0], NetFrameClass::Control as u8);
-        assert_eq!(&header[1..], &(bytes.len() as u32).to_le_bytes());
-        let (class, length) = decode_header(header, InboundFramePolicy::ServerToClient).unwrap();
-        assert_eq!(length, bytes.len());
-        assert_eq!(encode_msg(&decode_body(class, &bytes).unwrap()), bytes);
-        assert!(decode_body(NetFrameClass::Input, &bytes).is_err());
-        assert!(decode_body(class, &bytes[..bytes.len() - 1]).is_err());
-        assert!(decode_body(class, &[]).is_err());
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn shared_native_and_browser_content_admission_trace() {
-        // The only prelude policy difference is the signed browser invitation.
-        for expected in [None, Some(MultiplayerSessionId([2; 32]))] {
-            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
-            assert!(matches!(
-                state
-                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                    .unwrap(),
-                HandshakeAction::PrepareContent(_)
-            ));
-            assert_eq!(state.phase, HandshakePhase::ContentPending);
-            state.content_ready().unwrap();
-            assert!(matches!(
-                state.receive(Some(welcome())).unwrap(),
-                HandshakeAction::Welcome(_)
-            ));
-            assert_eq!(state.phase, HandshakePhase::Complete);
-            assert!(
-                state.receive(Some(welcome())).is_err(),
-                "late Welcome must not readmit"
-            );
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn prelude_rejects_reordered_closed_and_late_events() {
-        for expected in [None, Some(MultiplayerSessionId([2; 32]))] {
-            for unexpected in [
-                None,
-                Some(NetMsg::Note("too early".into())),
-                Some(NetMsg::Reject {
-                    reason: "denied".into(),
-                }),
-            ] {
-                let mut state = ClientHandshake::new("endpoint-key".into(), expected);
-                assert!(state.receive(unexpected).is_err());
-                assert!(
-                    state.receive(Some(welcome())).is_err(),
-                    "failure is terminal"
-                );
-            }
-            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
-            assert!(state.content_ready().is_err());
-            assert!(state.receive(Some(welcome())).is_err());
-            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
-            state
-                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                .unwrap();
-            assert!(
-                state.receive(Some(welcome())).is_err(),
-                "Welcome cannot bypass content readiness"
-            );
-            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
-            state
-                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                .unwrap();
-            state.content_ready().unwrap();
-            assert!(
-                state
-                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                    .is_err(),
-                "a second offer cannot replace mounted content"
-            );
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn authenticated_host_and_signed_invitation_checks_survive_content_phase() {
-        let mut state = ClientHandshake::new("other-endpoint".into(), None);
-        assert!(
-            state
-                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                .is_err()
-        );
-        let mut invalid = offer();
-        invalid.encoded_bytes = 0;
-        let mut state = ClientHandshake::new("endpoint-key".into(), None);
-        assert!(
-            state
-                .receive(Some(NetMsg::ContentOffer { offer: invalid }))
-                .is_err()
-        );
-        for content in [false, true] {
-            let mut state =
-                ClientHandshake::new("endpoint-key".into(), Some(MultiplayerSessionId([3; 32])));
-            if content {
-                state
-                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
-                    .unwrap();
-                state.content_ready().unwrap();
-            }
-            assert!(state.receive(Some(welcome())).is_err());
-        }
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn reconnect_requires_exact_offer_not_just_same_content_hash() {
-        let admitted = offer();
-        assert!(validate_reconnect_content(None, None).is_ok());
-        assert!(validate_reconnect_content(Some(&admitted), Some(&admitted)).is_ok());
-        assert!(validate_reconnect_content(None, Some(&admitted)).is_err());
-        assert!(validate_reconnect_content(Some(&admitted), None).is_err());
-        let mut changed = admitted.clone();
-        changed.title.push('!');
-        assert!(validate_reconnect_content(Some(&changed), Some(&admitted)).is_err());
-        changed = admitted.clone();
-        changed.full_mod_sha256 = [9; 32];
-        assert!(validate_reconnect_content(Some(&changed), Some(&admitted)).is_err());
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn reconnect_rejects_identity_change_and_adopts_host_context() {
-        let HandshakeAction::Welcome(expected) = ClientHandshake::new("endpoint-key".into(), None)
-            .receive(Some(welcome()))
-            .unwrap()
-        else {
-            panic!("expected Welcome")
-        };
-        let check = |actual: &WelcomeData| {
-            validate_reconnect_state(expected.reconnect_identity(), actual.reconnect_identity())
-        };
-        assert!(check(&expected).is_ok());
-        // Identity: seat and session. A reconnect that changes either is a
-        // different admit and must be refused.
-        for field in [0, 5] {
-            let mut actual = expected.clone();
-            match field {
-                0 => actual.seat = PlayerId(2),
-                5 => actual.session_id = MultiplayerSessionId([3; 32]),
-                _ => unreachable!(),
-            }
-            assert!(check(&actual).is_err(), "identity field {field}");
-        }
-        // Host-authored context changes at a mission boundary (a real session
-        // died on every win/fail because of this) and is adopted.
-        for field in [1, 2, 3, 4] {
-            let mut actual = expected.clone();
-            match field {
-                1 => actual.mission_id.push('!'),
-                2 => actual.mission_seed += 1,
-                3 => actual.sim_config.fog_of_war = !actual.sim_config.fog_of_war,
-                4 => actual.speech_timing_locale = None,
-                _ => unreachable!(),
-            }
-            assert!(check(&actual).is_ok(), "host context field {field}");
-        }
-    }
-}
-
 pub(super) fn encode_frame(message: &NetMsg) -> Result<([u8; 5], Vec<u8>), FramingError> {
     let bytes = encode_msg(message);
     let class = net_frame_class(message);
@@ -637,4 +355,286 @@ pub(super) fn validate_reconnect_state(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn offer() -> DistributedModOffer {
+        DistributedModOffer {
+            schema_version: 1,
+            full_mod_sha256: [1; 32],
+            spellforge_package_sha256: None,
+            spellforge_vm_abi: None,
+            encoded_bytes: 1,
+            mission_basename: "Mission".into(),
+            mission_rhm_entry: "Data/Levels/Mission.rhm".into(),
+            map_filename: "Mission".into(),
+            title: "Mission".into(),
+            claimed_author: "Author".into(),
+            version: "1".into(),
+            source_url: "https://example.invalid".into(),
+            license: "CC0-1.0".into(),
+            host_endpoint_id: "endpoint-key".into(),
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn session_publication_is_complete_for_both_speech_authorities() {
+        let HandshakeAction::Welcome(mut welcome) =
+            ClientHandshake::new("endpoint-key".into(), None)
+                .receive(Some(welcome()))
+                .unwrap()
+        else {
+            panic!("expected Welcome")
+        };
+        for locale in [None, Some("eng".to_owned())] {
+            let mut published: Option<ClientSessionMetadata> = None;
+            assert!(
+                published.is_none(),
+                "pending is not base-installation timing"
+            );
+            welcome.speech_timing_locale = locale.clone();
+            let content = offer();
+            published =
+                Some(ClientSessionMetadata::from_welcome(&welcome, Some(content.clone())).unwrap());
+            let session = published.unwrap();
+            assert_eq!(session.seat, welcome.seat);
+            assert_eq!(session.session_id, welcome.session_id);
+            assert_eq!(session.mission_id, welcome.mission_id);
+            assert_eq!(session.mission_seed, welcome.mission_seed);
+            assert_eq!(session.sim_config, welcome.sim_config);
+            assert_eq!(session.speech_timing_locale, locale);
+            assert_eq!(session.admitted_content.as_ref(), Some(&content));
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn session_publication_rejects_content_for_another_mission() {
+        let HandshakeAction::Welcome(welcome) = ClientHandshake::new("endpoint-key".into(), None)
+            .receive(Some(welcome()))
+            .unwrap()
+        else {
+            panic!("expected Welcome")
+        };
+        let mut content = offer();
+        content.mission_basename = "OtherMission".into();
+        assert!(ClientSessionMetadata::from_welcome(&welcome, Some(content)).is_err());
+        assert!(ClientSessionMetadata::from_welcome(&welcome, None).is_ok());
+    }
+
+    fn welcome() -> NetMsg {
+        NetMsg::Welcome {
+            your_seat: PlayerId(1),
+            mission_id: "Mission".into(),
+            mission_seed: 7,
+            sim_config: SimConfig::default(),
+            speech_timing_locale: Some("eng".into()),
+            session_id: MultiplayerSessionId([2; 32]),
+            host_nickname: "Host".into(),
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn every_direction_checks_exact_limit_before_allocation() {
+        for policy in [
+            InboundFramePolicy::ClientHello,
+            InboundFramePolicy::ClientToServer,
+            InboundFramePolicy::ServerToClient,
+        ] {
+            for class in [
+                NetFrameClass::Control,
+                NetFrameClass::Input,
+                NetFrameClass::Snapshot,
+                NetFrameClass::Content,
+            ] {
+                let mut header = [0; 5];
+                header[0] = class as u8;
+                match policy.limit(class) {
+                    Some(limit) => {
+                        header[1..].copy_from_slice(&(limit as u32).to_le_bytes());
+                        assert_eq!(decode_header(header, policy).unwrap(), (class, limit));
+                        header[1..].copy_from_slice(&((limit + 1) as u32).to_le_bytes());
+                        assert!(decode_header(header, policy).is_err());
+                    }
+                    None => assert!(decode_header(header, policy).is_err()),
+                }
+            }
+            assert!(decode_header([255, 0, 0, 0, 0], policy).is_err());
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn frame_codec_preserves_wire_bytes_and_rejects_misclassification() {
+        let message = welcome();
+        let (header, bytes) = encode_frame(&message).unwrap();
+        assert_eq!(bytes, encode_msg(&message));
+        assert_eq!(header[0], NetFrameClass::Control as u8);
+        assert_eq!(&header[1..], &(bytes.len() as u32).to_le_bytes());
+        let (class, length) = decode_header(header, InboundFramePolicy::ServerToClient).unwrap();
+        assert_eq!(length, bytes.len());
+        assert_eq!(encode_msg(&decode_body(class, &bytes).unwrap()), bytes);
+        assert!(decode_body(NetFrameClass::Input, &bytes).is_err());
+        assert!(decode_body(class, &bytes[..bytes.len() - 1]).is_err());
+        assert!(decode_body(class, &[]).is_err());
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn shared_native_and_browser_content_admission_trace() {
+        // The only prelude policy difference is the signed browser invitation.
+        for expected in [None, Some(MultiplayerSessionId([2; 32]))] {
+            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
+            assert!(matches!(
+                state
+                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                    .unwrap(),
+                HandshakeAction::PrepareContent(_)
+            ));
+            assert_eq!(state.phase, HandshakePhase::ContentPending);
+            state.content_ready().unwrap();
+            assert!(matches!(
+                state.receive(Some(welcome())).unwrap(),
+                HandshakeAction::Welcome(_)
+            ));
+            assert_eq!(state.phase, HandshakePhase::Complete);
+            assert!(
+                state.receive(Some(welcome())).is_err(),
+                "late Welcome must not readmit"
+            );
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn prelude_rejects_reordered_closed_and_late_events() {
+        for expected in [None, Some(MultiplayerSessionId([2; 32]))] {
+            for unexpected in [
+                None,
+                Some(NetMsg::Note("too early".into())),
+                Some(NetMsg::Reject {
+                    reason: "denied".into(),
+                }),
+            ] {
+                let mut state = ClientHandshake::new("endpoint-key".into(), expected);
+                assert!(state.receive(unexpected).is_err());
+                assert!(
+                    state.receive(Some(welcome())).is_err(),
+                    "failure is terminal"
+                );
+            }
+            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
+            assert!(state.content_ready().is_err());
+            assert!(state.receive(Some(welcome())).is_err());
+            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
+            state
+                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                .unwrap();
+            assert!(
+                state.receive(Some(welcome())).is_err(),
+                "Welcome cannot bypass content readiness"
+            );
+            let mut state = ClientHandshake::new("endpoint-key".into(), expected);
+            state
+                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                .unwrap();
+            state.content_ready().unwrap();
+            assert!(
+                state
+                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                    .is_err(),
+                "a second offer cannot replace mounted content"
+            );
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn authenticated_host_and_signed_invitation_checks_survive_content_phase() {
+        let mut state = ClientHandshake::new("other-endpoint".into(), None);
+        assert!(
+            state
+                .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                .is_err()
+        );
+        let mut invalid = offer();
+        invalid.encoded_bytes = 0;
+        let mut state = ClientHandshake::new("endpoint-key".into(), None);
+        assert!(
+            state
+                .receive(Some(NetMsg::ContentOffer { offer: invalid }))
+                .is_err()
+        );
+        for content in [false, true] {
+            let mut state =
+                ClientHandshake::new("endpoint-key".into(), Some(MultiplayerSessionId([3; 32])));
+            if content {
+                state
+                    .receive(Some(NetMsg::ContentOffer { offer: offer() }))
+                    .unwrap();
+                state.content_ready().unwrap();
+            }
+            assert!(state.receive(Some(welcome())).is_err());
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn reconnect_requires_exact_offer_not_just_same_content_hash() {
+        let admitted = offer();
+        assert!(validate_reconnect_content(None, None).is_ok());
+        assert!(validate_reconnect_content(Some(&admitted), Some(&admitted)).is_ok());
+        assert!(validate_reconnect_content(None, Some(&admitted)).is_err());
+        assert!(validate_reconnect_content(Some(&admitted), None).is_err());
+        let mut changed = admitted.clone();
+        changed.title.push('!');
+        assert!(validate_reconnect_content(Some(&changed), Some(&admitted)).is_err());
+        changed = admitted.clone();
+        changed.full_mod_sha256 = [9; 32];
+        assert!(validate_reconnect_content(Some(&changed), Some(&admitted)).is_err());
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn reconnect_rejects_identity_change_and_adopts_host_context() {
+        let HandshakeAction::Welcome(expected) = ClientHandshake::new("endpoint-key".into(), None)
+            .receive(Some(welcome()))
+            .unwrap()
+        else {
+            panic!("expected Welcome")
+        };
+        let check = |actual: &WelcomeData| {
+            validate_reconnect_state(expected.reconnect_identity(), actual.reconnect_identity())
+        };
+        assert!(check(&expected).is_ok());
+        // Identity: seat and session. A reconnect that changes either is a
+        // different admit and must be refused.
+        for field in [0, 5] {
+            let mut actual = expected.clone();
+            match field {
+                0 => actual.seat = PlayerId(2),
+                5 => actual.session_id = MultiplayerSessionId([3; 32]),
+                _ => unreachable!(),
+            }
+            assert!(check(&actual).is_err(), "identity field {field}");
+        }
+        // Host-authored context changes at a mission boundary (a real session
+        // died on every win/fail because of this) and is adopted.
+        for field in [1, 2, 3, 4] {
+            let mut actual = expected.clone();
+            match field {
+                1 => actual.mission_id.push('!'),
+                2 => actual.mission_seed += 1,
+                3 => actual.sim_config.fog_of_war = !actual.sim_config.fog_of_war,
+                4 => actual.speech_timing_locale = None,
+                _ => unreachable!(),
+            }
+            assert!(check(&actual).is_ok(), "host context field {field}");
+        }
+    }
 }

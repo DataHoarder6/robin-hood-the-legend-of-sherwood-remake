@@ -285,7 +285,7 @@ fn begin_host_snapshot_transition(
             .map(|(seat, _)| seat)
             .copied()
             .collect::<HashSet<_>>();
-        let now_ms = super::elapsed_ms(&context);
+        let now_ms = super::elapsed_ms(context);
         let deadline_ms = now_ms.saturating_add(transition_budget_ms(&payload));
         tracing::info!(
             transition = ?id,
@@ -496,6 +496,59 @@ pub(super) fn broadcast_input(
     );
 }
 
+/// Publish text using only the authenticated connection's display name.
+pub(super) fn broadcast_chat(
+    context: &ServerContext,
+    nickname: String,
+    text: String,
+) -> Result<(), MultiplayerError> {
+    let message = NetMsg::Chat {
+        nickname: nickname.clone(),
+        text: text.clone(),
+    };
+    // Local host publications need the same bounds as decoded remote frames.
+    robin_engine::multiplayer::decode_msg(&robin_engine::multiplayer::encode_msg(&message))
+        .map_err(|error| MultiplayerError::RemoteProtocol(error.into()))?;
+    context
+        .incoming_tx
+        .send(NetEvent::Note(format!("{nickname}: {text}")))
+        .map_err(|_| MultiplayerError::ChannelClosed("chat receiver closed".into()))?;
+    broadcast_diagnostic(context, message);
+    Ok(())
+}
+
+pub(super) fn route_latency(
+    context: &ServerContext,
+    from: PlayerId,
+    to: PlayerId,
+    nonce: u32,
+    reply: bool,
+) -> Result<(), MultiplayerError> {
+    if to == PlayerId::HOST {
+        context
+            .incoming_tx
+            .send(NetEvent::Latency { from, nonce, reply })
+            .map_err(|_| MultiplayerError::ChannelClosed("latency receiver closed".into()))?;
+    } else {
+        let sender = context
+            .peers
+            .lock()
+            .sessions
+            .senders()
+            .find(|(seat, _)| **seat == to.0)
+            .map(|(_, sender)| sender.clone());
+        if let Some(sender) = sender {
+            let _ = sender.send(NetMsg::Latency {
+                from,
+                to,
+                nonce,
+                reply,
+            });
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,57 +610,4 @@ mod tests {
         // a live-session irreversible control. It must not stop the host.
         queue_cached_begin(&sender, 42, 74);
     }
-}
-
-/// Publish text using only the authenticated connection's display name.
-pub(super) fn broadcast_chat(
-    context: &ServerContext,
-    nickname: String,
-    text: String,
-) -> Result<(), MultiplayerError> {
-    let message = NetMsg::Chat {
-        nickname: nickname.clone(),
-        text: text.clone(),
-    };
-    // Local host publications need the same bounds as decoded remote frames.
-    robin_engine::multiplayer::decode_msg(&robin_engine::multiplayer::encode_msg(&message))
-        .map_err(|error| MultiplayerError::RemoteProtocol(error.into()))?;
-    context
-        .incoming_tx
-        .send(NetEvent::Note(format!("{nickname}: {text}")))
-        .map_err(|_| MultiplayerError::ChannelClosed("chat receiver closed".into()))?;
-    broadcast_diagnostic(context, message);
-    Ok(())
-}
-
-pub(super) fn route_latency(
-    context: &ServerContext,
-    from: PlayerId,
-    to: PlayerId,
-    nonce: u32,
-    reply: bool,
-) -> Result<(), MultiplayerError> {
-    if to == PlayerId::HOST {
-        context
-            .incoming_tx
-            .send(NetEvent::Latency { from, nonce, reply })
-            .map_err(|_| MultiplayerError::ChannelClosed("latency receiver closed".into()))?;
-    } else {
-        let sender = context
-            .peers
-            .lock()
-            .sessions
-            .senders()
-            .find(|(seat, _)| **seat == to.0)
-            .map(|(_, sender)| sender.clone());
-        if let Some(sender) = sender {
-            let _ = sender.send(NetMsg::Latency {
-                from,
-                to,
-                nonce,
-                reply,
-            });
-        }
-    }
-    Ok(())
 }
