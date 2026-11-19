@@ -938,13 +938,15 @@ mod tests {
             missions_required_to_be_done: vec![1],
             ..Default::default()
         });
-        let mut campaign = Campaign::default();
-        campaign.missions = (0..2)
-            .map(|idx| Mission {
-                profile_idx: Some(idx),
-                ..Mission::new()
-            })
-            .collect();
+        let mut campaign = Campaign {
+            missions: (0..2)
+                .map(|idx| Mission {
+                    profile_idx: Some(idx),
+                    ..Mission::new()
+                })
+                .collect(),
+            ..Default::default()
+        };
         campaign.set_value(CampaignValue::Ransom, 50);
         campaign.set_ares(1);
         let notes = availability_notes(&campaign, &profiles, 1);

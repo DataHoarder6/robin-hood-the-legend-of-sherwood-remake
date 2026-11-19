@@ -164,7 +164,7 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .zip(expected.2.chunks_exact(4))
+                .zip(expected.2.as_chunks::<4>().0)
                 .filter(|(actual, expected)| actual != expected)
                 .count();
             assert_eq!(

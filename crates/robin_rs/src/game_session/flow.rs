@@ -528,13 +528,7 @@ impl InteractiveFrameFinish<'_, '_, '_> {
         // worker thread; nothing in this frame waits for it. Browser builds
         // have no bundle writer and no surface that queues one.
         #[cfg(not(target_arch = "wasm32"))]
-        super::report::drain_requested(
-            runtime,
-            world,
-            frontend,
-            &frame,
-            &callbacks.save_manager,
-        );
+        super::report::drain_requested(runtime, world, frontend, &frame, &callbacks.save_manager);
         let profiling = super::frame_perf::enabled();
         let phase_start = super::frame_perf::start(profiling);
         finish_interactive_audio(runtime, world, frontend, callbacks);

@@ -156,10 +156,10 @@ async fn run_with_policy(
     // a client that never reads its response must not keep the application alive.
     connections.abort_all();
     while let Some(result) = connections.join_next().await {
-        if let Err(error) = result {
-            if !error.is_cancelled() {
-                tracing::error!(%error, "HTTP task failed during shutdown");
-            }
+        if let Err(error) = result
+            && !error.is_cancelled()
+        {
+            tracing::error!(%error, "HTTP task failed during shutdown");
         }
     }
     queue.lock().expect("RPC router poisoned").retire();
@@ -221,15 +221,15 @@ async fn acquire(
                 RpcError::invalid_request(format!("invalid Content-Length: {error}")),
             )
         })?;
-    if let Some(length) = declared_length {
-        if length > limit {
-            return Err((
-                400,
-                RpcError::capacity(format!(
-                    "HTTP body observed {length} bytes, limit is {limit}"
-                )),
-            ));
-        }
+    if let Some(length) = declared_length
+        && length > limit
+    {
+        return Err((
+            400,
+            RpcError::capacity(format!(
+                "HTTP body observed {length} bytes, limit is {limit}"
+            )),
+        ));
     }
     let mut request = NativeRequest {
         url: parts

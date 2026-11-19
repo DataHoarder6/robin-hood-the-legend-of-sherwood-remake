@@ -575,8 +575,10 @@ fn local_join_uses_a_once_per_device_and_respects_five_player_limit() {
 #[test]
 fn local_join_capacity_and_reconnect_preserve_seat() {
     use crate::gfx_types::GameEvent;
-    let mut players = LocalPlayers::default();
-    players.keyboard = false;
+    let mut players = LocalPlayers {
+        keyboard: false,
+        ..Default::default()
+    };
     for which in 0..7 {
         let event = GameEvent::GamepadButton {
             which,

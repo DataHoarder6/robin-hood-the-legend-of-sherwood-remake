@@ -116,10 +116,10 @@ impl HttpTransport {
             }
             server.queue.lock().expect("RPC router poisoned").retire();
             #[cfg(all(feature = "script-rpc", not(target_arch = "wasm32")))]
-            if let Some(listener) = server.listener.take() {
-                if listener.join().is_err() {
-                    tracing::error!("script HTTP listener panicked during shutdown");
-                }
+            if let Some(listener) = server.listener.take()
+                && listener.join().is_err()
+            {
+                tracing::error!("script HTTP listener panicked during shutdown");
             }
         }
     }

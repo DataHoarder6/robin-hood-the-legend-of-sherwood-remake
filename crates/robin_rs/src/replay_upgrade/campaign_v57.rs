@@ -58,18 +58,20 @@ mod tests {
     use super::*;
     #[test]
     fn migrates_root_and_restart_configs_with_exact_cooperative_party() {
-        let mut campaign = Campaign::default();
-        campaign.peasant_names = vec!["retained".into()];
-        campaign.pre_mission_sim_config = Some(robin_engine::engine::SimConfig {
-            coop: robin_engine::coop::CoopRules {
-                players: 2,
-                team: [82, 82, 0, 0, 0],
-                assignments: [1, 0, 2, 3, 4],
+        let campaign = Campaign {
+            peasant_names: vec!["retained".into()],
+            pre_mission_sim_config: Some(robin_engine::engine::SimConfig {
+                coop: robin_engine::coop::CoopRules {
+                    players: 2,
+                    team: [82, 82, 0, 0, 0],
+                    assignments: [1, 0, 2, 3, 4],
+                    ..Default::default()
+                },
+                amount_of_speaking: 37,
                 ..Default::default()
-            },
-            amount_of_speaking: 37,
+            }),
             ..Default::default()
-        });
+        };
         let mut expected = serde_json::to_value(&campaign).unwrap();
         let mut snapshot = expected.clone();
         snapshot["pre_mission_sim_config"]["amount_of_speaking"] = 91.into();

@@ -48,12 +48,14 @@ mod tests {
     use super::*;
     #[test]
     fn migrates_root_and_restart_configs_with_solo_defaults() {
-        let mut campaign = Campaign::default();
-        campaign.peasant_names = vec!["retained".into()];
-        campaign.pre_mission_sim_config = Some(robin_engine::engine::SimConfig {
-            amount_of_speaking: 37,
+        let campaign = Campaign {
+            peasant_names: vec!["retained".into()],
+            pre_mission_sim_config: Some(robin_engine::engine::SimConfig {
+                amount_of_speaking: 37,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         let mut expected = serde_json::to_value(&campaign).unwrap();
         let mut snapshot = expected.clone();
         snapshot["pre_mission_sim_config"]["amount_of_speaking"] = 91.into();

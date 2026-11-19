@@ -271,9 +271,9 @@ mod tests {
         let mut rgba = Vec::new();
         rgb565_to_rgba_opaque(pixels.iter().copied(), &mut rgba);
         assert_eq!(rgba.len(), pixels.len() * 4);
-        for (pixel, color) in pixels.into_iter().zip(rgba.chunks_exact(4)) {
+        for (pixel, color) in pixels.into_iter().zip(rgba.as_chunks::<4>().0) {
             assert_eq!(
-                color,
+                *color,
                 [
                     ((pixel >> 11) << 3) as u8,
                     (((pixel >> 5) & 63) << 2) as u8,

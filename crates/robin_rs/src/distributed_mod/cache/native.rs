@@ -887,8 +887,10 @@ mod tests {
 
     #[test]
     fn native_index_json_layout_is_unchanged() {
-        let mut index = CacheIndex::default();
-        index.access_counter = 2;
+        let mut index = CacheIndex {
+            access_counter: 2,
+            ..Default::default()
+        };
         index.entries.insert(
             "0F".repeat(32),
             CacheIndexEntry {

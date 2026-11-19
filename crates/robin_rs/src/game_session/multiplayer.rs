@@ -2795,8 +2795,10 @@ mod tests {
                 rewind.begin_frame(frame, &manager.engine);
                 // Keep the synthetic PC out of world ticking; speech commands and
                 // sound boundary admission still run through the production engine.
-                let mut input = SimulationFrameInput::default();
-                input.simulation_body_allowed = false;
+                let input = SimulationFrameInput {
+                    simulation_body_allowed: false,
+                    ..Default::default()
+                };
                 manager
                     .engine
                     .advance_frame(&assets, input.clone())

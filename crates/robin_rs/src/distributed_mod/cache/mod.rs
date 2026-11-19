@@ -89,8 +89,10 @@ mod tests {
     #[test]
     fn flattened_index_matches_the_legacy_flat_json_layouts() {
         let key = "ab".repeat(32);
-        let mut native = CacheIndex::<NoExtension>::default();
-        native.access_counter = 7;
+        let mut native = CacheIndex::<NoExtension> {
+            access_counter: 7,
+            ..Default::default()
+        };
         native.entries.insert(
             key.clone(),
             CacheIndexEntry {

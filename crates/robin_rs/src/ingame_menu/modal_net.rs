@@ -641,7 +641,7 @@ mod tests {
         client.publish_frame(1);
         assert_eq!(
             client.take_ready_story_announcements(1).unwrap(),
-            [next_kind.clone()]
+            std::slice::from_ref(&next_kind)
         );
         let client_next = bind_modal(&client, next_kind, false);
         assert_eq!(client_next.instance(), next.instance());

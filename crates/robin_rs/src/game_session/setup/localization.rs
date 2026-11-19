@@ -150,8 +150,10 @@ mod tests {
             )
             .unwrap();
             let files = engine_sbfile::SbFileSystem::new(vfs);
-            let mut descriptors = assets_res_descr::LevelDescriptors::default();
-            descriptors.custom_popup_texts = vec![Some("original".into())];
+            let mut descriptors = assets_res_descr::LevelDescriptors {
+                custom_popup_texts: vec![Some("original".into())],
+                ..Default::default()
+            };
             let result =
                 apply_mission_descriptor_patch(&campaign, &profiles, &mut descriptors, &files);
             assert_eq!(result.is_ok(), succeeds);

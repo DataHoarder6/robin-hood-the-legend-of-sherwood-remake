@@ -1192,8 +1192,10 @@ fn preset_scroll_preserves_visibility_without_offset_overflow() {
 
 #[test]
 fn selecting_builtin_presets_clears_stale_import_feedback() {
-    let mut config = GraphicConfig::default();
-    config.shader_preset = "/tmp/imported.slangp".into();
+    let mut config = GraphicConfig {
+        shader_preset: "/tmp/imported.slangp".into(),
+        ..Default::default()
+    };
     for message in [
         "Imported preset validated",
         "Import failed: invalid preset",

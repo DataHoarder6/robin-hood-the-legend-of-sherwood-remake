@@ -17,6 +17,7 @@ use super::*;
 ///    future and this responder in the mission's bounded capture queue.
 /// 4. Consume this struct via [`PendingScreenshot::respond`], handing
 ///    over the pixels so the request replies with `image/png`.
+///
 /// Submission clears recorded commands; completion never borrows the live
 /// renderer. Ending the mission retires outstanding replies and readbacks.
 pub struct PendingScreenshot {

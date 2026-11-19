@@ -766,7 +766,7 @@ impl TerminalDebriefingState {
             let cursor = default_modal_cursor(
                 &mut context.presentation.sprites.cursor_renderer,
                 &mut context.resources.cursor,
-                &mut context.presentation.renderer,
+                &context.presentation.renderer,
             );
             state.show_waiting(
                 &mut ModalScreenIo {
@@ -787,7 +787,7 @@ impl TerminalDebriefingState {
         let cursor = default_modal_cursor(
             &mut context.presentation.sprites.cursor_renderer,
             &mut context.resources.cursor,
-            &mut context.presentation.renderer,
+            &context.presentation.renderer,
         );
         let Some(outcome) = state.tick(&mut ModalScreenIo {
             window: context.window,
@@ -866,7 +866,7 @@ impl TerminalDebriefingState {
         let cursor = default_modal_cursor(
             &mut context.presentation.sprites.cursor_renderer,
             &mut context.resources.cursor,
-            &mut context.presentation.renderer,
+            &context.presentation.renderer,
         );
         let outcome = picker.tick(
             &mut ModalScreenIo {

@@ -3615,15 +3615,17 @@ mod browser_tests {
 
     #[test]
     fn attack_artwork_lookup_preserves_catalogue_slots_and_missing_surfaces() {
-        let mut assets = CampaignMapAssets::default();
-        assets.attacks = std::array::from_fn(|index| {
-            Some(MenuSurface {
-                // Diagnostic handles are sufficient for lookup; this test never draws.
-                id: serde_json::from_value(serde_json::json!({"id": index + 1})).unwrap(),
-                width: 20 + index as i32,
-                height: 30 + index as i32,
-            })
-        });
+        let mut assets = CampaignMapAssets {
+            attacks: std::array::from_fn(|index| {
+                Some(MenuSurface {
+                    // Diagnostic handles are sufficient for lookup; this test never draws.
+                    id: serde_json::from_value(serde_json::json!({"id": index + 1})).unwrap(),
+                    width: 20 + index as i32,
+                    height: 30 + index as i32,
+                })
+            }),
+            ..Default::default()
+        };
         assert_eq!(ATTACK_RESOURCE_IDS.len(), ATTACK_POSITIONS.len());
         for (index, &resource_id) in ATTACK_RESOURCE_IDS.iter().enumerate() {
             let expected = assets.attacks[index].unwrap();

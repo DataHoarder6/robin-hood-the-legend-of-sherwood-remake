@@ -377,7 +377,9 @@ impl RustCallbacks {
         save_manager: SaveGameManager,
     ) -> Self {
         Self {
-            multiplayer_campaign: crate::multiplayer::MultiplayerCampaignSession::default(),
+            // A unit struct without the multiplayer transport and a stateful
+            // struct with it, so `Default` is the one spelling for both.
+            multiplayer_campaign: Default::default(),
             application_context,
             save_manager,
             autosave: AutosaveCoordinator::default(),

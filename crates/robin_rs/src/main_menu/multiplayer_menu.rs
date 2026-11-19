@@ -590,11 +590,11 @@ impl MultiplayerMenuState {
                 }
             }
             matchmaking::MatchmakingEvent::GameUpdated(updated) => {
-                if let MenuMode::Joined { game, .. } = &mut self.mode {
-                    if game.game_id == updated.id {
-                        self.coop = updated.coop;
-                        game.coop = updated.coop;
-                    }
+                if let MenuMode::Joined { game, .. } = &mut self.mode
+                    && game.game_id == updated.id
+                {
+                    self.coop = updated.coop;
+                    game.coop = updated.coop;
                 }
                 let updated = upsert_game(&mut self.games, updated);
                 match &mut self.mode {
@@ -803,33 +803,30 @@ impl MultiplayerMenuState {
                 h,
             );
         } else {
-            match &self.mode {
-                MenuMode::Games => {
-                    let can_join = self
-                        .games
-                        .get(self.selected)
-                        .is_some_and(|game| connected || game.state == "direct_invite");
-                    add(ID_JOIN, "Join game".into(), can_join, x, 76, w, h);
-                    add(
-                        ID_CREATE,
-                        "Host online".into(),
-                        connected,
-                        x,
-                        76 + h + 12,
-                        w,
-                        h,
-                    );
-                    add(
-                        ID_LOCAL,
-                        "Local co-op".into(),
-                        true,
-                        x,
-                        76 + 2 * (h + 12),
-                        w,
-                        h,
-                    );
-                }
-                _ => {}
+            if let MenuMode::Games = &self.mode {
+                let can_join = self
+                    .games
+                    .get(self.selected)
+                    .is_some_and(|game| connected || game.state == "direct_invite");
+                add(ID_JOIN, "Join game".into(), can_join, x, 76, w, h);
+                add(
+                    ID_CREATE,
+                    "Host online".into(),
+                    connected,
+                    x,
+                    76 + h + 12,
+                    w,
+                    h,
+                );
+                add(
+                    ID_LOCAL,
+                    "Local co-op".into(),
+                    true,
+                    x,
+                    76 + 2 * (h + 12),
+                    w,
+                    h,
+                );
             }
             if editing {
                 let mut y = 76;
@@ -1166,13 +1163,10 @@ impl MultiplayerMenuState {
                 }
             }
             if self.hero_setup || self.edit_assignments {
-                let key = self
-                    .input_state
-                    .gamepad_direction(event)
-                    .or_else(|| match event {
-                        GameEvent::KeyDown { keycode, .. } => Some(*keycode),
-                        _ => None,
-                    });
+                let key = self.input_state.gamepad_direction(event).or(match event {
+                    GameEvent::KeyDown { keycode, .. } => Some(*keycode),
+                    _ => None,
+                });
                 if let Some(
                     key @ (Keycode::Up
                     | Keycode::Down
@@ -1212,11 +1206,9 @@ impl MultiplayerMenuState {
                             self.scroll_view.reveal(self.selected);
                         }
                     }
-                    Keycode::Down => {
-                        if rows_len > 0 {
-                            self.selected = (self.selected + 1).min(rows_len - 1);
-                            self.scroll_view.reveal(self.selected);
-                        }
+                    Keycode::Down if rows_len > 0 => {
+                        self.selected = (self.selected + 1).min(rows_len - 1);
+                        self.scroll_view.reveal(self.selected);
                     }
                     _ => {}
                 }
@@ -1577,9 +1569,7 @@ impl MultiplayerMenuState {
                 },
             )
             .await;
-            let Some((slot, save)) = selected else {
-                return None;
-            };
+            let (slot, save) = selected?;
             let mut choice = self.missions[self.selected].clone();
             choice.load_save = false;
             choice.campaign_save = Some(slot);
@@ -2457,29 +2447,29 @@ impl MultiplayerMenuState {
         }
 
         scroll_view.draw_scrollbar(renderer, transform, resources);
-        if matches!(mode, MenuMode::Joined { .. }) {
-            if let Some(font) = resources.menu_text_font_any() {
-                render_text_virt_font(renderer, font, transform, "Host's mission team", 40, 118);
-                let usual = self
-                    .selected_mission()
-                    .and_then(|m| m.usual_team.as_deref());
-                for (slot, &code) in self.coop.team[..self.coop.team_len()].iter().enumerate() {
-                    let name = format!(
-                        "{}. {}",
-                        slot + 1,
-                        robin_engine::coop::team_character_name(code)
-                    );
-                    let y = 146 + slot as i32 * 46;
-                    render_text_virt_font(renderer, font, transform, &name, 40, y);
-                    let warning = match usual {
-                        Some(team) if !team.contains(char::from(code)) => {
-                            "! Not normally available in this mission"
-                        }
-                        None => "Usual team unknown for this mission.",
-                        _ => "",
-                    };
-                    render_text_virt_font(renderer, font, transform, warning, 40, y + 15);
-                }
+        if matches!(mode, MenuMode::Joined { .. })
+            && let Some(font) = resources.menu_text_font_any()
+        {
+            render_text_virt_font(renderer, font, transform, "Host's mission team", 40, 118);
+            let usual = self
+                .selected_mission()
+                .and_then(|m| m.usual_team.as_deref());
+            for (slot, &code) in self.coop.team[..self.coop.team_len()].iter().enumerate() {
+                let name = format!(
+                    "{}. {}",
+                    slot + 1,
+                    robin_engine::coop::team_character_name(code)
+                );
+                let y = 146 + slot as i32 * 46;
+                render_text_virt_font(renderer, font, transform, &name, 40, y);
+                let warning = match usual {
+                    Some(team) if !team.contains(char::from(code)) => {
+                        "! Not normally available in this mission"
+                    }
+                    None => "Usual team unknown for this mission.",
+                    _ => "",
+                };
+                render_text_virt_font(renderer, font, transform, warning, 40, y + 15);
             }
         }
 
@@ -2988,26 +2978,28 @@ mod tests {
     #[test]
     fn usual_roster_includes_recruited_alternatives_and_flags_early_heroes() {
         use super::*;
-        let mut profiles = engine_profiles::ProfileManager::default();
-        profiles.missions = vec![
-            engine_profiles::MissionProfile {
-                id: 1,
-                mission_filename: "S01_Not_VL".into(),
-                ..Default::default()
-            },
-            engine_profiles::MissionProfile {
-                id: 2,
-                mission_filename: "S02_Lei_MP".into(),
-                missions_required_to_be_done: vec![1],
-                ..Default::default()
-            },
-            engine_profiles::MissionProfile {
-                id: 3,
-                mission_filename: "H10_Yor_VL".into(),
-                missions_required_to_be_done: vec![2],
-                ..Default::default()
-            },
-        ];
+        let profiles = engine_profiles::ProfileManager {
+            missions: vec![
+                engine_profiles::MissionProfile {
+                    id: 1,
+                    mission_filename: "S01_Not_VL".into(),
+                    ..Default::default()
+                },
+                engine_profiles::MissionProfile {
+                    id: 2,
+                    mission_filename: "S02_Lei_MP".into(),
+                    missions_required_to_be_done: vec![1],
+                    ..Default::default()
+                },
+                engine_profiles::MissionProfile {
+                    id: 3,
+                    mission_filename: "H10_Yor_VL".into(),
+                    missions_required_to_be_done: vec![2],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
         assert_eq!(
             usual_mission_team(&profiles, "S01_Not_VL").as_deref(),
             Some("R")
@@ -3542,7 +3534,7 @@ mod visual_tests {
             let mut state = MultiplayerMenuState {
                 campaign_save: None,
                 coop: robin_engine::coop::CoopRules {
-                    team: [b'R', b'T', b'T', b'W', b'M'],
+                    team: *b"RTTWM",
                     ..Default::default()
                 },
                 local: true,
@@ -3619,7 +3611,7 @@ mod visual_tests {
                 state.coop.team = if matches!(view, "add-slot" | "invalid-team") {
                     [b'R', 0, 0, 0, 0]
                 } else {
-                    [b'R', b'T', b'T', b'W', b'M']
+                    *b"RTTWM"
                 };
                 state.team_slot = if view == "add-slot" { 1 } else { 4 };
                 state.mode = if view == "browser" {
@@ -3791,7 +3783,7 @@ mod visual_tests {
             [b'R', 0, 0, 0, 0],
             [b'R', b'R', 0, 0, 0],
             [b'R'; 5],
-            [b'M', b'T', b'R', b'J', b'W'],
+            *b"MTRJW",
         ] {
             let mut campaign = campaign.clone();
             campaign.current_mission_idx = Some(mission);
@@ -3857,7 +3849,7 @@ mod visual_tests {
                 titbit_row_frame_counts: Vec::new(),
                 rng_seed: 0,
                 original_rng_replay: None,
-                sim_config: config.clone(),
+                sim_config: config,
             })
             .unwrap();
             let party: Vec<_> = engine

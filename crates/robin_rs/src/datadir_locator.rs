@@ -468,10 +468,10 @@ pub fn resolve_datadir(exe_dir: Option<&Path>) -> DataDirResolution {
                 }
             }
         };
-        if let Some(chosen) = &chosen {
-            if let Err(error) = save_datadir(chosen) {
-                tracing::warn!("Could not remember selected game datadir: {error}");
-            }
+        if let Some(chosen) = &chosen
+            && let Err(error) = save_datadir(chosen)
+        {
+            tracing::warn!("Could not remember selected game datadir: {error}");
         }
         DataDirResolution::picked(chosen)
     }

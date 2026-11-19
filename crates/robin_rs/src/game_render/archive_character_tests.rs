@@ -235,7 +235,7 @@ pub(crate) fn capture(gpu: GpuContext, configuration: &std::path::Path) {
             .as_chunks::<4>()
             .0
             .iter()
-            .zip(after.chunks_exact(4))
+            .zip(after.as_chunks::<4>().0)
             .filter(|(a, b)| a != b)
             .count();
         let file =

@@ -1955,8 +1955,10 @@ mod tests {
         let data = robin_test_support::original_data::data_directory("");
         let (_, _, context) =
             crate::main_entry::rust_init_with_roots(Some(&data), Some(root)).unwrap();
-        let mut launch = crate::main_entry::LaunchConfig::default();
-        launch.global_options = context.clone().into();
+        let mut launch = crate::main_entry::LaunchConfig {
+            global_options: context.clone().into(),
+            ..Default::default()
+        };
         launch.cli.mp_browser_join_links = Some(false);
         let mut args = crate::main_entry::MissionRequest::from(launch);
         args.multiplayer.server = true;
@@ -2303,7 +2305,7 @@ mod tests {
         }
         .campaign_lobby();
         args.multiplayer.expected_players = Some(2);
-        let resumed = launch_sim_config(solo.clone(), &args).unwrap();
+        let resumed = launch_sim_config(solo, &args).unwrap();
         assert!(resumed.coop.campaign);
         assert_eq!(resumed.coop.players, 2);
         assert_eq!(resumed.coop.control, CharacterControl::Shared);
@@ -2312,7 +2314,7 @@ mod tests {
         // No party size means no lobby words to install: the slot's own
         // configuration is what runs.
         args.multiplayer.expected_players = None;
-        assert_eq!(launch_sim_config(solo.clone(), &args).unwrap(), solo);
+        assert_eq!(launch_sim_config(solo, &args).unwrap(), solo);
 
         args.multiplayer.expected_players = Some(6);
         assert!(launch_sim_config(solo, &args).is_err());

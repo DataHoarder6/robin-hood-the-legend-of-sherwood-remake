@@ -98,14 +98,16 @@ mod tests {
 
     #[test]
     fn migrates_root_and_restart_configs_without_changing_campaign_state() {
-        let mut campaign = Campaign::default();
-        campaign.peasant_names = vec!["retained name".into()];
-        campaign.pre_mission_rng_seed = Some(1234567);
-        campaign.pre_mission_sim_config = Some(robin_engine::engine::SimConfig {
-            amount_of_speaking: 37,
-            synchronous_pathfinding: true,
+        let campaign = Campaign {
+            peasant_names: vec!["retained name".into()],
+            pre_mission_rng_seed: Some(1234567),
+            pre_mission_sim_config: Some(robin_engine::engine::SimConfig {
+                amount_of_speaking: 37,
+                synchronous_pathfinding: true,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         let mut expected = serde_json::to_value(&campaign).unwrap();
         let mut snapshot = expected.clone();
         snapshot["pre_mission_sim_config"]["amount_of_speaking"] = 91.into();
