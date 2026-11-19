@@ -1,23 +1,39 @@
-//! Mission won / lost / aborted transient popup.
+//! Mission won / lost / quit transient popup.
 //!
 //! Creates a 629x480 frame window with the small menu background
-//! inside, plays a scaling open/close transition from the source
-//! button position, and on open advances a frame-driven Yes/No
-//! confirmation prompt. Reports `true` when the player confirms.
+//! inside, flies the panel in from the right edge, and on open advances a
+//! frame-driven confirmation prompt. Reports `true` when the player confirms.
 
 use crate::ingame_menu::widget_bridge::{ModalScreenIo, ScreenFrame};
 use crate::renderer::Renderer;
 
-use super::MissionEndKind;
 use super::layout::{
-    MENU_H, MENU_W, MenuRect, MenuTransform, TextAlign, VAlign, draw_background,
-    render_clipped_text_in_box_font,
+    draw_background, render_clipped_text_in_box_font, MenuRect, MenuTransform, TextAlign, VAlign,
+    MENU_H, MENU_W,
 };
 use super::resources::IngameMenuResources;
-use super::yesno::YesNoModalState;
+use super::yesno::{ConfirmButtons, YesNoModalState};
+use super::MissionEndKind;
 
-const TRANSITION_SPEED: f32 = 1.5;
-const INV_TRANSITION_SPEED: f32 = 1.0 / TRANSITION_SPEED;
+/// The panel travels the short distance from the right edge in nine ticks
+/// (~150 ms at 60 Hz), rather than growing from wherever a button happened
+/// to sit. Dismissal is quicker still: six ticks back to the same edge.
+const OPEN_TICKS: f32 = 9.0;
+const CLOSE_TICKS: f32 = 6.0;
+
+fn final_x() -> i32 {
+    (MENU_W - POPUP_W) / 2
+}
+
+fn fly_in_x(progress: f32) -> i32 {
+    let t = 1.0 - (1.0 - progress.clamp(0.0, 1.0)).powi(3);
+    MENU_W + ((final_x() - MENU_W) as f32 * t) as i32
+}
+
+fn fly_out_x(progress: f32) -> i32 {
+    let t = progress.clamp(0.0, 1.0).powi(2);
+    final_x() + ((MENU_W - final_x()) as f32 * t) as i32
+}
 
 /// Popup small-background dimensions.
 const POPUP_W: i32 = 400;
@@ -42,11 +58,11 @@ enum MissionStatePopupPhase {
     Done,
 }
 
-/// One-frame state for the mission-end popup.
+/// One-frame state for the mission won/lost/aborted popup.
 pub struct MissionStatePopupState {
     message: String,
     end: MissionEndKind,
-    source_button: Option<(i32, i32, i32, i32)>,
+    buttons: ConfirmButtons,
     phase: MissionStatePopupPhase,
 }
 
@@ -56,20 +72,19 @@ impl MissionStatePopupState {
         resources: &IngameMenuResources,
         message: String,
         end: MissionEndKind,
-        source_button: Option<(i32, i32, i32, i32)>,
+        buttons: ConfirmButtons,
     ) -> Self {
         let phase = MissionStatePopupPhase::Opening(MissionStateTransition::new(
             renderer,
             resources,
             &message,
             end,
-            source_button,
             TransitionDirection::Open,
         ));
         Self {
             message,
             end,
-            source_button,
+            buttons,
             phase,
         }
     }
@@ -78,13 +93,15 @@ impl MissionStatePopupState {
         match &mut self.phase {
             MissionStatePopupPhase::Opening(transition) => {
                 if transition.tick(io) {
-                    self.phase =
-                        MissionStatePopupPhase::Confirming(Box::new(YesNoModalState::new(
+                    self.phase = MissionStatePopupPhase::Confirming(Box::new(
+                        YesNoModalState::new_with_buttons(
                             io.window,
                             io.renderer,
                             io.resources,
                             self.message.clone(),
-                        )));
+                            self.buttons,
+                        ),
+                    ));
                 }
                 None
             }
@@ -99,7 +116,6 @@ impl MissionStatePopupState {
                             io.resources,
                             &self.message,
                             self.end,
-                            self.source_button,
                             TransitionDirection::Close,
                         ));
                         None
@@ -123,13 +139,8 @@ impl MissionStatePopupState {
 
 struct MissionStateTransition {
     transform: MenuTransform,
-    src_vx: i32,
-    src_vy: i32,
-    src_vw: i32,
-    src_vh: i32,
-    final_x: i32,
     final_y: i32,
-    counter: f32,
+    elapsed_ticks: f32,
     title: String,
     message: String,
     direction: TransitionDirection,
@@ -140,44 +151,23 @@ impl MissionStateTransition {
         renderer: &Renderer,
         resources: &IngameMenuResources,
         message: &str,
-        end: MissionEndKind,
-        source_button: Option<(i32, i32, i32, i32)>,
+        won: bool,
         direction: TransitionDirection,
     ) -> Self {
         let transform = MenuTransform::for_renderer(renderer);
-
-        // Final (fully-open) virtual rectangle, centred in the menu.
-        let final_x = (MENU_W - POPUP_W) / 2;
         let final_y = (MENU_H - POPUP_H) / 2;
 
-        // Start (collapsed) rectangle — the source button in screen pixels
-        // converted back to virtual coordinates.  When no source button is
-        // supplied, fall back to a 1x1 point at the final centre so the
-        // animation still runs for code paths (e.g. mission end) that do
-        // not have a triggering button.
-        let (src_vx, src_vy, src_vw, src_vh) = source_button
-            .map(|(sx, sy, sw_btn, sh_btn)| {
-                let (vx, vy) = transform.from_screen(sx, sy);
-                (vx, vy, sw_btn, sh_btn)
-            })
-            .unwrap_or((final_x + POPUP_W / 2, final_y + POPUP_H / 2, 1, 1));
-
-        let counter: f32 = match direction {
-            TransitionDirection::Open => TRANSITION_SPEED,
-            TransitionDirection::Close => 0.05,
+        let title_id = if won {
+            MT_TTL_MISSION_WON
+        } else {
+            MT_TTL_MISSION_LOST
         };
-
-        let title = resources.menu_text.get(end.title_id());
+        let title = resources.menu_text.get(title_id);
 
         Self {
             transform,
-            src_vx,
-            src_vy,
-            src_vw,
-            src_vh,
-            final_x,
             final_y,
-            counter,
+            elapsed_ticks: 0.0,
             title,
             message: message.to_string(),
             direction,
@@ -185,22 +175,14 @@ impl MissionStateTransition {
     }
 
     fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> bool {
-        // Exponential decay:
-        //   open:  counter *= INV_TRANSITION_SPEED
-        //   close: counter *= TRANSITION_SPEED
-        match self.direction {
-            TransitionDirection::Open => {
-                self.counter *= INV_TRANSITION_SPEED;
-                if self.counter < 0.03 {
-                    return true;
-                }
-            }
-            TransitionDirection::Close => {
-                self.counter *= TRANSITION_SPEED;
-                if self.counter >= 0.8 {
-                    return true;
-                }
-            }
+        let duration = match self.direction {
+            TransitionDirection::Open => OPEN_TICKS,
+            TransitionDirection::Close => CLOSE_TICKS,
+        };
+        self.elapsed_ticks += 1.0;
+        let progress = self.elapsed_ticks / duration;
+        if progress >= 1.0 {
+            return true;
         }
 
         // Drain pending input so the OS doesn't think the window is hung, and
@@ -208,35 +190,25 @@ impl MissionStateTransition {
         let screen = ScreenFrame::poll(io);
         self.transform = screen.transform;
 
-        // Interpolate bounds: destination = source + (final - source) * (1 - counter)
-        let t = (1.0_f32 - self.counter.min(1.0)).clamp(0.0, 1.0);
-        let tl_x = self.src_vx + ((self.final_x - self.src_vx) as f32 * t) as i32;
-        let tl_y = self.src_vy + ((self.final_y - self.src_vy) as f32 * t) as i32;
-        let br_x = (self.src_vx + self.src_vw)
-            + ((self.final_x + POPUP_W - (self.src_vx + self.src_vw)) as f32 * t) as i32;
-        let br_y = (self.src_vy + self.src_vh)
-            + ((self.final_y + POPUP_H - (self.src_vy + self.src_vh)) as f32 * t) as i32;
-        let cur_w = (br_x - tl_x).max(1);
-        let cur_h = (br_y - tl_y).max(1);
+        let (tl_x, tl_y) = match self.direction {
+            TransitionDirection::Open => (fly_in_x(progress), self.final_y),
+            TransitionDirection::Close => (fly_out_x(progress), self.final_y),
+        };
 
         let renderer = &mut *io.renderer;
         let resources = io.resources;
         screen.begin_draw(renderer);
 
         if let Some(bg) = resources.menu_bg_small {
-            draw_background(renderer, self.transform, &bg, tl_x, tl_y, cur_w, cur_h);
+            draw_background(renderer, self.transform, &bg, tl_x, tl_y, POPUP_W, POPUP_H);
         }
 
-        // Title + body draw every frame in both directions.  We don't
-        // bake a snapshot of the fully-open popup; instead we scale the
-        // text-box origin/size in proportion to the current popup rect
-        // so the body stays inside the shrinking frame.
-        let scale_x = cur_w as f32 / POPUP_W as f32;
-        let scale_y = cur_h as f32 / POPUP_H as f32;
+        // The panel keeps its full size throughout the flight: the motion is
+        // a translation from the right edge, never a scale from the centre.
         if let Some(font) = resources.title_font_any() {
             let tw = font.text_width(&self.title);
-            let tx = tl_x + (cur_w - tw) / 2;
-            let ty = tl_y + (20.0 * scale_y) as i32;
+            let tx = tl_x + (POPUP_W - tw) / 2;
+            let ty = tl_y + 20;
             super::layout::render_text_virt_font(
                 renderer,
                 font,
@@ -253,10 +225,10 @@ impl MissionStateTransition {
                 self.transform,
                 &self.message,
                 MenuRect {
-                    x: tl_x + (TEXT_X as f32 * scale_x) as i32,
-                    y: tl_y + (TEXT_Y as f32 * scale_y) as i32,
-                    w: (TEXT_W as f32 * scale_x) as i32,
-                    h: (TEXT_H as f32 * scale_y) as i32,
+                    x: tl_x + TEXT_X,
+                    y: tl_y + TEXT_Y,
+                    w: TEXT_W,
+                    h: TEXT_H,
                 },
                 TextAlign::Center,
                 VAlign::Top,
@@ -273,5 +245,31 @@ impl MissionStateTransition {
 
         io.renderer.present();
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn popup_flies_in_from_the_right_edge_and_eases_out() {
+        let final_x = (MENU_W - POPUP_W) / 2;
+        assert_eq!(fly_in_x(0.0), MENU_W);
+        assert_eq!(fly_in_x(1.0), final_x);
+        let quarter = fly_in_x(0.25) as f32;
+        let linear_quarter = MENU_W as f32 + (final_x - MENU_W) as f32 * 0.25;
+        assert!(
+            quarter < linear_quarter,
+            "ease-out must cover more of the distance than a linear pan"
+        );
+    }
+
+    #[test]
+    fn popup_flies_back_to_the_right_edge_on_dismiss() {
+        let final_x = (MENU_W - POPUP_W) / 2;
+        assert_eq!(fly_out_x(0.0), final_x);
+        assert_eq!(fly_out_x(1.0), MENU_W);
+        assert!(fly_out_x(0.5) < (final_x + MENU_W) / 2);
     }
 }

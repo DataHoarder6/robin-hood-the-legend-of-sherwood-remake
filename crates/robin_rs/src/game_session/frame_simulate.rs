@@ -16,6 +16,7 @@ use super::ui_task_state::{ActiveUiTask, UiTaskKind, UiTaskOutcome};
 use super::*;
 use crate::game::Game;
 use crate::host::HostSignal;
+use crate::ingame_menu::ConfirmButtons;
 use crate::ingame_menu::widget_bridge::ModalScreenIo;
 use crate::ingame_menu::widget_bridge::default_modal_cursor;
 
@@ -774,6 +775,17 @@ fn leave_prompt(
     (end, menu_text.get(end.leave_prompt_id()))
 }
 
+/// The first campaign mission has nowhere to go back to: its final dialogue
+/// only offers "leave now". Showing a cancel seal promises a choice that does
+/// not exist, and both seals currently complete the mission anyway.
+fn leave_prompt_buttons(mission_name: Option<&str>) -> ConfirmButtons {
+    if mission_name == Some("H01_Lin_VL") {
+        ConfirmButtons::YesOnly
+    } else {
+        ConfirmButtons::YesNo
+    }
+}
+
 /// Drive the mission-state leave/abandon confirmation after scripted modal
 /// lanes: the engine's first "you may leave now" banner and the rail's ✗
 /// both raise the same signal.
@@ -818,7 +830,7 @@ fn drive_leave_mission_prompt(
                     menu_resources,
                     message,
                     end,
-                    None,
+                    leave_prompt_buttons(assets.scripts.mission_name.as_deref()),
                 ),
                 replay_result,
                 dismissal: crate::ingame_menu::modal_net::ModalDismissalGate::default(),
@@ -1858,7 +1870,8 @@ fn manual_step_ui_block_reason(
 #[cfg(test)]
 mod tests {
     use super::{
-        ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, leave_prompt, ui_task_modal_admission,
+        ConfirmButtons, ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, leave_prompt,
+        ui_task_modal_admission,
     };
 
     /// Distinct markers in the two question slots prove which retail entry
@@ -2055,6 +2068,21 @@ mod tests {
                 assert_eq!(step.admitted(gate.0, gate.1, gate.2), None);
             }
         }
+    }
+
+    #[test]
+    fn first_mission_leave_prompt_offers_only_the_confirm_button() {
+        use super::leave_prompt_buttons;
+
+        assert_eq!(
+            leave_prompt_buttons(Some("H01_Lin_VL")),
+            ConfirmButtons::YesOnly
+        );
+        assert_eq!(
+            leave_prompt_buttons(Some("H02_Not_EC")),
+            ConfirmButtons::YesNo
+        );
+        assert_eq!(leave_prompt_buttons(None), ConfirmButtons::YesNo);
     }
 
     #[test]

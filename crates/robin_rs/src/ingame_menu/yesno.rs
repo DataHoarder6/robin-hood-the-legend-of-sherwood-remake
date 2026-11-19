@@ -91,6 +91,15 @@ pub enum YesNoChoice {
     No,
 }
 
+/// Which wax seals a confirmation offers. A mission that can only be left
+/// offers the confirm seal alone; the cancel seal would promise a choice the
+/// mission does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmButtons {
+    YesNo,
+    YesOnly,
+}
+
 /// Display the modal confirmation dialog.  Returns `true` if the player
 /// chose Yes (or pressed Return / Numpad Enter), `false` if the player
 /// chose No (or pressed Escape / closed the window).
@@ -122,6 +131,22 @@ impl YesNoModalState {
         resources: &IngameMenuResources,
         message: String,
     ) -> Self {
+        Self::new_with_buttons(
+            event_pump,
+            renderer,
+            resources,
+            message,
+            ConfirmButtons::YesNo,
+        )
+    }
+
+    pub fn new_with_buttons(
+        event_pump: &crate::window::GameWindow,
+        renderer: &Renderer,
+        resources: &IngameMenuResources,
+        message: String,
+        buttons: ConfirmButtons,
+    ) -> Self {
         let transform = MenuTransform::for_renderer(renderer);
 
         let win_x = (super::layout::MENU_W - WIN_W) / 2;
@@ -131,7 +156,10 @@ impl YesNoModalState {
         // get the max intrinsic size so they render at native
         // dimensions when centred as a pair.
         let (btn_w, btn_h) = resources.seal_pair_dimensions(SealButton::Ok, SealButton::Cancel);
-        let n = 2i32;
+        let n = match buttons {
+            ConfirmButtons::YesNo => 2,
+            ConfirmButtons::YesOnly => 1,
+        };
         let total_w = n * btn_w + (n - 1) * BUTTON_GAP;
         let start_x = win_x + (WIN_W - total_w) / 2;
         let btn_y = win_y + 130;
@@ -149,16 +177,18 @@ impl YesNoModalState {
             btn_w,
             btn_h,
         ));
-        frame.add_widget_absolute(widget_bridge::make_button_with_resource(
-            ID_NO,
-            "",
-            true,
-            robin_engine::resource_ids::RHID_CANCEL,
-            start_x + btn_w + BUTTON_GAP,
-            btn_y,
-            btn_w,
-            btn_h,
-        ));
+        if buttons == ConfirmButtons::YesNo {
+            frame.add_widget_absolute(widget_bridge::make_button_with_resource(
+                ID_NO,
+                "",
+                true,
+                robin_engine::resource_ids::RHID_CANCEL,
+                start_x + btn_w + BUTTON_GAP,
+                btn_y,
+                btn_w,
+                btn_h,
+            ));
+        }
         // Per-pixel hit masks so the transparent corners around each
         // round seal don't capture clicks.
         widget_bridge::attach_alpha_masks(&mut frame, resources, renderer);
@@ -179,10 +209,12 @@ impl YesNoModalState {
         // original shortcut-only dialog behavior.
         let mut focus = FrameButtonFocusManager::new();
         focus.add_button(&frame, ID_YES);
-        focus.add_button(&frame, ID_NO);
         focus.add_shortcut(ID_YES, KeyCode::Enter);
         focus.add_shortcut(ID_YES, KeyCode::NumpadEnter);
-        focus.add_shortcut(ID_NO, KeyCode::Escape);
+        if buttons == ConfirmButtons::YesNo {
+            focus.add_button(&frame, ID_NO);
+            focus.add_shortcut(ID_NO, KeyCode::Escape);
+        }
 
         let input_state = ModalInputState::from_window(event_pump, transform);
 
