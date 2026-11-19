@@ -1,6 +1,7 @@
 //! RPC request/reply payload types and their internal routing classification.
 
 use super::*;
+use robin_engine::game_operation::MissionResult;
 
 fn default_true() -> bool {
     true
@@ -141,6 +142,10 @@ pub enum HttpPayload {
     /// toggle the single-player mission loop's manual pause flag. Live
     /// multiplayer rejects local pause changes.
     SetPaused { paused: bool },
+    /// `POST /mission-result` — end the running mission with the decision's
+    /// own quit flag, so the tick, the terminal flow and the campaign handoff
+    /// are the ones a script-driven end reaches.
+    MissionResult(MissionResult),
     /// `GET /get-replay` — snapshot the current recorder's byte stream and
     /// export the one canonical compact-bitcode replay. Served from a bounded
     /// in-memory spool populated by the recorder's tee-writer, so native and
@@ -176,6 +181,7 @@ pub(super) enum CommandRequest {
         description: String,
         note: String,
     },
+    MissionResult(MissionResult),
 }
 
 pub(super) enum DeferredRequest {
@@ -212,6 +218,9 @@ impl HttpPayload {
             Self::Command(command) => RoutedRequest::Command(CommandRequest::Player(command)),
             Self::BugReport { description, note } => {
                 RoutedRequest::Command(CommandRequest::BugReport { description, note })
+            }
+            Self::MissionResult(result) => {
+                RoutedRequest::Command(CommandRequest::MissionResult(result))
             }
             Self::Screenshot(request) => {
                 RoutedRequest::Deferred(DeferredRequest::Screenshot(request))
@@ -345,6 +354,9 @@ pub(super) fn ranked_input_taint(payload: &HttpPayload) -> Option<InputTaintKind
         HttpPayload::Native { .. } | HttpPayload::Batch(_) => {
             Some(InputTaintKind::HttpStateMutation)
         }
+        // The decision is a developer trigger, so a session it ends is not a
+        // rankable run even though it ends through the mission's own path.
+        HttpPayload::MissionResult(_) => Some(InputTaintKind::HttpStateMutation),
         HttpPayload::Console(_) => Some(InputTaintKind::ConsoleCommand),
         HttpPayload::Command(_) => Some(InputTaintKind::HttpPlayerCommand),
         HttpPayload::StepForward { .. }

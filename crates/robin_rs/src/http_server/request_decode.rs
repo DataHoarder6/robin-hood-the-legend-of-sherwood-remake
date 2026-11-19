@@ -8,6 +8,7 @@ use super::{
     HttpPayload, NativeCall, PlayerCommand, RpcError, ScreenshotRequest, StepModalPolicy,
     StepRequest,
 };
+use robin_engine::game_operation::MissionResult;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +29,7 @@ pub(super) enum RequestKind {
     SetPaused,
     GetReplay,
     LoadReplay,
+    MissionResult,
 }
 
 impl RequestKind {
@@ -49,6 +51,7 @@ impl RequestKind {
             "set-paused" => Self::SetPaused,
             "get-replay" => Self::GetReplay,
             "load-replay" => Self::LoadReplay,
+            "mission-result" => Self::MissionResult,
             _ => return None,
         })
     }
@@ -84,6 +87,15 @@ struct GoToBody {
 #[derive(Serialize, Deserialize)]
 struct SetPausedBody {
     paused: bool,
+}
+
+/// The mission-end decision names a result, never a `GameCode`: the code is
+/// the engine's answer, which is why the body cannot choose one. An unknown
+/// field is a mistake in the driver, not a value to ignore.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MissionResultBody {
+    result: MissionResult,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -219,6 +231,9 @@ fn decode(kind: RequestKind, params: Parameters<'_>) -> Result<HttpPayload, RpcE
         RequestKind::SetPaused => HttpPayload::SetPaused {
             paused: params.decode::<SetPausedBody>()?.paused,
         },
+        RequestKind::MissionResult => {
+            HttpPayload::MissionResult(params.decode::<MissionResultBody>()?.result)
+        }
         RequestKind::LoadReplay => {
             let body: LoadReplayBody = params.decode()?;
             crate::replay_format::preflight_compact_transport(
@@ -306,6 +321,7 @@ mod tests {
                 modal_policy,
             } => serde_json::json!([target, checkpoint_only, modal_policy]),
             HttpPayload::SetPaused { paused } => serde_json::json!(paused),
+            HttpPayload::MissionResult(result) => serde_json::json!(result),
             HttpPayload::LoadReplay { data, paused } => serde_json::json!([data, paused]),
             _ => panic!("add field comparison for the new decoder fixture"),
         }
@@ -334,6 +350,18 @@ mod tests {
             ),
             ("set-paused", serde_json::json!({"paused":true}), true),
             ("set-paused", serde_json::json!({}), false),
+            ("mission-result", serde_json::json!({"result":"lost"}), true),
+            (
+                "mission-result",
+                serde_json::json!({"result":"draw"}),
+                false,
+            ),
+            ("mission-result", serde_json::json!({}), false),
+            (
+                "mission-result",
+                serde_json::json!({"result":"won","code":"quit"}),
+                false,
+            ),
             (
                 "load-replay",
                 serde_json::json!({"data":"not a replay"}),

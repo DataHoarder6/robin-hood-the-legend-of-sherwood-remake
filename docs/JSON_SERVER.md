@@ -96,8 +96,8 @@ the seats whose acknowledgement the host's commit still waits for.
 
 `presentation` is what the peer is looking at and waiting on, or `null` when
 nothing blocks it. The terminal flow publishes the same decision order it
-validates `/command` dismissals against, so a client can send the exact
-`ModalDismiss` without guessing an index:
+validates a typed dismissal against, so a driver can dismiss the page with the
+exact kind without guessing a text index:
 
 ```json
 {"presentation": {
@@ -258,6 +258,50 @@ answer names the reserved bundle directory and whether an upload endpoint is
 configured; the bundle itself is written at the next mission frame boundary.
 The bundle's layout, its upload and the receiver's contract:
 [BUG_REPORTS.md](BUG_REPORTS.md).
+
+### Ending the running mission
+
+`POST /mission-result` ends the mission with the decision a script, a lost
+blazon or the quit confirmation would reach. The body names the result, never a
+`GameCode`: the code is the engine's answer.
+
+```json
+{"result": "won"}
+```
+
+`won`, `lost` and `aborted` queue one deterministic command,
+`PlayerCommand::ForceMissionEnd`, which latches the mission's own quit flag. The
+next tick returns `LevelSucceeded`, `LevelFailed` or `LevelInterrupted`, runs
+`finalize_mission_script`, and hands the session to the terminal debriefing, the
+leaderboard and the campaign handoff unchanged. `aborted` is the same flag
+`QuitMissionRequested` sets, which is why an abandoned mission reads the level's
+retreat debriefing instead of a defeat.
+
+The command is the point: a mission end is a session fact, so in a live session
+the host's decision rides the command stream to every seat, which latches the
+same flag at the same frame. A host-local mutation would end one machine's
+mission and leave the peers simulating a mission that no longer exists.
+
+The reply names what the next tick will return:
+
+```json
+{"ok": true, "result": "won", "operation": "level_succeeded"}
+```
+
+Two refusals are explicit, because either would otherwise read as a no-op that
+ended nothing: a client in a live session is refused by name, since only the
+host may end the mission (the same command posted straight to `/command` is
+refused by the engine's seat check), and a request with no mission running gets
+the same "engine not ready" answer every mission-scoped endpoint gives between
+missions. A second trigger after the mission ended is the same decision arriving
+twice, so it is a no-op rather than a second ending.
+
+The request taints the replay as an HTTP state mutation, so a session it ended
+is not a rankable run.
+
+The terminal page that follows is dismissed with `POST /step-forward`'s typed
+dismissal (below): read `/state.presentation.kind` and send that exact kind with
+the `DialogResult` you want.
 
 ## Screenshots
 

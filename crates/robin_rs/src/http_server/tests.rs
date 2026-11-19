@@ -588,6 +588,93 @@ mod dispatch_tests {
         }
     }
 
+    /// The developer trigger ends the mission through the flag the mission
+    /// phase reads, so the code — and everything the session stages from it —
+    /// is the mission's own, not the request's. The decision is a command:
+    /// every seat applies it, which is what makes a mission end a session fact.
+    #[test]
+    fn a_mission_result_queues_the_mission_end_command_its_tick_reads() {
+        use robin_engine::game_operation::{GameCode, MissionResult};
+        use robin_engine::player_command::{PlayerCommand, PlayerId};
+        for (result, name, code) in [
+            (MissionResult::Won, "won", GameCode::LevelSucceeded),
+            (MissionResult::Lost, "lost", GameCode::LevelFailed),
+            (
+                MissionResult::Aborted,
+                "aborted",
+                GameCode::LevelInterrupted,
+            ),
+        ] {
+            let (mut engine, assets) =
+                robin_engine::test_support::fresh_engine_sized(1024.0, 768.0);
+            let mut ingress = SessionIngress::detached_for_test();
+            let reply = ingress.enqueue_for_test(HttpPayload::MissionResult(result));
+            let mut selected = None;
+            let queued = ingress.drain_headless(&mut engine, &assets, &mut selected);
+            let Ok(ReplyBody::Json(document)) = reply.try_recv().unwrap() else {
+                panic!("{name}: the request answers with its admission document");
+            };
+            assert_eq!(document["result"], name);
+            assert_eq!(
+                document["operation"],
+                code.wire_name(),
+                "{name}: the reply names the code the tick will return"
+            );
+            assert_eq!(
+                queued.commands.len(),
+                1,
+                "{name}: the trigger is one command, not a host-local mutation"
+            );
+            assert_eq!(queued.commands[0].player_id, PlayerId::HOST);
+            assert!(
+                matches!(
+                    queued.commands[0].command,
+                    PlayerCommand::ForceMissionEnd { result: queued } if queued == result
+                ),
+                "{name}: the queued command carries the decision"
+            );
+            // The command frame only latches the flag; the mission phase of the
+            // next tick is what turns it into the code.
+            let latched = engine
+                .advance_frame(
+                    &assets,
+                    engine_api::SimulationFrameInput::new(
+                        queued.commands.into_iter().map(Into::into).collect(),
+                    ),
+                )
+                .expect("apply the mission-end command");
+            assert_eq!(latched.game_code(), GameCode::LevelInProgress, "{name}");
+            let output = engine
+                .advance_frame(&assets, engine_api::SimulationFrameInput::default())
+                .expect("advance past the latched mission-end flag");
+            assert_eq!(
+                output.game_code(),
+                code,
+                "{name}: the tick returns the code"
+            );
+        }
+    }
+
+    /// No mission is a refusal with a reason, never a silent no-op that leaves
+    /// a driver believing it ended something.
+    #[test]
+    fn a_mission_result_is_refused_while_no_mission_session_exists() {
+        let router: Queue = Arc::new(Mutex::new(RequestRouter::default()));
+        let (response_tx, reply) = Responder::channel();
+        router.lock().unwrap().push_back(HttpRequest {
+            payload: HttpPayload::MissionResult(robin_engine::game_operation::MissionResult::Lost),
+            response_tx,
+        });
+        assert!(
+            matches!(
+                reply.try_recv().unwrap(),
+                Err(error) if error.kind == RpcErrorKind::UnavailableCapability
+                    && error.message.contains("engine not ready")
+            ),
+            "a mission-end request with no mission is an explicit error"
+        );
+    }
+
     #[test]
     fn headless_diagnostic_policy_omits_rng_without_mutating_live_engine() {
         for graphical in [false, true] {
@@ -772,6 +859,10 @@ mod dispatch_tests {
                     args: vec![100],
                     this: None,
                 }]),
+                InputTaintKind::HttpStateMutation,
+            ),
+            (
+                HttpPayload::MissionResult(robin_engine::game_operation::MissionResult::Lost),
                 InputTaintKind::HttpStateMutation,
             ),
             (

@@ -55,6 +55,18 @@ impl NativeRequest {
         url: impl Into<String>,
         listen_port: u16,
     ) -> Self {
+        Self::test_request_with_body(method, url, listen_port, Bytes::new())
+    }
+
+    /// The same request with an acquired body, for routes whose decoder is
+    /// what the test is about.
+    #[cfg(test)]
+    pub(super) fn test_request_with_body(
+        method: hyper::Method,
+        url: impl Into<String>,
+        listen_port: u16,
+        body: Bytes,
+    ) -> Self {
         let mut headers = hyper::HeaderMap::new();
         headers.insert(
             hyper::header::HOST,
@@ -66,8 +78,8 @@ impl NativeRequest {
             url: url.into(),
             method,
             headers,
-            declared_length: None,
-            body: Bytes::new(),
+            declared_length: Some(body.len()),
+            body,
         }
     }
 

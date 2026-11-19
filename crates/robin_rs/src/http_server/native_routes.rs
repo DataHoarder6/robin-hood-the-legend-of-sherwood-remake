@@ -33,8 +33,8 @@ fn classify(method: &Method, path: &str) -> Option<Route> {
         (&Method::GET, "/host-debug" | "/level-assets" | "/script" | "/get-replay")
         | (
             &Method::POST,
-            "/native" | "/batch" | "/console" | "/command" | "/step-forward" | "/step-back"
-            | "/go-to-frame" | "/set-paused" | "/load-replay",
+            "/native" | "/batch" | "/console" | "/command" | "/mission-result" | "/step-forward"
+            | "/step-back" | "/go-to-frame" | "/set-paused" | "/load-replay",
         ) => Route::Rpc(RequestKind::from_method(&path[1..]).expect("classified RPC method")),
         _ => return None,
     })
@@ -230,6 +230,32 @@ mod tests {
         );
     }
 
+    /// The mission-end body is validated by the route's own decoder, so an
+    /// unknown result is a 400 with the decoder's reason — never a payload the
+    /// mission queue has to interpret.
+    #[test]
+    fn a_mission_result_body_is_decoded_by_the_route() {
+        let queue: Queue = Arc::new(Mutex::new(RequestRouter::default()));
+        let port = 7731;
+        let request = NativeRequest::test_request_with_body(
+            Method::POST,
+            "/mission-result",
+            port,
+            hyper::body::Bytes::from_static(br#"{"result":"draw"}"#),
+        );
+        let (status, body) = futures::executor::block_on(dispatch(request, &queue, port));
+        assert_eq!(status, 400);
+        let ReplyBody::Json(document) = body else {
+            panic!("a rejected body answers with a JSON error");
+        };
+        let message = document["error"].as_str().expect("the error names itself");
+        assert!(message.starts_with("bad json: "), "{message}");
+        assert_eq!(
+            body_limit(&Method::POST, "/mission-result"),
+            Some(64 * 1024)
+        );
+    }
+
     #[test]
     fn route_body_policy_preserves_native_aliases_and_rejects_unknown_routes() {
         for path in [
@@ -253,6 +279,7 @@ mod tests {
             "/native",
             "/console",
             "/command",
+            "/mission-result",
             "/step-forward",
             "/step-back",
             "/go-to-frame",

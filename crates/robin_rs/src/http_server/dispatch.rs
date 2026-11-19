@@ -98,6 +98,7 @@ impl SessionIngress {
                         assets,
                         selected_view_element,
                         net,
+                        capabilities.local_seat(),
                         commands,
                         external_actions,
                     );
@@ -130,6 +131,15 @@ enum DispatchCapabilities<'a> {
 impl DispatchCapabilities<'_> {
     fn has_presentation(&self) -> bool {
         matches!(self, Self::Interactive { .. })
+    }
+
+    /// The seat this process is admitted as, or `None` for a headless runner
+    /// whose engine has no session behind it.
+    fn local_seat(&self) -> Option<robin_engine::player_command::PlayerId> {
+        match self {
+            Self::Interactive { local_seat, .. } => Some(*local_seat),
+            Self::Headless => None,
+        }
     }
 
     fn engine_dump(&self, engine: &Engine) -> Reply {
@@ -203,6 +213,7 @@ fn dispatch_command(
     assets: &LevelAssets,
     selected_view_element: &mut Option<engine_element::EntityId>,
     net: Option<&crate::multiplayer::NetChannels>,
+    local_seat: Option<robin_engine::player_command::PlayerId>,
     frame_commands: &mut FrameCommands,
     external_actions: &mut Vec<engine_api::ExternalAction>,
 ) -> Reply {
@@ -287,6 +298,37 @@ fn dispatch_command(
                     "console frame admission returned no console result",
                 )),
             }
+        }
+        CommandRequest::MissionResult(result) => {
+            // Ending the mission is the session authority's decision. A client
+            // that latched one locally would end a mission its host is still
+            // running, and the next host snapshot would contradict it.
+            if net.is_some()
+                && !matches!(
+                    local_seat,
+                    Some(robin_engine::player_command::PlayerId::HOST)
+                )
+            {
+                return Err(RpcError::unavailable_capability(
+                    "only the multiplayer host can end the session's mission".to_owned(),
+                ));
+            }
+            // The decision is a command, not a host-local mutation: every seat
+            // applies the same flag at the same frame, and the tick's own
+            // mission phase turns it into the code, the debriefing and the
+            // campaign handoff a script-driven end reaches.
+            let command = robin_engine::player_command::PlayerCommand::ForceMissionEnd { result };
+            if let Some(net) = net {
+                net.send_input(command)
+                    .map_err(RpcError::unavailable_capability)?;
+            } else {
+                frame_commands.push(command);
+            }
+            Ok(ReplyBody::Json(serde_json::json!({
+                "ok": true,
+                "result": result,
+                "operation": result.game_code().wire_name(),
+            })))
         }
         CommandRequest::Player(cmd) => {
             // In multiplayer, route the command over the wire so every
