@@ -1081,8 +1081,9 @@ impl EngineInner {
                 sprite.last_motion_state = Some(motion_state);
             }
 
+            // The transition branch below may override this scratch copy with
+            // `Terminated`; `motion_state` itself stays this call's result.
             raw_motion_state = motion_state;
-            let motion_state = raw_motion_state;
             let SelectedMovementOrder {
                 goal,
                 action_state,
