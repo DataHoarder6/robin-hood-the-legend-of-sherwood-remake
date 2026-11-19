@@ -41,7 +41,7 @@ rustPlatform.buildRustPackage {
     pname = "robin";
     version = robinVersion;
     src = ../.;
-    hash = "sha256-yyp0zf4C1oW+NDDkEwFDBHRB0f9j8BTIEzQ+MEAUVpc=";
+    hash = "sha256-I6lHXPgEdQDvMV4Xh0v/AsDsKljoYKG6diajmz2NU0M=";
   };
 
   # `--release --features desktop,multiplayer -p robin_rs --bin robin`, the
