@@ -119,7 +119,23 @@ else
     note no-integration-ref 'no fork/main, origin/main or branch upstream; drift cannot be checked (git branch --set-upstream-to=<remote>/main)'
 fi
 
-# 3. A build inside this checkout. Compiling against a tree that another agent
+# 3. Distance to the project this one forks. `fork/main` is the integration
+# branch and `origin/main` is phiresky's; the fork stays worth rebasing only
+# while its own delta is small, and nothing else in the loop says when it
+# stopped being small.
+if [ "$upstream" = fork/main ] &&
+    git -C "$root" rev-parse --verify --quiet 'origin/main^{commit}' >/dev/null; then
+    read -r upstream_behind upstream_ahead < <(git -C "$root" rev-list --left-right --count 'origin/main...fork/main')
+    if (( upstream_behind > 0 )); then
+        hint upstream-drift \
+            "fork/main is $upstream_behind behind origin/main and $upstream_ahead ahead of it" \
+            'rebase the integration branch onto origin/main while the delta is still small: git rebase origin/main fork/main'
+    else
+        ok upstream-current 'fork/main is not behind origin/main'
+    fi
+fi
+
+# 4. A build inside this checkout. Compiling against a tree that another agent
 # may switch produces artifacts nobody can attribute.
 builds=$(preflight_build_processes "$root")
 if [ -n "$builds" ]; then
@@ -130,7 +146,7 @@ else
     ok no-build 'no build process inside this checkout'
 fi
 
-# 4. Archived tips and a detached HEAD: the ways back that nobody watches.
+# 5. Archived tips and a detached HEAD: the ways back that nobody watches.
 archives=()
 while IFS= read -r archived; do
     [ -n "$archived" ] && archives+=("$archived")
@@ -168,7 +184,7 @@ if [ -n "$prunable" ]; then
         'git worktree prune'
 fi
 
-# 5. Cargo output is the space hog; report it every run, prune incremental first.
+# 6. Cargo output is the space hog; report it every run, prune incremental first.
 for directory in "$root/target" "$root/target/debug/incremental"; do
     if [ -d "$directory" ]; then
         bytes=$(du -s --block-size=1 "$directory" 2>/dev/null | cut -f1) || bytes=
@@ -180,7 +196,7 @@ for directory in "$root/target" "$root/target/debug/incremental"; do
     fi
 done
 
-# 6. Free disk. Levers are ordered by what they cost to rebuild.
+# 7. Free disk. Levers are ordered by what they cost to rebuild.
 available_kib=$(df -Pk "$root" | awk 'NR == 2 { print $4 }')
 if [ -n "$available_kib" ] && (( available_kib < min_free_gib * 1024 * 1024 )); then
     available_gib=$(awk -v k="$available_kib" 'BEGIN { printf "%.1f", k / 1048576 }')

@@ -198,6 +198,27 @@ expect_contains 'disk failure names the incremental prune first' 'rm -rf target/
 expect_contains 'disk failure names the safe garbage collection' 'nix-collect-garbage --delete-older-than 14d'
 expect_absent 'disk failure never suggests the destructive collect' 'nix-collect-garbage -d'
 
+# Distance to the upstream project: a fork/main behind origin/main is a note
+# with the numbers, never a failure, and it never fires without a fork ref.
+git init --quiet --bare "$work/upstream.git"
+git init --quiet "$work/upstream-seed"
+printf 'base\n' >"$work/upstream-seed/file.txt"
+git -C "$work/upstream-seed" add file.txt
+git -C "$work/upstream-seed" commit --quiet -m base
+git -C "$work/upstream-seed" push --quiet "$work/upstream.git" HEAD:main
+git -C "$work/upstream.git" symbolic-ref HEAD refs/heads/main
+git clone --quiet "$work/upstream.git" "$work/forked"
+git -C "$work/forked" branch fork/main origin/main
+printf 'upstream\n' >"$work/upstream-seed/upstream.txt"
+git -C "$work/upstream-seed" add upstream.txt
+git -C "$work/upstream-seed" commit --quiet -m upstream
+git -C "$work/upstream-seed" push --quiet "$work/upstream.git" HEAD:main
+git -C "$work/forked" fetch --quiet origin
+run_doctor "$work/forked"
+expect_status 0 'upstream drift does not fail the check'
+expect_contains 'upstream drift names the distance' 'fork/main is 1 behind origin/main'
+expect_contains 'upstream drift names the fix' 'git rebase origin/main fork/main'
+
 # Read-only: a doctor run leaves HEAD and the working tree alone.
 before=$(git -C "$work/clean" rev-parse HEAD; git -C "$work/clean" status --porcelain)
 run_doctor "$work/clean"
