@@ -185,13 +185,18 @@ pub struct CliArgs {
     /// spec's player commands at their frames, then exit. Live single-player
     /// missions only. See `crate::scenario_spec` and `docs/TESTING.md`,
     /// "Scenario specs (L2)".
-    #[cfg_attr(target_arch = "wasm32", arg(skip))]
-    #[arg(
-        long,
-        value_name = "PATH",
-        requires = "headless",
-        conflicts_with_all = ["start_paused", "replay", "server", "connect", "join"]
+    // A browser page has no command line, and clap rejects `skip` on a field
+    // that also carries `long`, so the whole argument group is native-only.
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        arg(
+            long,
+            value_name = "PATH",
+            requires = "headless",
+            conflicts_with_all = ["start_paused", "replay", "server", "connect", "join"]
+        )
     )]
+    #[cfg_attr(target_arch = "wasm32", arg(skip))]
     #[serde(skip)]
     pub spec: Option<std::path::PathBuf>,
 
