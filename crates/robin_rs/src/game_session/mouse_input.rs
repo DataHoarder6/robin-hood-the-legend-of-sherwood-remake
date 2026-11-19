@@ -43,7 +43,7 @@ use robin_engine::coordinates as engine_coordinates;
 use robin_engine::element as engine_element;
 use robin_engine::element::{Command, Posture};
 use robin_engine::engine as engine_api;
-use robin_engine::engine::Engine;
+use robin_engine::engine::{BoxSelectionHits, Engine};
 use robin_engine::game_operation::GameCode;
 use robin_engine::mission as engine_mission;
 use robin_engine::player_command as engine_player_command;
@@ -213,6 +213,11 @@ fn cancel_left_pointer(host: &mut Host, frame_cmds: &mut FrameCommands) {
 }
 
 // ─── Per-event handlers ─────────────────────────────────────────────
+
+/// Whether a drawn box catches any unit the player can select.
+fn box_selects_anything(hits: &BoxSelectionHits, control_tactical_units: bool) -> bool {
+    hits.heroes > 0 || (control_tactical_units && hits.soldiers > 0)
+}
 
 impl MouseCtx<'_> {
     /// Left-mouse-down: begin drags (multi-selection box, swordfight
@@ -527,6 +532,7 @@ impl MouseCtx<'_> {
     /// clicks, or the world left-click resolver.
     fn on_left_mouse_up(&mut self, mx: i32, my: i32) {
         let engine = self.engine;
+        let assets = self.assets;
         let portrait_cache = self.portrait_cache;
         let (screen_width, screen_height) = (self.screen_width, self.screen_height);
         let shift_held = self.modifiers.shift;
@@ -592,26 +598,35 @@ impl MouseCtx<'_> {
                 && host.frontend.input.draw_multi_selection()
             {
                 // Drag was large enough — box-select all PCs in the area.
-                // Shift adds to existing selection.
-                let cmd = PlayerCommand::BoxSelect {
-                    pt1: host.frontend.input.multi_selection_pt1(),
-                    pt2: host.frontend.input.multi_selection_pt2(),
-                    shift: shift_held,
-                };
-                dispatch_local_command(&host.transport, frame_cmds, &cmd);
-                if host.frontend.preferences().control_tactical_units() {
-                    let tactical_cmd = PlayerCommand::BoxSelectTacticalUnits {
-                        pt1: host.frontend.input.multi_selection_pt1(),
-                        pt2: host.frontend.input.multi_selection_pt2(),
+                // Shift adds to existing selection. An empty box is not a
+                // deselect gesture: it dispatches nothing.
+                let pt1 = host.frontend.input.multi_selection_pt1();
+                let pt2 = host.frontend.input.multi_selection_pt2();
+                let hits = engine.box_selection_hits(local_seat.0 as usize, assets, pt1, pt2);
+                if box_selects_anything(&hits, host.frontend.preferences().control_tactical_units())
+                {
+                    let cmd = PlayerCommand::BoxSelect {
+                        pt1,
+                        pt2,
                         shift: shift_held,
                     };
-                    dispatch_local_command(&host.transport, frame_cmds, &tactical_cmd);
+                    dispatch_local_command(&host.transport, frame_cmds, &cmd);
+                    if host.frontend.preferences().control_tactical_units() {
+                        let tactical_cmd = PlayerCommand::BoxSelectTacticalUnits {
+                            pt1,
+                            pt2,
+                            shift: shift_held,
+                        };
+                        dispatch_local_command(&host.transport, frame_cmds, &tactical_cmd);
+                    }
+                    tracing::info!(
+                        "Box-select: {} PCs and {} allied soldiers selected",
+                        engine.hero_selection(local_seat).len(),
+                        engine.tactical_selection(local_seat).len(),
+                    );
+                } else {
+                    tracing::debug!("empty box selection ignored");
                 }
-                tracing::info!(
-                    "Box-select: {} PCs and {} allied soldiers selected",
-                    engine.hero_selection(local_seat).len(),
-                    engine.tactical_selection(local_seat).len(),
-                );
             } else {
                 // Single click (drag too small or no drag started — e.g. panel clicks
                 // where screen_to_map returns None so multi_selection never started).
@@ -3274,5 +3289,131 @@ mod tests {
                 "a single press must not accelerate the walk: {walk:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod box_selection_tests {
+    use super::*;
+    use crate::host::test_support::{add_pc_with_status, fixture};
+    use robin_engine::element::Posture;
+    use robin_engine::engine::BoxSelectionHits;
+
+    fn box_drag(host: &mut crate::host::Host, x1: f32, y1: f32, x2: f32, y2: f32) {
+        host.frontend
+            .input
+            .start_multi_selection(engine_coordinates::MapPoint::new(x1, y1));
+        host.frontend
+            .input
+            .update_multi_selection(engine_coordinates::MapPoint::new(x2, y2));
+        host.frontend.input.latch_selection_outline();
+    }
+
+    #[test]
+    fn empty_box_release_dispatches_nothing() {
+        let (engine, assets, mut host) = fixture();
+        box_drag(&mut host, 500.0, 500.0, 560.0, 560.0);
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+        let mut ctx = MouseCtx {
+            engine: &engine,
+            host: &mut host,
+            assets: &assets,
+            portrait_cache: &cache,
+            frame_cmds: &mut commands,
+            screen_width: 800,
+            screen_height: 600,
+            modifiers: InputModifiers {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                plan: false,
+            },
+        };
+
+        ctx.on_left_mouse_up(400, 300);
+
+        assert!(commands.is_empty(), "empty box must dispatch no command");
+    }
+
+    #[test]
+    fn shift_empty_box_release_dispatches_nothing() {
+        let (engine, assets, mut host) = fixture();
+        box_drag(&mut host, 500.0, 500.0, 560.0, 560.0);
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+        let mut ctx = MouseCtx {
+            engine: &engine,
+            host: &mut host,
+            assets: &assets,
+            portrait_cache: &cache,
+            frame_cmds: &mut commands,
+            screen_width: 800,
+            screen_height: 600,
+            modifiers: InputModifiers {
+                ctrl: false,
+                shift: true,
+                alt: false,
+                plan: false,
+            },
+        };
+
+        ctx.on_left_mouse_up(400, 300);
+
+        assert!(
+            commands.is_empty(),
+            "empty shift box must dispatch no command"
+        );
+    }
+
+    #[test]
+    fn box_over_a_hero_dispatches_box_select() {
+        let (mut engine, assets, mut host) = fixture();
+        add_pc_with_status(&mut engine, 50.0, 50.0, Posture::Upright, true, 100);
+        box_drag(&mut host, 40.0, 40.0, 60.0, 60.0);
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+        let mut ctx = MouseCtx {
+            engine: &engine,
+            host: &mut host,
+            assets: &assets,
+            portrait_cache: &cache,
+            frame_cmds: &mut commands,
+            screen_width: 800,
+            screen_height: 600,
+            modifiers: InputModifiers {
+                ctrl: false,
+                shift: false,
+                alt: false,
+                plan: false,
+            },
+        };
+
+        ctx.on_left_mouse_up(400, 300);
+
+        assert!(
+            commands
+                .commands
+                .iter()
+                .any(|input| matches!(input.command, PlayerCommand::BoxSelect { .. })),
+            "hero box must dispatch BoxSelect"
+        );
+    }
+
+    #[test]
+    fn box_selects_anything_requires_the_preference_for_soldiers() {
+        let soldiers_only = BoxSelectionHits {
+            heroes: 0,
+            soldiers: 3,
+        };
+        assert!(!box_selects_anything(&soldiers_only, false));
+        assert!(box_selects_anything(&soldiers_only, true));
+        assert!(box_selects_anything(
+            &BoxSelectionHits {
+                heroes: 1,
+                soldiers: 0
+            },
+            false
+        ));
     }
 }

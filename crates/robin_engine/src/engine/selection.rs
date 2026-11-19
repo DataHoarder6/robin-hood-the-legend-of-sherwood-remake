@@ -1287,10 +1287,13 @@ impl EngineInner {
         // used by the corresponding box-unselection path below.
         let map_pos = entity.element_data().position_map();
         let map_pt = crate::coordinates::ScreenPoint::new(map_pos.x, map_pos.y);
+        if selection_box.contains_point(map_pt) {
+            return true;
+        }
         let sprite_box = entity
             .sprite()
             .bounding_box_at(entity.gameplay_sprite_position());
-        selection_box.is_intersecting(&sprite_box) || selection_box.contains_point(map_pt)
+        selection_box.is_intersecting(&sprite_box)
     }
 
     pub(crate) fn perform_box_selection(
