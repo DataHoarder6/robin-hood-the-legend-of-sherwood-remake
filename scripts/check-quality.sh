@@ -7,13 +7,23 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
+    printf 'suites: format lint core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
     exit 2
 fi
 
 case "$1" in
     format)
         cargo fmt --all -- --check
+        ;;
+    lint)
+        # Two feature sets, because one run would lint almost nothing: the
+        # default members are two small crates, and `robin_rs`'s default
+        # features compile a fraction of the client. The shipping client is the
+        # `release` set. No `-A` here: a lint that is wrong for this code is
+        # allowed by name where it fires, with a reason.
+        cargo clippy --locked --workspace --all-targets -- -D warnings
+        cargo clippy --locked -p robin_rs --all-targets \
+            --no-default-features --features release -- -D warnings
         ;;
     core)
         cargo test --locked -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support

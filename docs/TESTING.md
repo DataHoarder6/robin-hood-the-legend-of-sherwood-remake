@@ -12,10 +12,13 @@ Run the suite owning your change, then its affected consumers. Cargo retains
 the checkout's normal `target/` directory. Build and run the game separately;
 do not hide Cargo output behind filters.
 
-No suite runs Clippy yet. The linter ships with the pinned toolchain, but the
-tree still reports findings in files other changes own, so the suite waits:
-`docs/slop/clippy-backlog.md` has the command, the remainder and the rule for
-adding it (a clean `-D warnings` run, no command-line `-A`).
+`bash scripts/check-quality.sh lint` runs Clippy with `-D warnings` twice: over
+the workspace's default features, then over `robin_rs` with `release`. One run
+would lint almost nothing — the default members are two small crates and the
+client's default features compile a fraction of it — and `release` is the set
+that ships. A lint that is wrong for this code is allowed by name where it
+fires, with a one-line reason; `docs/slop/clippy-gate.md` records each one and
+why it is not a defect.
 
 The opt-in stock navigation benchmark runs 180 frames in each of three missions
 with three PCs and active mission scripts:
@@ -102,14 +105,15 @@ and an out-of-tree shared `CARGO_TARGET_DIR` reused nothing across copies (511
 crates recompiled). The copy is the thing to keep warm.
 
 The push that updates the integration branch is gated. The suites a landing owes
-are selected in one place, `scripts/push-gate.sh`: `format` and `client-release`
-when anything under `crates/` or a gate script changed, `engine` when engine
-crates did, `tooling` when anything under `scripts/`, `tools/` or `.githooks/`
-did, plus the scenario corpus when `docs/multiplayer/HARNESS.md` or the scenarios
-changed. They run on the build host through one `scripts/remote-check.sh
---suites` call over a single synced copy, and the first failure stops the
-landing. `wasm` joins them when anything under `crates/` changed: the browser
-client is a shipped artifact and no other suite compiles it.
+are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
+`client-release` when anything under `crates/` or a gate script changed,
+`engine` when engine crates did, `tooling` when anything under `scripts/`,
+`tools/` or `.githooks/` did, plus the scenario corpus when
+`docs/multiplayer/HARNESS.md` or the scenarios changed. They run on the build
+host through one `scripts/remote-check.sh --suites` call over a single synced
+copy, and the first failure stops the landing. `wasm` joins them when anything
+under `crates/` changed: the browser client is a shipped artifact and no other
+suite compiles it.
 
 Two entry points run that gate. `scripts/land.sh` is the loop's landing command:
 it fetches `fork/main`, rebases `HEAD` onto it when the branch is not already

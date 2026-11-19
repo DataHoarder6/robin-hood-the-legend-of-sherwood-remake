@@ -14,7 +14,7 @@ from check_asset_boundary import assert_boundary
 ROOT = Path(__file__).resolve().parents[1]
 RUST_SUITES = (
     "core", "scripting-llvm", "engine", "assets", "protocols", "services", "parity",
-    "client", "client-release", "tools", "wasm", "gpu", "gpu-gl", "host",
+    "client", "client-release", "tools", "wasm", "gpu", "gpu-gl", "host", "lint",
 )
 
 
