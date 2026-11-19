@@ -525,7 +525,9 @@ impl InteractiveFrameFinish<'_, '_, '_> {
         // A report requested from any surface (pause menu, console, HTTP) is
         // gathered here, at the one boundary where the tick's own state, the
         // modal stack and the transport are all live. Writing starts on a
-        // worker thread; nothing in this frame waits for it.
+        // worker thread; nothing in this frame waits for it. Browser builds
+        // have no bundle writer and no surface that queues one.
+        #[cfg(not(target_arch = "wasm32"))]
         super::report::drain_requested(
             runtime,
             world,

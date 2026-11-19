@@ -19,6 +19,11 @@ mod loading_progress;
 mod modal_state;
 mod mouse_input;
 mod multiplayer;
+/// The voluntary bug report's game-state half. Desktop-only, like the bundle
+/// writer it drains: every surface that queues a report (`/bug`, the pause-menu
+/// screen, `POST /bug-report`) is stubbed out on wasm32, so a browser build has
+/// nothing to drain and none of the modules it reads exist there.
+#[cfg(not(target_arch = "wasm32"))]
 mod report;
 pub(crate) use multiplayer::record_modal_expiry;
 mod render;
