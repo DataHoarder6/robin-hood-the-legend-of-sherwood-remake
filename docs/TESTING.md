@@ -10,7 +10,12 @@ bash scripts/check-quality.sh engine
 
 Run the suite owning your change, then its affected consumers. Cargo retains
 the checkout's normal `target/` directory. Build and run the game separately;
-do not hide Cargo output behind filters. These gates do not run Clippy.
+do not hide Cargo output behind filters.
+
+No suite runs Clippy yet. The linter ships with the pinned toolchain, but the
+tree still reports findings in files other changes own, so the suite waits:
+`docs/slop/clippy-backlog.md` has the command, the remainder and the rule for
+adding it (a clean `-D warnings` run, no command-line `-A`).
 
 The opt-in stock navigation benchmark runs 180 frames in each of three missions
 with three PCs and active mission scripts:

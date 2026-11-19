@@ -125,3 +125,11 @@ what catches that, and it is the suite's last two commands now;
 `wasm-www/scripts/build-runtime.mjs` remains the linked production build, and it
 alone checks the threaded module's shared memory import — `wasm-objdump` is not
 in the devShell.
+
+## Clippy in the same toolchain
+
+The devShell change that added the linter (`components = ["clippy", …]` in
+`rust-toolchain.toml`) has no wasm consequence: Clippy is a host-side toolchain
+component that lints host targets, it is not built for `wasm32`, and the
+`CC_wasm32_unknown_unknown`/`CXX_wasm32_unknown_unknown` fix above is untouched
+by it. The `wasm` suite builds the browser client and never invokes the linter.
