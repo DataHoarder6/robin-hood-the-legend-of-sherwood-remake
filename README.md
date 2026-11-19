@@ -146,6 +146,12 @@ builds enable the `simd128` target feature (`.cargo/config.toml`).  The
 two custom profiles force the LLVM codegen backend — cranelift doesn't
 target wasm.
 
+The target's compile check is `bash scripts/check-quality.sh wasm` — three
+`cargo check --target wasm32-unknown-unknown` runs, no game data and no
+browser. Run it before a browser change, from the build host's copy:
+`scripts/remote-check.sh wasm`. It runs in the devShell because the shell also
+supplies the C compiler `zstd-sys` needs for wasm32 (`flake.nix`).
+
 Production runtimes are the threaded build (`node wasm-www/scripts/build-runtime.mjs
 --threads`, which `stage-runtime-addition.mjs` always uses): shared wasm memory
 plus a wasm-bindgen-rayon pool of min(`hardwareConcurrency`, 8) sprite-decode

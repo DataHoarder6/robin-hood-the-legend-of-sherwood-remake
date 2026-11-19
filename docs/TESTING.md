@@ -148,8 +148,15 @@ offline `robin_modding_tools` must not pull in the `robin_rs` client;
 pure `robin_assets` must not pull in `robin_engine`. The checker prints
 the complete Cargo tree and rejects an empty or unexpected graph.
 The wasm gate is a compile check, not a browser execution or memory-cap test.
-The separate browser-audio gate runs synthetic browser tests, not full-game
-browser rendering or audible-output acceptance. Native-lifecycle is a local
+`scripts/remote-check.sh wasm` runs it on the build host in the devShell, which
+is also what gives `zstd-sys`'s bundled C a compiler that targets wasm32
+(`flake.nix` sets `CC_wasm32_unknown_unknown` for exactly that; the shell's
+`CC` is the host gcc). It is not in `scripts/push-gate.sh` yet: the client does
+not compile for wasm32 today — run the suite and `cargo check` names the line —
+and a gated suite that is red stops every landing. Add it to that script once
+the client compiles for the target. The separate browser-audio gate runs
+synthetic browser tests, not full-game browser rendering or audible-output
+acceptance. Native-lifecycle is a local
 provisioned gate, not public CI: it needs licensed data and a compatible host.
 Runtime publication retains its existing emitted-artifact checks. Consult the
 platform runbooks for native packaging and Android checks; this matrix does
