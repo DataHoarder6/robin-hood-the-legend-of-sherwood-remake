@@ -1628,6 +1628,20 @@ pub(super) fn handle_pause_menu_events(
                     ),
                 ));
             }
+            PauseMenuOutcome::OpenReportBug => {
+                // The pause menu stays up behind the screen, so cancelling a
+                // report returns to it exactly as Save/Load does.
+                let resources = required_menu_resources(menu_resources, "pause-menu Report a bug");
+                let multiplayer = host.transport.net().is_some();
+                *active_ui_task = Some(ActiveUiTask::BugReport(
+                    crate::ingame_menu::bug_report::BugReportModalState::new(
+                        event_pump,
+                        renderer,
+                        resources,
+                        multiplayer,
+                    ),
+                ));
+            }
             PauseMenuOutcome::OpenOptions => {
                 // Opening options from the in-game menu displays the options menu.
                 let resources = required_menu_resources(menu_resources, "pause-menu Options");

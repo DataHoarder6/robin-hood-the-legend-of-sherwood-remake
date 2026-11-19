@@ -77,6 +77,8 @@ pub(super) enum ActiveUiTask {
     Quit(YesNoModalState),
     QuickLoad(QuickLoadTaskState),
     MissionEndLeaderboard(super::leaderboard_runtime::MissionEndLeaderboardTaskState),
+    /// The voluntary bug-report screen (`ingame_menu::bug_report`).
+    BugReport(crate::ingame_menu::bug_report::BugReportModalState),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +90,7 @@ pub(super) enum UiTaskKind {
     QuitConfirmation,
     QuickLoadConfirmation,
     MissionEndLeaderboard,
+    BugReport,
 }
 
 impl ActiveUiTask {
@@ -152,6 +155,20 @@ impl ActiveUiTask {
                     controller,
                 ))),
             },
+            Self::BugReport(state) => {
+                use crate::ingame_menu::bug_report::BugReportOutcome;
+                if io.window.close_requested {
+                    return Some(UiTaskOutcome::ExitRequested);
+                }
+                match state.tick(io) {
+                    BugReportOutcome::Pending => None,
+                    BugReportOutcome::Queued { directory } => {
+                        tracing::info!("bug report queued; its bundle will be {directory}");
+                        Some(UiTaskOutcome::ReturnToPause)
+                    }
+                    BugReportOutcome::Cancelled => Some(UiTaskOutcome::ReturnToPause),
+                }
+            }
         }
     }
 
@@ -167,7 +184,8 @@ impl ActiveUiTask {
             | Self::Options(_)
             | Self::SaveLoad(_)
             | Self::Quit(_)
-            | Self::QuickLoad(_) => true,
+            | Self::QuickLoad(_)
+            | Self::BugReport(_) => true,
         }
     }
 
@@ -180,6 +198,7 @@ impl ActiveUiTask {
             Self::Quit(_) => UiTaskKind::QuitConfirmation,
             Self::QuickLoad(_) => UiTaskKind::QuickLoadConfirmation,
             Self::MissionEndLeaderboard(_) => UiTaskKind::MissionEndLeaderboard,
+            Self::BugReport(_) => UiTaskKind::BugReport,
         }
     }
 
@@ -193,7 +212,8 @@ impl ActiveUiTask {
             | Self::CampaignManager(_)
             | Self::Options(_)
             | Self::SaveLoad(_)
-            | Self::Quit(_) => UiTaskOutcome::ReturnToPause,
+            | Self::Quit(_)
+            | Self::BugReport(_) => UiTaskOutcome::ReturnToPause,
             Self::MissionEndLeaderboard(_) => {
                 panic!("mission-end leaderboard auto-dismiss must preserve background work")
             }

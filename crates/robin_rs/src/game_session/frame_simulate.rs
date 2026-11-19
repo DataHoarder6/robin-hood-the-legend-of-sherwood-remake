@@ -379,7 +379,8 @@ fn ui_task_modal_admission(
         UiTaskKind::CampaignManager
         | UiTaskKind::Options
         | UiTaskKind::SaveLoad
-        | UiTaskKind::QuitConfirmation => UiTaskModalAdmission::Cancel,
+        | UiTaskKind::QuitConfirmation
+        | UiTaskKind::BugReport => UiTaskModalAdmission::Cancel,
     }
 }
 

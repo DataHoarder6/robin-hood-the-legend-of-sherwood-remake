@@ -27,6 +27,7 @@
 
 pub mod blazon_set;
 pub mod briefings;
+pub mod bug_report;
 pub mod buy_blazons;
 pub mod debriefing;
 pub mod dialogue;

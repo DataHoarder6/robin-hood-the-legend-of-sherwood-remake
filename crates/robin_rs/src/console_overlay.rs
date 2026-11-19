@@ -90,7 +90,7 @@ const COMPLETION_KEYWORDS_DEV: &[&str] = &[
     "GOLDENEYE",
     "HADES",
     "HELP",
-    "BUGREPORT",
+    "BUG",
     "HIGHLANDER",
     "HIGHLANDER2",
     "HONOLULU",
@@ -432,8 +432,13 @@ impl ConsoleOverlay {
     /// lands interleaved with the user's echo line.
     fn drain_engine_output(&mut self, dev: &mut DevState) {
         #[cfg(not(target_arch = "wasm32"))]
-        for message in crate::bug_report::take_messages() {
-            self.push_output(OutputLine::Response(message));
+        {
+            for message in crate::bug_bundle::take_messages() {
+                self.push_output(OutputLine::Response(message));
+            }
+            for message in crate::bug_report::take_messages() {
+                self.push_output(OutputLine::Response(message));
+            }
         }
         for line in dev.console.drain_output() {
             self.push_output(OutputLine::Response(line));
@@ -492,29 +497,35 @@ impl ConsoleOverlay {
         if trimmed
             .split_whitespace()
             .next()
-            .is_some_and(|token| token.eq_ignore_ascii_case("BUGREPORT"))
+            .is_some_and(|token| token.eq_ignore_ascii_case("BUG"))
         {
             #[cfg(not(target_arch = "wasm32"))]
             let message = {
-                let description = trimmed["BUGREPORT".len()..].trim();
+                let description = trimmed["BUG".len()..].trim();
                 if description.is_empty() {
-                    "Usage: /BUGREPORT description of the problem".to_owned()
+                    "Usage: /BUG description of the problem".to_owned()
                 } else {
-                    match crate::bug_report::capture(
-                        robin_run_protocol::diagnostics::DiagnosticKindV1::Bug,
-                        description,
-                        None,
+                    match crate::bug_bundle::reserve(crate::bug_bundle::Origin::Console).and_then(
+                        |directory| {
+                            let path = directory.display().to_string();
+                            crate::bug_bundle::enqueue(
+                                directory,
+                                description,
+                                "",
+                                crate::bug_bundle::Origin::Console,
+                            )
+                            .map(|()| path)
+                        },
                     ) {
-                        Ok(_) => {
-                            crate::bug_report::submit_pending();
-                            "Report queued for submission to the leaderboard service.".to_owned()
+                        Ok(path) => {
+                            format!("Bug report queued; its bundle will be written to {path}")
                         }
                         Err(error) => format!("Report failed: {error:#}"),
                     }
                 }
             };
             #[cfg(target_arch = "wasm32")]
-            let message = "Use the Report bug button below the game.".to_owned();
+            let message = "Use the Report a bug button in the pause menu.".to_owned();
             self.push_output(OutputLine::Response(message));
             return;
         }

@@ -44,6 +44,9 @@ pub const PAUSE_BTN_RESTART: u32 = 4;
 pub const PAUSE_BTN_QUIT: u32 = 5;
 pub const PAUSE_BTN_SHERWOOD_TRADING: u32 = 6;
 pub const PAUSE_BTN_CAMPAIGN_MANAGER: u32 = 7;
+/// "Report a bug": the voluntary sibling of the crash bundle
+/// (`crate::bug_bundle`), reachable in one click from this menu.
+pub const PAUSE_BTN_REPORT_BUG: u32 = 8;
 
 /// Short briefings area inside the window: `(2, 2)..(440, 480)`.
 const BRIEFINGS_RECT: MenuRect = MenuRect {
@@ -76,6 +79,8 @@ pub enum PauseMenuOutcome {
     OpenSherwoodTrading,
     /// Browse campaign progress without leaving the current mission.
     OpenCampaignManager,
+    /// Open the bug-report screen: type a description and file it.
+    OpenReportBug,
     /// Restart the mission.
     Restart,
     /// Quit to the main menu.
@@ -133,6 +138,8 @@ impl PauseMenu {
             (PAUSE_BTN_SAVE, save_txt, true),
             (PAUSE_BTN_OPTIONS, options_txt, true),
             (PAUSE_BTN_RESTART, restart_txt, restart_allowed),
+            // TODO: localize; the screen itself is English-only today.
+            (PAUSE_BTN_REPORT_BUG, "Report a bug".to_string(), true),
             (PAUSE_BTN_QUIT, quit_txt, true),
         ]);
         let labels: Vec<(&str, bool)> = entries
@@ -332,6 +339,7 @@ impl PauseMenu {
             PAUSE_BTN_CAMPAIGN_MANAGER => PauseMenuOutcome::OpenCampaignManager,
             PAUSE_BTN_OPTIONS => PauseMenuOutcome::OpenOptions,
             PAUSE_BTN_RESTART => PauseMenuOutcome::Restart,
+            PAUSE_BTN_REPORT_BUG => PauseMenuOutcome::OpenReportBug,
             PAUSE_BTN_QUIT => PauseMenuOutcome::Quit,
             _ => PauseMenuOutcome::Pending,
         };
@@ -397,10 +405,10 @@ mod tests {
     }
 
     #[test]
-    fn pause_menu_has_seven_buttons() {
+    fn pause_menu_has_eight_buttons() {
         let resources = stub_resources();
         let menu = PauseMenu::new(&resources, true);
-        assert_eq!(menu.button_count(), 7);
+        assert_eq!(menu.button_count(), 8);
     }
 
     #[test]
@@ -477,7 +485,8 @@ mod tests {
         let resources = stub_resources();
         // restart_allowed = false so Restart is disabled — nav must skip it.
         let mut menu = PauseMenu::new(&resources, false);
-        // Continue → Campaign Manager → Load → Save → Options → Quit → Continue
+        // Continue → Campaign Manager → Load → Save → Options → Report a bug
+        // → Quit → Continue
         menu.move_keyboard_selection(1);
         assert_eq!(menu.keyboard_selection, PAUSE_BTN_CAMPAIGN_MANAGER);
         menu.move_keyboard_selection(1);
@@ -487,9 +496,19 @@ mod tests {
         menu.move_keyboard_selection(1);
         assert_eq!(menu.keyboard_selection, PAUSE_BTN_OPTIONS);
         menu.move_keyboard_selection(1);
+        assert_eq!(menu.keyboard_selection, PAUSE_BTN_REPORT_BUG);
+        menu.move_keyboard_selection(1);
         assert_eq!(menu.keyboard_selection, PAUSE_BTN_QUIT);
         menu.move_keyboard_selection(1);
         assert_eq!(menu.keyboard_selection, PAUSE_BTN_CONTINUE);
+    }
+
+    #[test]
+    fn pause_menu_report_bug_button_opens_the_report_screen() {
+        let resources = stub_resources();
+        let mut menu = PauseMenu::new(&resources, true);
+        menu.activate(PAUSE_BTN_REPORT_BUG);
+        assert_eq!(menu.outcome(), PauseMenuOutcome::OpenReportBug);
     }
 
     #[test]
@@ -508,7 +527,7 @@ mod tests {
 
         let mut sherwood = PauseMenu::new_with_sherwood_trading(&resources, false, true);
         assert!(sherwood.frame.widget(PAUSE_BTN_SHERWOOD_TRADING).is_some());
-        assert_eq!(sherwood.button_count(), 8);
+        assert_eq!(sherwood.button_count(), 9);
 
         sherwood.move_keyboard_selection(1);
         assert_eq!(sherwood.keyboard_selection, PAUSE_BTN_SHERWOOD_TRADING);
