@@ -349,18 +349,19 @@ pub(super) fn drain_steps(
                     step.respond_err(error);
                     continue;
                 }
-                Ok(()) if host.transport.local_seat() != PlayerId::HOST => {
-                    // The client's modal tick publishes the acknowledgement;
-                    // a client may never advance the host's timeline.
+                Ok(()) => {
+                    // The page's own tick applies the decision: a host
+                    // publishes its vote and waits for the seats that owe an
+                    // acknowledgement, a client publishes a proposal. Neither
+                    // is a timeline step, so the request must not move the
+                    // host's clock or resynchronize the peers from a snapshot
+                    // taken mid-decision.
                     step.respond_ok(serde_json::json!({
                         "direction": "terminal-modal-dismissal",
                         "queued": true,
                     }));
                     continue;
                 }
-                // The host advances the frame that applies and publishes the
-                // queued decision; the step continues below.
-                Ok(()) => {}
             }
         }
         if let Err(error) =
@@ -1425,33 +1426,26 @@ fn author_modal_decision(
     Ok(())
 }
 
-/// Authorize a dismissal of the terminal page that owns a mission.
+/// Refuse a dismissal that does not name the page the session shares.
 ///
-/// Terminal pages are session-owned, so their dismissal follows the same rule
-/// as a story page: a host decides at once, a client only submits its
-/// acknowledgement. The client's acknowledgement is published by the modal gate
-/// when the queued result is applied, so it must not be proposed twice here.
+/// A terminal page is session-owned, so a host does not decide it alone: its
+/// `queue_http_result` reaches the modal gate, which publishes the host's vote
+/// and waits for the seats that owe an acknowledgement. Authoring the decision
+/// here instead would close every peer's page before it could answer, and leave
+/// the host waiting for acknowledgements of a page that no longer exists.
 fn authorize_terminal_http_dismissal(
     host: &Host,
     dismissal: &crate::http_server::HttpModalDismissal,
 ) -> Result<(), RpcError> {
-    let Some(net) = host.transport.net() else {
+    if host.transport.net().is_none() {
         return Ok(());
-    };
-    // A terminal page is session-owned. Dismissing anything else is not a
-    // terminal decision, and authoring one would invent an occurrence the
-    // session never opened.
+    }
     if !robin_engine::multiplayer::is_session_shared_modal(&dismissal.kind) {
         return Err(RpcError::unavailable_capability(
             "terminal modal is not shared by the session".to_owned(),
         ));
     }
-    if host.transport.local_seat() != PlayerId::HOST {
-        // The client's acknowledgement is published by the modal gate when the
-        // queued result is applied, so it must not be proposed twice here.
-        return Ok(());
-    }
-    author_modal_decision(net, dismissal)
+    Ok(())
 }
 
 /// Apply multiplayer authority to HTTP-supplied modal outcomes before any
