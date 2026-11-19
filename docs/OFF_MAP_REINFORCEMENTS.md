@@ -1,9 +1,10 @@
 # Off-map reinforcements
 
-Status: **model landed; the summon path is not.** `SimConfig::enable_offmap_reinforcements`
-and staged garrison bodies exist; the summon event, entry kinds, AI emission,
-withdrawal and the native do not. Every decision below was settled in a grilling
-session on 2026-11-19.
+Status: **spine landed; the rest is not.** `SimConfig::enable_offmap_reinforcements`,
+staged garrison bodies, and `EngineInner::summon_garrison` (wake a body, publish
+it into the counters, walk it in through a reinforcement door) exist. Entry
+kinds, the AI emitter, the budget, withdrawal and the native do not. Every
+decision below was settled in a grilling session on 2026-11-19.
 
 ## What this is
 
@@ -133,15 +134,20 @@ before the first tick, which is what keeps replays and co-op peers in agreement.
 
 1. `enter_from_outside` as an engine operation; `RecordEnterGame` becomes a
    caller.
-2. Generalise `create_reinforcement` from a PC with an optional dead body to
-   `(faction, tier, entry)`.
+2. ~~Generalise the spawn path from a PC with an optional dead body to
+   `(faction, entry)`~~ — `summon_garrison` wakes an authored staged body
+   instead of creating one, so the faction is a lookup and the entry is a door.
+   Tier selection stays with the caller.
 3. Entry kinds and optional in-map target on the authored point type.
-4. Budget accounting and the summoned mark on the actor.
+4. ~~Budget accounting~~ — the counter/stat publication a woken body needs is
+   `publish_soldier_alert_count` and `record_soldier_in_level`; the per-mission
+   budget itself is still open. The summoned mark on the actor is
+   `SoldierData::staged`, cleared on wake.
 5. `Decision` emission from `AlertSoldiers` when the in-radius recruit falls
    short.
 6. Withdrawal on alarm decay.
 7. The `SummonReinforcements` native.
-8. `SimConfig` field, its `from_options` value, and its state-hash coverage.
+8. ~~`SimConfig` field, its `from_options` value, and its state-hash coverage.~~
 
 ## Open
 

@@ -23,6 +23,17 @@ use crate::engine::TickCtx;
 use crate::order::OrderType;
 use crate::sequence::{MoveFlags, Sequence, SequenceElement, SequenceElementData};
 
+/// A request to bring a garrison body into the level from outside it.
+///
+/// `tier` and the per-mission budget belong to the caller that emits the
+/// request: this only picks a body, opens a door and starts the walk.
+pub(crate) struct SummonRequest {
+    /// Which side's staged bodies may answer.
+    pub faction: crate::element::Camp,
+    /// A specific entry; `None` picks one of the level's reinforcement doors.
+    pub entry: Option<crate::gate::DoorIndex>,
+}
+
 impl EngineInner {
     pub(crate) fn create_reinforcement(&mut self, tcx: TickCtx<'_>, dead_pc: Option<EntityId>) {
         // Pick a random reinforcement door.
@@ -306,6 +317,177 @@ impl EngineInner {
             door = %door_index,
             "REINFORCEMENT: spawned reinforcement PC."
         );
+    }
+
+    /// Wake one staged body of `request.faction`, publish it into the
+    /// level's counters, and start the `PASS_DOOR` → `MOVE` walk that
+    /// carries it in. Returns the body it woke, or `None` when the feature
+    /// is off, no body of that faction is staged, or the level has no
+    /// reinforcement door to enter through.
+    pub(crate) fn summon_garrison(
+        &mut self,
+        tcx: TickCtx<'_>,
+        request: SummonRequest,
+    ) -> Option<EntityId> {
+        if !self.control.sim_config.enable_offmap_reinforcements {
+            return None;
+        }
+        if self.ai.global.reinforcement_doors.is_empty() {
+            tracing::warn!("SUMMON: no reinforcement doors on this level.");
+            return None;
+        }
+
+        let body = self.world.npc_registry_ids.iter().copied().find(|id| {
+            self.get_entity(*id).is_some_and(|entity| {
+                !entity.element_data().active
+                    && entity.soldier_data().is_some_and(|soldier| {
+                        soldier.staged && soldier.cached_camp == request.faction
+                    })
+            })
+        })?;
+
+        let (door_index, point_out, layer_out, sector_out, point_in, layer_in, sector_in) =
+            match request.entry {
+                Some(index) => {
+                    let door = self
+                        .ai
+                        .global
+                        .reinforcement_doors
+                        .iter()
+                        .find(|door| door.door_index == index)?;
+                    (
+                        door.door_index,
+                        door.point_out,
+                        door.layer_out,
+                        door.sector_out,
+                        door.point_in,
+                        door.position_in.level,
+                        door.position_in.sector,
+                    )
+                }
+                None => {
+                    let pick = crate::sim_rng::usize(
+                        tcx.sim,
+                        crate::sim_rng::RngSite::ReinforcementDoor,
+                        0..self.ai.global.reinforcement_doors.len(),
+                    );
+                    let door = &self.ai.global.reinforcement_doors[pick];
+                    (
+                        door.door_index,
+                        door.point_out,
+                        door.layer_out,
+                        door.sector_out,
+                        door.point_in,
+                        door.position_in.level,
+                        door.position_in.sector,
+                    )
+                }
+            };
+
+        let (alert, camp, money) = {
+            let Some(Entity::Soldier(actor)) = self.get_entity_mut(body) else {
+                return None;
+            };
+            let alert = actor
+                .npc
+                .ai
+                .ai_brain
+                .base()
+                .map(|base| base.current_music_alert_status)
+                .unwrap_or(crate::ai::AlertLevel::Green);
+            let camp = actor.soldier.cached_camp;
+            let money = actor.npc.ai.money;
+            actor.soldier.staged = false;
+            actor.element.active = true;
+            actor.element.set_position_map(point_out);
+            actor.element.set_layer(layer_out);
+            actor.element.set_sector(sector_out);
+            actor.element.update_grid_cell();
+            (alert, camp, money)
+        };
+        self.publish_soldier_alert_count(alert);
+        self.record_soldier_in_level(camp, money);
+
+        // TODO: register the arriving body in every NPC's detectable list
+        // the way `create_reinforcement` does for a new PC, once the
+        // summon path owns detection wiring for soldier targets.
+        let action = OrderType::WalkingUpright;
+        let mut seq = Sequence::new();
+
+        let mut pass = SequenceElement::new_movement(1, Command::PassDoor, Some(body), action);
+        pass.data = SequenceElementData::Movement {
+            destination: point_in,
+            layer: layer_in,
+            sector: sector_in,
+            gate_id: Some(door_index),
+            line_id: None,
+            element: None,
+            flags: MoveFlags::DOOR | MoveFlags::MAP,
+            tolerance: 0.0,
+            direction: 0,
+            action,
+            speed_factor: 1.0,
+            linked_seek: None,
+            post_seek_sequence: None,
+        };
+        seq.append_element(pass);
+
+        let half_diagonal = self
+            .expect_entity(body, "summoned body entry movement")
+            .position_iface()
+            .get_half_diagonal();
+        let mut jitter: Option<MapPoint> = None;
+        for _ in 0..10 {
+            let dx = -50.0
+                + 100.0
+                    * crate::sim_rng::c_rand_unit_inclusive(
+                        tcx.sim,
+                        crate::sim_rng::RngSite::ReinforcementJitter,
+                    );
+            let dy = -50.0
+                + 100.0
+                    * crate::sim_rng::c_rand_unit_inclusive(
+                        tcx.sim,
+                        crate::sim_rng::RngSite::ReinforcementJitter,
+                    );
+            let candidate = point_in + MapVec::new(dx, dy);
+            if self
+                .world
+                .fast_grid
+                .is_reachable_thick(point_in, candidate, layer_in, half_diagonal)
+            {
+                jitter = Some(candidate);
+                break;
+            }
+        }
+        if let Some(target) = jitter {
+            let mut mv = SequenceElement::new_movement(2, Command::Move, Some(body), action);
+            mv.data = SequenceElementData::Movement {
+                destination: target,
+                layer: layer_in,
+                sector: None,
+                gate_id: None,
+                line_id: None,
+                element: None,
+                flags: MoveFlags::STRAIGHT,
+                tolerance: 0.0,
+                direction: 0,
+                action,
+                speed_factor: 1.0,
+                linked_seek: None,
+                post_seek_sequence: None,
+            };
+            seq.append_element(mv);
+        }
+
+        let seq_id = self.launch_sequence(tcx, seq);
+        tracing::info!(
+            body = ?body,
+            ?seq_id,
+            door = %door_index,
+            "SUMMON: garrison body entered from outside the map."
+        );
+        Some(body)
     }
 
     /// Appends a `Detectable` pointing at `element_id` to every NPC's

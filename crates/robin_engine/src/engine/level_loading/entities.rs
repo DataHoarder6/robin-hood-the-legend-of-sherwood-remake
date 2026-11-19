@@ -938,6 +938,7 @@ impl EngineInner {
                     command_interface,
                     mission_role,
                     combat_stance: raw.combat_stance,
+                    staged: raw.staged,
                     ..Default::default()
                 },
             });
@@ -973,13 +974,7 @@ impl EngineInner {
             // miscomputes the delta.  A staged body is not in the level yet,
             // so it contributes nothing until a summon wakes it.
             if !raw.staged {
-                self.mission_domain.mission_stat.soldier_money += raw.money;
-                self.mission_domain
-                    .mission_stat
-                    .record_soldier_encounter(cached_camp);
-                if self.is_hostile_to_player_camp(cached_camp) {
-                    self.mission_domain.mission_stat.total_soldier_count += 1;
-                }
+                self.record_soldier_in_level(cached_camp, raw.money);
             }
         }
 
