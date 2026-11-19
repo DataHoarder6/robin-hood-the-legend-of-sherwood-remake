@@ -337,6 +337,16 @@ class AssertionTest(unittest.TestCase):
                 {"assert": "transition", "payload": "Save", "acked": [0, 1], "committed": True},
                 self.record({}))
 
+    def test_only_a_page_that_is_gone_makes_a_step_an_answer(self):
+        self.assertTrue(suite.dismissal_has_no_page({"error": suite.TERMINAL_PAGE_ABSENT}))
+        # Any other refusal is the row's own mistake and must fail it: a wrong
+        # kind, a seat that may not answer, a page the flow still holds.
+        self.assertFalse(suite.dismissal_has_no_page(
+            {"error": "blocked by modal FinalDebriefing; retry with auto_dismiss=true"}))
+        self.assertFalse(suite.dismissal_has_no_page(
+            {"direction": "terminal-modal-dismissal", "queued": True}))
+        self.assertFalse(suite.dismissal_has_no_page("not a reply"))
+
 
 class MissionTest(unittest.TestCase):
     """`mission` counts the maps a seat entered and demands the seats agree."""
@@ -395,10 +405,13 @@ class HashCadenceTest(unittest.TestCase):
                                          for seat in traces],
                   "trace": [], "statuses": {}, "latest": {}}
         for seat, samples in traces.items():
-            for frame, compared, desync in samples:
+            for sample in samples:
+                frame, compared, desync = sample[:3]
+                generation = sample[3] if len(sample) > 3 else None
                 record["trace"].append((
                     {"seat": seat, "role": "host" if seat == 0 else "client"},
                     {"frame": frame, "multiplayer": {
+                        "begin_sim_frame": generation,
                         "last_compared_hash_frame": compared, "desync_count": desync}}))
         return record
 
@@ -430,6 +443,22 @@ class HashCadenceTest(unittest.TestCase):
         samples = [(0, 25, 0), (120, 75, 0)]
         ok, detail, _ = self.evaluate({0: samples, 1: samples})
         self.assertTrue(ok, detail)
+
+    def test_a_snapshot_transition_starts_a_new_cadence(self):
+        # A restart rebuilds both seats from the same save: the timeline, and
+        # with it the hash schedule, begins again, so the counter going back to
+        # 25 is the new generation's first boundary and not a skipped one.
+        samples = [(0, None, 0, 0), (10, 0, 0, 0), (26, 25, 0, 0), (51, 50, 0, 0),
+                   (0, None, 0, 1), (10, 0, 0, 1), (26, 25, 0, 1), (51, 50, 0, 1)]
+        ok, detail, _ = self.evaluate({1: samples}, peers=(1,))
+        self.assertTrue(ok, detail)
+
+    def test_a_new_generation_must_show_its_own_cadence(self):
+        samples = [(0, None, 0, 0), (26, 25, 0, 0), (51, 50, 0, 0),
+                   (0, None, 0, 1), (26, 25, 0, 1)]
+        ok, detail, _ = self.evaluate({1: samples}, peers=(1,))
+        self.assertFalse(ok)
+        self.assertIn("unobservable", detail)
 
     def test_a_compared_frame_off_the_boundary_fails(self):
         samples = [(0, 30, 0), (10, 30, 0)]
@@ -497,12 +526,17 @@ class EvidenceLayoutTest(unittest.TestCase):
             suite.require_empty(Path(root) / "absent")
             suite.require_empty(Path(root))
 
-    def test_the_hash_manifest_records_the_samples_and_the_replay(self):
+    def test_the_hash_manifest_records_the_samples_and_every_recording(self):
         with tempfile.TemporaryDirectory() as root:
-            replay = Path(root) / "host.rhrec.jsonl"
-            replay.write_text("{}\n")
+            install = Path(root) / "installs" / "host"
+            for name in ("2026-01-01T00-00-00.mission", "2026-01-01T00-00-05.mission"):
+                directory = install / "replays" / name
+                directory.mkdir(parents=True)
+                (directory / "mission.json").write_text("{}\n")
+                (directory / "chunk-0.rhrec").write_text("frame\n")
             scenario = type("S", (), {
-                "record_path": replay,
+                "run": Path(root),
+                "peers": [type("P", (), {"role": "host", "install": install})()],
                 "record": lambda self: {"trace": [
                     ({"seat": 0, "role": "host"},
                      {"frame": 10, "multiplayer": {"last_compared_hash_frame": 0,
@@ -516,13 +550,15 @@ class EvidenceLayoutTest(unittest.TestCase):
         self.assertEqual(manifest["samples"][0],
                          {"seat": 0, "frame": 10, "compared_frame": 0, "desync_count": 0})
         self.assertEqual([sample["seat"] for sample in manifest["samples"]], [0, 1])
-        self.assertEqual(manifest["replay"]["path"], "host.rhrec.jsonl")
-        self.assertTrue(manifest["replay"]["exists"])
-        self.assertEqual(len(manifest["replay"]["sha256"]), 64)
+        recordings = manifest["recordings"]
+        self.assertEqual([Path(item["path"]).name for item in recordings],
+                         ["2026-01-01T00-00-00.mission", "2026-01-01T00-00-05.mission"])
+        self.assertEqual(recordings[0]["files"], ["chunk-0.rhrec", "mission.json"])
+        self.assertEqual(len(recordings[0]["mission_sha256"]), 64)
 
     def test_a_run_that_never_started_still_has_a_manifest(self):
         manifest = suite.hash_manifest(None)
-        self.assertEqual((manifest["samples"], manifest["replay"]), ([], None))
+        self.assertEqual((manifest["samples"], manifest["recordings"]), ([], []))
 
     def test_the_required_evidence_names_are_declared(self):
         self.assertEqual(suite.EVIDENCE_FILES,

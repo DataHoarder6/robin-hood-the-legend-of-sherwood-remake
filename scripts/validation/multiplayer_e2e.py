@@ -459,10 +459,44 @@ def hash_cadence(samples, every):
     honest if the peer advanced far enough that the samples could not have seen
     the boundary in between, which is why the sampling interval is bounded here
     rather than assumed.
+
+    A snapshot transition starts a new simulation generation: its frame counter,
+    and with it the hash schedule, begins again (`begin_sim_frame` names the
+    boundary). The rules therefore apply within one generation, and each
+    generation that compares a hash must show a cadence of its own — a restart
+    whose replacement mission compares once proves nothing about agreement.
     """
-    problems = []
     if not samples:
         return ["no /state sample"]
+    problems, compared_anywhere = [], set()
+    for generation in _hash_generations(samples):
+        problems += _generation_cadence(generation, every)
+        compared_anywhere |= {multiplayer.get("last_compared_hash_frame")
+                              for _, multiplayer in generation
+                              if multiplayer.get("last_compared_hash_frame") is not None}
+    if not compared_anywhere:
+        problems.append("no hash comparison was ever observed")
+    return problems
+
+
+def _hash_generations(samples):
+    """Split one seat's samples where a new simulation generation begins."""
+    generations, current, marker = [], [], None
+    for sample in samples:
+        value = (sample[1] or {}).get("begin_sim_frame")
+        if current and value != marker:
+            generations.append(current)
+            current = []
+        marker = value
+        current.append(sample)
+    if current:
+        generations.append(current)
+    return generations
+
+
+def _generation_cadence(samples, every):
+    """`hash_cadence`'s rules inside one generation."""
+    problems = []
     frames = [frame for frame, _ in samples]
     compared = [multiplayer.get("last_compared_hash_frame") for _, multiplayer in samples]
     for value in compared:
@@ -470,7 +504,7 @@ def hash_cadence(samples, every):
             problems.append(f"compared frame {value} is not a multiple of {every}")
     seen = sorted({value for value in compared if value is not None})
     if not seen:
-        return problems + ["no hash comparison was ever observed"]
+        return problems
     if len(seen) < 2:
         problems.append(
             f"only one compared frame ({seen[0]}) was observed, so the {every}-frame "
@@ -605,14 +639,16 @@ def hash_manifest(scenario):
     """Section 5's per-peer hash manifest, from the samples already collected.
 
     `/state` carries the compared frame and the desync count, not the hash value,
-    so that is what a manifest can honestly record; the host replay's path and
-    digest travel beside it because the recorder may not have written one (a host
-    killed at frame zero never does).
+    so that is what a manifest can honestly record. The host's mission
+    recordings travel beside it: the recorder writes one directory per mission
+    into the install's `replays/`, so a run that re-enters its mission leaves two
+    attempts and a host killed at frame zero leaves none. No `--record` names
+    them, because a named directory cannot hold a second mission of the same
+    process.
     """
     trace = scenario.record()["trace"] if scenario is not None else []
-    replay = Path(scenario.record_path) if scenario is not None else None
     return {
-        "schema": 1,
+        "schema": 2,
         "samples": [
             {"seat": peer["seat"],
              "frame": sample.get("frame"),
@@ -620,12 +656,28 @@ def hash_manifest(scenario):
              "desync_count": (sample.get("multiplayer") or {}).get("desync_count")}
             for peer, sample in trace
         ],
-        "replay": None if replay is None else {
-            "path": replay.name,
-            "exists": replay.is_file(),
-            "sha256": digest(replay) if replay.is_file() else None,
-        },
+        "recordings": [] if scenario is None else mission_recordings(scenario),
     }
+
+
+def mission_recordings(scenario):
+    """One entry per mission recording the host install holds, oldest first."""
+    host = next((peer for peer in scenario.peers if peer.role == "host"), None)
+    if host is None:
+        return []
+    root = Path(host.install) / "replays"
+    if not root.is_dir():
+        return []
+    recordings = []
+    for directory in sorted(path for path in root.iterdir()
+                            if path.is_dir() and path.name.endswith(".mission")):
+        mission = directory / "mission.json"
+        recordings.append({
+            "path": str(directory.relative_to(scenario.run)),
+            "files": sorted(path.name for path in directory.iterdir() if path.is_file()),
+            "mission_sha256": digest(mission) if mission.is_file() else None,
+        })
+    return recordings
 
 
 def require_empty(path):
@@ -704,6 +756,19 @@ def request(port, path, body=None, timeout=5):
             raise RuntimeError(f"HTTP {error.code} from {path}: {raw[:400]!r}") from error
 
 
+# `queue_terminal_modal_dismissal` answers a step with this exact refusal when
+# the seat owns no terminal page: the debriefing was already answered (by this
+# seat, or by the host's decision on its copy) and the mission-end leaderboard
+# is now the surface. It is the one refusal a resolve step treats as an answer.
+TERMINAL_PAGE_ABSENT = (
+    "blocked by mission-end leaderboard; dismiss it in the game before stepping")
+
+
+def dismissal_has_no_page(reply):
+    """Whether a step was refused because the seat has no terminal page left."""
+    return isinstance(reply, dict) and reply.get("error") == TERMINAL_PAGE_ABSENT
+
+
 class Transcript:
     """`events.jsonl`, mirrored to stdout for an operator watching the run."""
 
@@ -753,8 +818,7 @@ class Peer:
                 "--mission", scenario.defaults["mission"]]
         if self.role == "host":
             argv += ["--server", "--mp-expected-players",
-                     str(scenario.defaults["expected_players"]),
-                     "--record", str(scenario.record_path)]
+                     str(scenario.defaults["expected_players"])]
             if scenario.expanded.get("campaign"):
                 # A campaign is one host-owned session: the host names it, and a
                 # joiner learns it from the lobby listing, never from its own
@@ -833,7 +897,6 @@ class ScenarioRun:
         self.trace = []
         self.latest = {}
         self.account_data = run / "account-data"
-        self.record_path = run / "host.rhrec.jsonl"
         self.connect = None
         self.peers = []
         self.faults = list(expanded["faults"])
@@ -1100,14 +1163,22 @@ class ScenarioRun:
 
     def post(self, peer, name, path, body, description):
         """One dev-surface request, so a refusal names itself instead of timing out."""
-        try:
-            reply = request(peer.port, path, body)
-        except (OSError, ValueError, RuntimeError, urllib.error.URLError) as error:
-            raise RuntimeError(f"{peer.name}: {path} {description} failed: {error}") from error
+        reply = self.answer(peer, path, body, description)
         if not isinstance(reply, dict) or "error" in reply:
             raise RuntimeError(f"{peer.name}: {path} refused {description}: {reply}")
         self.events.event(name, peer=peer.name, request=body, reply=reply)
         return reply
+
+    def answer(self, peer, path, body, description):
+        """Send one request and return its reply, refusal included.
+
+        A caller that can act on a specific refusal reads it here; every other
+        caller goes through `post`, where a refusal fails the row.
+        """
+        try:
+            return request(peer.port, path, body)
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError) as error:
+            raise RuntimeError(f"{peer.name}: {path} {description} failed: {error}") from error
 
     def end_mission(self, peer, fault):
         """The host ends the mission through its own terminal flow."""
@@ -1122,6 +1193,15 @@ class ScenarioRun:
         index. The dismissal travels on the step endpoint, which is the one
         surface that queues a terminal decision — a client's is forwarded to the
         host, exactly as the keyboard would forward it.
+
+        A press that loses the race to the session's own decision is not a
+        failed row: the page it names is already gone, the step's promise is
+        answered, and the evidence says so.
+
+        The list is a sequence, not a set: a step whose seat has no page yet
+        holds every later one. Rows depend on that — the host's decision ends
+        the page on every seat, so a client's answer only exists if it is
+        pressed while the page is still the session's open question.
         """
         if not self.resolves:
             return
@@ -1138,8 +1218,18 @@ class ScenarioRun:
                     "synchronized_multiplayer": True,
                     "dismissals": [{"kind": presentation["kind"], "result": step["result"]}],
                 }
-                self.post(peer, "resolve", "/step-forward", body,
-                          f"terminal dismissal {step['result']}")
+                description = f"terminal dismissal {step['result']}"
+                reply = self.answer(peer, "/step-forward", body, description)
+                if dismissal_has_no_page(reply):
+                    self.events.event("resolve_answered_by_session", peer=peer.name,
+                                      why="the decision closed the page before the press landed",
+                                      reply=reply)
+                    self.resolves.remove(step)
+                    self.last_fault_at = time.monotonic()
+                    continue
+                if not isinstance(reply, dict) or "error" in reply:
+                    raise RuntimeError(f"{peer.name}: /step-forward refused {description}: {reply}")
+                self.events.event("resolve", peer=peer.name, request=body, reply=reply)
                 self.resolves.remove(step)
                 self.last_fault_at = time.monotonic()
                 continue
@@ -1147,10 +1237,12 @@ class ScenarioRun:
                 # The session answered this seat's page before the runner could
                 # press it (the host's decision closes every seat's copy); that
                 # is the same promise, and pressing a page that is gone is not.
-                self.events.event("resolve_answered_by_session", peer=peer.name)
+                self.events.event("resolve_answered_by_session", peer=peer.name,
+                                  why="the page was already gone at the next sample")
                 self.resolves.remove(step)
                 continue
             waiting.append(peer.name)
+            break
         if waiting and not self.faults and (
                 time.monotonic() - self.last_fault_at > BARRIER_DEADLINE_S):
             raise ScenarioDeadline(
