@@ -1,15 +1,17 @@
 # Multiplayer waits without a deadline
 
 Audit of every place one participant's progress depends on a message another
-participant may never send. Read-only: no production code was changed.
+participant may never send.
 
-Last verified: 2026-11-19, `fork/main` @ `ac74b98c0`. Written against
-`5e1d2b17e`; ranks 2 and 3 were bounded before `af1f3f779` (`45fc7fb96`,
-`9ff945a46`, `05bca0b90`) and the earlier re-check of this file said otherwise,
-so their rows now sit in "Waits that do have deadlines" and the ranked entries
-state the new behaviour. Rank 5 was bounded before this re-check as well, with
-one hole: the browser attempt was unbounded, so the budget was never read. Each
-open ranked item is closed by a change that gives the wait a budget and a named
+Last verified: 2026-11-19, `fork/main` @ `4ff153ba6`, after rank 4 was closed
+(#46). Written against `5e1d2b17e`; ranks 2 and 3 were bounded before
+`af1f3f779` (`45fc7fb96`, `9ff945a46`, `05bca0b90`) and the earlier re-check of
+this file said otherwise, so their rows now sit in "Waits that do have
+deadlines" and the ranked entries state the new behaviour. Rank 5 was bounded
+before this re-check as well, with one hole: the browser attempt was unbounded,
+so the budget was never read. Rank 4 is closed too: the page now awaits only the
+seats that are in the session's simulation. Each open ranked item is closed by a
+change that gives the wait a budget and a named
 consequence, never by a note in this file.
 
 Scope: `crates/robin_rs/src/game_session/terminal_debriefing.rs`,
@@ -59,8 +61,6 @@ repo-relative.
 | Client terminal debriefing holds for the host's snapshot commit | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Client finished its debriefing with outcome `Ok`/`Load` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session with `GameCode::Quit` and reopens the menu; it does not keep waiting for a host that may never answer | The same `session_failed` event and log line as the host row | Closed 2026-11-19 with the host row: both sides of the same wait now expire. |
 | Client waits for `BeginSim` | `runtime/admission.rs:14-22` (`PeerWaitingForBegin`, `HostWaitingForBegin`, `HostWaitingForResyncBegin`); gate `runtime/multiplayer_sync.rs:60-74`; pause `multiplayer.rs:1274` | Peer adopted the snapshot and sent `ReadyToSim`, or host's mission is loaded and waiting on peers | **none** | Nothing in the game layer. Only the transport notices a dead host. | No log for the wait itself. `BeginSim` arrival logs "begin-sim barrier released" (`multiplayer.rs:625-629`). | Mission loaded but never simulated; input disabled by `set_gameplay_input_enabled(false)` (`host/transport.rs:178`). |
 | Client waits for `InitialSnapshot` after (re)connect | `runtime/admission.rs:50-57` (`PeerWaitingForSnapshot`) | `Disconnected`, or a first join before the host's snapshot cache exists | **none** | Nothing. The host skips the send silently when its `initial_snapshot` cache is empty (`server.rs:995-1010`). | Console: "Disconnected; reconnecting…" and "Reconnected; synchronizing game…" (`multiplayer.rs:519-551`). No indication that the snapshot never arrived. | Peer frozen indefinitely on a snapshot it never receives; reconnect loops never converge. |
-| Story / terminal modal acknowledgement barrier | `modal_session.rs:19-22` (`requires_modal_acknowledgements`), `:632-671` (votes), `:828-845` (unanimous over the roster), `:751-761` (`story_barrier_pending`); pause `multiplayer.rs:1295-1303` | Any shared story modal, and any `FinalDebriefing`/`MissionState EndState` page, while another seat is admitted | **none** | Nothing. The roster (`required_players`) is set once at `install_session` (`host/transport.rs:177`) and never shrinks when a seat leaves. | Host UI shows "Waiting for Player 2…" from `modal_waiting_names` (`modal_net.rs:159-164`) for scripted story modals only. The terminal debriefing uses `ModalDismissalGate` (`terminal_debriefing.rs:224-225`, `modal_net.rs:16-103`), which shows no waiting text at all. | Simulation paused for every participant. One player who never opens the page (or left the session) freezes everyone until they return. |
-| Host waits for a peer's modal decision (debriefing popup and final page) | `terminal_debriefing.rs:628-648` (`AwaitingMissionAuthority`, `AwaitingFinalAuthority`), `modal_net.rs:58-103` | Host clicked continue on a debriefing page that requires acknowledgements | **none** | Nothing; the gate stays `AwaitingAuthority` and retries publication each UI tick. | None on screen; `tracing::error!` only when publication itself fails (`modal_net.rs:105-110`). | Host debriefing hangs with the page still open. Combined with the two rows above, a peer that disconnects at mission end deadlocks both sides. |
 | Mission-end debriefing waits for its own command echo | `terminal_debriefing.rs:1105-1112` (`pending_terminal_debriefing` re-queued while `mission_attempt_sequence` has not advanced) | After the engine returns a terminal exit code, in any multiplayer mission | **none** — but no longer permanent: the pause it waits behind expires (rank 5) | The echo needs frames, and `pause_simulation` is true while `transport.reconnecting()` (`multiplayer.rs:1456`, from `host/transport.rs:256`); a disconnect at mission end still withholds them, so the client now leaves the session when the reconnect budget is spent instead of waiting for an echo that cannot arrive | "waiting for authoritative mission completion update" is logged once (`terminal_debriefing.rs:1147-1152`), then the give-up names the host and the budget | Bounded by rank 5: a disconnect at mission end ends the client's session within `RECONNECT_BUDGET` rather than freezing it. The echo itself is still not a wait with its own deadline. |
 | Client reconnect loop (`SessionEnd::Drop`) | `client_session.rs:790-870`, `:643-680` (`ReconnectStep`, `give_up_on_reconnect`), budget `:56` (`RECONNECT_BUDGET`) | Any transport loss | **60 s** wall clock for the whole loop, one attempt never longer than what is left of it | Gives up: one `warn!("multiplayer: giving up on reconnection")` and a `NetEvent::Fatal` timeout naming *which* host was being dialled and the budget it spent; the game loop turns that fatal into a failed mission (`multiplayer.rs:719-727`), so the client leaves the session with a non-zero exit, which is what H19 asserts | Warn per drop: `client session ended: {reason}; reconnecting...`, then one warn per failed attempt; console: "Disconnected; reconnecting…" | Closed 2026-11-19. The loop was already capped when this audit was re-read (the row below it contradicted H19); the budget is now a cap on the whole loop, and every attempt is bounded, so it cannot be outlived. |
 | Browser reconnect attempt | `wasm.rs:38-43` (`RECONNECT_ATTEMPT_TIMEOUT`), `:194-205` | Browser transport loss | **15 s**, the same bound the native attempt uses, capped further by what is left of the budget | The attempt ends as a failed attempt, the loop retries under the same budget and gives up as the row above does. The browser writes frames under a 30 s bound too (`content_write`), so no write in an attempt is unbounded either | Same drop warnings; a failed attempt now logs `reconnect failed: …; will retry in …` | Closed 2026-11-19 (`reconnect_attempt: None` removed from the field's type). Before the fix one attempt could wait forever, so the 60 s budget was never read and the browser peer wedged inside it. |
@@ -102,10 +102,30 @@ the constants the transports actually read, not comments.
 | Synchronized start gate once `BeginSim` arrives | host clock + 500 ms | `server.rs:287-292`; opened at `multiplayer_sync.rs:61-69` |
 | Host snapshot-transition acknowledgement barrier (`SnapshotTransitions::awaiting`) | 60 s + 1 s per 64 KiB of payload | `robin_engine/src/multiplayer.rs:260` (`TRANSITION_COMMIT_MS`), `:286` (`transition_budget`); stamped `server_dispatch.rs:283-287`; expired on the 500 ms tick `server.rs:866-874` |
 | Host ready barrier (`ReadyBarrier::candidate`) | 120 s, refreshed once for a seat admitted mid-wait | `server_protocol.rs:23` (`READY_BUDGET_MS`), `:89-104` (wait start, one extension, expiry); expired on the same tick `server.rs:316-327` |
+| Shared-page acknowledgement barrier (`ModalSyncState`, story pages and the mission-end page, and the host's wait for a peer's decision on either) | 300 s, and only for the seats in the session's simulation | `robin_engine/src/multiplayer/modal_session.rs:26` (`MODAL_ACK_BUDGET_MS`); await set `session_seats` (`multiplayer.rs:762`) published from `server.rs:250-273`; expiry `modal_session.rs:481-548`; publication `:1016-1038`; message `ingame_menu/modal_net.rs:160-180` |
 
-The synchronized start gate and the two host barriers above resolve on a clock.
-Every remaining row in the first table waits for a message that may never
-arrive.
+The synchronized start gate, the two host barriers and the shared-page barrier
+above resolve on a clock. Every remaining row in the first table waits for a
+message that may never arrive.
+
+The shared-page barrier counts the simulation's seats, not the roster. The
+roster is `required_players` (`modal_session.rs:804`, written once from
+`host/transport.rs:302`); the await set is `SessionSeats`, a host-local bitmap
+the server publishes on admission, on loss, when the ready barrier releases the
+mission and when the session drops every peer (`server.rs:250-273` with call
+sites `:601`, `:826`, `:897`, `:952`, `:1257`, `:1618`, and
+`server_dispatch.rs:259`). A seat that was admitted but has not been released
+into the mission — the `PeerWaitingForBegin` of the #43 capture — is not in it,
+so a page opened at that moment completes on the host's decision instead of
+waiting 300 s for a seat that cannot see it; a seat the start barrier released
+before the page closed is in it and does owe an answer. On expiry the host marks
+the seats it awaited, records one `modal_expired` event naming them, and
+publishes the decision. Both paths show the same sentence — "Waiting for X
+(continuing without them in N s)..." (`modal_net.rs:160-180`) — and the
+mission-end page draws it in place of its body while the session owns the
+outcome (`terminal_debriefing.rs:756-780`, `ingame_menu/debriefing.rs:238`). A
+peer names only the host whose decision it awaits: it publishes no mask, because
+it does not decide the barrier.
 
 The two host barriers expire into the same shape, so it is stated once: the
 seats still waiting are evicted, one `tracing::warn!` names the transition (or
@@ -185,13 +205,26 @@ the tick that expires the barrier commits it under the same lock, after which
    (`server/tests.rs:472`) and
    `ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner`
    (`peer_sessions.rs:509`), the pair H11 names.
-4. **Modal acknowledgement barrier, including terminal summaries** —
-   `modal_session.rs:19-22` makes `FinalDebriefing` and `MissionState EndState`
-   require acknowledgements, `:837-845` requires every roster seat, and
-   `multiplayer.rs:1303` turns a pending story barrier into
-   `pause_simulation`. The roster never shrinks. Only scripted story modals
-   show "Waiting for …" (`modal_net.rs:159-164`); the terminal pages show
-   nothing, so the host sees a frozen mission with an open debriefing page.
+4. **Modal acknowledgement barrier, including terminal summaries — closed
+   2026-11-19 (#46).** The barrier counted `required_players`, the configured
+   roster (`modal_session.rs:19-22` made `FinalDebriefing` and `MissionState
+   EndState` require acknowledgements), so a page drawn while a roster seat was
+   still in `PeerWaitingForBegin` waited 300 s for a seat that could not see it
+   — the #43 capture. The await set is now `SessionSeats` (`multiplayer.rs:762`),
+   which the host's server publishes whenever the simulation's seat set changes
+   (`server.rs:250-273`): a page decides on the host's own outcome while a seat
+   is only admitted, awaits a seat the start barrier released, and stops
+   awaiting one that leaves. `required_players` keeps its roster meaning
+   (`:804`, `host/transport.rs:302`), and `MODAL_ACK_BUDGET_MS` still bounds the
+   seats that are simulating. The mission-end page used to show nothing while
+   the host waited; it now draws the same sentence the story path draws
+   (`terminal_debriefing.rs:756-780`, `ingame_menu/debriefing.rs:238`). Proved
+   by `a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim` and
+   `a_page_awaits_a_seat_released_into_the_mission`
+   (`game_session/multiplayer/story_regression.rs`, H21), by
+   `session_seat_mask_withholds_a_seat_until_the_start_barrier_releases_it` and
+   `session_seat_mask_shrinks_when_the_seat_leaves` (`native/server/tests.rs`),
+   and by the engine's `modal_session` seat-mask tests.
 5. **Client reconnect — closed 2026-11-19, after this audit's own two rows
    disagreed.** The loop was already capped when re-read: `RECONNECT_BUDGET`
    is 60 s (`client_session.rs:56`) and a spent budget publishes a fatal and
@@ -253,9 +286,11 @@ failure", so they belong with this evidence:
   that requires the transport task to be the only producer of `ContentChunk`
   events for that channel. Not proven for every entry point, so listed rather
   than ranked.
-- **Whether a departed player can ever be removed from `required_players`.**
-  Only `set_modal_player_count` writes it (`modal_session.rs:624-630`), and it
-  is called from `install_session` only (`host/transport.rs:177`). A mid-session
-  path that re-derives the roster from live seats was not found; absence of a
-  caller is not proof that none exists, so the conclusion rests on the call
-  sites listed.
+- **Whether a departed player can ever be removed from `required_players`** —
+  closed 2026-11-19 (#46) as "it does not need to be". `set_modal_player_count`
+  writes the roster (`modal_session.rs:804`) and is called from
+  `install_session` only (`host/transport.rs:302`), which is why the roster
+  never shrinks; the seats a page awaits are the separate `SessionSeats` mask
+  (`multiplayer.rs:762`), which does shrink on release and on eviction
+  (`server.rs:250-273`). A mid-session path that re-derives the roster was not
+  found, and nothing now depends on one existing.
