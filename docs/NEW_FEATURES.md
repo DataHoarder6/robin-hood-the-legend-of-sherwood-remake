@@ -2953,3 +2953,15 @@ longer asks anything between the defeat and its debriefing: the title card that
 used to sit there asked Yes/No and ran the same transition either way.
 Evidence, the strings and the ids are in
 [mission-end pages](slop/MISSION_END_PAGES.md).
+
+- **Campaign co-op is one session.** A campaign host advertises a joinable
+  lobby — `campaign` plus the fixed party size and no explicit roster — so a
+  second seat joins from its own install and needs no local save. The host owns
+  the campaign: its slot, its roster and its mission sequence. The session spans
+  the campaign's missions, so the mission-end page hands every seat to the next
+  mission instead of ending the session and leaving each install to write its
+  own save; a joining seat never writes a campaign slot. A campaign host with a
+  save resumes at the mission the party is on, a fresh one at the mission its
+  lobby advertised. `--mp-campaign` starts the same session from the command
+  line, and a lobby whose rules cannot be advertised names the reason in its
+  status line instead of sitting there as if it were open.
