@@ -146,7 +146,14 @@ def main(argv: list[str]) -> int:
     if spent.get("month") != month:
         spent = {"month": month, "characters": 0}
 
-    pending = [entry for entry in entries if key_of(entry) not in manifest["lines"]]
+    # A manifest entry alone does not mean the line was synthesised: a dry run
+    # records entries without writing audio. The file on disk is the proof.
+    pending = [
+        entry
+        for entry in entries
+        if key_of(entry) not in manifest["lines"]
+        or not (args.out / output_path(entry)).is_file()
+    ]
     characters = sum(len(entry["spoken"]) for entry in pending)
     if spent["characters"] + characters > args.budget:
         raise SystemExit(

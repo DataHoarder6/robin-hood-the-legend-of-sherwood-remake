@@ -99,14 +99,24 @@ class DryRun(Fixture):
         first = manifest["lines"]["H01-1000105-0"]
         self.assertEqual(first["characters"], len("Jaunas Robinas iš Loksli paliko savo kraštą."))
 
-    def test_resume_does_not_count_finished_lines_twice(self):
+    def test_a_dry_run_manifest_does_not_hide_real_work(self):
         first = self.run_synth("--dry-run")
         self.assertEqual(first.returncode, 0, first.stderr)
-        characters = json.loads(self.manifest.read_text())["characters"]
         second = self.run_synth("--dry-run")
         self.assertEqual(second.returncode, 0, second.stderr)
-        again = json.loads(self.manifest.read_text())["characters"]
-        self.assertEqual(characters, again)
+        self.assertIn("2 pending", second.stderr)
+        self.assertNotIn("0 pending", second.stderr)
+
+    def test_a_manifest_with_audio_on_disk_is_not_repeated(self):
+        first = self.run_synth("--dry-run")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        manifest = json.loads(self.manifest.read_text())
+        for entry in manifest["lines"].values():
+            path = self.root / "audio" / entry["path"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"ogg")
+        second = self.run_synth("--dry-run")
+        self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn("0 pending", second.stderr)
 
 

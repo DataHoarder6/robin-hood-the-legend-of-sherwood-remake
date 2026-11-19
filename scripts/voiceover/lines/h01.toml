@@ -1,4 +1,8 @@
 # H01: 32 lines, 7212 characters of English.
+[meta]
+mission = "H01"
+level_code = "HA"
+
 [[line]]
 id = 1000017
 index = 0

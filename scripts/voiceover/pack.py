@@ -27,11 +27,25 @@ LOCALE_ROOT = "1063"
 ENGLISH_LOCALE = "2047"
 
 
-def load_lines(directory: Path) -> dict[str, list[dict]]:
-    missions: dict[str, list[dict]] = {}
+def resolve(root: Path, *parts: str) -> Path:
+    """Walk `parts` case-insensitively; distributions spell Data/data/DATA."""
+    current = root
+    for part in parts:
+        match = next(
+            (child for child in current.iterdir() if child.name.lower() == part.lower()),
+            None,
+        )
+        if match is None:
+            raise SystemExit(f"{current}: no {part}")
+        current = match
+    return current
+
+
+def load_lines(directory: Path) -> dict[str, dict]:
+    missions: dict[str, dict] = {}
     for path in sorted(directory.glob("*.toml")):
         document = tomllib.loads(path.read_text())
-        missions[path.stem.upper()] = document["line"]
+        missions[path.stem.upper()] = document
     return missions
 
 
@@ -47,10 +61,10 @@ def wave_paths(descriptor: descriptors.Descriptor, dump: dict) -> dict[tuple[int
     return mapping
 
 
-def write_translations(missions: dict[str, list[dict]], path: Path) -> None:
+def write_translations(missions: dict[str, dict], path: Path) -> None:
     blocks = []
-    for lines in missions.values():
-        for line in lines:
+    for document in missions.values():
+        for line in document["line"]:
             blocks.append(
                 "[[line]]\n"
                 f"id = {line['id']}\n"
@@ -79,7 +93,8 @@ def main(argv: list[str]) -> int:
     translations.parent.mkdir(parents=True, exist_ok=True)
     write_translations(missions, translations)
 
-    retail_level = args.retail / ENGLISH_LOCALE / "data" / "Text" / "Level.res"
+    retail_text = resolve(args.retail / ENGLISH_LOCALE, "data", "Text")
+    retail_level = retail_text / "Level.res"
     subprocess.run(
         [
             str(args.tool),
@@ -97,18 +112,19 @@ def main(argv: list[str]) -> int:
     dialogue_dir = pack / "Text" / "Dialogues"
     dialogue_dir.mkdir(parents=True, exist_ok=True)
     copied = 0
-    for clip in sorted((args.retail / ENGLISH_LOCALE / "data" / "Text" / "Dialogues").glob("*.wav")):
+    for clip in sorted((retail_text / "Dialogues").glob("*.wav")):
         shutil.copy2(clip, dialogue_dir / clip.name)
         copied += 1
     print(f"{dialogue_dir}: {copied} retail clips", file=sys.stderr)
 
     manifest = json.loads(args.manifest.read_text()) if args.manifest.exists() else {"lines": {}}
     dubbed = 0
-    for mission, lines in missions.items():
-        red = args.retail / "DATA" / "Text" / f"RHLevel{mission[-2:]}.red"
-        descriptor = descriptors.read(red)
+    for mission, document in missions.items():
+        level_code = document["meta"]["level_code"]
+        red_dir = resolve(args.retail, "DATA", "Text")
+        descriptor = descriptors.read(red_dir / f"RHLevel{level_code}.red")
         mapping = wave_paths(descriptor, dump)
-        for line in lines:
+        for line in document["line"]:
             key = f"{mission}-{line['id']}-{line['index']}"
             entry = manifest["lines"].get(key)
             if not entry:
@@ -118,7 +134,7 @@ def main(argv: list[str]) -> int:
                 print(f"{key}: no audio at {source}, skipping", file=sys.stderr)
                 continue
             if line["voice"] == "narrator":
-                target = pack / entry["path"]
+                target = pack.parent / entry["path"]
             else:
                 target = pack / "Text" / mapping[(int(line["id"]), int(line["index"]))]
             target.parent.mkdir(parents=True, exist_ok=True)

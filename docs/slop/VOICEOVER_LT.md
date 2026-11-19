@@ -161,6 +161,10 @@ verification was performed. To finish: translate `display` for 87 lines
 synthesiser), then
 
 ```sh
+# To re-extract a line table, pass the descriptor's level code (H01→HA, H02→HB):
+# python3 scripts/voiceover/extract.py --dump level.json \
+#   --red <datadir>/DATA/Text/RHLevelHA.red --mission H01 --level-code HA \
+#   --output scripts/voiceover/lines/h01.toml
 GOOGLE_TTS_API_KEY=... just voiceover-synth
 just voiceover-pack --retail <datadir> --dump <dump_res JSON> \
     --tool target/debug/translate_level_res --out build/pack

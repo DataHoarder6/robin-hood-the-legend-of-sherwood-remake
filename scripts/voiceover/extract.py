@@ -48,6 +48,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dump", required=True, type=Path, help="dump_res JSON")
     parser.add_argument("--red", required=True, type=Path)
     parser.add_argument("--mission", required=True, help="mission id, e.g. H01")
+    parser.add_argument("--level-code", required=True, help="descriptor code, e.g. HA")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
 
@@ -80,6 +81,9 @@ def main(argv: list[str]) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         f"# {args.mission}: {len(lines)} lines, {total} characters of English.\n"
+        + "[meta]\n"
+        + f'mission = "{args.mission}"\n'
+        + f'level_code = "{args.level_code}"\n\n'
         + "\n\n".join(lines)
         + "\n"
     )

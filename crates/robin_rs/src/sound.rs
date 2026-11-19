@@ -1363,6 +1363,11 @@ mod exclamations;
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct NarrationLane {
     started: bool,
+    /// An ended lane stays ended: a pending multiplayer dismissal asks the
+    /// modal to stop before authority arrives, and the next tick must not
+    /// restart the clip.
+    ended: bool,
+    previous_music_volume: Option<u16>,
 }
 
 impl NarrationLane {
@@ -1374,20 +1379,25 @@ impl NarrationLane {
         sound: &mut SoundManager,
         backend: &mut dyn AudioBackend,
     ) {
-        if self.started {
+        if self.started || self.ended {
             return;
         }
         let Some(path) = path else {
             return;
         };
         self.started = true;
+        self.previous_music_volume = Some(backend.get_music_volume());
         sound.play_narration(path, backend);
     }
 
     /// Halt the clip if this lane started one.
     pub(crate) fn end(&mut self, sound: &mut SoundManager, backend: &mut dyn AudioBackend) {
+        self.ended = true;
         if std::mem::take(&mut self.started) {
             sound.close_narration(backend);
+            if let Some(volume) = self.previous_music_volume.take() {
+                backend.set_music_volume(volume);
+            }
         }
     }
 }

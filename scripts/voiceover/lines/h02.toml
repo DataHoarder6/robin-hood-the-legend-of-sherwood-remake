@@ -1,4 +1,8 @@
 # H02: 55 lines, 6751 characters of English.
+[meta]
+mission = "H02"
+level_code = "HB"
+
 [[line]]
 id = 1000018
 index = 0
