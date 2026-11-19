@@ -451,6 +451,7 @@ async fn run_rust_game_active(
         ))
         .await;
         outcome.result?;
+        crate::observability::application_exit("the forced mission run finished");
         return Ok(0);
     }
 
@@ -491,6 +492,7 @@ async fn run_rust_game_active(
         ))
         .await;
         outcome.result?;
+        crate::observability::application_exit("the demo mission run finished");
         return Ok(0);
     }
 
@@ -569,6 +571,7 @@ async fn run_prepared_replay(
     ))
     .await;
     outcome.result?;
+    crate::observability::application_exit("the replay run finished");
     Ok(0)
 }
 
@@ -610,6 +613,12 @@ impl MainMenuContext<'_> {
         })
         .await?;
         if self.window.close_requested || result == Some(SessionResult::ExitRequested) {
+            let reason = if self.window.close_requested {
+                "a session ended with the window closed"
+            } else {
+                "a session asked the application to exit"
+            };
+            crate::observability::application_exit(reason);
             return Ok(None);
         }
         Ok(Some(campaign))
@@ -1080,6 +1089,7 @@ async fn run_main_menu(
         #[cfg(not(target_arch = "wasm32"))]
         crate::diagnostic_context::main_menu();
         if menu.window.close_requested {
+            crate::observability::application_exit("the main menu loop found the window closed");
             return Ok(0);
         }
         let open_options_initially = std::mem::take(&mut reopen_main_options);

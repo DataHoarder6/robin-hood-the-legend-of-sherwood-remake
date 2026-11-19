@@ -211,6 +211,20 @@ pub(crate) fn record_in_isolated_ring(
     isolated_ring(|ring| ring.push(kind, seat, frame, detail.clone())).is_some()
 }
 
+/// The application is about to end, and not because it crashed: name the
+/// boundary that decided it. A report of "the game just turned off" otherwise
+/// leaves only `game future returned, exit_code=0`, which is also the last line
+/// of an ordinary quit (#47).
+pub(crate) fn application_exit(reason: &str) {
+    event(
+        EventKind::ApplicationExit,
+        format!("application exiting: {reason}"),
+    )
+    .warn()
+    .field("reason", reason)
+    .record();
+}
+
 // ── `/state` ───────────────────────────────────────────────────────────
 
 /// A mission attempt begins: its own generation, its own terminal, and no

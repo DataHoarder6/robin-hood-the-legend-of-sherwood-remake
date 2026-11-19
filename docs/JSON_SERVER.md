@@ -154,7 +154,8 @@ the previous page, so a poller never repeats an event.
 `transport_reconnected`, `barrier_reached`, `barrier_released`,
 `barrier_expired`, `transition_prepared`, `transition_committed`,
 `transition_aborted`, `transition_dropped`, `modal_announced`, `modal_proposed`,
-`modal_acked`, `modal_expired`, `desync`, `session_failed` and `session_ended`.
+`modal_acked`, `modal_expired`, `desync`, `session_failed`, `session_ended` and
+`application_exit`.
 `seat` and `frame` are `null` when the event has no seat or frame; `detail`
 carries the event's own fields and always names the wording in `message`.
 
@@ -164,6 +165,12 @@ this process receiving its seat from the host; `seat_evicted` is reserved for an
 admitted `DisconnectSeat`. A lost peer link is `transport_disconnected` followed
 by `transport_reconnected` when the transport recovers — the transport retries
 on its own, so no seat was evicted.
+
+`application_exit` names the boundary that asked the process to stop — a
+closed window, a session that returned `ExitRequested`, a mission-end page
+settled as an emergency end, or a one-shot `--mission`/replay run that
+finished. It carries the wording in `detail.reason`; a process that ends
+without it did not end by one of those decisions.
 
 `seq` restarts at zero in every process, so `run` identifies the process run that
 served the page and `next_seq` is always that run's true cursor. A poller that

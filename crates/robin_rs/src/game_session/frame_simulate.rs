@@ -1477,6 +1477,12 @@ impl InteractiveFrameSimulation {
         if terminal_progress == TerminalDebriefingProgress::EmergencyExit
             || lost_sherwood_progress == LostSherwoodGateProgress::Exit
         {
+            let reason = if terminal_progress == TerminalDebriefingProgress::EmergencyExit {
+                "the mission-end page settled as an emergency end"
+            } else {
+                "the lost-Sherwood gate settled as an exit"
+            };
+            crate::observability::application_exit(reason);
             let application_context = host.application_context().clone();
             let requested = frame.begin_post_initialize();
             let post_initialized = runtime.lifecycle_mut().cross_post_initialize(|| {

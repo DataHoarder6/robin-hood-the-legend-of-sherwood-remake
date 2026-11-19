@@ -64,6 +64,8 @@ pub(crate) enum EventKind {
     Desync,
     SessionFailed,
     SessionEnded,
+    /// The application is ending and this says which boundary decided that.
+    ApplicationExit,
 }
 
 /// One event before it is recorded. Built and finished at a single call site so
