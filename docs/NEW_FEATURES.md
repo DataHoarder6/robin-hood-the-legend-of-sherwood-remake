@@ -2390,12 +2390,13 @@ serializes helper and manual uploads; the OS releases it after a crash. Local
 falls back to its background upload worker. The helper uploads captured reports;
 it cannot capture failures that prevent the OS from starting the executable.
 
-Open the in-game console (`~`) and enter `BUGREPORT description of the problem`
-to submit a manual report. Submission status and the report ID appear in the
-console. Reports include the engine commit, platform, panic backtrace, recent
-debug log (up to 32 MiB), and active replay JSON files (up to 224 MiB decoded). Missing or
-oversized replay attachments are explicitly reported. Logs and replays can
-contain player names, local paths and gameplay.
+A player who is not looking at a panic files a voluntary report instead: pause
+menu → Report a bug, `/BUG description of the problem` in the console (`~`), or
+`POST /bug-report`. Its bundle carries the script's objective flags, the tick,
+every seat, the saves and the replay, and is filed as an issue labelled `bug`
+and `bug-report` — see `docs/BUG_REPORTS.md`. The leaderboard diagnostic queue
+above still receives native panic reports. Logs and replays can contain player
+names, local paths and gameplay.
 
 Native game-thread panics suppress the secondary “terminated without publishing
 an exit code” report only after the panic report is safely queued. Both graphical

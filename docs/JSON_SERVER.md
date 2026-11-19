@@ -244,6 +244,21 @@ not manufacture default values for malformed calls.
 
 The command enters the same deterministic command path as interactive input.
 
+### Bug reports
+
+`POST /bug-report` files the voluntary report a player can also file from the
+pause menu or `/BUG`:
+
+```json
+{"description":"mission complete, no debriefing","note":"host is stuck too"}
+```
+
+`description` is required and becomes the issue title; `note` is optional. The
+answer names the reserved bundle directory and whether an upload endpoint is
+configured; the bundle itself is written at the next mission frame boundary.
+The bundle's layout, its upload and the receiver's contract:
+[BUG_REPORTS.md](BUG_REPORTS.md).
+
 ## Screenshots
 
 `GET /screenshot` returns raw `image/png` bytes. Without `frame`, it captures

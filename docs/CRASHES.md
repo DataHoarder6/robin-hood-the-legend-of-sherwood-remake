@@ -8,6 +8,9 @@ Implementation: `crates/robin_rs/src/crash.rs` (client),
 `tools/crash-receiver/receiver.py` (receiver). This page is the contract between
 them; the code is the behaviour.
 
+A player can also file a report when nothing crashed; that is a separate
+contract with its own bundle, screen and endpoint: [BUG_REPORTS.md](BUG_REPORTS.md).
+
 ## What a crash leaves on disk
 
 `<install home>/crashes/<utc>-<fingerprint>/` is written by the panic hook,

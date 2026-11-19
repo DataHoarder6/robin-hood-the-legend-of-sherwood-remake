@@ -20,6 +20,7 @@
 
 - [Highscores, replay verification, ranked authority authoring, VPS and browser deployment](../crates/robin_highscores/README.md) is the consolidated service and deployment guide; the operations scripts live in `crates/robin_highscores/ops/`.
 - [Crash reporting](CRASHES.md) — what a panic leaves on disk, the upload endpoint contract, and the receiver that files one GitHub issue per crash
+- [Bug reports](BUG_REPORTS.md) — the voluntary in-game report: its three entrances, the bundle it carries, and its endpoint contract
 
 These documents describe operations; reading or testing a deployment command
 does not by itself authorize publishing a release or modifying a live service.
