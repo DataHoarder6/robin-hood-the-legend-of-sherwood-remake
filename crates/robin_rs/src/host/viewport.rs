@@ -14,6 +14,35 @@ pub struct ViewportState {
     pub screen_size: ScreenSize,
     pub level_size: MapSize,
     touch_motion: TouchCameraMotion,
+    /// In-flight scripted pan: the director owns the target and its timing,
+    /// the host owns the path from the view the player was actually looking at.
+    director_slide: Option<DirectorSlide>,
+    /// Presentation state captured the frame a cutscene takes the camera.
+    cutscene_view: Option<(MapPoint, f32)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DirectorSlide {
+    target: MapPoint,
+    engine_from: MapPoint,
+    host_from: MapPoint,
+}
+
+/// Fraction of the director's pan completed, read from its deterministic
+/// cursor. The host uses it to travel the same distance over the same ticks.
+fn director_slide_progress(slide: &DirectorSlide, current: MapPoint) -> f32 {
+    let dx = slide.target.x - slide.engine_from.x;
+    let dy = slide.target.y - slide.engine_from.y;
+    let (span, moved) = if dx.abs() >= dy.abs() {
+        (dx, current.x - slide.engine_from.x)
+    } else {
+        (dy, current.y - slide.engine_from.y)
+    };
+    if span.abs() < f32::EPSILON {
+        1.0
+    } else {
+        (moved / span).clamp(0.0, 1.0)
+    }
 }
 
 /// Host-only touch-camera state. Velocities are expressed in screen pixels
@@ -36,6 +65,8 @@ impl ViewportState {
             screen_size: ScreenSize::new(screen_width, screen_height),
             level_size: MapSize::ZERO,
             touch_motion: TouchCameraMotion::default(),
+            director_slide: None,
+            cutscene_view: None,
         }
     }
 
@@ -68,6 +99,9 @@ impl ViewportState {
         if !before.owns_view && !after.owns_view {
             return;
         }
+        if !before.owns_view && after.owns_view {
+            self.cutscene_view = Some((self.view_position, self.zoom_factor));
+        }
         if before.zoom_factor != after.zoom_factor {
             // Script zooms retain the local focal point until a pan or jump
             // explicitly chooses a new one.
@@ -79,22 +113,55 @@ impl ViewportState {
                 .slide_target
                 .filter(|target| *target == after.view_position)
         });
-        if let Some(_target) = target {
-            // The engine has already advanced its logical director camera for
-            // this fixed tick. Adopt that endpoint here; refresh-rate
-            // interpolation owns the motion between this endpoint and the
-            // previous one. Re-interpolating the host viewport from the
-            // director's progress here and then interpolating it again during
-            // presentation produces a visibly uneven camera cadence.
-            if before.view_position != after.view_position {
+        let mut jumped = false;
+        if let Some(target) = target {
+            // A new target rebases the pan onto the view the player has now;
+            // later segments chain off the previous segment's end pose.
+            if self
+                .director_slide
+                .is_none_or(|slide| slide.target != target)
+            {
+                self.director_slide = Some(DirectorSlide {
+                    target,
+                    engine_from: after.view_position,
+                    host_from: self.view_position,
+                });
+            }
+            let slide = self.director_slide.unwrap();
+            let progress = director_slide_progress(&slide, after.view_position);
+            let shift_x = (view_size.x - self.screen_size.x) / (2.0 * after.zoom_factor);
+            let shift_y = (view_size.y - self.screen_size.y) / (2.0 * after.zoom_factor);
+            self.old_view_position = self.view_position;
+            self.view_position = MapPoint::new(
+                slide.host_from.x + (target.x + shift_x - slide.host_from.x) * progress,
+                slide.host_from.y + (target.y + shift_y - slide.host_from.y) * progress,
+            );
+        } else {
+            // No pan: an explicit jump or a follow update adopts the framing.
+            jumped = before.zoom_factor == after.zoom_factor
+                && self
+                    .director_slide
+                    .is_none_or(|slide| after.view_position != slide.target)
+                && after.view_position != before.view_position;
+            self.director_slide = None;
+            if jumped {
                 self.adopt_director_camera(after.view_position, view_size, after.zoom_factor);
             }
-        } else if before.view_position != after.view_position
-            && before.zoom_factor == after.zoom_factor
-        {
-            // An explicit jump (including jump+unlock in one tick), or a
-            // follow-camera update, still adopts the scripted framing.
-            self.adopt_director_camera(after.view_position, view_size, after.zoom_factor);
+        }
+
+        if before.owns_view && !after.owns_view {
+            self.director_slide = None;
+            if jumped {
+                // An authored jump back is intent; it wins over the restore.
+                self.cutscene_view = None;
+            } else if let Some((view, zoom)) = self.cutscene_view.take() {
+                // Teleport, not a glide: the presentation interpolator reads
+                // `old_view_position`, so both endpoints must be the restore.
+                self.old_view_position = view;
+                self.old_zoom_factor = zoom;
+                self.view_position = view;
+                self.zoom_factor = zoom;
+            }
         }
     }
 
@@ -419,10 +486,11 @@ mod viewport_touch_tests {
             ..start
         };
         viewport.advance_director_camera(start, halfway, view_size);
-        // The host adopts the logical endpoint; refresh-rate sampling owns
-        // interpolation between this endpoint and the previous one.
-        close(viewport.view_position.x, 472.0);
-        close(viewport.view_position.y, 724.0);
+        // The pan's origin is the host's own view, not the director cursor the
+        // script left at the mission spawn. Halfway through the engine's pan,
+        // the host is halfway from where the player was looking to the target.
+        close(viewport.view_position.x, 1586.0);
+        close(viewport.view_position.y, 1512.0);
 
         // Completion can clear the slide in the same tick that it arrives.
         let end = engine_api::DirectorCameraFrame {
@@ -434,6 +502,82 @@ mod viewport_touch_tests {
         assert_eq!(viewport.view_position, MapPoint::new(972.0, 1224.0));
         viewport.advance_director_camera(end, end, view_size);
         assert_eq!(viewport.view_position, MapPoint::new(972.0, 1224.0));
+    }
+
+    #[test]
+    fn cutscene_release_teleports_back_to_the_view_before_the_cutscene() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.view_position = MapPoint::new(2200.0, 1800.0);
+        let view_size = viewport.screen_size;
+        let spawn = MapPoint::new(100.0, 200.0);
+        let room = MapPoint::new(1100.0, 1200.0);
+        let idle = engine_api::DirectorCameraFrame {
+            view_position: spawn,
+            zoom_factor: 1.0,
+            slide_target: None,
+            owns_view: false,
+        };
+        let locked = engine_api::DirectorCameraFrame {
+            owns_view: true,
+            ..idle
+        };
+        viewport.advance_director_camera(idle, locked, view_size);
+
+        let panning = engine_api::DirectorCameraFrame {
+            view_position: MapPoint::new(600.0, 700.0),
+            slide_target: Some(room),
+            ..locked
+        };
+        viewport.advance_director_camera(locked, panning, view_size);
+        let arrived = engine_api::DirectorCameraFrame {
+            view_position: room,
+            slide_target: None,
+            ..locked
+        };
+        viewport.advance_director_camera(panning, arrived, view_size);
+        assert_eq!(viewport.view_position, room);
+
+        // The script unlocks without an explicit jump back: the camera must
+        // return to where the player was before the cutscene, instantly.
+        let released = engine_api::DirectorCameraFrame {
+            owns_view: false,
+            ..arrived
+        };
+        viewport.advance_director_camera(arrived, released, view_size);
+        assert_eq!(viewport.view_position, MapPoint::new(2200.0, 1800.0));
+    }
+
+    #[test]
+    fn cutscene_restore_brings_back_the_zoom_from_before_the_cutscene() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.view_position = MapPoint::new(2200.0, 1800.0);
+        viewport.zoom_factor = 0.5;
+        let view_size = viewport.screen_size;
+        let idle = engine_api::DirectorCameraFrame {
+            view_position: MapPoint::new(100.0, 200.0),
+            zoom_factor: 0.5,
+            slide_target: None,
+            owns_view: false,
+        };
+        let locked = engine_api::DirectorCameraFrame {
+            owns_view: true,
+            ..idle
+        };
+        viewport.advance_director_camera(idle, locked, view_size);
+        let zoomed = engine_api::DirectorCameraFrame {
+            zoom_factor: 2.0,
+            ..locked
+        };
+        viewport.advance_director_camera(locked, zoomed, view_size);
+        let released = engine_api::DirectorCameraFrame {
+            owns_view: false,
+            ..zoomed
+        };
+        viewport.advance_director_camera(zoomed, released, view_size);
+        close(viewport.zoom_factor, 0.5);
+        assert_eq!(viewport.view_position, MapPoint::new(2200.0, 1800.0));
     }
 
     #[test]
