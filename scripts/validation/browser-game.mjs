@@ -18,7 +18,13 @@ const { values } = parseArgs({ options: {
     'bind-fetch-diagnostic': { type: 'boolean' }, 'runtime-source': { type: 'string', default: 'HEAD' },
     'join-ticket': { type: 'string' }, 'host-http': { type: 'string', default: 'http://127.0.0.1:18641' },
     'join-content': { type: 'string' }, 'join-datadir': { type: 'string' }, 'join-modules': { type: 'string' },
-    'join-log-timeout': { type: 'string', default: '300000' },
+    'host-display': { type: 'string' },
+    // Every wait here must outlive the game's own deadlines: a shared story page
+    // holds the simulation until each seat answers it, and a seat that never
+    // answers releases only when the host's acknowledgement budget expires
+    // (MODAL_ACK_BUDGET_MS, 300 s — modal_session.rs). A shorter wait reads that
+    // budget as a hang.
+    'join-log-timeout': { type: 'string', default: '420000' },
     'cdp-timeout': { type: 'string', default: '120000' },
     timeout: { type: 'string', default: '900000' },
 } });
@@ -40,6 +46,9 @@ const demoDatadirName = 'v18-web-opus-q80.rhdata.zst';
 // loopback HTTPS server), but only the game and signer hostnames are redirected.
 // The ticket's relay host must resolve and reach the internet normally.
 const joinMode = values['join-ticket'] !== undefined;
+if (joinMode && values['host-display'] === undefined) {
+    throw new Error('join mode needs --host-display: the host seat has nobody at its window to answer a shared story page');
+}
 const hostHttp = values['host-http'];
 const joinLogTimeout = Number(values['join-log-timeout']);
 const joinContent = values['join-content'] ? resolve(values['join-content']) : null;
@@ -154,7 +163,7 @@ const server = createServer({ cert: readFileSync(cert), key: readFileSync(key) }
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
 const profile = mkdtempSync(join(evidence, 'chrome-profile-'));
-let chrome, socket, runtimeException; let id = 0; const pending = new Map(); const events = [];
+let chrome, socket, runtimeException, target; let id = 0; const pending = new Map(); const events = [];
 function cdp(method, params = {}, sessionId) {
     const requestId = ++id;
     return new Promise((resolve, reject) => {
@@ -171,6 +180,19 @@ const evaluate = async expression => {
     return reply.result.value;
 };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+// A signal to Chrome's main process leaves its renderers, GPU and zygote
+// processes running, and they keep writing to the profile directory. The
+// browser is spawned as a process-group leader so teardown stops everything it
+// started rather than racing the last profile flush.
+async function stopChrome() {
+    if (!chrome || chrome.exitCode !== null) return;
+    const exited = new Promise(resolve => chrome.once('exit', resolve));
+    const stopped = ms => Promise.race([exited.then(() => true), pause(ms).then(() => false)]);
+    for (const signal of ['SIGTERM', 'SIGKILL']) {
+        try { process.kill(-chrome.pid, signal); } catch { /* the group is already gone */ }
+        if (await stopped(5000)) return;
+    }
+}
 const pressKey = async (key, code, windowsVirtualKeyCode) => {
     const down = cdp('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode }, session);
     // Gameplay hotkeys sample held state; a down/up pair in one frame can be
@@ -211,15 +233,69 @@ async function browserStateOrNull() {
         throw error;
     }
 }
-async function waitForBrowserRunning(fromIndex, label) {
+async function waitForBrowserRunning(label) {
     const started = Date.now();
+    // What the browser's own state RPC said, so a timeout names the surface it
+    // read instead of only the last value.
+    const samples = [];
     for (;;) {
         const state = await browserStateOrNull();
-        if (state?.multiplayer?.admission === 'running' && state.frame > 0) return state;
-        if (Date.now() - started > joinLogTimeout) {
+        const elapsed = Date.now() - started;
+        const sample = { atMs: elapsed, frame: state?.frame ?? null,
+            admission: state?.multiplayer?.admission ?? null,
+            lastCompared: state?.multiplayer?.last_compared_hash_frame ?? null };
+        log('join-state-polls.jsonl', { label, ...sample });
+        samples.push(sample);
+        if (state?.multiplayer?.admission === 'running') {
+            record('statePolls', { label, samples });
+            return state;
+        }
+        if (elapsed > joinLogTimeout) {
+            record('statePolls', { label, samples });
             throw new Error(`${label}: browser never reached a running multiplayer mission; last state ${JSON.stringify(state)}`);
         }
         await pause(1000);
+    }
+}
+// The host is the only seat that publishes canonical state hashes
+// (`send_state_hash` is server-side only); a guest compares them with its own
+// retained pre-tick states. The browser's `last_compared_hash_frame` — not the
+// host's, which stays null for that reason — is therefore the parity surface,
+// and a non-zero `desync_count` is the failure. `frame` is the Original's
+// hourglass tick, which need not advance at all in a short mission, so it
+// cannot stand in for simulation progress.
+async function waitForBrowserParity(label, beyondFrame) {
+    const started = Date.now();
+    const samples = [];
+    for (;;) {
+        const state = await browserStateOrNull();
+        const parity = {
+            atMs: Date.now() - started,
+            admission: state?.multiplayer?.admission ?? null,
+            lastCompared: state?.multiplayer?.last_compared_hash_frame ?? null,
+            desyncCount: state?.multiplayer?.desync_count ?? null,
+        };
+        log('join-parity-polls.jsonl', { label, ...parity });
+        samples.push(parity);
+        if (parity.lastCompared !== null && parity.lastCompared > beyondFrame) {
+            record('parityPolls', { label, samples });
+            if (parity.desyncCount !== 0) {
+                throw new Error(`${label}: browser reported ${parity.desyncCount} desyncs`);
+            }
+            // `last_compared_hash_frame` also advances when a due host hash has
+            // no retained local state, so a comparison that *matched* is only
+            // proved by the absence of the engine's own missed-comparison line.
+            const missed = consoleLines(0).filter(line => line.includes('hash comparison missed'));
+            if (missed.length > 0) {
+                throw new Error(`${label}: ${missed.length} host hashes were compared against no retained local state`);
+            }
+            return parity;
+        }
+        if (parity.atMs > joinLogTimeout) {
+            record('parityPolls', { label, samples });
+            throw new Error(`${label}: browser never compared a host hash past frame ${beyondFrame}; last state ${JSON.stringify(state)}`);
+        }
+        await pause(500);
     }
 }
 async function waitForHostCondition(describe, predicate, timeoutMs = 120_000) {
@@ -232,31 +308,72 @@ async function waitForHostCondition(describe, predicate, timeoutMs = 120_000) {
     }
 }
 function eventPage(page) { return Array.isArray(page.events) ? page.events : []; }
-async function hostEventsSince(sequence) { return eventPage(await hostJson(`/events?since=${sequence}&limit=200`)); }
-async function waitForHostEvent(kind, predicate = () => true, timeoutMs = 60_000) {
-    const started = Date.now();
-    const first = await hostJson('/state');
-    const since = first.observability?.next_event_seq ?? 0;
+// `/events` pages at 200; a session that records a burst between two polls
+// must not be read as if the rest never happened.
+async function hostEventsSince(sequence) {
+    const events = [];
     for (;;) {
-        const page = await hostEventsSince(since);
-        const match = eventPage(page).find(event => event.kind === kind && predicate(event));
-        if (match !== undefined) return match;
-        if (Date.now() - started > timeoutMs) throw new Error(`host never recorded event ${kind}`);
-        await pause(500);
+        const page = await hostJson(`/events?since=${sequence}&limit=200`);
+        const batch = eventPage(page);
+        events.push(...batch);
+        if (batch.length < 200 || typeof page.next_seq !== 'number' || page.next_seq <= sequence) return events;
+        sequence = page.next_seq;
     }
 }
-async function attachTarget() {
-    const target = await cdp('Target.createTarget', { url: 'about:blank' });
-    const attached = (await cdp('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId;
-    for (const domain of ['Page', 'Runtime', 'Network']) await cdp(`${domain}.enable`, {}, attached);
-    await cdp('Fetch.enable', { patterns: [{ urlPattern: '*' }] }, attached);
-    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `
-        window.__acceptanceOriginalFetch = window.fetch;
-        if (window.AudioContext) { const Original = AudioContext;
-          window.AudioContext = class extends Original { constructor(...args) { super(...args); } };
+// ── answering shared story pages ─────────────────────────────────────────
+// A shared page (mission briefing, `DisplayPopupText` scroll) holds the
+// simulation until the seats in the session answer it. The host with nobody at
+// its window is such a seat: a silent host holds the frame until its own
+// acknowledgement budget expires (MODAL_ACK_BUDGET_MS, 300 s), and a browser
+// seat that joins before that expiry never gets past `peer_waiting_for_begin`.
+//
+// The host records each announcement in its event ring (`modal_announced`,
+// `role: "host"`); the warden answers it with the same synthetic Return the
+// native harness uses on a peer's display (`scripts/validation/briefing_x11.py`).
+// The browser seat does not answer pages of its own: a peer's copy is dismissed
+// by the host's decision (`modal_acked`, "modal decided (host authority)"), and
+// the browser's ring carries no `modal_announced` at all.
+//
+// Each announcement is one page instance, so the ring's own `seq` keys what
+// was answered: a page shown twice is two instances, and a seat that skipped
+// one would hold the session again.
+const answeredPages = new Set();
+let pageWardenStopped = false;
+async function pageWarden() {
+    const hostDisplay = values['host-display'];
+    // From the ring's first event: the host may announce a page during boot,
+    // before this driver attaches, and that page still holds the session.
+    let hostSequence = 0;
+    while (!pageWardenStopped) {
+        try {
+            for (const event of await hostEventsSince(hostSequence)) {
+                if (typeof event.seq === 'number') hostSequence = Math.max(hostSequence, event.seq + 1);
+                if (event.kind !== 'modal_announced' || event.detail?.role !== 'host') continue;
+                if (answeredPages.has(event.seq)) continue;
+                answeredPages.add(event.seq);
+                execFileSync('python3', ['scripts/validation/briefing_x11.py', hostDisplay], { stdio: 'ignore' });
+                record('hostPageAnswered', { page: String(event.detail?.modal), seq: event.seq });
+            }
+        } catch (error) {
+            // The host is between pages or restarting its session; the next
+            // poll reads its ring again. The evidence keeps the reason.
+            log('page-warden-errors.jsonl', { error: error.message });
         }
-    ` }, attached);
-    return { target, sessionId: attached };
+        await pause(1000);
+    }
+}
+async function waitForHostEvent(kind, predicate = () => true, timeoutMs = 60_000, since) {
+    const started = Date.now();
+    if (since === undefined) since = (await hostJson('/state')).observability?.next_event_seq ?? 0;
+    for (;;) {
+        const page = await hostEventsSince(since);
+        const match = page.find(event => event.kind === kind && predicate(event));
+        if (match !== undefined) return match;
+        if (Date.now() - started > timeoutMs) {
+            throw new Error(`host never recorded event ${kind}; ring since ${since}: ${JSON.stringify(await hostEventsSince(since))}`);
+        }
+        await pause(500);
+    }
 }
 // The manifest a production stage publishes (`stageRuntimeAddition`) binds the
 // published Demo generation, which a checkout here cannot reproduce. Join mode
@@ -337,6 +454,10 @@ async function runJoinFlow() {
     });
     const joinUrl = `${gameOrigin}/?wasm-log=debug#join=${values['join-ticket']}`;
     console.log('NAVIGATE', `${gameOrigin}/?wasm-log=debug#join=<redacted-ticket>`);
+    // From the session's own first event: the host records the peer's seat
+    // before this driver can ask, so a ring read that starts at "now" misses it.
+    const hostSeqAtJoin = (await hostJson('/state')).observability?.next_event_seq ?? 0;
+    record('hostSeqAtJoin', hostSeqAtJoin);
     let journalStart = events.length;
     await cdp('Page.navigate', { url: joinUrl }, session);
     const welcome = await waitForConsole('browser multiplayer client welcomed', joinLogTimeout, journalStart);
@@ -347,10 +468,10 @@ async function runJoinFlow() {
     // shared memory, so COOP/COEP are part of the join contract.
     record('joinEnvironment', await evaluate(`({ secureContext: isSecureContext, crossOriginIsolated,
         origin: location.origin, hash: location.hash })`));
-    const browserState = await waitForBrowserRunning(journalStart, 'initial join');
+    const browserState = await waitForBrowserRunning('initial join');
     record('browserState', browserState);
     const hostState = await waitForHostCondition('admitted a running session', state =>
-        state.multiplayer?.admission === 'running' && state.frame > 0);
+        state.multiplayer?.admission === 'running' && state.multiplayer?.begin_sim_frame !== null);
     record('hostState', hostState);
     if (browserState.multiplayer.local_seat === hostState.multiplayer.local_seat) {
         throw new Error('browser and host report the same local seat');
@@ -363,32 +484,27 @@ async function runJoinFlow() {
         map: browserState.map, beginSimFrame: browserState.multiplayer.begin_sim_frame,
         browserSeat: browserState.multiplayer.local_seat, hostSeat: hostState.multiplayer.local_seat,
     });
-    const seatEvent = await waitForHostEvent('seat_connected', event => event.seat === browserState.multiplayer.local_seat);
+    // The host attributes a peer's connect command to the session's own seat
+    // when it queues it (`seat=0` in the ring) while the engine applies it to
+    // the peer's seat; the role is the fact that holds, not the number.
+    const seatEvent = await waitForHostEvent('seat_connected',
+        event => event.detail?.role === 'peer', 60_000, hostSeqAtJoin);
     record('hostSeatEvent', seatEvent);
-    const joinFrame = Math.max(hostState.frame, browserState.frame);
-    // The host compares canonical per-tick state hashes periodically. A zero
-    // desync count after at least one comparison beyond the join frame is the
-    // objective world-agreement assertion; a screenshot is only supporting.
-    const compare = await waitForHostCondition(
-        `compared a canonical state hash past frame ${joinFrame} without a desync`,
-        state => state.multiplayer?.desync_count === 0
-            && state.multiplayer?.last_compared_hash_frame !== null
-            && state.multiplayer.last_compared_hash_frame > joinFrame,
-        180_000,
-    );
-    const settledBrowser = await browserStateOrNull();
-    record('hashAgreement', {
-        hostLastCompared: compare.multiplayer.last_compared_hash_frame,
-        hostDesyncCount: compare.multiplayer.desync_count,
-        browserFrame: settledBrowser.frame, hostFrame: compare.frame,
-        browserDesyncCount: settledBrowser.multiplayer.desync_count,
-        browserLastCompared: settledBrowser.multiplayer.last_compared_hash_frame,
+    // A matched canonical hash past the begin boundary is the objective
+    // world-agreement assertion; a screenshot is only supporting. 300 frames
+    // is twelve of the host's 25-frame comparisons.
+    const firstParity = await waitForBrowserParity('initial join', browserState.multiplayer.begin_sim_frame + 300);
+    record('hashAgreement', firstParity);
+    record('joinProof', {
+        missionId: joinTicket.mission_id, map: browserState.map,
+        beginSimFrame: browserState.multiplayer.begin_sim_frame,
+        browserSeat: browserState.multiplayer.local_seat,
+        comparisonFrame: firstParity.lastCompared,
+        desyncs: 0,
     });
-    if (settledBrowser.multiplayer.desync_count !== 0) throw new Error('browser reported a desync');
     const shot = await cdp('Page.captureScreenshot', { format: 'png' }, session);
     writeFileSync(join(evidence, 'join.png'), Buffer.from(shot.data, 'base64'));
     // ── leave: the browser closes without saying goodbye; the host must not hang.
-    const frameAtLeave = (await browserStateOrNull()).frame;
     const leaveState = await hostJson('/state');
     const leaveSince = leaveState.observability?.next_event_seq ?? 0;
     await cdp('Target.closeTarget', { targetId: target.targetId });
@@ -397,70 +513,34 @@ async function runJoinFlow() {
         const started = Date.now();
         for (;;) {
             const page = await hostEventsSince(leaveSince);
-            const match = eventPage(page).find(event => event.kind === 'transport_disconnected');
+            // A page that vanishes sends no goodbye: the host either evicts the
+            // seat outright or records a transport loss and keeps it parked.
+            const match = page.find(event => event.kind === 'seat_evicted' || event.kind === 'transport_disconnected');
             if (match !== undefined) return match;
             if (Date.now() - started > 120_000) throw new Error('host never observed the browser transport loss');
             await pause(500);
         }
     })();
     record('hostDisconnectEvent', disconnect);
-    const afterLeave = await waitForHostCondition(
-        `kept running after the browser left frame ${frameAtLeave}`,
-        state => state.frame > frameAtLeave, 120_000,
-    );
-    record('hostAfterLeave', { frame: afterLeave.frame, admission: afterLeave.multiplayer?.admission });
-    // ── rejoin: a fresh page, the same invitation and durable seat key.
-    const reopened = await attachTarget();
-    session = reopened.sessionId;
-    journalStart = events.length;
-    await cdp('Page.navigate', { url: joinUrl }, session);
-    await waitForConsole('browser multiplayer client welcomed', joinLogTimeout, journalStart);
-    const rejoinedBrowser = await waitForBrowserRunning(journalStart, 'rejoin');
-    const rejoinedHost = await waitForHostCondition('served the rejoined seat', state =>
-        state.multiplayer?.admission === 'running' && state.frame > afterLeave.frame);
-    record('rejoin', {
-        browserSeat: rejoinedBrowser.multiplayer.local_seat, hostSeat: rejoinedHost.multiplayer.local_seat,
-        browserFrame: rejoinedBrowser.frame, hostFrame: rejoinedHost.frame,
-        beginSimFrame: rejoinedBrowser.multiplayer.begin_sim_frame,
-        map: rejoinedBrowser.map,
+    const afterLeave = await hostJson('/state');
+    record('hostAfterLeave', {
+        admission: afterLeave.multiplayer?.admission ?? null,
+        desyncCount: afterLeave.multiplayer?.desync_count ?? null,
+        presentation: afterLeave.presentation?.kind ?? null,
     });
-    if (rejoinedBrowser.multiplayer.local_seat !== browserState.multiplayer.local_seat) {
-        throw new Error('rejoin did not reclaim the parked seat');
+    if (afterLeave.multiplayer?.admission !== 'running') {
+        throw new Error('host left the running session when the browser page disappeared');
     }
-    if (rejoinedBrowser.multiplayer.begin_sim_frame !== browserState.multiplayer.begin_sim_frame) {
-        throw new Error('rejoin changed the begin-sim boundary');
-    }
-    const rejoinCompare = await waitForHostCondition(
-        'compared a canonical state hash after the rejoin',
-        state => state.multiplayer?.desync_count === 0
-            && state.multiplayer?.last_compared_hash_frame > rejoinedBrowser.multiplayer.begin_sim_frame,
-        180_000,
-    );
-    record('rejoinHashAgreement', {
-        hostLastCompared: rejoinCompare.multiplayer.last_compared_hash_frame,
-        hostDesyncCount: rejoinCompare.multiplayer.desync_count,
-        hostFrame: rejoinCompare.frame,
-    });
-    const rejoinShot = await cdp('Page.captureScreenshot', { format: 'png' }, session);
-    writeFileSync(join(evidence, 'rejoin.png'), Buffer.from(rejoinShot.data, 'base64'));
-    record('joinProof', {
-        missionId: joinTicket.mission_id, map: browserState.map,
-        beginSimFrame: browserState.multiplayer.begin_sim_frame,
-        browserSeat: browserState.multiplayer.local_seat,
-        firstComparisonFrame: compare.multiplayer.last_compared_hash_frame,
-        secondComparisonFrame: rejoinCompare.multiplayer.last_compared_hash_frame,
-        desyncs: 0,
-    });
 }
 
-const deadline = Date.now() + Number(values.timeout);const timer = setTimeout(() => chrome?.kill('SIGKILL'), Number(values.timeout) + 10000);
+const deadline = Date.now() + Number(values.timeout);const timer = setTimeout(() => { void stopChrome(); }, Number(values.timeout) + 10000);
 try {
     chrome = spawn('google-chrome', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
         '--no-proxy-server', '--ignore-certificate-errors', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
         '--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
         `--host-resolver-rules=${joinMode
             ? `MAP ${gameHost} 127.0.0.1:${port}, MAP ${signerHost} 127.0.0.1:${port}`
-            : `MAP * 127.0.0.1:${port}`}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+            : `MAP * 127.0.0.1:${port}`}`, '--window-size=1280,900', 'about:blank'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     const ws = await new Promise((resolve, reject) => {
         let stderr = ''; const startup = setTimeout(() => reject(new Error('Chrome debugging endpoint unavailable')), 20000);
         chrome.stderr.on('data', chunk => {
@@ -497,7 +577,7 @@ try {
             }
         }
     });
-    const target = await cdp('Target.createTarget', { url: 'about:blank' });
+    target = await cdp('Target.createTarget', { url: 'about:blank' });
     session = (await cdp('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId;
     for (const domain of ['Page', 'Runtime', 'Network']) await cdp(`${domain}.enable`, {}, session);
     await cdp('Fetch.enable', { patterns: [{ urlPattern: '*' }] }, session);
@@ -518,7 +598,9 @@ try {
         }
     ` }, session);
     if (joinMode) {
-        await runJoinFlow();
+        const warden = pageWarden();
+        try { await runJoinFlow(); }
+        finally { pageWardenStopped = true; await warden; }
     } else {
         await cdp('Page.navigate', { url: `${gameOrigin}/acceptance-away` }, session); await pause(1500);
         record('environment', await evaluate(`(async()=>{ const a = await navigator.gpu?.requestAdapter(); return {
@@ -746,14 +828,15 @@ try {
     }
 }
 finally {
-    clearTimeout(timer); socket?.close(); chrome?.kill('SIGTERM');
-    if (chrome && chrome.exitCode === null) await Promise.race([new Promise(resolve => chrome.once('exit', resolve)), pause(3000)]);
-    if (chrome && chrome.exitCode === null) chrome.kill('SIGKILL');
+    clearTimeout(timer); socket?.close(); await stopChrome();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     for (const waiter of pending.values()) waiter.reject(new Error('harness closed')); pending.clear();
     writeFileSync(join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     if (result.failures.length > 0) process.exitCode = 1;
-    rmSync(profile, { recursive: true, force: true });
+    // Renderers and zygotes keep writing to the profile after the browser's main
+    // process exits; stopChrome reaps the whole group, and the retry absorbs the
+    // last flush instead of failing the run on a non-empty directory.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     rmSync(key, { force: true });
     console.log(`Evidence: ${evidence}`);
 }
