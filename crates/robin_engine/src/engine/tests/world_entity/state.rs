@@ -20,6 +20,107 @@ fn inactive_garrison_soldier_does_not_join_the_alert_population() {
     );
 }
 
+fn staged_garrison_engine() -> (EngineInner, crate::element::EntityId) {
+    use crate::ai::{Position, ReinforcementDoorInfo};
+    use crate::coordinates::MapPoint;
+    use crate::element::Camp;
+    use crate::gate::DoorIndex;
+
+    let mut engine = EngineInner::new();
+    let mut staged = make_test_ai_soldier(Camp::Lacklandists);
+    staged.element_data_mut().active = false;
+    // A real spawn configures the move box from the soldier profile; the test
+    // fixture has no profile table, and the entry walk reads the half diagonal.
+    staged.position_iface_mut().configure_for_actor(
+        crate::position_interface::PathfinderIndex::new(0).expect("pathfinder index"),
+        crate::coordinates::MoveBoxHalfDiagonal::new(20.0, 20.0),
+        MapPoint::new(40.0, 100.0),
+    );
+    let Entity::Soldier(soldier) = &mut staged else {
+        unreachable!("fixture is a soldier");
+    };
+    soldier.soldier.staged = true;
+    let body = engine.add_test_entity(staged);
+    engine
+        .ai
+        .global
+        .reinforcement_doors
+        .push(ReinforcementDoorInfo {
+            position_in: Position {
+                x: 100.0,
+                y: 100.0,
+                sector: None,
+                level: 0,
+            },
+            door_index: DoorIndex::new(0).expect("door index"),
+            point_out: MapPoint::new(40.0, 100.0),
+            point_mid: MapPoint::new(70.0, 100.0),
+            point_in: MapPoint::new(100.0, 100.0),
+            layer_out: 0,
+            sector_out: None,
+        });
+    (engine, body)
+}
+
+#[test]
+fn summon_wakes_a_staged_body_at_the_reinforcement_door() {
+    use crate::coordinates::MapPoint;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+
+    let (mut engine, body) = staged_garrison_engine();
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let garrison_before = engine.ai.global.green_alert_soldiers;
+    let summoned = engine
+        .summon_garrison(
+            TickCtx::new(&sim, &assets),
+            SummonRequest {
+                faction: Camp::Lacklandists,
+                entry: None,
+            },
+        )
+        .expect("a staged garrison body answers the call");
+
+    assert_eq!(summoned, body);
+    let entity = engine.get_entity(body).expect("summoned body");
+    assert!(entity.element_data().active);
+    assert!(!entity.soldier_data().expect("soldier data").staged);
+    assert_eq!(
+        entity.element_data().position_map(),
+        MapPoint::new(40.0, 100.0),
+        "the body waits outside the map until the door walk carries it in"
+    );
+    assert_eq!(
+        engine.ai.global.green_alert_soldiers,
+        garrison_before + 1,
+        "the woken body joins the alert population"
+    );
+}
+
+#[test]
+fn summon_is_off_when_the_sim_flag_is_off() {
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+
+    let (mut engine, _body) = staged_garrison_engine();
+    engine.control.sim_config.enable_offmap_reinforcements = false;
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    assert!(
+        engine
+            .summon_garrison(
+                TickCtx::new(&sim, &assets),
+                SummonRequest {
+                    faction: Camp::Lacklandists,
+                    entry: None,
+                },
+            )
+            .is_none(),
+        "the flag must gate the whole path, not only the AI emitter"
+    );
+}
+
 #[test]
 fn live_state_changes_preserve_formation_links_then_clear_both_reciprocals() {
     use crate::ai::{AiEntityHandle, AiState, Substate};

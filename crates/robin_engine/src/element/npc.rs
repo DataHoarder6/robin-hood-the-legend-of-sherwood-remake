@@ -628,6 +628,9 @@ pub struct SoldierData {
     /// Default stance before/without an explicit tactical order.
     #[serde(default)]
     pub combat_stance: CombatStance,
+    /// Authored off-map garrison body: inactive until a summon wakes it.
+    #[serde(default)]
+    pub staged: bool,
 }
 
 /// Civilian-specific data.
