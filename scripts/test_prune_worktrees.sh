@@ -9,12 +9,15 @@ source_root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 prune=$source_root/scripts/prune-worktrees.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/robin-prune.XXXXXX")
 build_pid=
+busy_pid=
 stop_build() {
-    if [ -n "$build_pid" ]; then
-        kill "$build_pid" 2>/dev/null || true
-        wait "$build_pid" 2>/dev/null || true
-        build_pid=
-    fi
+    local pid
+    for pid in "$build_pid" "$busy_pid"; do
+        [ -n "$pid" ] || continue
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    build_pid= busy_pid=
 }
 trap 'stop_build; rm -rf -- "$work"' EXIT
 
@@ -107,6 +110,7 @@ add_worktree dirty
 printf 'x\n' >>"$repo/.worktrees/dirty/file.txt"
 git -C "$repo" worktree add --quiet --detach "$repo/.worktrees/detached" fork/main
 add_worktree building
+add_worktree busy
 add_worktree outside-check
 git -C "$repo" worktree move "$repo/.worktrees/outside-check" "$work/outside"
 
@@ -120,6 +124,16 @@ for _ in {1..50}; do
     sleep 0.1
 done
 
+# Any other process counts too: removing the directory under a running shell
+# breaks that shell even when the branch has landed.
+ln -s "$(command -v python3)" "$work/bin/sleep"
+(cd "$repo/.worktrees/busy" && exec "$work/bin/sleep" -c 'import time; time.sleep(300)') &
+busy_pid=$!
+for _ in {1..50}; do
+    [ "$(readlink -f "/proc/$busy_pid/cwd" 2>/dev/null)" = "$(readlink -f "$repo/.worktrees/busy")" ] && break
+    sleep 0.1
+done
+
 # The plan removes nothing.
 run_prune "$repo"
 expect_status 0 'the plan exits 0'
@@ -129,6 +143,7 @@ expect_contains 'unmerged branch is kept' 'commits not in fork/main'
 expect_contains 'dirty tree is kept' 'uncommitted changes'
 expect_contains 'detached worktree is kept' 'detached HEAD'
 expect_contains 'running build is kept' 'a build is running here'
+expect_contains 'any other running process is kept' 'a process is running here'
 expect_contains 'the plan says nothing was removed' 'rerun with --apply'
 expect_exists 'the plan leaves the merged worktree' "$repo/.worktrees/merged"
 expect_branch 'the plan leaves the merged branch' merged
@@ -142,6 +157,7 @@ expect_exists 'the unmerged worktree stays' "$repo/.worktrees/unmerged"
 expect_exists 'the dirty worktree stays' "$repo/.worktrees/dirty"
 expect_exists 'the detached worktree stays' "$repo/.worktrees/detached"
 expect_exists 'the building worktree stays' "$repo/.worktrees/building"
+expect_exists 'the busy worktree stays' "$repo/.worktrees/busy"
 expect_exists 'the main checkout stays' "$repo/file.txt"
 expect_branch 'the unmerged branch stays' unmerged
 if git -C "$repo" rev-parse --verify --quiet refs/heads/merged >/dev/null; then

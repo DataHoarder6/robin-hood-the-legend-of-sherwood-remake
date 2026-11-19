@@ -5,7 +5,7 @@
 #   scripts/prune-worktrees.sh --apply    # remove the worktrees the plan names
 #
 # A worktree is retired only when all of these hold: its branch is an ancestor
-# of the integration ref, its tree is clean, it is not detached, no build runs
+# of the integration ref, its tree is clean, it is not detached, no process runs
 # inside it, and it is neither the repository's main checkout nor the checkout
 # this command runs from. Everything else is kept and printed with the reason,
 # because an unmerged branch is a decision, not litter.
@@ -57,6 +57,25 @@ failed=0
 
 report() { # VERDICT BRANCH PATH REASON
     printf '%-6s %-34s %s\n' "$1" "${2:-detached}" "$3${4:+  ($4)}"
+}
+
+# processes_inside PATH: "PID COMMAND" for every process whose working
+# directory is inside PATH. A build is the case doctor fails on; for a removal
+# any process counts, because deleting the directory under a running shell or
+# agent breaks it even when the branch has already landed.
+processes_inside() {
+    local root=$1 pid cwd comm
+    for pid in /proc/[0-9]*; do
+        pid=${pid#/proc/}
+        [ "$pid" != "$$" ] || continue
+        cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null) || continue
+        case $cwd in
+            "$root" | "$root"/*) ;;
+            *) continue ;;
+        esac
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
+        printf '%s %s\n' "$pid" "$comm"
+    done
 }
 
 retire() { # BRANCH PATH REASON
@@ -112,6 +131,10 @@ consider() { # PATH BRANCH DETACHED LOCKED
     fi
     if [ -n "$(preflight_build_processes "$path")" ]; then
         keep "$branch" "$path" 'a build is running here'
+        return 0
+    fi
+    if [ -n "$(processes_inside "$path")" ]; then
+        keep "$branch" "$path" 'a process is running here'
         return 0
     fi
     if ! git -C "$root" merge-base --is-ancestor "refs/heads/$branch" "$integration" 2>/dev/null; then

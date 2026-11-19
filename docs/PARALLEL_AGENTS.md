@@ -30,7 +30,7 @@ trees whose work already landed, and `git branch` stops telling work in
 progress from history.
 
 Rule: a worktree is retired when its branch is merged into the integration
-ref, its tree is clean, it is not detached, no build runs inside it, and it is
+ref, its tree is clean, it is not detached, no process runs inside it, and it is
 neither the shared checkout nor the one you are running from. Everything else
 is a decision — land it or abandon it — and the plan names which.
 
