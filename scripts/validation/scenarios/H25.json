@@ -27,11 +27,11 @@
   ],
   "resolve": [
     {
-      "peer": 0,
+      "peer": 1,
       "result": "Restart"
     },
     {
-      "peer": 1,
+      "peer": 0,
       "result": "Restart"
     }
   ],

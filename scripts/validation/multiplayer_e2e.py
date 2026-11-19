@@ -404,6 +404,17 @@ def evaluate_final_operation(expectation, record):
     return ok, f"final operation {expectation['operation']}: {observed}", observed
 
 
+def still_booting(latest, seats):
+    """Whether any seat has not yet answered `/state` with a frame.
+
+    A peer that is still building its mission publishes no frame and no
+    admission phase, so the session looks quiet for as long as its boot takes.
+    That silence is the peer's, not the session's: a row that settled on it
+    would read a slow boot as a stopped session.
+    """
+    return any((latest.get(seat) or {}).get("frame") is None for seat in seats)
+
+
 def presentation_samples(record, seat):
     """Every `presentation` document one seat's samples carried, in order.
 
@@ -1005,6 +1016,10 @@ class ScenarioRun:
         self.events.event("surface_dismissed", attempt=self.dismissals, frame=frame,
                           windows=windows)
 
+    def booting(self):
+        """Whether a live peer has not yet published a frame (see `still_booting`)."""
+        return still_booting(self.latest, [peer.seat for peer in self.peers if peer.alive()])
+
     def seconds_since_change(self):
         """Seconds since any live peer last advanced its frame or admission phase."""
         changed = False
@@ -1063,7 +1078,9 @@ class ScenarioRun:
         for that budget before it publishes the fatal (section 1's bounded
         reconnect). Every other unmet promise is a failed assertion (exit 1) once
         nothing moves: the deadline only fires while the session is still moving
-        and a barrier never releases.
+        and a barrier never releases. A peer that has published no frame yet is
+        still building its mission, so its silence is not the session's and the
+        quiet rule waits for it.
         """
         positives = [
             expectation for expectation in self.expanded["expect"]
@@ -1090,7 +1107,8 @@ class ScenarioRun:
             if positives and all(self.holds(item) for item in positives):
                 self.events.event("settled", description="every positive expectation observed")
                 return
-            if not exit_pending and self.seconds_since_change() >= QUIET_S:
+            if not exit_pending and not self.booting() and \
+                    self.seconds_since_change() >= QUIET_S:
                 self.events.event("settled", description="no peer is moving",
                                   quiet_s=QUIET_S)
                 return

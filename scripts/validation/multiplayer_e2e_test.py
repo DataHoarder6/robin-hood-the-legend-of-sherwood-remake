@@ -485,6 +485,19 @@ class HashCadenceTest(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class BootTest(unittest.TestCase):
+    def test_a_seat_that_has_published_no_frame_is_still_booting(self):
+        latest = {0: {"frame": 12}, 1: {"frame": None}}
+        self.assertTrue(suite.still_booting(latest, [0, 1]))
+
+    def test_a_seat_that_never_answered_state_is_still_booting(self):
+        self.assertTrue(suite.still_booting({}, [0, 1]))
+
+    def test_every_seat_with_a_frame_is_not_booting(self):
+        latest = {0: {"frame": 0}, 1: {"frame": 3}}
+        self.assertFalse(suite.still_booting(latest, [0, 1]))
+
+
 class VerdictTest(unittest.TestCase):
     def test_a_refused_row_keeps_the_suite_red(self):
         self.assertEqual(suite.suite_verdict(False, False, [], [{"id": "H10"}],
