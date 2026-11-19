@@ -110,6 +110,10 @@ pub enum HttpPayload {
     Console(String),
     /// `POST /command` — apply a PlayerCommand to the engine.
     Command(PlayerCommand),
+    /// `POST /bug-report` — file a voluntary report. The answer names the
+    /// bundle directory; the game-state snapshot is gathered at the next frame
+    /// boundary and written off the frame loop.
+    BugReport { description: String, note: String },
     /// `GET /host-debug` / `robin.call("host-debug")` — host/UI-only state.
     HostDebug,
     /// `GET /engine-dump` — full serialized engine for ad-hoc debug.
@@ -168,6 +172,10 @@ pub(super) enum CommandRequest {
     Batch(Vec<NativeCall>),
     Console(String),
     Player(PlayerCommand),
+    BugReport {
+        description: String,
+        note: String,
+    },
 }
 
 pub(super) enum DeferredRequest {
@@ -202,6 +210,9 @@ impl HttpPayload {
             Self::Batch(calls) => RoutedRequest::Command(CommandRequest::Batch(calls)),
             Self::Console(command) => RoutedRequest::Command(CommandRequest::Console(command)),
             Self::Command(command) => RoutedRequest::Command(CommandRequest::Player(command)),
+            Self::BugReport { description, note } => {
+                RoutedRequest::Command(CommandRequest::BugReport { description, note })
+            }
             Self::Screenshot(request) => {
                 RoutedRequest::Deferred(DeferredRequest::Screenshot(request))
             }
@@ -347,7 +358,8 @@ pub(super) fn ranked_input_taint(payload: &HttpPayload) -> Option<InputTaintKind
         | HttpPayload::Script
         | HttpPayload::Decompile { .. }
         | HttpPayload::Screenshot(_)
-        | HttpPayload::GetReplay => None,
+        | HttpPayload::GetReplay
+        | HttpPayload::BugReport { .. } => None,
     }
 }
 

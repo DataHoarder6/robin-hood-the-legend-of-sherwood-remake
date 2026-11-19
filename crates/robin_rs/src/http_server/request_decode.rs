@@ -20,6 +20,7 @@ pub(super) enum RequestKind {
     Batch,
     Console,
     Command,
+    BugReport,
     Screenshot,
     StepForward,
     StepBack,
@@ -40,6 +41,7 @@ impl RequestKind {
             "batch" => Self::Batch,
             "console" => Self::Console,
             "command" => Self::Command,
+            "bug-report" => Self::BugReport,
             "screenshot" => Self::Screenshot,
             "step-forward" => Self::StepForward,
             "step-back" => Self::StepBack,
@@ -60,6 +62,14 @@ struct BatchBody {
 #[derive(Serialize, Deserialize)]
 struct ConsoleBody {
     command: String,
+}
+
+/// `POST /bug-report`: what the player would have typed, plus a free note.
+#[derive(Serialize, Deserialize)]
+struct BugReportBody {
+    description: String,
+    #[serde(default)]
+    note: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -172,6 +182,13 @@ fn decode(kind: RequestKind, params: Parameters<'_>) -> Result<HttpPayload, RpcE
         RequestKind::Batch => HttpPayload::Batch(params.decode::<BatchBody>()?.calls),
         RequestKind::Console => HttpPayload::Console(params.decode::<ConsoleBody>()?.command),
         RequestKind::Command => HttpPayload::Command(params.decode::<PlayerCommand>()?),
+        RequestKind::BugReport => {
+            let body: BugReportBody = params.decode()?;
+            HttpPayload::BugReport {
+                description: body.description,
+                note: body.note,
+            }
+        }
         RequestKind::Screenshot => HttpPayload::Screenshot(if params.browser_defaults() {
             ScreenshotRequest::default()
         } else {

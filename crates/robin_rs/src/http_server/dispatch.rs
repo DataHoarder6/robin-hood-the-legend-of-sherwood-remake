@@ -301,6 +301,41 @@ fn dispatch_command(
             }
             Ok(ReplyBody::Json(serde_json::json!({"ok": true})))
         }
+        CommandRequest::BugReport { description, note } => {
+            // The bundle is the evidence: reserve its directory now, so this
+            // answer can name it, and let the next frame boundary gather the
+            // game state and write it off the frame loop.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let directory = crate::bug_bundle::reserve(crate::bug_bundle::Origin::Http)
+                    .map_err(|error| {
+                        RpcError::invalid_request(format!(
+                            "cannot reserve a bug-report bundle: {error:#}"
+                        ))
+                    })?;
+                let bundle = directory.display().to_string();
+                crate::bug_bundle::enqueue(
+                    directory,
+                    &description,
+                    &note,
+                    crate::bug_bundle::Origin::Http,
+                )
+                .map_err(|error| RpcError::invalid_request(format!("{error:#}")))?;
+                Ok(ReplyBody::Json(serde_json::json!({
+                    "bundle": bundle,
+                    "queued": true,
+                    "written_at": "the next mission frame boundary",
+                    "endpoint_configured": crate::bug_bundle::endpoint_configured(),
+                })))
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = (description, note);
+                Err(RpcError::unavailable_capability(
+                    "browser builds have no local bug-report bundle",
+                ))
+            }
+        }
     }
 }
 
