@@ -30,9 +30,15 @@ fn main() {
     ))]
     velopack::VelopackApp::build().run();
 
+    let args = robin_rs::main_entry::parse_cli();
+    // The crash-upload child is the same binary: it must exit before the crash
+    // hook, tracing, the updater or any window/engine exists. Tracing would
+    // open a new run log, and opening one prunes the crashed run's log.
+    if let Some(status) = robin_rs::main_entry::crash_upload_status(&args) {
+        std::process::exit(status);
+    }
     install_crash_diagnostics();
     robin_rs::init_tracing();
-    let args = robin_rs::main_entry::parse_cli();
     robin_rs::diagnostic_context::initialize(&args);
     // Keep the helper's stdin open for the entire process lifetime. Abrupt
     // termination closes it in the OS, without relying on Rust destructors.

@@ -128,6 +128,20 @@ impl LaunchConfig {
     }
 }
 
+/// Exit status of the hidden `--upload-crash <dir>` child mode, or `None` for
+/// an ordinary launch.
+///
+/// [`crate::crash`] spawns this mode from a panicking process, so the binary
+/// calls it before installing the crash hook, initializing tracing or
+/// constructing a window or an engine: the child must not write a run log
+/// (opening one prunes the crashed run's log) and must not install a second
+/// hook.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn crash_upload_status(cli: &CliArgs) -> Option<i32> {
+    let directory = cli.upload_crash.as_deref()?;
+    Some(crate::crash::upload_bundle(directory))
+}
+
 /// Launch-supplied custom-mission content and its admitted asset lease.
 /// Replaced as a unit whenever a replay or save becomes the content authority.
 #[derive(Debug, Default, Serialize)]

@@ -256,6 +256,12 @@ pub struct CliArgs {
     #[arg(long, action = clap::ArgAction::Set)]
     pub mp_browser_join_links: Option<bool>,
 
+    /// Internal: upload one crash bundle written by the panic hook and exit.
+    /// Spawned by the hook itself; it never becomes a game window or a session.
+    #[arg(long, value_name = "DIR", hide = true)]
+    #[serde(skip)]
+    pub upload_crash: Option<std::path::PathBuf>,
+
     /// Nickname shown in the portrait "controlled by" overlay on
     /// peers.  Defaults to a host-name-derived fallback when omitted.
     #[arg(long, value_name = "NICKNAME", default_value = "")]
@@ -313,6 +319,7 @@ impl Default for CliArgs {
             mp_mission_profile_id: None,
             mp_browser_join_links: None,
             mp_nickname: String::new(),
+            upload_crash: None,
         };
         install_global_options(&args);
         args

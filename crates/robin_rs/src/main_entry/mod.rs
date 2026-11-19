@@ -29,6 +29,8 @@ pub use error::LaunchError;
 #[cfg(target_arch = "wasm32")]
 pub use cli::set_pending_browser_join;
 pub use cli::{CliArgs, RHREC_EXT, parse_cli, parse_cli_from, try_parse_cli_from};
+#[cfg(not(target_arch = "wasm32"))]
+pub use launch::crash_upload_status;
 pub use launch::{
     LaunchConfig, MissionContent, MissionRequest, MissionStartCapture, MultiplayerRoute,
     PendingLuaMission,
