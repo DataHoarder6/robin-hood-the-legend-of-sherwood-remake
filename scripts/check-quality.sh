@@ -151,6 +151,7 @@ case "$1" in
         bash scripts/test_release.sh
         bash scripts/test_doctor.sh
         bash scripts/test_reconcile_main.sh
+        bash scripts/test_push_gate.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every

@@ -59,6 +59,8 @@ untracked=$(git ls-files --others --exclude-standard)
 if [ -n "$untracked" ]; then
     printf 'push-gate: untracked files are in the tree the suites compile but not in the push:\n' >&2
     printf '%s\n' "$untracked" | sed 's/^/push-gate:   /' >&2
+    printf 'push-gate: commit, ignore or delete them first.\n' >&2
+    exit 1
 fi
 
 if [ -n "$base" ]; then
