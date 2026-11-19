@@ -890,6 +890,11 @@ impl EngineInner {
                         crate::element::Posture::Upright,
                     );
                     initial_element.kind = crate::element::ElementKind::ActorSoldier;
+                    // Staged garrison bodies are constructed in their slot but
+                    // start inactive: the tick skips inactive elements, so a
+                    // staged body costs a slot and nothing else until a summon
+                    // wakes it.
+                    initial_element.active = !raw.staged;
                     // Non-forest levels start soldiers as blipped shadows that
                     // get revealed by proximity detection (SeesBlip) or the
                     // Listen ability.
@@ -965,13 +970,16 @@ impl EngineInner {
             // count used by debriefing / campaign-stat sync.  Without this,
             // the "Level money" and "enemies encountered" rows on the
             // debriefing screen stay at 0 — and the `money` console cheat
-            // miscomputes the delta.
-            self.mission_domain.mission_stat.soldier_money += raw.money;
-            self.mission_domain
-                .mission_stat
-                .record_soldier_encounter(cached_camp);
-            if self.is_hostile_to_player_camp(cached_camp) {
-                self.mission_domain.mission_stat.total_soldier_count += 1;
+            // miscomputes the delta.  A staged body is not in the level yet,
+            // so it contributes nothing until a summon wakes it.
+            if !raw.staged {
+                self.mission_domain.mission_stat.soldier_money += raw.money;
+                self.mission_domain
+                    .mission_stat
+                    .record_soldier_encounter(cached_camp);
+                if self.is_hostile_to_player_camp(cached_camp) {
+                    self.mission_domain.mission_stat.total_soldier_count += 1;
+                }
             }
         }
 

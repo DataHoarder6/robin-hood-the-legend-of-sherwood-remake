@@ -2527,6 +2527,7 @@ fn failed_construction_returns_the_same_campaign_allocation() {
         mission_role: crate::human_control::MissionRole::Combatant,
         combat_stance: crate::human_control::CombatStance::Aggressive,
         revealed: false,
+        staged: false,
         tower_guard: false,
         company_number: 0,
         drunk_level: 0,

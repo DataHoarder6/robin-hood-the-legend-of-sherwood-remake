@@ -925,6 +925,11 @@ pub struct RawSoldier {
     /// Custom missions may bypass the normal town-map fog silhouette.
     #[serde(default)]
     pub revealed: bool,
+    /// Authored off-map garrison body. A staged soldier is constructed in its
+    /// slot but starts inactive, so it neither ticks nor counts toward the
+    /// level's alert population or mission statistics until it is summoned.
+    #[serde(default)]
+    pub staged: bool,
     pub tower_guard: bool,
     pub company_number: u32,
     pub drunk_level: u32,
@@ -2598,6 +2603,9 @@ pub struct HackableSoldier {
     pub mission_role: MissionRole,
     #[serde(default)]
     pub combat_stance: CombatStance,
+    /// Authored off-map garrison body: constructed inactive until summoned.
+    #[serde(default)]
+    pub staged: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
@@ -2994,6 +3002,7 @@ impl LoadedLevel {
                     mission_role: soldier.mission_role,
                     combat_stance: soldier.combat_stance,
                     revealed: reveal_all,
+                    staged: soldier.staged,
                     tower_guard: false,
                     company_number: 0,
                     drunk_level: 0,
@@ -4765,6 +4774,7 @@ fn read_soldiers(
             mission_role: MissionRole::Combatant,
             combat_stance: CombatStance::Aggressive,
             revealed: false,
+            staged: false,
             tower_guard,
             company_number,
             drunk_level,
@@ -6688,6 +6698,29 @@ mod tests {
         assert!(!motion.layers[0][0].obstacles.is_empty());
         assert!(!level.proto.sight_obstacles.is_empty());
         assert!(level.proto.masks.is_empty());
+    }
+
+    #[test]
+    fn hackable_descriptor_carries_staged_garrison_bodies() {
+        let level = LoadedLevel::hackable_from_json(
+            br#"{
+                "title": "Staged Garrison",
+                "map_filename": "TestMap",
+                "spawn": [50, 60],
+                "walkable_polygon": [[0, 0], [100, 0], [100, 100], [0, 100]],
+                "soldiers": [
+                    { "position": [30, 30], "profile": 0, "allegiance": 0, "staged": true },
+                    { "position": [40, 40], "profile": 0, "allegiance": 0 }
+                ]
+            }"#,
+        )
+        .expect("hackable descriptor with garrison bodies");
+        assert_eq!(level.mission.soldiers.len(), 2);
+        assert!(level.mission.soldiers[0].staged);
+        assert!(
+            !level.mission.soldiers[1].staged,
+            "a descriptor that omits the flag keeps the body in the level"
+        );
     }
 
     #[test]

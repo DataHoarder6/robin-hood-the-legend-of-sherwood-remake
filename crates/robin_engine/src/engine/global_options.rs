@@ -45,6 +45,10 @@ pub struct SimConfig {
     /// Enable the post-port player interaction for releasing tied NPCs.
     #[serde(default = "enabled_by_default")]
     pub enable_unbinding: bool,
+    /// Enable actors arriving in the level from outside it: staged garrison
+    /// bodies woken by an alarm, a mission script, or the player's call.
+    #[serde(default = "enabled_by_default")]
+    pub enable_offmap_reinforcements: bool,
     /// Optional Clean Hands rule for deaths caused by non-player NPCs.
     #[serde(default)]
     pub clean_hands_npc_kills_invalidate: bool,
@@ -135,6 +139,7 @@ pub enum RankedSimulationConfigField {
     Difficulty,
     FixHardReactionTimes,
     EnableUnbinding,
+    EnableOffmapReinforcements,
     CleanHandsNpcKillsInvalidate,
     ExcludeStartingDeadSoldiersFromPreservedLives,
     ExcludeRequiredKillsFromPreservedLives,
@@ -172,6 +177,7 @@ impl RankedSimulationConfigField {
             Self::Difficulty => "sim_config.difficulty",
             Self::FixHardReactionTimes => "sim_config.fix_hard_reaction_times",
             Self::EnableUnbinding => "sim_config.enable_unbinding",
+            Self::EnableOffmapReinforcements => "sim_config.enable_offmap_reinforcements",
             Self::CleanHandsNpcKillsInvalidate => "sim_config.clean_hands_npc_kills_invalidate",
             Self::ExcludeStartingDeadSoldiersFromPreservedLives => {
                 "sim_config.exclude_starting_dead_soldiers_from_preserved_lives"
@@ -379,6 +385,7 @@ macro_rules! profile_gameplay_projection {
                     script_enabled: _, highlander: _, highlander2: _, golden_eye: _,
                     ignore_default_loose: _,
                     synchronous_pathfinding: _,
+                    enable_offmap_reinforcements: _,
                 } = *self;
                 $(gameplay.$field = $field;)+
             }
@@ -424,6 +431,7 @@ impl SimConfig {
             difficulty,
             fix_hard_reaction_times: true,
             enable_unbinding: true,
+            enable_offmap_reinforcements: true,
             clean_hands_npc_kills_invalidate: false,
             exclude_starting_dead_soldiers_from_preserved_lives: true,
             exclude_required_kills_from_preserved_lives: true,
@@ -480,6 +488,7 @@ impl SimConfig {
             difficulty,
             fix_hard_reaction_times,
             enable_unbinding,
+            enable_offmap_reinforcements,
             clean_hands_npc_kills_invalidate,
             exclude_starting_dead_soldiers_from_preserved_lives,
             exclude_required_kills_from_preserved_lives,
@@ -509,6 +518,7 @@ impl SimConfig {
             difficulty: expected_difficulty,
             fix_hard_reaction_times: expected_fix_hard_reaction_times,
             enable_unbinding: expected_enable_unbinding,
+            enable_offmap_reinforcements: expected_enable_offmap_reinforcements,
             clean_hands_npc_kills_invalidate: expected_clean_hands_npc_kills_invalidate,
             exclude_starting_dead_soldiers_from_preserved_lives:
                 expected_exclude_starting_dead_soldiers_from_preserved_lives,
@@ -543,6 +553,8 @@ impl SimConfig {
                 .then_some(RankedSimulationConfigField::FixHardReactionTimes),
             (enable_unbinding != expected_enable_unbinding)
                 .then_some(RankedSimulationConfigField::EnableUnbinding),
+            (enable_offmap_reinforcements != expected_enable_offmap_reinforcements)
+                .then_some(RankedSimulationConfigField::EnableOffmapReinforcements),
             (clean_hands_npc_kills_invalidate != expected_clean_hands_npc_kills_invalidate)
                 .then_some(RankedSimulationConfigField::CleanHandsNpcKillsInvalidate),
             (exclude_starting_dead_soldiers_from_preserved_lives
@@ -604,6 +616,7 @@ impl SimConfig {
             difficulty,
             fix_hard_reaction_times: true,
             enable_unbinding: true,
+            enable_offmap_reinforcements: true,
             clean_hands_npc_kills_invalidate: false,
             exclude_starting_dead_soldiers_from_preserved_lives: true,
             exclude_required_kills_from_preserved_lives: true,
