@@ -145,7 +145,17 @@ pub(super) async fn execute(
             }
         }
         SaveLoadRequest::Continue { mission_id } => {
-            if let Err(err) = save_manager.write_continue_save(
+            if host.transport.net().is_some()
+                && engine.sim_config().coop.campaign
+                && host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST
+            {
+                // A campaign belongs to its host: a guest seat keeps no copy,
+                // so returning to this install can never resume a forked run.
+                tracing::info!(
+                    mission_id,
+                    "campaign guest leaves the campaign slot to the host"
+                );
+            } else if let Err(err) = save_manager.write_continue_save(
                 host,
                 game,
                 engine,

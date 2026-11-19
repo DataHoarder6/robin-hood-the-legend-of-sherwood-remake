@@ -224,7 +224,10 @@ pub struct MultiplayerRoute {
 impl MultiplayerRoute {
     fn from_cli(cli: &CliArgs) -> Self {
         Self {
-            coop: Default::default(),
+            coop: robin_engine::coop::CoopRules {
+                campaign: cli.mp_campaign,
+                ..Default::default()
+            },
             join: cli.join.clone(),
             server: cli.server,
             connect: cli.connect.clone(),
@@ -397,4 +400,52 @@ pub struct PendingLuaMission {
     /// Exact already-admitted package supplied by live, replay, save, or
     /// multiplayer preparation. Startup never consults a local library.
     pub spellforge_package: Option<robin_engine::spellforge::SpellforgePackage>,
+}
+
+#[cfg(test)]
+mod campaign_handoff_tests {
+    use super::*;
+
+    fn campaign_launch(server: bool) -> MissionRequest {
+        let cli = CliArgs {
+            server,
+            connect: (!server).then(|| "host-key".to_owned()),
+            mp_campaign: true,
+            mp_expected_players: Some(3),
+            ..Default::default()
+        };
+        MissionRequest::new(Arc::new(LaunchConfig {
+            cli,
+            ..Default::default()
+        }))
+    }
+
+    /// A campaign is one session over its missions: the launch the next mission
+    /// receives is the same campaign, with the same fixed party, marked as the
+    /// host's session continuation. Nothing derives a new party or a skirmish.
+    #[test]
+    fn a_campaign_hands_its_next_mission_the_same_party() {
+        let host = campaign_launch(true);
+        assert!(host.multiplayer.coop.campaign);
+        assert_eq!(host.multiplayer.expected_players, Some(3));
+        let next = host.continuing_host_session();
+        assert!(next.multiplayer.coop.campaign);
+        assert_eq!(next.multiplayer.expected_players, Some(3));
+        assert!(next.multiplayer.continue_session);
+    }
+
+    /// The continuation flag is the host's authenticated transport. A joining
+    /// seat never claims it, so the next mission cannot make a client the
+    /// campaign's owner.
+    #[test]
+    fn a_joining_seat_never_continues_the_hosts_session() {
+        let client = campaign_launch(false);
+        assert!(client.multiplayer.coop.campaign);
+        assert!(
+            !client
+                .continuing_host_session()
+                .multiplayer
+                .continue_session
+        );
+    }
 }

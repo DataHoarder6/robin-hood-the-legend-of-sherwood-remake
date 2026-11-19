@@ -2285,4 +2285,36 @@ mod tests {
             crate::main_entry::LaunchConfig::default().with_mission_start_capture(fogged_export);
         assert!(initial_sim_config(&fogged_export).fog_of_war);
     }
+
+    /// A slot written by a solo run resumes as a skirmish of one seat unless
+    /// the lobby's campaign words replace it. Without this the campaign ends
+    /// after its first mission and the joiner is dropped.
+    #[test]
+    fn a_campaign_lobby_replaces_the_slots_own_simulation_config() {
+        use robin_engine::coop::{CharacterControl, CoopRules};
+        let solo = robin_engine::engine::SimConfig::default();
+        assert!(!solo.coop.campaign);
+
+        let mut args = crate::main_entry::MissionRequest::default();
+        args.multiplayer.coop = CoopRules {
+            campaign: true,
+            players: 2,
+            ..Default::default()
+        }
+        .campaign_lobby();
+        args.multiplayer.expected_players = Some(2);
+        let resumed = launch_sim_config(solo.clone(), &args).unwrap();
+        assert!(resumed.coop.campaign);
+        assert_eq!(resumed.coop.players, 2);
+        assert_eq!(resumed.coop.control, CharacterControl::Shared);
+        assert_eq!(resumed.coop.team_len(), 0);
+
+        // No party size means no lobby words to install: the slot's own
+        // configuration is what runs.
+        args.multiplayer.expected_players = None;
+        assert_eq!(launch_sim_config(solo.clone(), &args).unwrap(), solo);
+
+        args.multiplayer.expected_players = Some(6);
+        assert!(launch_sim_config(solo, &args).is_err());
+    }
 }

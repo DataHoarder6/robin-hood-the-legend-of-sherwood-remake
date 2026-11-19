@@ -608,6 +608,21 @@ async fn run_session_body(
         session_args =
             session_args.with_content(crate::main_entry::MissionContent::exact_assets(resolved));
         (authoritative_rng_seed, authoritative_sim_config) = save.engine.mission_start_simulation();
+        if session_args.multiplayer.coop.campaign {
+            // The save owns the world and the campaign roster; the lobby owns
+            // how many seats are in it and that it is a campaign at all. A
+            // slot written by a solo run otherwise resumes as a skirmish and
+            // ends the session after its first mission.
+            match setup::launch_sim_config(authoritative_sim_config, &session_args) {
+                Ok(config) => authoritative_sim_config = config,
+                Err(error) => {
+                    return SessionOutcome {
+                        campaign,
+                        result: Err(format!("campaign lobby cannot resume this slot: {error}")),
+                    };
+                }
+            }
+        }
         campaign = save.engine.campaign().clone();
         preselected_mission = Some(target_idx);
         callbacks.queue_operation(SaveLoadRequest::ApplyLoad(load));

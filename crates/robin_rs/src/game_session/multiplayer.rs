@@ -1658,6 +1658,20 @@ fn validate_multiplayer_launch_args(
             "multiplayer host and client modes are mutually exclusive".into(),
         ));
     }
+    if args.multiplayer.coop.campaign {
+        let joined = args.multiplayer.server || args.multiplayer.connect.is_some();
+        if !joined {
+            return Err(SessionSetupFailure::InvalidLaunch(
+                "a campaign session needs --server or --connect; it is one host's campaign".into(),
+            ));
+        }
+        if args.multiplayer.expected_players.is_none() {
+            return Err(SessionSetupFailure::InvalidLaunch(
+                "a campaign session needs its fixed party size (--mp-expected-players), because the campaign's roster is the host's"
+                    .into(),
+            ));
+        }
+    }
     if let Some(expected) = args.multiplayer.expected_players
         && !(1..=crate::multiplayer::MAX_MULTIPLAYER_PLAYERS).contains(&expected)
     {
@@ -1917,6 +1931,31 @@ mod tests {
             ..Default::default()
         });
         assert!(validate_multiplayer_launch_args(&too_many).is_err());
+    }
+
+    #[test]
+    fn campaign_launch_needs_a_joined_session_and_a_party_size() {
+        for (campaign, server, connect, players, valid) in [
+            (true, false, None, Some(2), false),
+            (true, false, None, None, false),
+            (true, true, None, None, false),
+            (true, true, None, Some(2), true),
+            (true, false, Some("host-key"), Some(2), true),
+            (false, false, None, None, true),
+        ] {
+            let args = launch_from_cli(crate::main_entry::CliArgs {
+                mp_campaign: campaign,
+                server,
+                connect: connect.map(str::to_owned),
+                mp_expected_players: players,
+                ..Default::default()
+            });
+            assert_eq!(
+                validate_multiplayer_launch_args(&args).is_ok(),
+                valid,
+                "campaign={campaign} server={server} connect={connect:?} players={players:?}"
+            );
+        }
     }
 
     #[test]

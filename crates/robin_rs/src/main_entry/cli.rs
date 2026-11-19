@@ -256,6 +256,12 @@ pub struct CliArgs {
     #[arg(long, hide = true)]
     pub mp_mission_profile_id: Option<u32>,
 
+    /// Run this multiplayer launch as a campaign. The host owns the campaign
+    /// (its slot, roster and mission sequence); a joining seat plays the host's
+    /// campaign and needs no local save. Requires `--server` or `--connect`.
+    #[arg(long)]
+    pub mp_campaign: bool,
+
     /// Override the active profile's browser-invitation publication setting
     /// for this hosted game. Omitted means use the saved preference.
     #[arg(long, action = clap::ArgAction::Set)]
@@ -329,6 +335,7 @@ impl Default for CliArgs {
             mp_start_at_epoch_ms: None,
             mp_expected_players: None,
             mp_mission_profile_id: None,
+            mp_campaign: false,
             mp_browser_join_links: None,
             mp_nickname: String::new(),
             upload_crash: None,

@@ -428,6 +428,32 @@ async fn run_rust_game_active(
     if let Some((idx, location)) =
         force_mission_launch(&mut campaign, &mut profiles, &application_context, &config)?
     {
+        if request.multiplayer.coop.campaign {
+            // A campaign is one host-owned session spanning its missions, not
+            // one mission: the direct launch owns that session so the
+            // debriefing's next-mission action carries every seat on.
+            let outcome = Box::pin(crate::game_session::run_session(
+                window,
+                campaign,
+                std::sync::Arc::make_mut(&mut profiles),
+                &application_context,
+                request,
+                None,
+            ))
+            .await;
+            match outcome.result {
+                Ok(crate::game_session::SessionResult::ExitRequested) => {
+                    crate::observability::application_exit(
+                        "a campaign session asked the application to exit",
+                    );
+                }
+                Ok(crate::game_session::SessionResult::QuitToMenu) => {
+                    crate::observability::application_exit("the campaign session finished");
+                }
+                Err(message) => return Err(LaunchError::campaign(message)),
+            }
+            return Ok(0);
+        }
         let Some(mut callbacks) =
             RustCallbacks::new_for_window(application_context.clone(), window).await?
         else {
@@ -851,7 +877,11 @@ impl MainMenuContext<'_> {
                     self.application_context.sim_config().difficulty,
                 );
             }
-            if !launch.coop.campaign || matches!(launch.role, MultiplayerRole::Client { .. }) {
+            // A campaign host with a slot takes its current mission from that
+            // slot; every other launch plays the mission the lobby advertised.
+            // Without this a fresh campaign would announce one mission and
+            // select another.
+            if launch.plays_lobby_mission() {
                 campaign.force_next_mission(idx);
             }
             None
