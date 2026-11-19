@@ -120,7 +120,7 @@ pub use rollback_safe::{
 };
 pub use scroll_reveal::{BeggarRemark, ScrollStatus};
 pub use seat::SeatState;
-pub use selection::Stature;
+pub use selection::{BoxSelectionHits, Stature};
 pub use types::*;
 
 /// Whether Original dispatches this actor/order pair through

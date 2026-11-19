@@ -519,6 +519,24 @@ impl EngineInner {
         }
     }
 
+    /// Whether a controllable soldier's ground point lies inside the drag box.
+    pub(crate) fn soldier_in_box(&self, id: EntityId, selection_box: &crate::sprite::BBox) -> bool {
+        if !self.is_tactically_controllable(id) {
+            return false;
+        }
+        let entity = self
+            .get_entity(id)
+            .expect("controllable allied soldier disappeared during box selection");
+        let pos = entity.element_data().position_map();
+        // Soldier sprites are anchored at their feet and extend primarily up
+        // and left. Intersecting the whole sprite made the top/left sides of a
+        // drag box select units far outside it, while the bottom/right sides
+        // appeared accurate. The ground point is also the center of the
+        // persistent selection circle, so it is the stable selection
+        // coordinate.
+        selection_box.contains_point(crate::coordinates::ScreenPoint::new(pos.x, pos.y))
+    }
+
     pub(crate) fn box_select_tactical_units(
         &mut self,
         seat: usize,
@@ -526,28 +544,12 @@ impl EngineInner {
         pt2: MapPoint,
         shift: bool,
     ) {
-        let selection_box = crate::sprite::BBox::new(
-            crate::coordinates::ScreenPoint::new(pt1.x.min(pt2.x), pt1.y.min(pt2.y)),
-            crate::coordinates::ScreenPoint::new(pt1.x.max(pt2.x), pt1.y.max(pt2.y)),
-        );
+        let selection_box = super::selection::selection_box(pt1, pt2);
         let selected: Vec<_> = self
             .world
             .entities
             .npc_ids()
-            .filter(|id| self.is_tactically_controllable(*id))
-            .filter(|id| {
-                let entity = self
-                    .get_entity(*id)
-                    .expect("controllable allied soldier disappeared during box selection");
-                let pos = entity.element_data().position_map();
-                // Soldier sprites are anchored at their feet and extend
-                // primarily up and left. Intersecting the whole sprite made
-                // the top/left sides of a drag box select units far outside
-                // it, while the bottom/right sides appeared accurate. The
-                // ground point is also the center of the persistent selection
-                // circle, so it is the stable selection coordinate.
-                selection_box.contains_point(crate::coordinates::ScreenPoint::new(pos.x, pos.y))
-            })
+            .filter(|&id| self.soldier_in_box(id, &selection_box))
             .collect();
         self.select_tactical_units(seat, &selected, shift);
     }

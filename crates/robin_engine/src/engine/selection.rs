@@ -6,6 +6,25 @@ use crate::engine::TickCtx;
 use crate::profiles::Action;
 use crate::sequence::{SequenceElement, SequencePriority};
 
+/// Selectable heroes and controllable soldiers whose sprites fall inside a
+/// drag box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BoxSelectionHits {
+    pub heroes: usize,
+    pub soldiers: usize,
+}
+
+/// Axis-aligned map-space rectangle for a drag gesture.
+pub(crate) fn selection_box(
+    pt1: crate::coordinates::MapPoint,
+    pt2: crate::coordinates::MapPoint,
+) -> crate::sprite::BBox {
+    crate::sprite::BBox::new(
+        crate::coordinates::ScreenPoint::new(pt1.x.min(pt2.x), pt1.y.min(pt2.y)),
+        crate::coordinates::ScreenPoint::new(pt1.x.max(pt2.x), pt1.y.max(pt2.y)),
+    )
+}
+
 /// Combined "stand up / crouch" widget state. Returned from
 /// [`EngineInner::retrieve_stature`] to drive the up / down arrow widgets on
 /// the status bar.
@@ -1225,6 +1244,55 @@ impl EngineInner {
         true
     }
 
+    /// Count selectable heroes and controllable soldiers inside a drag box.
+    pub fn box_selection_hits(
+        &self,
+        seat: usize,
+        assets: &LevelAssets,
+        pt1: crate::coordinates::MapPoint,
+        pt2: crate::coordinates::MapPoint,
+    ) -> BoxSelectionHits {
+        let selection_box = selection_box(pt1, pt2);
+        BoxSelectionHits {
+            heroes: self
+                .world
+                .pc_ids
+                .iter()
+                .filter(|&&id| self.pc_in_box(assets, seat, id, &selection_box))
+                .count(),
+            soldiers: self
+                .world
+                .entities
+                .npc_ids()
+                .filter(|&id| self.soldier_in_box(id, &selection_box))
+                .count(),
+        }
+    }
+
+    /// Whether a PC is selectable for `seat` and overlaps the drag box.
+    pub(crate) fn pc_in_box(
+        &self,
+        assets: &LevelAssets,
+        seat: usize,
+        id: EntityId,
+        selection_box: &crate::sprite::BBox,
+    ) -> bool {
+        if !self.is_pc_selectable(assets, id) || !self.coop_can_select(seat, id) {
+            return false;
+        }
+        let Some(entity) = self.get_entity(id) else {
+            return false;
+        };
+        // Sprite-AABB-vs-drag-box overlap, matching the same hit-test also
+        // used by the corresponding box-unselection path below.
+        let map_pos = entity.element_data().position_map();
+        let map_pt = crate::coordinates::ScreenPoint::new(map_pos.x, map_pos.y);
+        let sprite_box = entity
+            .sprite()
+            .bounding_box_at(entity.gameplay_sprite_position());
+        selection_box.is_intersecting(&sprite_box) || selection_box.contains_point(map_pt)
+    }
+
     pub(crate) fn perform_box_selection(
         &mut self,
         tcx: TickCtx<'_>,
@@ -1233,10 +1301,7 @@ impl EngineInner {
         p2: crate::coordinates::MapPoint,
         shift_held: bool,
     ) {
-        let box_multi_selection = crate::sprite::BBox::new(
-            crate::coordinates::ScreenPoint::new(p1.x.min(p2.x), p1.y.min(p2.y)),
-            crate::coordinates::ScreenPoint::new(p1.x.max(p2.x), p1.y.max(p2.y)),
-        );
+        let selection_box = selection_box(p1, p2);
 
         if !shift_held {
             self.unselect_all_pcs(seat);
@@ -1246,24 +1311,10 @@ impl EngineInner {
         let pc_count = self.world.pc_ids.len();
         for index in 0..pc_count {
             let pc_id = self.world.pc_ids[index];
-            if !self.is_pc_selectable(tcx.assets, pc_id) || !self.coop_can_select(seat, pc_id) {
+            if !self.pc_in_box(tcx.assets, seat, pc_id, &selection_box) {
                 continue;
             }
-            if let Some(entity) = self.get_entity(pc_id) {
-                // Sprite-AABB-vs-drag-box overlap, matching the same
-                // hit-test also used by the corresponding box-unselection
-                // path below.
-                let map_pos = entity.element_data().position_map();
-                let map_pt = crate::coordinates::ScreenPoint::new(map_pos.x, map_pos.y);
-                let sprite_box = entity
-                    .sprite()
-                    .bounding_box_at(entity.gameplay_sprite_position());
-                if box_multi_selection.is_intersecting(&sprite_box)
-                    || box_multi_selection.contains_point(map_pt)
-                {
-                    self.select_pc(tcx, seat, pc_id, true, true);
-                }
-            }
+            self.select_pc(tcx, seat, pc_id, true, true);
         }
     }
 
@@ -1522,6 +1573,147 @@ mod tests {
             human: Default::default(),
             pc: Default::default(),
         }))
+    }
+
+    fn place_at(engine: &mut EngineInner, id: EntityId, x: f32, y: f32) {
+        let element = engine.get_entity_mut(id).unwrap().element_data_mut();
+        element.set_position_map(crate::coordinates::MapPoint::new(x, y));
+        element.sprite.position_iface.settle_current_position();
+    }
+
+    fn attach_one_frame_sprite(engine: &mut EngineInner, id: EntityId) {
+        let sprite = engine.get_entity_mut(id).unwrap().sprite_mut();
+        sprite.scripts = std::sync::Arc::new(vec![crate::sprite_script::SpriteScript {
+            frame_ids: vec![0],
+            delays: vec![1],
+            distances: vec![0],
+            offsets: vec![crate::coordinates::SpriteFrameOffset::ZERO],
+            sound_ids: vec![0],
+            ..Default::default()
+        }]);
+    }
+
+    #[test]
+    fn box_selection_hits_counts_a_selectable_hero_inside_and_none_outside() {
+        let assets = LevelAssets::default();
+        let mut engine = EngineInner::new();
+        let hero = add_selectable_test_pc(&mut engine);
+        place_at(&mut engine, hero, 50.0, 50.0);
+        attach_one_frame_sprite(&mut engine, hero);
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    0,
+                    &assets,
+                    crate::coordinates::MapPoint::new(40.0, 40.0),
+                    crate::coordinates::MapPoint::new(60.0, 60.0),
+                )
+                .heroes,
+            1
+        );
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    0,
+                    &assets,
+                    crate::coordinates::MapPoint::new(200.0, 200.0),
+                    crate::coordinates::MapPoint::new(220.0, 220.0),
+                )
+                .heroes,
+            0
+        );
+    }
+
+    #[test]
+    fn box_selection_hits_ignores_a_dead_hero() {
+        let assets = LevelAssets::default();
+        let mut engine = EngineInner::new();
+        let hero = add_selectable_test_pc(&mut engine);
+        place_at(&mut engine, hero, 50.0, 50.0);
+        attach_one_frame_sprite(&mut engine, hero);
+        engine
+            .get_entity_mut(hero)
+            .unwrap()
+            .pc_data_mut()
+            .unwrap()
+            .life_points = 0;
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    0,
+                    &assets,
+                    crate::coordinates::MapPoint::new(40.0, 40.0),
+                    crate::coordinates::MapPoint::new(60.0, 60.0),
+                )
+                .heroes,
+            0
+        );
+    }
+
+    #[test]
+    fn box_selection_hits_counts_a_controllable_soldier() {
+        use crate::element::AiBrain;
+        use crate::engine::test_support::actors::make_test_soldier;
+
+        let assets = LevelAssets::default();
+        let mut engine = EngineInner::new();
+        let mut soldier = make_test_soldier(Posture::Upright);
+        let Entity::Soldier(data) = &mut soldier else {
+            unreachable!()
+        };
+        data.element.active = true;
+        data.element
+            .set_position_map(crate::coordinates::MapPoint::new(50.0, 50.0));
+        data.soldier.command_interface = crate::human_control::CommandInterface::TacticalOrders;
+        data.npc.ai_brain = AiBrain::Enemy(Box::default());
+        data.npc.life_points = 100;
+        engine.add_test_entity(soldier);
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    0,
+                    &assets,
+                    crate::coordinates::MapPoint::new(40.0, 40.0),
+                    crate::coordinates::MapPoint::new(60.0, 60.0),
+                )
+                .soldiers,
+            1
+        );
+    }
+
+    #[test]
+    fn box_selection_hits_excludes_a_hero_another_seat_controls() {
+        let assets = LevelAssets::default();
+        let mut engine = EngineInner::new();
+        engine.control.sim_config.coop.control = crate::coop::CharacterControl::Exclusive;
+        let hero = add_selectable_test_pc(&mut engine);
+        place_at(&mut engine, hero, 50.0, 50.0);
+        attach_one_frame_sprite(&mut engine, hero);
+        let seat_one = engine.ensure_seat(crate::player_command::PlayerId(1));
+        engine.players.seats[seat_one].connected = true;
+        engine.players.seats[seat_one].selection = vec![hero];
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    0,
+                    &assets,
+                    crate::coordinates::MapPoint::new(40.0, 40.0),
+                    crate::coordinates::MapPoint::new(60.0, 60.0),
+                )
+                .heroes,
+            0
+        );
+        assert_eq!(
+            engine
+                .box_selection_hits(
+                    1,
+                    &assets,
+                    crate::coordinates::MapPoint::new(40.0, 40.0),
+                    crate::coordinates::MapPoint::new(60.0, 60.0),
+                )
+                .heroes,
+            1
+        );
     }
 
     #[test]
