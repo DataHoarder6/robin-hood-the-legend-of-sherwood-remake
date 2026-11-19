@@ -3,8 +3,9 @@
 Issue #44: a campaign host never opened a session an ambush host would. This
 records what was measured, what the fix changed, and what is still unproved.
 
-Last verified: 2026-11-19 on `campaign-coop` @ `fork/main` `ba8ab0d4e`'s base
-`4ff153ba6` (the branch was rebased at landing).
+Last verified: 2026-11-19 — H30 observed on the tree that landed
+(`build-host:~/campaign-e2e-H30-20261119-165539`; its `summary.json` names the
+snapshot, so this line cannot go stale under a rebase).
 
 ## What could be measured pre-fix
 
@@ -95,8 +96,7 @@ conversion.
   could never settle — H30 as first written asserted `peers=0,1` and hung at
   130 s with the session otherwise healthy (`…-20261119-160134`, both seats on
   `lincoln`, the guest comparing 24 frames, 0 desyncs). Evidence:
-  `build-host:~/campaign-e2e-H30-20261119-160955` (`verdict: observed`, snapshot
-  `a8ebef54c`).
+  `build-host:~/campaign-e2e-H30-20261119-165539` (`verdict: observed`).
 
 ## Found, not fixed (all reproduced on this base)
 
