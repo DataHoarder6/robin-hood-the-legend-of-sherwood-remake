@@ -22,6 +22,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 mod original;
+mod splice;
+
+pub use splice::splice_text_tables;
 
 use original::{RES_VERSION_100, flagged_picture_count};
 
