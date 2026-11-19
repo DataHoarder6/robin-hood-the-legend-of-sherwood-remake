@@ -2,7 +2,7 @@ use super::*;
 use crate::engine::SimCommand;
 
 #[test]
-fn a_mission_end_command_latches_the_flag_its_tick_reads() {
+fn a_mission_end_command_ends_the_mission_in_the_frame_that_applies_it() {
     use crate::game_operation::{GameCode, MissionResult};
     use crate::player_command::PlayerCommand;
     for (result, code) in [
@@ -11,24 +11,30 @@ fn a_mission_end_command_latches_the_flag_its_tick_reads() {
         (MissionResult::Aborted, GameCode::LevelInterrupted),
     ] {
         let (mut engine, assets) = frame_api_fixture();
-        let latched = engine
+        // Commands run before the mission phase, so the frame that applies the
+        // trigger is the frame that returns the mission's code — the same frame
+        // the script's own quit flag would end it in.
+        let ending = engine
             .advance_frame(
                 &assets,
                 SimulationFrameInput::new(vec![PlayerCommand::ForceMissionEnd { result }.into()]),
             )
             .expect("apply the mission-end command");
         assert_eq!(
-            latched.events.code,
-            GameCode::LevelInProgress,
-            "{result:?} latches a flag; the mission phase is what returns"
+            ending.events.code, code,
+            "{result:?} returns the code its mission-end flag names"
         );
-        // The flag is the one the mission phase reads, so the ending code is
-        // the next tick's and the finalization that goes with it is the real
-        // one, not a second path.
-        let ending = engine
-            .advance_frame(&assets, SimulationFrameInput::default())
-            .expect("advance past the latched quit flag");
-        assert_eq!(ending.events.code, code, "{result:?}");
+        let mission = engine.inner.mission();
+        let latched = match result {
+            MissionResult::Won => mission.quit_won,
+            MissionResult::Lost => mission.quit_lost,
+            MissionResult::Aborted => mission.quit_interrupted,
+        };
+        assert!(
+            latched,
+            "{result:?} latches the flag the mission phase reads, so the terminal flow \
+             and the campaign handoff are the ones a script-driven end reaches"
+        );
         // One attempt records one outcome: the same decision arriving again is
         // a no-op rather than a second ending.
         assert!(
