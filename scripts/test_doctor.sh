@@ -20,6 +20,10 @@ trap 'stop_build; rm -rf -- "$work"' EXIT
 export HOME=$work/home
 export GIT_CONFIG_GLOBAL=$work/gitconfig
 export GIT_CONFIG_NOSYSTEM=1
+# Fixtures are about repository states, not the host's disk. The disk-floor
+# cases set this explicitly; every other scenario must pass on a build host
+# that happens to be full.
+export DOCTOR_MIN_FREE_GIB=0
 mkdir -p "$HOME" "$work/bin"
 git config --file "$GIT_CONFIG_GLOBAL" user.name Fixture
 git config --file "$GIT_CONFIG_GLOBAL" user.email fixture@example.invalid
@@ -188,7 +192,7 @@ expect_contains 'incremental size is reported' 'target/debug/incremental is 0.0 
 # The disk floor fails with the ordered levers.
 export DOCTOR_MIN_FREE_GIB=999999
 run_doctor "$work/clean"
-unset DOCTOR_MIN_FREE_GIB
+export DOCTOR_MIN_FREE_GIB=0
 expect_status 1 'low disk fails'
 expect_contains 'disk failure names the incremental prune first' 'rm -rf target/debug/incremental in every checkout'
 expect_contains 'disk failure names the safe garbage collection' 'nix-collect-garbage --delete-older-than 14d'
