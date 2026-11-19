@@ -109,6 +109,13 @@ returned `Option<String>` where the shared call site wraps the native `String`
 in `Some` — and it is fixed in the same change; a
 `cargo check --features audio,multiplayer` now passes.
 
+**Since then.** `fork/main` `174cc2ee0` fails the same third command again, for a
+different reason: `crates/robin_rs/src/game_session/report.rs` calls
+`crate::bug_bundle`, `crate::bug_report`, `crate::crash` and
+`crate::diagnostic_context`, which `lib.rs` defines only off wasm32. The two
+errors recorded above are gone; the target is still red, so `docs/TESTING.md`
+owns the gate's state and this file stops at the compiler setup.
+
 **Limit.** The suite is `cargo check`: it compiles and archives the C but never
 links, so the object-format mistake above would survive a green run. The
 `cargo build` in this file is the check that catches it, and
