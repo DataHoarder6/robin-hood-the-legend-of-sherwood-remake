@@ -1,5 +1,15 @@
 # Post-port Features
 
+- **Empty selection boxes leave your party alone.** A left-drag box that
+  catches no selectable hero and no controllable allied soldier dispatches no
+  selection command: heroes, allied soldiers, the selected action, and
+  portraits stay as they were. Soldiers count only while
+  `control_tactical_units` is on. A box with any hit still replaces both
+  selections unless Shift is held; clicking units, clicking ground, and
+  right-dragging keep their existing behaviour. This is a post-port convenience,
+  not original-game behaviour; the decision is recorded in
+  `docs/adr/0001-empty-box-selection-is-not-a-deselect.md`.
+
 - **Campaign map mission availability.** Every map pin now carries the
   campaign's own answer for its mission: a filled gold corner marks a mission
   that can start now, a hollow pale-blue corner marks a completed mission that
