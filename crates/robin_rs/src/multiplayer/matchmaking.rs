@@ -138,7 +138,12 @@ struct TopicBroadcast {
     nonce: [u8; 16],
 }
 
+// The nonce exists to make each broadcast a distinct payload (gossip
+// suppresses repeats), so it must come from ambient randomness: a seeded
+// engine roll would repeat across clients. Matchmaking never reaches
+// `Engine::perform_hourglass`, so it cannot desync the simulation.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::disallowed_methods)]
 fn encode_topic_broadcast(message: &TopicMsg) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(&TopicBroadcast {
         message: message.clone(),
@@ -664,14 +669,14 @@ mod native {
         async fn handle_command(&mut self, command: Command) -> bool {
             match command {
                 Command::Rules(rules) => {
-                    if let Role::Hosting { game, .. } = &mut self.role {
-                        if game.state == "waiting" {
-                            game.coop = rules;
-                            let game = game.clone();
-                            self.broadcast(&TopicMsg::Announce { game: game.clone() })
-                                .await;
-                            let _ = self.events.send(MatchmakingEvent::GameUpdated(game));
-                        }
+                    if let Role::Hosting { game, .. } = &mut self.role
+                        && game.state == "waiting"
+                    {
+                        game.coop = rules;
+                        let game = game.clone();
+                        self.broadcast(&TopicMsg::Announce { game: game.clone() })
+                            .await;
+                        let _ = self.events.send(MatchmakingEvent::GameUpdated(game));
                     }
                 }
                 Command::Create {
