@@ -335,6 +335,45 @@ pub struct OffmapEntry {
     pub direction: i16,
 }
 
+/// How many bodies an alarm may bring in from outside the map in one mission.
+///
+/// Authored from the mission's tactic data. `authorize` is the single gate:
+/// a summon spends one slot, and a failed summon refunds it.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct OffmapReinforcementBudget {
+    pub total: u16,
+    pub concurrent: u16,
+    pub cooldown_ticks: u32,
+    pub remaining: u16,
+    pub live: u16,
+    pub next_allowed_frame: u32,
+}
+
+impl OffmapReinforcementBudget {
+    pub fn authorize(&mut self, frame: u32) -> bool {
+        if self.remaining == 0 || self.live >= self.concurrent || frame < self.next_allowed_frame {
+            return false;
+        }
+        self.remaining -= 1;
+        self.live += 1;
+        self.next_allowed_frame = frame.saturating_add(self.cooldown_ticks);
+        true
+    }
+
+    pub fn release(&mut self) {
+        self.live = self.live.saturating_sub(1);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Global AI state
 // ---------------------------------------------------------------------------
@@ -481,6 +520,8 @@ pub struct AiGlobalState {
     /// Non-gate reinforcement points, used when a summon has no door to pass.
     /// Populated at level load.
     pub offmap_entries: Vec<OffmapEntry>,
+    /// Per-mission budget for bodies summoned from outside the map.
+    pub offmap_budget: OffmapReinforcementBudget,
 
     /// Buildings the AI knows about — populated during AI initialization from
     /// every sector whose `sector_type.is_building()` is true, with

@@ -1,10 +1,11 @@
 # Off-map reinforcements
 
-Status: **entries and summon landed; the rest is not.** `SimConfig::enable_offmap_reinforcements`,
-staged garrison bodies, `EngineInner::summon_garrison`, authored entry kinds
-and the shared `place_outside_entity` exist. The AI emitter, the per-mission
-budget, withdrawal and the script native do not. Every decision below was
-settled in a grilling session on 2026-11-19.
+Status: **emitter and budget landed; withdrawal and the native are not.**
+`SimConfig::enable_offmap_reinforcements`, staged garrison bodies,
+`EngineInner::summon_garrison`, authored entry kinds, the shared
+`place_outside_entity`, the per-mission budget and the `AlertSoldiers` emitter
+exist. Withdrawal on alarm decay and the script native do not. Every decision
+below was settled in a grilling session on 2026-11-19.
 
 ## What this is
 
@@ -143,12 +144,16 @@ before the first tick, which is what keeps replays and co-op peers in agreement.
    Tier selection stays with the caller.
 3. ~~Entry kinds and optional in-map target on the authored point type~~ —
    `ReinforcementEntryKind` and `RawReinforcementPoint::target`.
-4. ~~Budget accounting~~ — the counter/stat publication a woken body needs is
-   `publish_soldier_alert_count` and `record_soldier_in_level`; the per-mission
-   budget itself is still open. The summoned mark on the actor is
-   `SoldierData::staged`, cleared on wake.
-5. `Decision` emission from `AlertSoldiers` when the in-radius recruit falls
-   short.
+4. ~~Budget accounting~~ — `RawTacticData::reinforcement_budget` authors the
+   total, concurrent cap and cooldown; `OffmapReinforcementBudget::authorize`
+   is the single gate, and a failed summon refunds its slot. The counter/stat
+   publication a woken body needs is `publish_soldier_alert_count` and
+   `record_soldier_in_level`. The summoned mark is `SoldierData::staged`,
+   cleared on wake.
+5. ~~`Decision` emission from `AlertSoldiers` when the in-radius recruit falls
+   short~~ — `try_summon_offmap` calls when `alerted_us` is empty and the
+   officer is not Green; the arriving body takes the officer as `master` and
+   its last known position as its goal.
 6. Withdrawal on alarm decay.
 7. The `SummonReinforcements` native.
 8. ~~`SimConfig` field, its `from_options` value, and its state-hash coverage.~~

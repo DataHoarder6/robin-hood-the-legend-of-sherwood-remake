@@ -339,6 +339,7 @@ fn reinforcement_install_resolves_sparse_slot_across_public_sector_collision() {
             sector: 1,
             layer: 0,
         }],
+        reinforcement_budget: Default::default(),
         ambush_points: Vec::new(),
         seek_points: Vec::new(),
         archery_sectors: Vec::new(),

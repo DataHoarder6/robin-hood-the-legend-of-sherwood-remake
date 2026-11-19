@@ -310,6 +310,7 @@ fn tactic_seek_position_resolves_sparse_slot_to_exact_sector_object() {
     let mut loaded = crate::level_data::LoadedLevel::empty();
     loaded.mission.tactic_data = Some(RawTacticData {
         reinforcement_points: Vec::new(),
+        reinforcement_budget: Default::default(),
         ambush_points: Vec::new(),
         seek_points: vec![RawSeekPoint {
             x: 658,
@@ -384,6 +385,7 @@ fn tactic_ambush_position_resolves_sparse_slot_to_exact_sector_object() {
     let mut loaded = crate::level_data::LoadedLevel::empty();
     loaded.mission.tactic_data = Some(RawTacticData {
         reinforcement_points: Vec::new(),
+        reinforcement_budget: Default::default(),
         ambush_points: vec![RawAmbushPoint {
             x: 1120,
             y: 840,
@@ -416,6 +418,7 @@ fn archery_waypoint_resolves_to_exact_motion_sector_after_loading() {
     let mut loaded = crate::level_data::LoadedLevel::empty();
     loaded.mission.tactic_data = Some(RawTacticData {
         reinforcement_points: Vec::new(),
+        reinforcement_budget: Default::default(),
         ambush_points: Vec::new(),
         seek_points: Vec::new(),
         archery_sectors: vec![RawArcherySector {

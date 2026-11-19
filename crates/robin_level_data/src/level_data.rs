@@ -1243,6 +1243,27 @@ pub struct RawArcherySector {
     pub points: Vec<RawArcheryPoint>,
 }
 
+/// Authored off-map reinforcement limits. No authoring means no summons.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    robin_state_hash_derive::StateHash,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+pub struct RawReinforcementBudget {
+    #[serde(default)]
+    pub total: u16,
+    #[serde(default)]
+    pub concurrent: u16,
+    #[serde(default)]
+    pub cooldown_ticks: u32,
+}
+
 /// All tactic data from the TACTIC (AI /HIRN) chunk.
 #[derive(
     Debug,
@@ -1255,6 +1276,9 @@ pub struct RawArcherySector {
 )]
 pub struct RawTacticData {
     pub reinforcement_points: Vec<RawReinforcementPoint>,
+    /// Off-map summon limits for this mission. Zero means none.
+    #[serde(default)]
+    pub reinforcement_budget: RawReinforcementBudget,
     pub ambush_points: Vec<RawAmbushPoint>,
     pub seek_points: Vec<RawSeekPoint>,
     pub archery_sectors: Vec<RawArcherySector>,
@@ -6072,6 +6096,7 @@ fn read_tactic_data(
 
     Ok(RawTacticData {
         reinforcement_points,
+        reinforcement_budget: RawReinforcementBudget::default(),
         ambush_points,
         seek_points,
         archery_sectors,
