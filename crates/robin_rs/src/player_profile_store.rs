@@ -499,6 +499,12 @@ const BROWSER_PROFILE_SCHEMA_VERSION: u32 = 1;
 #[cfg(any(test, target_arch = "wasm32"))]
 const BROWSER_PROFILE_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 
+/// The browser save directory is a label, not a path: the profile archive,
+/// key configs and saves live in page storage keyed by this string, and
+/// `PlayerProfileManager::save_directory` records it for wire compatibility.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub const BROWSER_SAVE_DIRECTORY: &str = "browser-save";
+
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

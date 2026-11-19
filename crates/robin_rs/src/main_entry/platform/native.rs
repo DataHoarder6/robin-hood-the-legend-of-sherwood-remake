@@ -27,6 +27,13 @@ pub fn overlay_mods_dir() -> Option<std::path::PathBuf> {
     resolve_install_resource_dir(None, MODS_DIR)
 }
 
+/// The install's save directory: `ROBINHOOD_SAVE_DIR`, else
+/// `<install root>/saves`. Absence is an error, never a path relative to the
+/// process's cwd.
+pub fn player_profile_directory() -> Result<std::path::PathBuf, InitError> {
+    crate::save_file::default_save_directory().ok_or(InitError::PlayerProfileDirectoryMissing)
+}
+
 fn configured_data_dir(explicit: Option<&Path>, environment: Option<String>) -> Option<String> {
     explicit
         .map(|dir| dir.to_string_lossy().into_owned())

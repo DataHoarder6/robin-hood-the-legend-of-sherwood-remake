@@ -26,6 +26,16 @@ pub fn overlay_mods_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// The browser keeps player profiles, key configs and saves in page storage,
+/// which is addressed by a label rather than a filesystem path; the profile
+/// store archives under this string and the game records it as the save
+/// directory.
+pub fn player_profile_directory() -> Result<std::path::PathBuf, InitError> {
+    Ok(std::path::PathBuf::from(
+        crate::player_profile_store::BROWSER_SAVE_DIRECTORY,
+    ))
+}
+
 pub fn prepare_direct_custom_mission_args(
     request: MissionRequest,
     _profiles: &engine_profiles::ProfileManager,

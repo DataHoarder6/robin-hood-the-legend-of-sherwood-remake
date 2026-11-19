@@ -512,8 +512,7 @@ fn rust_init_finish(
         profiles.missions.len(),
         profiles.hth_weapons.len()
     );
-    let player_profile_directory = crate::save_file::default_save_directory()
-        .ok_or(InitError::PlayerProfileDirectoryMissing)?;
+    let player_profile_directory = super::platform::player_profile_directory()?;
     let (player_profiles, player_profiles_regenerated) =
         load_player_profile_manager(&player_profile_directory);
     let key_configs = load_key_config_store(&player_profile_directory, player_profiles_regenerated);
