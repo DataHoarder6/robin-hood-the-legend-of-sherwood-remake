@@ -267,6 +267,13 @@ pub struct CliArgs {
     #[serde(skip)]
     pub upload_crash: Option<std::path::PathBuf>,
 
+    /// Internal: upload one bug-report bundle written by the in-game report
+    /// and exit. Spawned by the report writer; it never becomes a game window
+    /// or a session.
+    #[arg(long, value_name = "DIR", hide = true)]
+    #[serde(skip)]
+    pub upload_bug_report: Option<std::path::PathBuf>,
+
     /// Nickname shown in the portrait "controlled by" overlay on
     /// peers.  Defaults to a host-name-derived fallback when omitted.
     #[arg(long, value_name = "NICKNAME", default_value = "")]
@@ -325,6 +332,7 @@ impl Default for CliArgs {
             mp_browser_join_links: None,
             mp_nickname: String::new(),
             upload_crash: None,
+            upload_bug_report: None,
         };
         install_global_options(&args);
         args

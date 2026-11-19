@@ -142,6 +142,19 @@ pub fn crash_upload_status(cli: &CliArgs) -> Option<i32> {
     Some(crate::crash::upload_bundle(directory))
 }
 
+/// Exit status of the hidden `--upload-bug-report <dir>` child mode, or `None`
+/// for an ordinary launch.
+///
+/// [`crate::bug_bundle`] spawns this mode from a mission frame, so the binary
+/// calls it before the crash hook, tracing or any window exists: the child must
+/// not write a run log (it would prune the reporting run's) and must not start
+/// a second helper.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn bug_upload_status(cli: &CliArgs) -> Option<i32> {
+    let directory = cli.upload_bug_report.as_deref()?;
+    Some(crate::bug_bundle::upload_bundle(directory))
+}
+
 /// Launch-supplied custom-mission content and its admitted asset lease.
 /// Replaced as a unit whenever a replay or save becomes the content authority.
 #[derive(Debug, Default, Serialize)]

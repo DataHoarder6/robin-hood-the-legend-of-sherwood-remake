@@ -37,6 +37,11 @@ fn main() {
     if let Some(status) = robin_rs::main_entry::crash_upload_status(&args) {
         std::process::exit(status);
     }
+    // The bug-report upload child is the same executable and the same rule:
+    // it exits before the crash hook, tracing or any window exists.
+    if let Some(status) = robin_rs::main_entry::bug_upload_status(&args) {
+        std::process::exit(status);
+    }
     install_crash_diagnostics();
     robin_rs::init_tracing();
     robin_rs::diagnostic_context::initialize(&args);
