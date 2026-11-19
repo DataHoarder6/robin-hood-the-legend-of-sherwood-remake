@@ -114,25 +114,6 @@ impl SubmissionState {
     }
 }
 
-#[cfg(test)]
-mod lifecycle_tests {
-    use super::*;
-    #[test]
-    fn terminal_rows_require_valid_payloads() {
-        assert!(SubmissionState::from_columns("accepted", None, None).is_err());
-        assert!(SubmissionState::from_columns("accepted", Some(String::new()), None).is_err());
-        assert!(SubmissionState::from_columns("rejected", None, None).is_err());
-        assert!(SubmissionState::from_columns("rejected", None, Some("unknown".into())).is_err());
-        assert!(SubmissionState::from_columns("queued", Some("run".into()), None).is_err());
-        assert!(SubmissionState::from_columns("accepted", Some("run".into()), None).is_ok());
-        assert!(
-            SubmissionState::from_columns("rejected", None, Some("malformed_replay".into()))
-                .is_ok()
-        );
-        assert!(SubmissionState::from_columns("failed", None, None).is_ok());
-    }
-}
-
 /// One leased verification job. Everything else the worker needs comes from
 /// the configured board.
 #[derive(Debug, Clone)]
@@ -157,4 +138,23 @@ pub fn now_epoch_ms() -> Result<i64, std::time::SystemTimeError> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis();
     Ok(i64::try_from(millis).expect("current epoch milliseconds must fit in i64"))
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn terminal_rows_require_valid_payloads() {
+        assert!(SubmissionState::from_columns("accepted", None, None).is_err());
+        assert!(SubmissionState::from_columns("accepted", Some(String::new()), None).is_err());
+        assert!(SubmissionState::from_columns("rejected", None, None).is_err());
+        assert!(SubmissionState::from_columns("rejected", None, Some("unknown".into())).is_err());
+        assert!(SubmissionState::from_columns("queued", Some("run".into()), None).is_err());
+        assert!(SubmissionState::from_columns("accepted", Some("run".into()), None).is_ok());
+        assert!(
+            SubmissionState::from_columns("rejected", None, Some("malformed_replay".into()))
+                .is_ok()
+        );
+        assert!(SubmissionState::from_columns("failed", None, None).is_ok());
+    }
 }

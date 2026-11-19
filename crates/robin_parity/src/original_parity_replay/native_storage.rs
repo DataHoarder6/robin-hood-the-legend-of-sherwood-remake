@@ -1243,7 +1243,7 @@ pub(super) fn ensure_native_binary_trace_locked(
                     break;
                 }
             }
-            let (terminal_frame_count, terminal_final_frame) = terminal_metadata.ok_or_else(|| format!("parity trace ended without an rng_suffix terminator; refusing to publish the native trace"))?;
+            let (terminal_frame_count, terminal_final_frame) = terminal_metadata.ok_or_else(|| "parity trace ended without an rng_suffix terminator; refusing to publish the native trace".to_string())?;
             storage_ensure!(
                 (terminal_frame_count) == (frame_count),
                 "terminator frame count disagrees with decoded frame count"
@@ -1875,9 +1875,9 @@ pub(super) fn read_all_rng_draws(native_path: &std::path::Path) -> TraceStorageR
                     append_simulation_rng_draws(&mut result, &mut original_index, &batch);
                 }
                 let terminal_frame_count = terminal_frame_count
-                    .ok_or_else(|| format!("parity cache RNG pre-scan found incomplete End"))?;
+                    .ok_or_else(|| "parity cache RNG pre-scan found incomplete End".to_string())?;
                 let final_frame = final_frame
-                    .ok_or_else(|| format!("parity cache RNG pre-scan found incomplete End"))?;
+                    .ok_or_else(|| "parity cache RNG pre-scan found incomplete End".to_string())?;
                 storage_ensure!(
                     (terminal_frame_count) == (frame_count),
                     "RNG pre-scan terminator frame count disagrees with decoded frame count"

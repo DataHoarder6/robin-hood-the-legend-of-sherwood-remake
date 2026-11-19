@@ -73,9 +73,9 @@ pub(super) fn absolute_trace_path_from(trace_path: &Path, current_dir: &Path) ->
 /// `.jsonl.zst` path remains the trace's identity).
 pub(super) fn canonicalize_trace_identity(trace_path: &Path) -> TraceStorageResult<PathBuf> {
     if trace_path.exists() {
-        return Ok(trace_path
+        return trace_path
             .canonicalize()
-            .map_err(|error| format!("canonicalize {}: {error}", trace_path.display()))?);
+            .map_err(|error| format!("canonicalize {}: {error}", trace_path.display()));
     }
     let file_name = trace_path.file_name().ok_or_else(|| {
         format!(

@@ -139,7 +139,9 @@ pub(super) fn read_string_table(reader: &mut Reader<'_>, context: &str) -> Resul
             format!("{context} string {string_index} UTF-16 data"),
         )?;
         let code_units = encoded
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]));
         strings.push(
             char::decode_utf16(code_units)

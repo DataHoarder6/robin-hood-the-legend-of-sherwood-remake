@@ -57,7 +57,9 @@ fn solid_red_2x3() -> DecodedRgba {
 fn words(picture: &Picture) -> Vec<u16> {
     picture
         .data
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|word| u16::from_le_bytes([word[0], word[1]]))
         .collect()
 }
@@ -113,7 +115,7 @@ fn native_decode_matches_avifdec_reference_pixels() {
     }
     // The lossless fixture's alpha is exactly the class markers.
     let lossless = decode_avif_rgba8(LOSSLESS_8X4).unwrap();
-    for (index, pixel) in lossless.rgba.chunks_exact(4).enumerate() {
+    for (index, pixel) in lossless.rgba.as_chunks::<4>().0.iter().enumerate() {
         let expected = keyed_pixels().rgba[index * 4 + 3];
         assert_eq!(pixel[3], expected, "lossless alpha at pixel {index}");
     }
@@ -136,7 +138,12 @@ fn tracked_mod_terrain_decodes_natively_from_its_map_name() {
     assert_eq!(terrain.data.len(), 2508 * 2508 * 2);
     let first = &terrain.data[..2];
     assert!(
-        terrain.data.chunks_exact(2).any(|pixel| pixel != first),
+        terrain
+            .data
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .any(|pixel| pixel != first),
         "decoded terrain is a single flat colour"
     );
     // Not predecoded: native decode must not have populated the cache.
@@ -165,7 +172,7 @@ fn tracked_mod_terrain_decodes_natively_from_its_map_name() {
     let mut not_avif = bytes.clone();
     not_avif[8..12].copy_from_slice(b"mif1");
     let brands_end = u32::from_be_bytes(not_avif[0..4].try_into().unwrap()) as usize;
-    for brand in not_avif[16..brands_end].chunks_exact_mut(4) {
+    for brand in not_avif[16..brands_end].as_chunks_mut::<4>().0 {
         if brand == b"avif" {
             brand.copy_from_slice(b"mif1");
         }

@@ -86,7 +86,9 @@ pub fn is_avif(bytes: &[u8]) -> bool {
         return true;
     }
     bytes[16..size]
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .any(|brand| brand == b"avif")
 }
 
@@ -209,7 +211,7 @@ mod native_av1 {
         }
 
         fn decode(&mut self, obus: &[u8]) -> Result<Frame> {
-            let context = self.0.clone();
+            let context = self.0;
             let mut data = Dav1dData::default();
             // SAFETY: `obus` outlives the decode (the data is fully consumed
             // and unreferenced before this function returns) and no free
@@ -232,7 +234,7 @@ mod native_av1 {
                         // SAFETY: context is open; `data` is a valid wrapped buffer.
                         let sent = unsafe {
                             rav1d::src::lib::dav1d_send_data(
-                                context.clone(),
+                                context,
                                 NonNull::new(&mut data as *mut _),
                             )
                         };
@@ -243,7 +245,7 @@ mod native_av1 {
                     // SAFETY: context is open; `picture` is valid to write to.
                     let got = unsafe {
                         rav1d::src::lib::dav1d_get_picture(
-                            context.clone(),
+                            context,
                             NonNull::new(&mut picture as *mut _),
                         )
                     };
@@ -654,7 +656,9 @@ mod tests {
         let picture = rgba_to_rgb565_keyed(&decoded).unwrap();
         let words: Vec<u16> = picture
             .data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|w| u16::from_le_bytes([w[0], w[1]]))
             .collect();
         assert_eq!(words[0], TRANSPARENT_COLOR_16);

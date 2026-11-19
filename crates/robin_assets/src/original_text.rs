@@ -135,7 +135,7 @@ mod tests {
                     bytes.extend_from_slice(&unit.to_le_bytes());
                 }
             }
-            vfs.install_preloaded_asset(&format!("{id}.res"), bytes)
+            vfs.install_preloaded_asset(format!("{id}.res"), bytes)
                 .unwrap();
         }
         let files = std::sync::Arc::new(robin_engine::sbfile::SbFileSystem::new(vfs).snapshot());

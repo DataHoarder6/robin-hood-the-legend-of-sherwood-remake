@@ -524,30 +524,30 @@ fn derive_with_spatial_index(
                 if ambiguous.contains(&key) {
                     continue;
                 }
-                if let Some(previous) = output.insert(key, (left, right)) {
-                    if previous != (left, right) {
-                        // Splitting almost-touching edges can collapse a ground
-                        // sliver to one float32 segment. Compose its two swaps
-                        // into the direct receiver transition instead of losing
-                        // the entire boundary. Conflicting real receivers remain
-                        // ambiguous and must not be guessed.
-                        let merge = |a, b| {
-                            if a == b || b == u16::MAX {
-                                Some(a)
-                            } else if a == u16::MAX {
-                                Some(b)
-                            } else {
-                                None
-                            }
-                        };
-                        if let (Some(left), Some(right)) =
-                            (merge(previous.0, left), merge(previous.1, right))
-                        {
-                            output.insert(key, (left, right));
+                if let Some(previous) = output.insert(key, (left, right))
+                    && previous != (left, right)
+                {
+                    // Splitting almost-touching edges can collapse a ground
+                    // sliver to one float32 segment. Compose its two swaps
+                    // into the direct receiver transition instead of losing
+                    // the entire boundary. Conflicting real receivers remain
+                    // ambiguous and must not be guessed.
+                    let merge = |a, b| {
+                        if a == b || b == u16::MAX {
+                            Some(a)
+                        } else if a == u16::MAX {
+                            Some(b)
                         } else {
-                            output.remove(&key);
-                            ambiguous.insert(key);
+                            None
                         }
+                    };
+                    if let (Some(left), Some(right)) =
+                        (merge(previous.0, left), merge(previous.1, right))
+                    {
+                        output.insert(key, (left, right));
+                    } else {
+                        output.remove(&key);
+                        ambiguous.insert(key);
                     }
                 }
             }

@@ -397,7 +397,7 @@ fn decode_compact_inner(
         )?;
     }
     let encoded = decode_zstd_bounded(
-        &compressed,
+        compressed,
         limits.map(|limits| limits.max_decompressed_bytes),
         limits.map(|limits| limits.max_zstd_window_log),
     )?;
@@ -2207,7 +2207,7 @@ mod tests {
         let valid = encode_file(&sample_file());
         let preflight = preflight_compact_transport(&valid, &Default::default()).unwrap();
         let compressed = preflight.compressed_payload;
-        let window = zstd_frame_window_size(&compressed).unwrap();
+        let window = zstd_frame_window_size(compressed).unwrap();
         assert!(window <= 1 << DEFAULT_REPLAY_ADMISSION_LIMITS.max_zstd_window_log);
         assert!(window <= DEFAULT_REPLAY_ADMISSION_LIMITS.max_decompressed_bytes);
     }

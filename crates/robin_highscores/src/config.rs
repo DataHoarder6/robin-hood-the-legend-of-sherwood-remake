@@ -769,8 +769,10 @@ missions = [{ mission_id = "Dem_Lei_MP", display_name = "Leicester" }]
         };
         assert!(config.validate().is_err());
 
-        let mut config = ServerConfig::default();
-        config.max_concurrent_uploads_per_key = 0;
+        let mut config = ServerConfig {
+            max_concurrent_uploads_per_key: 0,
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
         config.max_concurrent_uploads_per_key =
             u32::try_from(config.max_concurrent_uploads + 1).unwrap();

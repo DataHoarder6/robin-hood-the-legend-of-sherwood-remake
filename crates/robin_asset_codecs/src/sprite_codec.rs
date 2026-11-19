@@ -2157,11 +2157,11 @@ mod tests {
         let shipping = encode_grids_shipping(251, &grids, None, None, &[None]).unwrap();
         assert_eq!(
             decode_grids(251, &dims, None, &plain).unwrap(),
-            [indices.clone()]
+            std::slice::from_ref(&indices)
         );
         assert_eq!(
             decode_grids_auxref(251, &dims, &[None], &aux).unwrap(),
-            [indices.clone()]
+            std::slice::from_ref(&indices)
         );
         assert_eq!(
             decode_grids_shipping(251, &dims, None, None, &[None], &shipping).unwrap(),
@@ -2451,7 +2451,7 @@ mod tests {
         assert!(uniform_blob.len() < 32, "{} bytes", uniform_blob.len());
         assert_eq!(
             decode_grids(12, &[(cols, rows)], None, &uniform_blob).unwrap(),
-            [uniform.clone()]
+            std::slice::from_ref(&uniform)
         );
         for len in 0..blob.len() {
             assert!(

@@ -16,6 +16,115 @@ pub struct DiagnosticPayload {
     pub bytes: Vec<u8>,
     pub encoding: String,
 }
+impl Database {
+    pub async fn insert_diagnostic(
+        &self,
+        payload: Vec<u8>,
+        encoding: &'static str,
+        kind: &str,
+        engine_commit: &str,
+        ip_hash: [u8; 32],
+    ) -> Result<DiagnosticReceiptV1, DbError> {
+        if payload.is_empty() || payload.len() > MAX_DIAGNOSTIC_BODY_BYTES {
+            return Err(DbError::ResultInvariant(
+                "invalid compressed report size".into(),
+            ));
+        }
+        if !matches!(encoding, "zstd" | "gzip") || !matches!(kind, "bug" | "panic" | "fatal_error")
+        {
+            return Err(DbError::ResultInvariant(
+                "invalid diagnostic metadata".into(),
+            ));
+        }
+        if engine_commit.is_empty()
+            || engine_commit.len() > 128
+            || !engine_commit
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        {
+            return Err(DbError::ResultInvariant(
+                "invalid diagnostic build identifier".into(),
+            ));
+        }
+        // Preserve the exact uploaded artifact, including incomplete/crashed
+        // captures. Index only the small metadata explicitly supplied by clients.
+        let (id, payload) =
+            tokio::task::spawn_blocking(move || (hex::encode(Sha256::digest(&payload)), payload))
+                .await
+                .map_err(|e| DbError::Corrupt(e.to_string()))?;
+        let now = now_epoch_ms()?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("DELETE FROM diagnostic_reports WHERE received_at_ms < ?")
+            .bind(now.saturating_sub(30 * 24 * 60 * 60 * 1000))
+            .execute(&mut *tx)
+            .await?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM diagnostic_reports WHERE id = ?")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if exists == 0 {
+            let hour = now.saturating_sub(60 * 60 * 1000);
+            let global: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM diagnostic_reports WHERE received_at_ms >= ?",
+            )
+            .bind(hour)
+            .fetch_one(&mut *tx)
+            .await?;
+            let per_ip: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM diagnostic_reports WHERE received_at_ms >= ? AND reporter_ip_hash = ?").bind(hour).bind(ip_hash.as_slice()).fetch_one(&mut *tx).await?;
+            let bytes: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(SUM(payload_bytes), 0) FROM diagnostic_reports",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if global >= 100 || per_ip >= 10 || bytes + payload.len() as i64 > 512 * 1024 * 1024 {
+                return Err(DbError::QueueFull);
+            }
+            sqlx::query("INSERT INTO diagnostic_reports (id, received_at_ms, reporter_ip_hash, payload, payload_bytes, encoding, kind, engine_commit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(&id).bind(now).bind(ip_hash.as_slice()).bind(&payload).bind(payload.len() as i64).bind(encoding).bind(kind).bind(engine_commit).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(DiagnosticReceiptV1 {
+            schema_version: 1,
+            report_id: id,
+        })
+    }
+    pub async fn diagnostic_reports(&self) -> Result<Vec<DiagnosticSummary>, DbError> {
+        let rows = sqlx::query("SELECT id, received_at_ms, kind, engine_commit FROM diagnostic_reports ORDER BY received_at_ms DESC, id DESC LIMIT 100").fetch_all(&self.pool).await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(DiagnosticSummary {
+                    report_id: row.try_get("id")?,
+                    received_at_unix_ms: row.try_get("received_at_ms")?,
+                    kind: row.try_get("kind")?,
+                    engine_commit: row.try_get("engine_commit")?,
+                })
+            })
+            .collect()
+    }
+    pub async fn diagnostic_report(&self, id: &str) -> Result<DiagnosticPayload, DbError> {
+        let row = sqlx::query("SELECT payload, encoding FROM diagnostic_reports WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        Ok(DiagnosticPayload {
+            bytes: row.try_get("payload")?,
+            encoding: row.try_get("encoding")?,
+        })
+    }
+
+    pub async fn delete_diagnostic_report(&self, id: &str) -> Result<(), DbError> {
+        let result = sqlx::query("DELETE FROM diagnostic_reports WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -125,114 +234,5 @@ mod tests {
                 .await,
             Err(DbError::ResultInvariant(_))
         ));
-    }
-}
-impl Database {
-    pub async fn insert_diagnostic(
-        &self,
-        payload: Vec<u8>,
-        encoding: &'static str,
-        kind: &str,
-        engine_commit: &str,
-        ip_hash: [u8; 32],
-    ) -> Result<DiagnosticReceiptV1, DbError> {
-        if payload.is_empty() || payload.len() > MAX_DIAGNOSTIC_BODY_BYTES {
-            return Err(DbError::ResultInvariant(
-                "invalid compressed report size".into(),
-            ));
-        }
-        if !matches!(encoding, "zstd" | "gzip") || !matches!(kind, "bug" | "panic" | "fatal_error")
-        {
-            return Err(DbError::ResultInvariant(
-                "invalid diagnostic metadata".into(),
-            ));
-        }
-        if engine_commit.is_empty()
-            || engine_commit.len() > 128
-            || !engine_commit
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-        {
-            return Err(DbError::ResultInvariant(
-                "invalid diagnostic build identifier".into(),
-            ));
-        }
-        // Preserve the exact uploaded artifact, including incomplete/crashed
-        // captures. Index only the small metadata explicitly supplied by clients.
-        let (id, payload) =
-            tokio::task::spawn_blocking(move || (hex::encode(Sha256::digest(&payload)), payload))
-                .await
-                .map_err(|e| DbError::Corrupt(e.to_string()))?;
-        let now = now_epoch_ms()?;
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query("DELETE FROM diagnostic_reports WHERE received_at_ms < ?")
-            .bind(now.saturating_sub(30 * 24 * 60 * 60 * 1000))
-            .execute(&mut *tx)
-            .await?;
-        let exists: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM diagnostic_reports WHERE id = ?")
-                .bind(&id)
-                .fetch_one(&mut *tx)
-                .await?;
-        if exists == 0 {
-            let hour = now.saturating_sub(60 * 60 * 1000);
-            let global: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM diagnostic_reports WHERE received_at_ms >= ?",
-            )
-            .bind(hour)
-            .fetch_one(&mut *tx)
-            .await?;
-            let per_ip: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM diagnostic_reports WHERE received_at_ms >= ? AND reporter_ip_hash = ?").bind(hour).bind(ip_hash.as_slice()).fetch_one(&mut *tx).await?;
-            let bytes: i64 = sqlx::query_scalar(
-                "SELECT COALESCE(SUM(payload_bytes), 0) FROM diagnostic_reports",
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-            if global >= 100 || per_ip >= 10 || bytes + payload.len() as i64 > 512 * 1024 * 1024 {
-                return Err(DbError::QueueFull);
-            }
-            sqlx::query("INSERT INTO diagnostic_reports (id, received_at_ms, reporter_ip_hash, payload, payload_bytes, encoding, kind, engine_commit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                .bind(&id).bind(now).bind(ip_hash.as_slice()).bind(&payload).bind(payload.len() as i64).bind(encoding).bind(kind).bind(&engine_commit).execute(&mut *tx).await?;
-        }
-        tx.commit().await?;
-        Ok(DiagnosticReceiptV1 {
-            schema_version: 1,
-            report_id: id,
-        })
-    }
-    pub async fn diagnostic_reports(&self) -> Result<Vec<DiagnosticSummary>, DbError> {
-        let rows = sqlx::query("SELECT id, received_at_ms, kind, engine_commit FROM diagnostic_reports ORDER BY received_at_ms DESC, id DESC LIMIT 100").fetch_all(&self.pool).await?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(DiagnosticSummary {
-                    report_id: row.try_get("id")?,
-                    received_at_unix_ms: row.try_get("received_at_ms")?,
-                    kind: row.try_get("kind")?,
-                    engine_commit: row.try_get("engine_commit")?,
-                })
-            })
-            .collect()
-    }
-    pub async fn diagnostic_report(&self, id: &str) -> Result<DiagnosticPayload, DbError> {
-        let row = sqlx::query("SELECT payload, encoding FROM diagnostic_reports WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(DbError::NotFound)?;
-        Ok(DiagnosticPayload {
-            bytes: row.try_get("payload")?,
-            encoding: row.try_get("encoding")?,
-        })
-    }
-
-    pub async fn delete_diagnostic_report(&self, id: &str) -> Result<(), DbError> {
-        let result = sqlx::query("DELETE FROM diagnostic_reports WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if result.rows_affected() == 0 {
-            return Err(DbError::NotFound);
-        }
-        Ok(())
     }
 }

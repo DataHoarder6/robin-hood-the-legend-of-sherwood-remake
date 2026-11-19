@@ -157,7 +157,7 @@ fn engine_native_called_from_lua_writes_host_state() {
             },
         )
         .unwrap();
-    assert_eq!(native_globals.get(0).copied(), Some(42));
+    assert_eq!(native_globals.first().copied(), Some(42));
     assert_eq!(native_globals.len(), 16);
     assert_eq!(native_globals[15], 9);
 }

@@ -252,7 +252,10 @@ mod tests {
         let x = 1037.1234_f32;
         let y = (2000. + (f64::from(x) - 1000.) * 0.33) as f32;
         assert!(contains_rounded_anchor(&boundary, [x, y]));
-        assert!(contains_rounded_anchor(&boundary, [x, y - 0.000244140625]));
+        assert!(contains_rounded_anchor(
+            &boundary,
+            [x, y - 0.000_244_140_63]
+        ));
         assert!(!contains_rounded_anchor(&boundary, [x, y - 0.01]));
         assert!(!contains_rounded_anchor(&boundary, [x, y - 0.125]));
     }

@@ -1415,7 +1415,6 @@ impl SbFileSystem {
     }
 
     /// Mutating a sealed lookup graph is an error, never a successful no-op.
-
     pub fn add_alternate_path(&self, path: &str) -> Result<(), SbFileError> {
         let mut guard = self.mounts.lock().unwrap();
         let mounts = Arc::make_mut(&mut guard);
@@ -1454,14 +1453,8 @@ impl SbFileSystem {
         let mut guard = self.mounts.lock().unwrap();
         let mounts = Arc::make_mut(&mut guard);
         mounts.ensure_mutable("set_presentation_locale")?;
-        let selected = match selected.map(normalise_locale_root).transpose() {
-            Ok(path) => path,
-            Err(error) => return Err(error),
-        };
-        let fallback = match fallback.map(normalise_locale_root).transpose() {
-            Ok(path) => path,
-            Err(error) => return Err(error),
-        };
+        let selected = selected.map(normalise_locale_root).transpose()?;
+        let fallback = fallback.map(normalise_locale_root).transpose()?;
         let locale_paths = &mut mounts.locale_paths;
         *locale_paths = LocaleLookup {
             selected,
@@ -1485,7 +1478,6 @@ impl SbFileSystem {
     }
 
     /// Snapshot the roots in lookup order, suppressing a duplicate fallback.
-
     #[cfg(not(target_arch = "wasm32"))]
     pub fn add_overlay_path(&self, path: &str) -> Result<(), SbFileError> {
         let mut guard = self.mounts.lock().unwrap();
@@ -1551,10 +1543,7 @@ impl SbFileSystem {
             return Err(SbFileError::PathAlreadyPresent);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        let overlay = match ZipOverlay::open_for_mission(Path::new(zip_path), rhm_entry) {
-            Ok(overlay) => overlay,
-            Err(error) => return Err(error),
-        };
+        let overlay = ZipOverlay::open_for_mission(Path::new(zip_path), rhm_entry)?;
         #[cfg(target_arch = "wasm32")]
         let _ = rhm_entry;
         #[cfg(target_arch = "wasm32")]
@@ -1588,11 +1577,7 @@ impl SbFileSystem {
         {
             return Err(SbFileError::PathAlreadyPresent);
         }
-        let overlay =
-            match ZipOverlay::open_bytes_for_mission(mount_id.to_owned(), bytes, rhm_entry) {
-                Ok(overlay) => overlay,
-                Err(error) => return Err(error),
-            };
+        let overlay = ZipOverlay::open_bytes_for_mission(mount_id.to_owned(), bytes, rhm_entry)?;
         {
             paths.push(OverlayRoot::Zip(Arc::new(overlay)));
             self.assets.invalidate_content(false);

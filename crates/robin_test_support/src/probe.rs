@@ -48,6 +48,12 @@ impl<E> Probe<E> {
     }
 }
 
+impl<E> Default for Probe<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[test]
 fn probe_scopes_are_nested_and_restore_after_panics() {
     let probe = Probe::new();

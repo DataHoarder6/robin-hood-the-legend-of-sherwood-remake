@@ -629,8 +629,10 @@ mod tests {
 
     async fn assert_physical_work_is_drained(mode: &'static str) {
         let directory = tempfile::tempdir().unwrap();
-        let mut config = ServerConfig::default();
-        config.database_path = directory.path().join("highscores.sqlite3");
+        let config = ServerConfig {
+            database_path: directory.path().join("highscores.sqlite3"),
+            ..Default::default()
+        };
         let database = Database::migrate(&config).await.unwrap();
         let mutation = directory.path().join("published-object");
         let write_path = mutation.clone();
@@ -874,9 +876,11 @@ mod tests {
     #[tokio::test]
     async fn unavailable_write_lease_prevents_worker_startup_from_creating_storage_roots() {
         let directory = tempfile::tempdir().unwrap();
-        let mut server = ServerConfig::default();
-        server.database_path = directory.path().join("highscores.sqlite3");
-        server.replay_directory = directory.path().join("objects/replays");
+        let server = ServerConfig {
+            database_path: directory.path().join("highscores.sqlite3"),
+            replay_directory: directory.path().join("objects/replays"),
+            ..Default::default()
+        };
         let database = Database::migrate(&server).await.unwrap();
         let held = database
             .acquire_maintenance_write_lease(

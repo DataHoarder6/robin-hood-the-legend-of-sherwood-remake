@@ -259,14 +259,11 @@ pub(super) fn project_constructor_storage(
     if ((at_goal && computed_3d) || zero_displacement_step)
         && !flying_order
         && undefined.contains_key("/position/forecasted_movement")
+        && let Some(increment) = undefined.get("/position/increment")
+        && runtime.pointer("/position/increment") == Some(increment)
+        && let Some(forecast) = runtime.pointer("/position/forecasted_movement")
     {
-        if let Some(increment) = undefined.get("/position/increment") {
-            if runtime.pointer("/position/increment") == Some(increment) {
-                if let Some(forecast) = runtime.pointer("/position/forecasted_movement") {
-                    undefined.insert("/position/forecasted_movement".into(), forecast.clone());
-                }
-            }
-        }
+        undefined.insert("/position/forecasted_movement".into(), forecast.clone());
     }
     for (path, defined) in fields {
         if defined || undefined.get(path) != runtime.pointer(path) {

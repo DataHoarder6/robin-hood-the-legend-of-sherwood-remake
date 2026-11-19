@@ -235,7 +235,7 @@ fn static_area_shared_between_instances() {
             NativeContext::new(&mut script_state, &mut script_domains, &mut capabilities);
         let _ = poll_call(&mut inst, &mut mgr, "SetGlobal42", &[], &mut context).unwrap();
     }
-    assert_eq!(native_globals.get(0), Some(&42));
+    assert_eq!(native_globals.first(), Some(&42));
 }
 
 #[test]

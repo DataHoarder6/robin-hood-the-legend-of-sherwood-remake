@@ -1049,7 +1049,7 @@ mod tests {
         let minimap = Picture::load_minimap_from_bytes(&keyed).unwrap();
         assert_eq!((minimap.width, minimap.height), (8, 4));
         assert_eq!(Picture::terrain_dimensions(&keyed).unwrap(), (8, 4));
-        for (index, pixel) in minimap.data.chunks_exact(2).enumerate() {
+        for (index, pixel) in minimap.data.as_chunks::<2>().0.iter().enumerate() {
             let pixel = u16::from_le_bytes([pixel[0], pixel[1]]);
             let expected = match (index % 8, index / 8) {
                 (0 | 1, _) => Some(TRANSPARENT_COLOR_16),
@@ -1227,7 +1227,7 @@ mod tests {
             assert_eq!(picture.pixel_format, PixelFormat::Rgb16);
             let rgba = picture.to_rgba8888(Some(0x07C0));
             assert_eq!(rgba.len(), 120 * 160 * 4);
-            assert!(rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+            assert!(rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
             #[cfg(feature = "engine-adapters")]
             {
                 let managed = resources.get_picture(267, frame_index).unwrap();

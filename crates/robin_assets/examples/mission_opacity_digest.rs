@@ -77,9 +77,7 @@ fn main() -> Result<()> {
                     raster
                         .row(y, width)
                         .unwrap_or_else(|| panic!("sprite {id} raster row {y} out of range"))
-                        .iter()
-                        .copied()
-                        .collect::<Vec<_>>()
+                        .to_vec()
                 })
                 .collect()
         } else if sprite.packed_data.is_empty() {

@@ -195,7 +195,7 @@ fn load_actor_names(
         );
         return Err(std::process::ExitCode::FAILURE);
     };
-    match robin_modding_tools::actor_names::load_from_datadir(Path::new(dd), &m) {
+    match robin_modding_tools::actor_names::load_from_datadir(Path::new(dd), m) {
         Ok(n) => Ok(Some(n)),
         Err(e) => {
             tracing::error!("{scb_path}: actor names: {e}");

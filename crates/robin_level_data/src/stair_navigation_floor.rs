@@ -213,14 +213,13 @@ impl StairNavigationFloor {
             if world.iter().any(|n| !n.is_finite()) {
                 return None;
             }
-            if let Some(previous) = result {
-                if previous
+            if let Some(previous) = result
+                && previous
                     .iter()
                     .zip(world)
                     .any(|(a, b)| (*a - b).abs() > 0.001)
-                {
-                    return None;
-                }
+            {
+                return None;
             }
             result = Some(world);
         }
