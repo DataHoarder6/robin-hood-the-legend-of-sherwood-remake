@@ -129,3 +129,46 @@ pronunciation and the translation quality, both human time.
   these two missions, recorded per line so a human pass can find the weak ones.
 - **No narrator exists**, so mission 1's voice is a new feature and its quality
   is judged against nothing in the retail game.
+
+## Implementation result (2026-11-20)
+
+Engine work landed: `lt-LT` in `LANGUAGE_DEFINITIONS`, `lt` in
+`locale_prefers_truetype`, a narration lane that never sets `has_dialog`, and a
+one-shot narrator hook on the popup modal. Content tooling landed:
+`splice_text_tables` (TEXT-only `.res` rewrite, pictures untouched),
+`translate_level_res`, and `scripts/voiceover/` (extract, synth, pack).
+
+**Measured scope.** `H01` has 32 text entries / 7,212 characters; `H02` has 55
+entries / 6,751 characters, of which 20 are the cutscene sentences. Total
+87 lines / 13,963 characters — 1.4% of Chirp 3 HD's 1,000,000-character monthly
+allowance ($0.42 at list price). Both line tables are checked in under
+`scripts/voiceover/lines/`.
+
+**Ruling — narration naming.** An earlier version keyed narration by a
+pack-level WAVE table. Popup text ids restart in every mission, so two missions
+would collide on the same index. Narration is now a path convention
+`Data/Text/Narration/<text table>_<text id>.ogg`, probed with
+`ResourceManager::try_exists`; no archive node is added. Cost if wrong: a pack
+built for the old convention is silent, and the probe is the only thing that
+finds that out.
+
+**Not done — the content itself.** The line tables still carry the English
+text in `display`; they are extraction skeletons, not a Lithuanian script.
+No synthesis has run: it needs `GOOGLE_TTS_API_KEY`, which is the one input the
+pipeline cannot supply. Consequently no pack was assembled and no in-game
+verification was performed. To finish: translate `display` for 87 lines
+(keeping the correct orthography; `pronunciation.toml` respells names for the
+synthesiser), then
+
+```sh
+GOOGLE_TTS_API_KEY=... just voiceover-synth
+just voiceover-pack --retail <datadir> --dump <dump_res JSON> \
+    --tool target/debug/translate_level_res --out build/pack
+```
+
+and install `build/pack/` as the `1063` locale root. `just voiceover-synth
+--dry-run` is the zero-cost way to re-measure after translation.
+
+**Known scope limits, unchanged:** barks stay English (the engine's English
+fallback), port-owned UI strings stay English, and the debrief has no audio
+lane yet — its text is translated but not narrated.

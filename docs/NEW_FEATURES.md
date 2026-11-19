@@ -1719,6 +1719,15 @@ A list of which additional features we have added, which ones we might still wan
   text and playback are client-local, and logical speech timing comes from
   the required English core audio timing table, independent of installed voice
   packs and the client's active presentation language.
+  Port-authored loose packs are discovered the same way as retail locales:
+  `1063/` (`lt-LT`, Lithuanian) is a content pack, not a retail edition. Its
+  `Data/Text/Level.res` is a retail table with selected strings translated and
+  every other id carried over verbatim, so the pack validates without a full
+  translation. Popup narration is an optional per-text clip at
+  `Data/Text/Narration/<text table>_<text id>.ogg`; the text id restarts per
+  mission, which is why the table id is part of the name. Popup ids with no
+  clip are silent, and narration never touches the dialogue modal's finished
+  state. See `docs/slop/VOICEOVER_LT.md`.
 
 - **Hackable JSON levels.** Every subdirectory of `mods/` is registered as an
   overlay datadir at startup, and any overlay may ship an editable

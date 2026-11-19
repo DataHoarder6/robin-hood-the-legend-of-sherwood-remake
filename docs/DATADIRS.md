@@ -24,6 +24,7 @@ I DO NOT recommend buying the [steam version](https://store.steampowered.com/app
 1046 - Portuguese (Brazil)
 1049 - Russian +
 1054 - Thai
+1063 - Lithuanian (Lithuania) — port-authored pack, no retail edition
 2047 - English (GB) +
 2052 - Chinese (PRC)
 2070 - Portuguese (Portugal)
