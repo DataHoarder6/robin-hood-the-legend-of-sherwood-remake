@@ -97,6 +97,20 @@ pub(crate) struct MultiplayerLaunch {
         Option<robin_engine::mission_assets::InstalledArchiveLocator>,
 }
 
+impl MultiplayerLaunch {
+    /// Whether this launch plays the mission the lobby advertised.
+    ///
+    /// A campaign host holding a slot plays the slot's current mission, which
+    /// is where the party actually is after a mid-campaign join or rejoin.
+    /// Every other launch — a skirmish, a joining client that has no slot, or
+    /// a fresh campaign — plays the mission the menu offered.
+    pub(crate) fn plays_lobby_mission(&self) -> bool {
+        !self.coop.campaign
+            || matches!(self.role, MultiplayerRole::Client { .. })
+            || self.campaign_save.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct MissionChoice {
     load_save: bool,
@@ -231,6 +245,24 @@ enum MenuMode {
         game: JoinedGame,
         listing: Option<GameListing>,
     },
+}
+
+/// The rules a campaign mission choice launches with.
+///
+/// A campaign owns its roster: the saved choice contributes the save's own
+/// rules, a fresh one the lobby's, and both reach the session as one campaign
+/// lobby descriptor — `campaign` plus the seat count, no explicit party.
+fn campaign_choice_rules(
+    mission: &MissionChoice,
+    lobby: robin_engine::coop::CoopRules,
+    saved_rules: robin_engine::coop::CoopRules,
+) -> robin_engine::coop::CoopRules {
+    if mission.campaign_save.is_some() {
+        saved_rules
+    } else {
+        lobby
+    }
+    .campaign_lobby()
 }
 
 fn discard_disconnected_matchmaking_state(games: &mut Vec<GameListing>, mode: &mut MenuMode) {
@@ -466,10 +498,19 @@ impl MultiplayerMenuState {
                 self.status = self.matchmaking_label.clone();
             }
             matchmaking::MatchmakingEvent::Created(created) => {
-                self.publish_rules();
-                self.status = "Game created. Press Start when ready.".to_string();
-                self.mode = MenuMode::Hosted { game: created };
-                self.selected = 0;
+                if self.publish_or_report() {
+                    self.status = "Game created. Press Start when ready.".to_string();
+                    self.mode = MenuMode::Hosted { game: created };
+                    self.selected = 0;
+                } else {
+                    // A lobby that cannot publish its own mode would advertise
+                    // a skirmish to everyone browsing. Stop announcing it.
+                    if let Some(session) = &self.matchmaking_client
+                        && let Err(error) = session.leave_game()
+                    {
+                        tracing::warn!(%error, "matchmaking leave failed");
+                    }
+                }
             }
             matchmaking::MatchmakingEvent::Joined(joined) => {
                 self.coop = joined.coop;
@@ -560,12 +601,12 @@ impl MultiplayerMenuState {
                     MenuMode::Hosted { game, .. } if game.id == updated.id => {
                         let previous_players = game.players;
                         *game = updated.clone();
-                        if self.campaign_save.is_none() {
-                            if previous_players != game.players {
-                                self.coop.assignments = [0, 1, 2, 3, 4];
-                            }
-                            self.coop.players = game.players as u8;
+                        if previous_players != game.players && !self.coop.campaign {
+                            self.coop.assignments = [0, 1, 2, 3, 4];
                         }
+                        // The lobby's seat count is the lobby's, campaign or
+                        // not: the campaign owns the roster, not the party size.
+                        self.coop.players = game.players as u8;
                         if game.players != previous_players {
                             self.status = format!(
                                 "{} player{} in game",
@@ -636,17 +677,10 @@ impl MultiplayerMenuState {
 
     fn selected_rules(&self) -> robin_engine::coop::CoopRules {
         let mut rules = self.coop;
-        if matches!(self.mode, MenuMode::Missions)
-            && let Some(mission) = self.selected_mission()
+        if let Some(mission) = self.selected_mission()
             && let Some(saved_rules) = mission.campaign_rules
         {
-            if mission.campaign_save.is_some() {
-                rules = saved_rules;
-            }
-            if mission.campaign_save.is_none() {
-                rules.campaign = true;
-                rules.team = [0; 5];
-            }
+            rules = campaign_choice_rules(mission, self.coop, saved_rules);
         }
         rules
     }
@@ -661,15 +695,31 @@ impl MultiplayerMenuState {
         }
     }
 
-    fn publish_rules(&mut self) {
-        if self.coop.validate().is_ok()
-            && !self.local
-            && let Some(session) = &self.matchmaking_client
-        {
-            if let Err(error) = session.set_rules(self.coop) {
-                self.status = error;
+    /// Publish this lobby's rules and keep the reason in the status line when
+    /// they cannot be advertised. A host never sits in a lobby that is neither
+    /// advertising nor saying why it cannot.
+    fn publish_or_report(&mut self) -> bool {
+        match self.publish_rules() {
+            Ok(()) => true,
+            Err(error) => {
+                self.status = format!("Cannot advertise this lobby: {error}");
+                tracing::warn!(%error, "multiplayer lobby rules were refused");
+                false
             }
         }
+    }
+
+    /// Publish this lobby's rules to the matchmaking swarm. `Err` is the
+    /// reason they cannot be a lobby: an invalid ruleset, or a closed session.
+    fn publish_rules(&mut self) -> Result<(), String> {
+        let rules = self.selected_rules();
+        rules.validate()?;
+        if !self.local
+            && let Some(session) = &self.matchmaking_client
+        {
+            session.set_rules(rules)?;
+        }
+        Ok(())
     }
 
     fn update_buttons(&mut self, keyboard_player: bool, resources: &IngameMenuResources) {
@@ -1324,13 +1374,13 @@ impl MultiplayerMenuState {
                     Exclusive => Assigned,
                     Assigned => Shared,
                 };
-                self.publish_rules();
+                self.publish_or_report();
                 return None;
             }
             ID_SCALE => {
                 self.coop.enemy_health_per_duplicate =
                     (self.coop.enemy_health_per_duplicate + 25) % 125;
-                self.publish_rules();
+                self.publish_or_report();
                 return None;
             }
             ID_KEYBOARD => {
@@ -1354,7 +1404,7 @@ impl MultiplayerMenuState {
                 let slot = self.team_slot.min(self.coop.team_len()).min(4);
                 self.coop.team[slot] =
                     robin_engine::coop::TEAM_CHARACTERS[(id - ID_CHARACTER_BASE) as usize].0;
-                self.publish_rules();
+                self.publish_or_report();
                 return None;
             }
             id if (ID_REMOVE_BASE..ID_REMOVE_BASE + 5).contains(&id) => {
@@ -1365,7 +1415,7 @@ impl MultiplayerMenuState {
                     self.coop.team[4] = 0;
                     self.coop.assignments = [0, 1, 2, 3, 4];
                     self.team_slot = self.team_slot.min(count - 2);
-                    self.publish_rules();
+                    self.publish_or_report();
                 }
                 return None;
             }
@@ -1383,7 +1433,7 @@ impl MultiplayerMenuState {
                         .position(|&assigned| assigned == next)
                         .expect("assignment permutation");
                     self.coop.assignments.swap(slot, other);
-                    self.publish_rules();
+                    self.publish_or_report();
                 }
                 return None;
             }
@@ -1550,12 +1600,10 @@ impl MultiplayerMenuState {
         {
             self.campaign_save = mission.campaign_save.clone();
             if let Some(rules) = mission.campaign_rules {
-                if mission.campaign_save.is_some() {
-                    self.coop = rules;
-                } else {
-                    self.coop.campaign = true;
-                    self.coop.team = [0; 5];
-                }
+                // A campaign's own words are the save's roster, which the
+                // campaign — not the lobby — owns. Both a fresh and a continued
+                // campaign reach the session as one campaign lobby descriptor.
+                self.coop = campaign_choice_rules(mission, self.coop, rules);
             } else {
                 self.coop.campaign = false;
                 if self.coop.team_len() == 0 {
@@ -1702,7 +1750,9 @@ impl MultiplayerMenuState {
             }
             ID_START => {
                 if matches!(self.mode, MenuMode::Hosted { .. }) {
-                    self.publish_rules();
+                    if !self.publish_or_report() {
+                        return None;
+                    }
                     match self
                         .matchmaking_client
                         .as_ref()
@@ -2636,7 +2686,7 @@ fn add_campaign_choices(
     };
     let rules = resume
         .as_ref()
-        .map(|(_, save)| save.engine.sim_config().coop)
+        .map(|(_, save)| save.engine.sim_config().coop.campaign_lobby())
         .unwrap_or(robin_engine::coop::CoopRules {
             campaign: true,
             ..Default::default()
@@ -2968,6 +3018,166 @@ mod tests {
         }
         assert!(!late.contains('F'));
         assert!(usual_mission_team(&profiles, "Unknown custom mission").is_none());
+    }
+
+    fn campaign_mission(
+        load_save: bool,
+        rules: robin_engine::coop::CoopRules,
+    ) -> super::MissionChoice {
+        super::MissionChoice {
+            load_save,
+            campaign_rules: Some(rules),
+            campaign_save: load_save.then(|| crate::savegame::SlotName::new("Continue").unwrap()),
+            mission_id: 1,
+            mission_name: "Start Campaign".into(),
+            label: "Start Campaign".into(),
+            custom: None,
+            usual_team: None,
+            requirements: None,
+        }
+    }
+
+    /// A campaign host advertises one campaign lobby whatever its party looked
+    /// like in the slot: the rules it publishes validate, and they still say
+    /// `campaign`, so a joiner needs no local save and never reads this lobby
+    /// as a skirmish. Before the fix a slot's own rules (`campaign` plus the
+    /// roster it played with) did not validate, so the host published nothing
+    /// and its listing kept the skirmish defaults.
+    #[test]
+    fn campaign_choices_publish_one_valid_campaign_lobby() {
+        use super::*;
+        use robin_engine::coop::{CharacterControl, CoopRules};
+        let lobby = CoopRules {
+            players: 2,
+            enemy_health_per_duplicate: 50,
+            ..Default::default()
+        };
+        let saved = CoopRules {
+            campaign: true,
+            players: 2,
+            control: CharacterControl::Assigned,
+            team: [b'R', b'J', b'T', 0, 0],
+            enemy_health_per_duplicate: 25,
+            ..Default::default()
+        };
+        for (continued, expected_health) in [(false, 50), (true, 25)] {
+            let mission = campaign_mission(continued, saved);
+            // The measurement the fix started from: a continued slot hands the
+            // menu exactly these words, and the pre-fix `publish_rules` passed
+            // `self.coop` to `CoopRules::validate` and published nothing when
+            // it refused. `validate` is unchanged, so this is the same refusal
+            // the host met.
+            if continued {
+                assert_eq!(
+                    saved.validate(),
+                    Err("campaign co-op uses the persistent campaign roster".to_string())
+                );
+            }
+            let rules = campaign_choice_rules(&mission, lobby, saved);
+            assert!(rules.validate().is_ok(), "{rules:?}");
+            assert!(rules.campaign);
+            assert_eq!(rules.team_len(), 0);
+            assert_eq!(rules.players, 2);
+            assert_eq!(rules.control, CharacterControl::Shared);
+            assert_eq!(rules.enemy_health_per_duplicate, expected_health);
+            // The same words a save records at quit, so the next host of this
+            // slot resumes with the same party size and mode.
+            assert_eq!(
+                CoopRules {
+                    campaign: true,
+                    players: 2,
+                    ..rules
+                }
+                .campaign_lobby(),
+                rules
+            );
+        }
+    }
+
+    /// The listing a running host publishes must survive the receiving peer's
+    /// filter: a campaign lobby carries no explicit roster, so it is neither
+    /// invalid nor a skirmish.
+    #[test]
+    fn a_campaign_lobby_listing_survives_the_peer_filter() {
+        use robin_engine::coop::CoopRules;
+        let listing = crate::multiplayer::matchmaking::GameListing {
+            coop: CoopRules {
+                campaign: true,
+                players: 2,
+                ..Default::default()
+            }
+            .campaign_lobby(),
+            id: "host-key".into(),
+            mission_id: 1,
+            mission_name: "Start Campaign".into(),
+            host_content: None,
+            host: "Host".into(),
+            players: 1,
+            max_players: 5,
+            state: "waiting".into(),
+            start_at_epoch_ms: None,
+        };
+        assert!(crate::multiplayer::matchmaking::listing_is_launchable(
+            &listing
+        ));
+        assert!(!crate::multiplayer::matchmaking::listing_is_launchable(
+            &crate::multiplayer::matchmaking::GameListing {
+                coop: CoopRules {
+                    campaign: true,
+                    team: [b'R', 0, 0, 0, 0],
+                    ..Default::default()
+                },
+                ..listing
+            }
+        ));
+    }
+
+    /// A campaign host holding a slot plays the slot's own mission — the
+    /// mission the party is actually on after a joiner arrives mid-campaign —
+    /// while a fresh campaign, a skirmish and a client without a slot play the
+    /// mission the lobby offered.
+    #[test]
+    fn only_a_slot_holding_campaign_host_keeps_the_slots_mission() {
+        use super::*;
+        use robin_engine::coop::CoopRules;
+        let launch = |campaign, role, campaign_save| MultiplayerLaunch {
+            campaign_save,
+            coop: CoopRules {
+                campaign,
+                players: 2,
+                ..Default::default()
+            },
+            local_custom: None,
+            mission_id: 1,
+            mission_name: "Start Campaign".into(),
+            role,
+            expected_players: 2,
+            start_at_epoch_ms: None,
+            distributed_mod: None,
+            distributed_installed_locator: None,
+        };
+        let slot = crate::savegame::SlotName::new("campaign").unwrap();
+        assert!(
+            !launch(true, MultiplayerRole::Host, Some(slot.clone())).plays_lobby_mission(),
+            "a slot-holding campaign host must keep the slot's mission"
+        );
+        for (campaign, role, save) in [
+            (true, MultiplayerRole::Host, None),
+            (false, MultiplayerRole::Host, Some(slot.clone())),
+            (false, MultiplayerRole::Local, Some(slot.clone())),
+            (
+                true,
+                MultiplayerRole::Client {
+                    connect_addr: "host-key".into(),
+                },
+                Some(slot),
+            ),
+        ] {
+            assert!(
+                launch(campaign, role.clone(), save).plays_lobby_mission(),
+                "{campaign} {role:?}"
+            );
+        }
     }
 
     #[test]

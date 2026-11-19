@@ -69,6 +69,17 @@ impl GameListing {
     }
 }
 
+/// Whether a listing's rules can describe a lobby at all.
+///
+/// A campaign lobby names its mode and seat count and leaves the roster to the
+/// host's campaign, so the predicate is the same for both modes; a listing whose
+/// rules cannot be a lobby is dropped rather than shown as a game nobody can
+/// launch. The host's own `publish_rules` refuses those words, so a peer only
+/// ever sees this for a listing from a build that disagreed about them.
+pub fn listing_is_launchable(game: &GameListing) -> bool {
+    game.coop.validate().is_ok() && game.players <= 5
+}
+
 /// The launch handoff for a game the local player is part of.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinedGame {
@@ -579,7 +590,7 @@ mod native {
         fn handle_topic_msg(&mut self, msg: TopicMsg) {
             match msg {
                 TopicMsg::Announce { game } => {
-                    if game.coop.validate().is_err() || game.players > 5 {
+                    if !listing_is_launchable(&game) {
                         return;
                     }
                     self.listings
