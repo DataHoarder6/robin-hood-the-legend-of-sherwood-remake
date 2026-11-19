@@ -46,3 +46,12 @@ bank at dusk.
 
 The schematic is a drawing, not the background. The editor renders the
 background from placed assets; this file only fixes the layout.
+
+The scene is the editor's own "New map" output, unmodified: size 1792×1280,
+grid spacing 128, initial elevation 0, material `grass_short`, no placements.
+It is what `createNewMap` (`level-editor/app/src/new-map.ts`) writes, so it can
+be regenerated rather than hand-edited.
+
+Authoring the terrain and placements needs an asset library with
+`3d-assets/index.json` and `game-data/index.json`. Neither is in this
+repository; point the editor at one with `EDITOR_LIBRARY`.
