@@ -401,19 +401,17 @@ For meaningful gameplay coverage, replay the same recorded command stream on
 both peers; stepping empty frames proves clock/snapshot agreement but not the
 full command surface.
 
-The live browser driver is `wasm-www/scripts/live-relay-e2e.mjs`. It requires
-a native host with its loopback HTTP API, a fresh `rhmp3` ticket, and Chrome
-already listening on a remote-debugging port. It asserts relay-WebSocket
-welcome, authoritative input delivery, a forced transport loss, a progressed
-replacement snapshot, post-reconnect input, host replay availability, and
-browser-peer replay refusal. Production QA additionally requires the isolated
-signer origin and exact ticket-selected `/wasm/<commit>` and content catalog
-to be deployed.
-
-That run does not exist yet, and the driver cannot pass as written: two of its
-waits match log lines no code emits
-([the browser-seat audit](slop/browser-seat.md#3-the-two-browser-harnesses-and-what-they-actually-assert)).
-What is proved is the artifact's side of the contract:
+There is no browser-join driver in this tree. `wasm-www/scripts/live-relay-e2e.mjs`
+asserted two log lines no code emits (`browser welcomed through iroh WebSocket
+relay`, `browser multiplayer session ended; reconnecting through iroh relay`), so
+it timed out after 180 s at its first wait; no gate, script or runbook invoked
+it, and no run was ever recorded.
+It was deleted on 2026-11-19 rather than kept as coverage that cannot pass
+([the browser-seat audit](slop/browser-seat.md#3-the-browser-harness-and-what-it-actually-asserts)
+records what it would take to write one that runs). Production QA additionally
+requires the isolated signer origin and exact ticket-selected `/wasm/<commit>`
+and content catalog to be deployed. What is proved is the artifact's side of the
+contract:
 `wasm-www/scripts/build-runtime.mjs` builds `audio,multiplayer` (threaded:
 `audio,multiplayer,wasm-threads`), and
 `node wasm-www/scripts/verify-runtime-multiplayer.mjs --pkg <artifact> --expect-ticket-schema 3`

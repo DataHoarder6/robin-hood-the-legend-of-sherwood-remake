@@ -18,7 +18,7 @@ a browser row would sit beside), [the multiplayer architecture](../MULTIPLAYER.m
 
 | Direction | State (2026-11-19, after the build-plan fix) | What decides it |
 | --- | --- | --- |
-| native host + browser client, the repo's own artifact | **artifact ready, join unproved** | `wasm-www/scripts/build-runtime.mjs` now builds `audio,multiplayer` (threaded: `+wasm-threads`), so the artifact exports the real `ticketSchema` and the shell no longer refuses the invitation. No browser seat has joined a native host: no run is recorded, and the one driver is stale (`wasm-www/scripts/live-relay-e2e.mjs:242`) |
+| native host + browser client, the repo's own artifact | **artifact ready, join unproved** | `wasm-www/scripts/build-runtime.mjs` now builds `audio,multiplayer` (threaded: `+wasm-threads`), so the artifact exports the real `ticketSchema` and the shell no longer refuses the invitation. No browser seat has joined a native host: no run is recorded, and the one driver was deleted on 2026-11-19 because it could not pass (§3) |
 | native host + browser client, before this change | **impossible** | the artifact every repo script built had no multiplayer transport, so the join died before it reached a relay |
 | browser host + native client | **impossible by construction** | browser hosting is not implemented and its server handle type has no values (`crates/robin_rs/src/multiplayer/wasm/native_only.rs:25-26`, `crates/robin_rs/src/game_session/multiplayer/session_setup.rs:35-38`) |
 | browser reconnect, no hang | **bounded 2026-11-19** | a reconnect attempt carries a deadline of its own, so the 60 s give-up budget is reachable while an attempt is in flight (`crates/robin_rs/src/multiplayer/wasm.rs:197`, `crates/robin_rs/src/multiplayer/client_session.rs:617-637`, `:655-673`); section 6 still lists three wasm ways to hang that no attempt bound fixes |
@@ -33,7 +33,7 @@ Short names below; every path is repo-relative.
 | `cli.rs`, `robin.rs` (bin) | `crates/robin_rs/src/main_entry/cli.rs`, `crates/robin_rs/src/bin/robin.rs` |
 | `server.rs` | `crates/robin_rs/src/multiplayer/native/server.rs` |
 | `boot-lifecycle.ts`, `main.ts`, `join_ticket.ts`, `multiplayer_identity.ts`, `multiplayer_content.ts` | `wasm-www/src/` |
-| `browser-game.mjs`, `live-relay-e2e.mjs`, `build-runtime.mjs` | `wasm-www/scripts/` (the first: `scripts/validation/browser-game.mjs`) |
+| `browser-game.mjs`, `build-runtime.mjs` | `wasm-www/scripts/` (the first: `scripts/validation/browser-game.mjs`) |
 
 ## 1. What a browser seat is, in five facts the code enforces
 
@@ -190,12 +190,11 @@ only that this code **compiles** — `cargo check --bin robin --tests` with
 browser tests in that module are the shared protocol and identity unit tests, not
 a join (`lifecycle_gate.py:25-31`).
 
-## 3. The two browser harnesses, and what they actually assert
+## 3. The browser harness, and what it actually asserts
 
 | Harness | What it starts | What it dials | What it asserts | Verdict |
 | --- | --- | --- | --- | --- |
 | `scripts/validation/browser-game.mjs` | `google-chrome --headless=new` against a Node HTTPS server on `127.0.0.1:0`, self-signed cert with SANs for both game names (`:40-42`, `:63-97`, `:127-130`) | Only `robinhood.phiresky.xyz` and `identity.robinhood.phiresky.xyz`, force-resolved to loopback (`:28-29`, `:96`, `:130`); every other host is refused with 403 (`:67`) and every non-GET, non-https or off-allowlist request is failed in CDP (`:155-163`) | single-player Demo boot, first mission state, replay export through the real wasm admission worker, pause-menu replay restart, bfcache restore, no console "required mission text" errors, no desync lines (`:252-398`) | no multiplayer anywhere: it navigates to `/?<query>` with no ticket and no fragment (`:265-268`) |
-| `wasm-www/scripts/live-relay-e2e.mjs` | an **already running** Chrome with `--remote-debugging-port` and an about:blank page (`:3-9`, `:27-36`); it launches nothing | the page named by `--page-url`, default `https://robinhood.phiresky.xyz/`, with `#join=<ticket>` (`:15`, `:24`) | relay welcome, frame-0 snapshot, `begin-sim`, a host-side input reaching authoritative state, a forced socket close and full reconnect with a progressed replacement snapshot, host replay present, browser replay refused (`:242-338`) | **cannot pass today**: two of its waits match log lines no code emits (below) |
 
 The `browser-game.mjs` isolation is deliberate and total: `MAP * 127.0.0.1:${port}`
 sends *every* hostname to the fixture server, and the handler serves only two
@@ -204,36 +203,40 @@ names. A relay is a third name and would be answered `local acceptance: denied`
 cannot host a browser multiplayer run without changing both the resolver rule and
 the allowlist.
 
-`live-relay-e2e.mjs` fails at its first assertion. It waits for
+`wasm-www/scripts/live-relay-e2e.mjs` was the only browser-join driver, and it was
+deleted on 2026-11-19. It failed at its first assertion: it waited for
 
 ```
-browser welcomed through iroh WebSocket relay          (live-relay-e2e.mjs:242)
-browser multiplayer session ended; reconnecting…       (live-relay-e2e.mjs:272, :295)
+browser welcomed through iroh WebSocket relay          (wait at 180 s)
+browser multiplayer session ended; reconnecting…       (waits at 45 s)
 ```
 
-and neither string exists in the game: the only occurrences in the tree are the
+and neither string exists in the game — the only occurrences in the tree were the
 driver's own (`grep -rn "welcomed through iroh" --glob '!target' .` → two hits,
-both in `live-relay-e2e.mjs`). The code logs
-`browser multiplayer client welcomed` at debug level (`wasm.rs:263-268`) and
-`client session ended: {reason}; reconnecting...` (`client_session.rs:742`).
-Three other waits it makes do match real lines — `begin-sim barrier released`
-(`game_session/multiplayer.rs:772`), `transport reconnected; awaiting host
-snapshot` (`:671`), `adopting host's engine snapshot` (`:883`) — so the driver is
-stale, not hypothetical. It also presses the host through `POST /step-forward`
-(`:194-212`), which advances the host and re-admits every peer from the new
-snapshot (`docs/multiplayer/HARNESS.md:226-234`), so even a passing run would not
-prove input scheduling.
+both in `live-relay-e2e.mjs`). The code logs `browser multiplayer client
+welcomed` at debug level (`wasm.rs:263-268`) and `client session ended:
+{reason}; reconnecting...` (`client_session.rs:795`). Three other waits did match
+real lines — `begin-sim barrier released` (`game_session/multiplayer.rs:772`),
+`transport reconnected; awaiting host snapshot` (`:671`), `adopting host's engine
+snapshot` (`:883`) — and a fourth matched a line emitted only when local init
+diverged (`frame-0 host snapshot`, `:965`), so the driver was stale rather than
+hypothetical. Repairing the two dead waits was not enough to make it coverage: it
+also pressed the host through `POST /step-forward`, which advances the host and
+re-admits every peer from the new snapshot
+(`docs/multiplayer/HARNESS.md:226-234`), so even a passing run would not have
+proved input scheduling — and the run it needed is the §4 stack, which has never
+existed here.
 
 Nothing in the tree records a browser join having happened: no evidence
-directory, no gate invokes `live-relay-e2e.mjs` (`grep -rn live-relay-e2e
+directory, no gate invoked the driver (`grep -rn live-relay-e2e
 scripts docs wasm-www/package.json` → this file and `MULTIPLAYER.md`, nothing
 else), and
-`scripts/README.md` lists `browser-game.mjs` but not the relay driver. What the
+`scripts/README.md` lists `browser-game.mjs` but not a relay driver. What the
 tree does now prove is narrower and exact: the artifact the repo builds exports
 the manifest's `ticketSchema` (§2.1), so the documented capability no longer
 dies at the shell's first check. No browser seat has joined a host.
 
-## 4. What it would take to run it here
+## 4. What a driver that runs would need
 
 The artifact blocker is gone: `wasm-www/scripts/build-runtime.mjs` builds the
 relay client, and §2.1 checks the export. Nothing below has been run against a
@@ -299,15 +302,17 @@ Serving, and the three things a fixture server must add over `browser-game.mjs`:
    `browser-game.mjs:84` already does) or let the browser reach the deployed
    signer.
 
-Then the driver, with the artifact served at the ticket's own commit path:
-
-```
-google-chrome --headless=new --ignore-certificate-errors \
-  --host-resolver-rules='MAP robinhood.phiresky.xyz 127.0.0.1, MAP identity.robinhood.phiresky.xyz 127.0.0.1, EXCLUDE <relay host>' \
-  --remote-debugging-port=9222 about:blank
-node wasm-www/scripts/live-relay-e2e.mjs --ticket rhmp3-… --devtools-port 9222 \
-  --host-http http://127.0.0.1:18641 --page-url https://robinhood.phiresky.xyz/
-```
+Then a driver, with the artifact served at the ticket's own commit path. There is
+none in the tree: the deleted one's `google-chrome --headless=new
+--ignore-certificate-errors --host-resolver-rules='MAP robinhood.phiresky.xyz
+127.0.0.1, …' --remote-debugging-port=9222 about:blank` launch was sound, but its
+waits must name lines the game prints — `browser multiplayer client welcomed`
+(debug, `wasm.rs:263-268`), `client session ended: …; reconnecting...`
+(`client_session.rs:795`), `multiplayer: begin-sim barrier released at frame …`
+(`game_session/multiplayer.rs:772`), `multiplayer: transport reconnected;
+awaiting host snapshot` (`:671`), `multiplayer: adopting host's engine snapshot`
+(`:883`) — and its assertions must not rest on `POST /step-forward`, which
+re-admits every peer from a fresh snapshot.
 
 `--wasm-base` is useless on a join: `resolveBuild` returns the ticket's build
 before it looks at that parameter (`main.ts:252-254`), so the artifact must exist
@@ -441,8 +446,9 @@ first is what blocked everything:
    `requires` entry (today `{"game-data","graphical","netem"}`, `:112`) and an
    explicit exception in section 6 — or the relay requirement is removed from the
    game, which is a much larger change than a row.
-5. **A driver that works.** `live-relay-e2e.mjs` must wait on lines the game
-   actually prints (`:242`, `:272`, `:295`) before any row can name it.
+5. **A driver that works.** None exists: the stale one was deleted on
+   2026-11-19 (§3), so a row needs a driver written to the lines the game
+   actually prints before it can name one.
 
 Given 1–5, a browser row is a `process`-shaped row with a different runner and a
 different terminal observation, not a fourth execution site of the same scenario:
@@ -474,10 +480,11 @@ Proved now, and no longer listed here: the plan builds the relay client, the
 
 ## 9. What to do next, in order
 
-1. Replace the two dead waits in `live-relay-e2e.mjs` with the lines the game
-   prints (`wasm.rs:263`, `client_session.rs:742`) and run it once against a
-   staged artifact — that single run decides whether the browser path is real or
-   aspirational, and produces the first evidence this file cannot.
+1. Stand up the §4 stack and write a driver that waits on the lines the game
+   prints (`wasm.rs:263`, `client_session.rs:795`) — the stale driver is gone, so
+   this is a new file, not a repair. Running it once against a staged artifact
+   decides whether the browser path is real or aspirational, and produces the
+   first evidence this file cannot.
 2. ~~Bound the wasm reconnect attempt and the content write.~~ Done
    2026-11-19: the attempt is 15 s like native (`wasm.rs:42`, `:197`) and now
    covers the content prelude it opens, and the write is 30 s (`wasm.rs:200`).
