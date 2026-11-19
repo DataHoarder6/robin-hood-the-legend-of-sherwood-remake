@@ -39,8 +39,8 @@ esac
 
 head=$(git rev-parse --verify HEAD^{commit})
 base=$(git ls-remote "$remote" "refs/heads/$integration" | cut -f1)
-if [ -n "$base" ] && git merge-base --is-ancestor "$base" "$head"; then
-    printf 'land: nothing to do; %s already contains %s\n' "$remote/$integration" "$head" >&2
+if [ -n "$base" ] && git merge-base --is-ancestor "$head" "$base"; then
+    printf 'land: nothing to do; %s/%s already contains %s\n' "$remote" "$integration" "$head" >&2
     exit 0
 fi
 
