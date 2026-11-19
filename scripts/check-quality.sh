@@ -131,6 +131,9 @@ case "$1" in
         python3 scripts/test_quality_suites.py
         python3 scripts/test_workspace_hygiene.py
         pnpm --dir scripts/release verify
+        # The browser runtime plan the stable site publishes. A plan without
+        # multiplayer exports ticket schema 0 and refuses every invitation.
+        node --test wasm-www/scripts/build-runtime.test.mjs
         test -f scripts/test_portable_linker.py
         python3 -m unittest discover -s scripts -p test_portable_linker.py
         test -f scripts/validation/save_load_live_test.py

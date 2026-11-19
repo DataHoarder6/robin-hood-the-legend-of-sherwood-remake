@@ -18,7 +18,7 @@ test('production runtime additions are the threaded game build', () => {
     assert.equal(RUNTIME_ADDITION_BUILD.requireIdentity, true);
     const plan = runtimeBuildPlan({ outDir: '/tmp/addition', ...RUNTIME_ADDITION_BUILD });
     assert(plan.cargo.includes('scripts/wasm-threads.cargo-config.toml'));
-    assert(plan.cargo.includes('audio,wasm-threads'));
+    assert(plan.cargo.includes('audio,multiplayer,wasm-threads'));
     assert(plan.cargo.includes('robin'));
     assert.equal(plan.optimize, null);
 });

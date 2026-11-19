@@ -3,6 +3,14 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+// Every browser runtime carries the relay client. This artifact is what the
+// stable shell checks against a host-signed invitation, and a build without
+// `multiplayer` exports ticket schema 0, so the shell refuses every real
+// invitation before any relay traffic. The relay route and the identity signer
+// origin are runtime inputs — the ticket names the relay, the page names the
+// signer — so no host is baked in here.
+export const RUNTIME_FEATURES = Object.freeze(['audio', 'multiplayer']);
+
 export function runtimeBuildPlan({ outDir = 'wasm-www/pkg', profile = 'wasm-release',
     threads = false, bench = false, optimize = true, bindgen = 'wasm-bindgen' } = {}) {
     if (!['wasm-dev', 'wasm-release'].includes(profile)) throw new Error('unsupported wasm profile');
@@ -12,7 +20,7 @@ export function runtimeBuildPlan({ outDir = 'wasm-www/pkg', profile = 'wasm-rele
     if (bench) cargo.push('-p', 'robin_assets', '--example', 'wasm_decode_bench',
         ...(threads ? ['--features', 'wasm-threads'] : []));
     else cargo.push('-p', 'robin_rs', '--bin', 'robin', '--no-default-features',
-        '--features', threads ? 'audio,wasm-threads' : 'audio');
+        '--features', (threads ? [...RUNTIME_FEATURES, 'wasm-threads'] : RUNTIME_FEATURES).join(','));
     const wasm = `target/wasm32-unknown-unknown/${profile}/${bench ? 'examples/wasm_decode_bench' : 'robin'}.wasm`;
     return { cargo, wasm, threads, bindgen,
         bindgenArgs: ['--target', 'web', '--out-dir', outDir,

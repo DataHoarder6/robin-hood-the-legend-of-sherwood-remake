@@ -77,6 +77,12 @@ export async function stageRuntimeAddition({
     // The published engine, not only Cargo's output, must keep the shared
     // memory contract its decode workers instantiate against.
     requireSharedMemoryImport(join(artifact, 'robin_bg.wasm'));
+    // And the published bytes must report the schema the manifest publishes: a
+    // browser refuses an artifact whose export disagrees with the invitation
+    // before any relay traffic, so this is what makes a `ticketSchema: 0`
+    // artifact unpublishable rather than merely undocumented.
+    run(process.execPath, ['wasm-www/scripts/verify-runtime-multiplayer.mjs',
+        '--pkg', artifact, '--expect-ticket-schema', String(contract.ticketSchema)]);
     run('gzip', ['-9', '-n', '-k', join(artifact, 'robin.js'), join(artifact, 'robin_bg.wasm')]);
     await writeBrotliWasm(join(artifact, 'robin_bg.wasm'));
     buildReplayAdmission({ outDir: artifact, bindgen, requireIdentity: true });
