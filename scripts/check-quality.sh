@@ -96,15 +96,17 @@ case "$1" in
         : "${ROBINHOOD_DATA_DIR:?Set ROBINHOOD_DATA_DIR to the game root containing Data/}"
         evidence=${ROBIN_E2E_EVIDENCE:-$(mktemp -d "${TMPDIR:-/tmp}/robin-multiplayer-e2e.XXXXXX")}
         printf 'multiplayer-e2e evidence: %s\n' "$evidence" >&2
-        # One scenario at a time by default: a fault fires at frame N, so a
-        # client starved of cores reaches N late and the suite reports a timing
-        # artefact as a defect. Each scenario owns its display, data dir and
-        # ports, so raising ROBIN_E2E_JOBS is safe once the whole corpus has been
-        # measured at that width on this host.
+        # Two scenarios at a time: a fault fires at frame N, so the width was
+        # measured on the build host before it was raised from one. 14 process
+        # rows, same binary: 1357 s at --jobs 1, 744 s at --jobs 2 (1.82x), all
+        # 14 verdicts "observed" in both runs. Scenarios own their display, data
+        # dir and ports. Two leaves room for their game clients on 12 cores;
+        # higher widths are unmeasured and may turn core starvation into a
+        # timing artefact reported as a defect.
         exec python3 scripts/validation/multiplayer_e2e.py \
             --binary "$ROBIN_E2E_BINARY" --data "$ROBINHOOD_DATA_DIR" \
             --snapshot "$(git rev-parse HEAD)" --evidence "$evidence" \
-            --jobs "${ROBIN_E2E_JOBS:-1}"
+            --jobs "${ROBIN_E2E_JOBS:-2}"
         ;;
     parity-cross)
         # Linux x Windows replay-hash parity: every recording in the tracked
