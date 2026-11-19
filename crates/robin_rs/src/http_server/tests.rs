@@ -633,9 +633,9 @@ mod dispatch_tests {
                 ),
                 "{name}: the queued command carries the decision"
             );
-            // The command frame only latches the flag; the mission phase of the
-            // next tick is what turns it into the code.
-            let latched = engine
+            // The command latches the flag and the same frame's mission phase
+            // reads it: the code the reply named is the code this frame returns.
+            let tick = engine
                 .advance_frame(
                     &assets,
                     engine_api::SimulationFrameInput::new(
@@ -643,15 +643,7 @@ mod dispatch_tests {
                     ),
                 )
                 .expect("apply the mission-end command");
-            assert_eq!(latched.game_code(), GameCode::LevelInProgress, "{name}");
-            let output = engine
-                .advance_frame(&assets, engine_api::SimulationFrameInput::default())
-                .expect("advance past the latched mission-end flag");
-            assert_eq!(
-                output.game_code(),
-                code,
-                "{name}: the tick returns the code"
-            );
+            assert_eq!(tick.game_code(), code, "{name}: the tick returns the code");
         }
     }
 
