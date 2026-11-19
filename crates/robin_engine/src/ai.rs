@@ -44,7 +44,7 @@ pub use model::{
 mod contexts;
 pub use contexts::{
     AI_DOOR_RALLY_POINT_DISTANCE, AiGlobalState, DoorRallyPoint, House, OffmapEntry,
-    ReinforcementDoorInfo,
+    OffmapReinforcementBudget, ReinforcementDoorInfo,
 };
 pub(crate) use contexts::{ai_position_to_point_3d, enemy_lift_approach_for_position};
 

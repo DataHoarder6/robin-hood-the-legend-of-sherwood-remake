@@ -27,6 +27,14 @@ fn staged_garrison_engine() -> (EngineInner, crate::element::EntityId) {
     use crate::gate::DoorIndex;
 
     let mut engine = EngineInner::new();
+    engine.ai.global.offmap_budget = crate::ai::OffmapReinforcementBudget {
+        total: 4,
+        concurrent: 2,
+        cooldown_ticks: 10,
+        remaining: 4,
+        live: 0,
+        next_allowed_frame: 0,
+    };
     let mut staged = make_test_ai_soldier(Camp::Lacklandists);
     staged.element_data_mut().active = false;
     // A real spawn configures the move box from the soldier profile; the test
@@ -1635,4 +1643,74 @@ fn summon_can_use_a_named_door_entry() {
         )
         .expect("the named door answers the call");
     assert_eq!(summoned, body);
+}
+
+#[test]
+fn summon_respects_the_mission_budget() {
+    use crate::ai::OffmapReinforcementBudget;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+
+    let (mut engine, _body) = staged_garrison_engine();
+    engine.ai.global.offmap_budget = OffmapReinforcementBudget {
+        total: 1,
+        concurrent: 1,
+        cooldown_ticks: 0,
+        remaining: 1,
+        live: 0,
+        next_allowed_frame: 0,
+    };
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let request = SummonRequest {
+        faction: Camp::Lacklandists,
+        entry: crate::engine::reinforcement::SummonEntry::Any,
+    };
+    assert!(
+        engine
+            .summon_garrison(TickCtx::new(&sim, &assets), request)
+            .is_some(),
+        "the first call spends the mission's one summon"
+    );
+    assert!(
+        engine
+            .summon_garrison(TickCtx::new(&sim, &assets), request)
+            .is_none(),
+        "the budget must stop an unbounded alarm"
+    );
+}
+
+#[test]
+fn summon_is_blocked_by_its_cooldown() {
+    use crate::ai::OffmapReinforcementBudget;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+
+    let (mut engine, _body) = staged_garrison_engine();
+    engine.ai.global.offmap_budget = OffmapReinforcementBudget {
+        total: 4,
+        concurrent: 2,
+        cooldown_ticks: 30,
+        remaining: 4,
+        live: 0,
+        next_allowed_frame: 0,
+    };
+    engine.control.frame_counter = 5;
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let request = SummonRequest {
+        faction: Camp::Lacklandists,
+        entry: crate::engine::reinforcement::SummonEntry::Any,
+    };
+    assert!(
+        engine
+            .summon_garrison(TickCtx::new(&sim, &assets), request)
+            .is_some()
+    );
+    assert!(
+        engine
+            .summon_garrison(TickCtx::new(&sim, &assets), request)
+            .is_none(),
+        "two calls in one alarm must not both bring bodies in"
+    );
 }

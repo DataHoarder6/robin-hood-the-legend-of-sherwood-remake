@@ -826,6 +826,40 @@ impl AiOwnerCtx<'_> {
         )
     }
 
+    /// An officer who could not raise anyone nearby calls the authored
+    /// off-map garrison instead. The feature flag and the per-mission budget
+    /// are enforced by `summon_garrison`; this only decides when the call is
+    /// appropriate and who the arriving body answers to.
+    fn try_summon_offmap(&mut self) {
+        if !self.engine.control.sim_config.enable_offmap_reinforcements {
+            return;
+        }
+        if self.enemy().base.current_music_alert_status == crate::ai::AlertLevel::Green {
+            return;
+        }
+        let faction = self
+            .engine
+            .expect_entity(self.owner, "offmap summon officer")
+            .camp();
+        let goal = self.enemy().base.seek_position;
+        let owner = self.owner;
+        if let Some(body) = self.engine.summon_garrison(
+            self.tcx,
+            crate::engine::reinforcement::SummonRequest {
+                faction,
+                entry: crate::engine::reinforcement::SummonEntry::Any,
+            },
+        ) {
+            self.engine
+                .ai_mut(body, "offmap summoned subordinate")
+                .master = Some(AiEntityHandle::new(owner.index()));
+            self.engine
+                .enemy_ai_mut(body, "offmap summoned goal")
+                .base
+                .seek_position = goal;
+        }
+    }
+
     fn alert_soldiers(&mut self, center: Position, flags: u16) -> bool {
         use crate::ai::Remark;
         use crate::ai_enemy::ReportUpdateFlags;
@@ -982,6 +1016,7 @@ impl AiOwnerCtx<'_> {
             None
         };
         if self.enemy().alerted_us.is_empty() {
+            self.try_summon_offmap();
             return false;
         }
         let count = self.enemy().alerted_us.len() as u16;

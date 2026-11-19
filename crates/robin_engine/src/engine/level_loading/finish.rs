@@ -240,6 +240,18 @@ impl EngineInner {
         assets: &LevelAssets,
         loaded: &crate::level_data::LoadedLevel,
     ) {
+        if let Some(ref tactic) = loaded.mission.tactic_data {
+            let authored = &tactic.reinforcement_budget;
+            self.ai.global.offmap_budget = crate::ai::OffmapReinforcementBudget {
+                total: authored.total,
+                concurrent: authored.concurrent,
+                cooldown_ticks: authored.cooldown_ticks,
+                remaining: authored.total,
+                live: 0,
+                next_allowed_frame: 0,
+            };
+        }
+
         // Install mission-defined reinforcement doors: construct one
         // `Door(Reinforcement)` per REIN entry and insert it into the
         // gate-graph table.  The Rust port keeps a single

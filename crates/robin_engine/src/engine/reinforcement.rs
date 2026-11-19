@@ -27,6 +27,7 @@ use crate::sequence::{MoveFlags, Sequence, SequenceElement, SequenceElementData}
 ///
 /// `tier` and the per-mission budget belong to the caller that emits the
 /// request: this only picks a body, opens a door and starts the walk.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SummonRequest {
     /// Which side's staged bodies may answer.
     pub faction: crate::element::Camp,
@@ -399,6 +400,22 @@ impl EngineInner {
     /// is off, no body of that faction is staged, or the level has no
     /// reinforcement door to enter through.
     pub(crate) fn summon_garrison(
+        &mut self,
+        tcx: TickCtx<'_>,
+        request: SummonRequest,
+    ) -> Option<EntityId> {
+        let frame = self.control.frame_counter;
+        if !self.ai.global.offmap_budget.authorize(frame) {
+            return None;
+        }
+        let result = self.summon_garrison_authorized(tcx, request);
+        if result.is_none() {
+            self.ai.global.offmap_budget.release();
+        }
+        result
+    }
+
+    fn summon_garrison_authorized(
         &mut self,
         tcx: TickCtx<'_>,
         request: SummonRequest,
