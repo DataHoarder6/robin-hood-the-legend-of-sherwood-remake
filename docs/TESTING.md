@@ -62,7 +62,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `client` | `robin_rs`, default features | Client tests, then a separate `robin` binary build |
 | `client-release` | `robin_rs`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates; audio example check |
 | `tools` | `robin_modding_tools`; `robin_rs` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
-| `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev` |
+| `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the shipped `audio,multiplayer` client and its threaded plan |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
 | `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer rows of the scenario corpus: real signals, per-install isolation, assertions over `/state`; core and transport rows name the Rust test that proves them |
@@ -103,8 +103,8 @@ crates did, `tooling` when anything under `scripts/`, `tools/` or `.githooks/`
 did, plus the scenario corpus when `docs/multiplayer/HARNESS.md` or the scenarios
 changed. They run on the build host through one `scripts/remote-check.sh
 --suites` call over a single synced copy, and the first failure stops the
-landing. `wasm` is not in that set; the wasm paragraph below owns why and what
-would put it there.
+landing. `wasm` joins them when anything under `crates/` changed: the browser
+client is a shipped artifact and no other suite compiles it.
 
 Two entry points run that gate. `scripts/land.sh` is the loop's landing command:
 it fetches `fork/main`, rebases `HEAD` onto it when the branch is not already
@@ -162,23 +162,23 @@ The wasm gate is a compile check, not a browser execution or memory-cap test.
 `scripts/remote-check.sh wasm` runs it on the build host in the devShell, which
 is also what gives `zstd-sys`'s bundled C a compiler that targets wasm32
 (`flake.nix` sets `CC_wasm32_unknown_unknown` for exactly that; the shell's
-`CC` is the host gcc). It is not in `scripts/push-gate.sh`, and cannot be until
-it is green: at `174cc2ee0` its last command fails, so no wasm32 build of the
-shipped client exists today.
+`CC` is the host gcc). Its last two commands build the client with the feature
+set `wasm-www/scripts/build-runtime.mjs` ships — `audio,multiplayer`, because a
+runtime without `multiplayer` exports ticket schema 0 and the stable shell
+refuses every invitation — once unthreaded and once threaded, the second adding
+`wasm-threads` with `-Zbuild-std=std,panic_abort` under
+`scripts/wasm-threads.cargo-config.toml`. Both are `cargo build`, not `cargo
+check`: a module that never links hides the link-argument contract the threaded
+runtime depends on. What is proved is compilation at `wasm-dev`; the published
+`wasm-release` module (fat LTO, `wasm-opt`) is built and checked for its shared
+memory import by `build-runtime.mjs` itself and is not gated here.
 
-```sh
-cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown \
-  -p robin_rs --bin robin --no-default-features
-# error[E0433]: cannot find `bug_bundle` in the crate root
-#   --> crates/robin_rs/src/game_session/report.rs:29:27
-```
-
-All six of its errors are in `crates/robin_rs/src/game_session/report.rs`, which
-calls `crate::bug_bundle`, `crate::bug_report`, `crate::crash` and
-`crate::diagnostic_context` — modules that `lib.rs:28-37` gates
-`#[cfg(not(target_arch = "wasm32"))]`. A gated suite that is red stops every
-landing, so the module is fixed first; when this command compiles, `wasm` joins
-the `crates_changed` suites in `scripts/push-gate.sh` and this paragraph goes.
+The client module this gate compiles is the browser guest's whole game, so a
+desktop-only module that a browser path reaches breaks a shipped artifact while
+every native suite stays green — which is how `game_session/report.rs` landed
+red. Modules that exist only off wasm32 are declared that way in `lib.rs` and
+their call sites are gated the same way, never made to compile by ungating the
+module for the browser.
 The separate browser-audio gate runs
 synthetic browser tests, not full-game browser rendering or audible-output
 acceptance. Native-lifecycle is a local

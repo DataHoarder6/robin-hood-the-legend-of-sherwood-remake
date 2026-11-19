@@ -82,7 +82,9 @@ printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_change
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    suites+=(format client-release)
+    # `wasm` is the only suite that compiles the browser client; a desktop-only
+    # module on a browser path is invisible to every native suite.
+    suites+=(format client-release wasm)
 fi
 if [ "$engine_changed" = 1 ]; then
     suites+=(engine)

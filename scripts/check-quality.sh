@@ -61,6 +61,13 @@ case "$1" in
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_identity_signer --bin leaderboard_identity_bridge --features identity-signer-bridge
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_replay_admission_wasm
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features
+        # The artifact a browser guest joins with: `wasm-www/scripts/build-runtime.mjs`
+        # ships `audio,multiplayer` (a runtime without multiplayer exports ticket
+        # schema 0, so the stable shell refuses every invitation) and its threaded
+        # plan adds `wasm-threads`, whose std has to be rebuilt with atomics.
+        # Build, not check: only a link exercises the threaded link arguments.
+        cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features --features audio,multiplayer
+        cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_rs --bin robin --no-default-features --features audio,multiplayer,wasm-threads
         ;;
     browser-audio|native-lifecycle)
         # This delegated gate is the entire suite. Do not retain a suspended

@@ -109,14 +109,19 @@ returned `Option<String>` where the shared call site wraps the native `String`
 in `Some` — and it is fixed in the same change; a
 `cargo check --features audio,multiplayer` now passes.
 
-**Since then.** `fork/main` `174cc2ee0` fails the same third command again, for a
-different reason: `crates/robin_rs/src/game_session/report.rs` calls
+**Since then.** `fork/main` `174cc2ee0` failed the same third command again, for a
+different reason: `crates/robin_rs/src/game_session/report.rs` called
 `crate::bug_bundle`, `crate::bug_report`, `crate::crash` and
-`crate::diagnostic_context`, which `lib.rs` defines only off wasm32. The two
-errors recorded above are gone; the target is still red, so `docs/TESTING.md`
-owns the gate's state and this file stops at the compiler setup.
+`crate::diagnostic_context`, which `lib.rs` defines only off wasm32. That module
+and its one call site in `game_session/flow.rs` are now gated the same way, and
+the suite's last two commands build the client with the features
+`wasm-www/scripts/build-runtime.mjs` ships — `audio,multiplayer`, then the
+threaded plan with `-Zbuild-std` — so a desktop-only module on a browser path
+fails a gate instead of a release. `docs/TESTING.md` owns the gate's contents.
 
-**Limit.** The suite is `cargo check`: it compiles and archives the C but never
-links, so the object-format mistake above would survive a green run. The
-`cargo build` in this file is the check that catches it, and
-`wasm-www/scripts/build-runtime.mjs` is the linked production build.
+**Limit.** `cargo check` compiles and archives the C but never links, so an
+object-format mistake would survive it. The `cargo build` this file records is
+what catches that, and it is the suite's last two commands now;
+`wasm-www/scripts/build-runtime.mjs` remains the linked production build, and it
+alone checks the threaded module's shared memory import — `wasm-objdump` is not
+in the devShell.
