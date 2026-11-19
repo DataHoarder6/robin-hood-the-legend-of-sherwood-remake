@@ -100,7 +100,7 @@ fn installed() -> Option<Install> {
 
 /// Version line of this binary: the package version plus the commit the build
 /// script stamped in, the same string `--version` prints.
-fn version() -> &'static str {
+pub(crate) fn version() -> &'static str {
     crate::version::CLI_VERSION
 }
 
@@ -224,7 +224,7 @@ fn gather() -> Evidence {
 
 /// The evidence file the `/state` document names under `observability`, if it
 /// names one. `/state` writes `null` when a path does not exist.
-fn evidence_path(document: &Option<Value>, key: &str) -> Option<PathBuf> {
+pub(crate) fn evidence_path(document: &Option<Value>, key: &str) -> Option<PathBuf> {
     let path = document.as_ref()?.get("observability")?.get(key)?;
     path.as_str().map(PathBuf::from)
 }
@@ -233,7 +233,7 @@ fn evidence_path(document: &Option<Value>, key: &str) -> Option<PathBuf> {
 ///
 /// Whole-file reads are pointless here: the last lines are exactly where the
 /// crash is, and the hook must stay fast and allocation-bounded.
-fn tail(path: &Path, lines: usize) -> Result<String> {
+pub(crate) fn tail(path: &Path, lines: usize) -> Result<String> {
     let mut file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let length = file.metadata()?.len();
     let start = length.saturating_sub(TAIL_BYTES);
@@ -303,11 +303,11 @@ fn write_bundle(install: &Install, info: &std::panic::PanicHookInfo<'_>) -> Resu
     Ok(directory)
 }
 
-fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::write(path, bytes).with_context(|| format!("write {}", path.display()))
 }
 
-fn write_json(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn write_json(path: &Path, value: &Value) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value)?;
     write(path, &bytes)
 }
@@ -328,7 +328,7 @@ pub(crate) fn fingerprint_of(location: Option<&str>, version: &str) -> String {
 }
 
 /// `YYYYMMDDTHHMMSSZ`: sorts as time, survives every filesystem.
-fn utc_stamp() -> String {
+pub(crate) fn utc_stamp() -> String {
     jiff::Timestamp::now()
         .strftime("%Y%m%dT%H%M%SZ")
         .to_string()
@@ -341,32 +341,40 @@ fn utc_stamp() -> String {
 /// place. It gets no stdin and no output, and its own process group, so a
 /// terminal signal sent to the game's process group cannot kill the upload.
 fn spawn_uploader(directory: &Path) {
-    #[cfg(test)]
-    {
-        // A test's crash happens in a child test process the test cannot
-        // inspect from outside, and no test may reach the network: record the
-        // request beside the bundle instead of executing it.
-        let _ = std::fs::write(
-            directory.join(SPAWN_MARKER),
-            format!("{UPLOAD_ARGUMENT} {}\n", directory.display()),
-        );
-    }
-    #[cfg(not(test))]
-    if let Err(error) = spawn(directory) {
+    if let Err(error) = spawn_upload_child(UPLOAD_ARGUMENT, directory) {
         // The process is already dying; stderr is the only channel left.
         report_failure("cannot start the crash uploader", error);
     }
+}
+
+/// Start this executable as an upload child for one bundle directory.
+///
+/// One child mode per bundle kind: `argument` names the hidden CLI flag the
+/// binary dispatches on. In a test the child is recorded beside the bundle
+/// instead, because a test's bundle lives in a child process and no test may
+/// reach the network.
+pub(crate) fn spawn_upload_child(argument: &str, directory: &Path) -> Result<()> {
+    #[cfg(test)]
+    {
+        let _ = std::fs::write(
+            directory.join(SPAWN_MARKER),
+            format!("{argument} {}\n", directory.display()),
+        );
+        Ok(())
+    }
+    #[cfg(not(test))]
+    detached(argument, directory)
 }
 
 #[cfg(test)]
 const SPAWN_MARKER: &str = "upload-requested.txt";
 
 #[cfg(not(test))]
-fn spawn(directory: &Path) -> Result<()> {
+fn detached(argument: &str, directory: &Path) -> Result<()> {
     let executable = std::env::current_exe().context("locate this executable")?;
     let mut command = std::process::Command::new(executable);
     command
-        .arg(UPLOAD_ARGUMENT)
+        .arg(argument)
         .arg(directory)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
