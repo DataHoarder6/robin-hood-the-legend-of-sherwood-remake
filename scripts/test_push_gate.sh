@@ -71,5 +71,29 @@ run_gate
 expect_status 0 'a clean tree with no gated path changes passes'
 expect_contains 'the pass says no suite was selected' 'no gated path changed'
 
+# A crates/ change selects the suites that compile it, and `wasm` is the only
+# one that compiles the browser client: the artifact a guest joins with was red
+# for a whole change while every native suite stayed green. The build host is
+# not reachable here, so the stub records the selection instead.
+mkdir -p crates/example
+printf '[package]\nname = "example"\nversion = "0.0.0"\n' >crates/example/Cargo.toml
+cat >scripts/remote-check.sh <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >"$GATE_SUITES"
+STUB
+chmod +x scripts/remote-check.sh
+git add crates/example/Cargo.toml scripts/remote-check.sh
+git commit --quiet -m crates
+crates_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$head" "$crates_head" 2>&1) || status=$?
+expect_status 0 'a crates change runs the suites its diff selects'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites format client-release wasm tooling' ]; then
+    pass 'the crates change selects wasm, the suite that compiles the browser client'
+else
+    fail "the crates change selects wasm (selected '$selected')"
+fi
+
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
