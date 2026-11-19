@@ -6,6 +6,10 @@ doctor:
 reconcile-main:
     scripts/reconcile-main.sh
 
+# Retire the worktrees a merge already finished; `--apply` removes them.
+prune-worktrees *args:
+    scripts/prune-worktrees.sh {{args}}
+
 # Named gates from scripts/check-quality.sh; `tooling` is the fixture-free one.
 check suite="tooling":
     bash scripts/check-quality.sh {{suite}}

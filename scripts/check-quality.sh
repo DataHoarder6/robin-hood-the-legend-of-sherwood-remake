@@ -168,6 +168,7 @@ case "$1" in
         bash scripts/test_release.sh
         bash scripts/test_doctor.sh
         bash scripts/test_reconcile_main.sh
+        bash scripts/test_prune_worktrees.sh
         bash scripts/test_land.sh
         bash scripts/test_push_gate.sh
         bash scripts/test_build_host.sh

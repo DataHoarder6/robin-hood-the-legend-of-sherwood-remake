@@ -23,6 +23,22 @@ git worktree add .worktrees/my-change -b my-change fork/main
 `main`, so run `just doctor` in the shared checkout first: a drifted or dirty
 `main` would fork the drift.
 
+## "A merged worktree is still 400 MB"
+
+Symptom: `.worktrees/` holds every branch ever opened, the disk fills with
+trees whose work already landed, and `git branch` stops telling work in
+progress from history.
+
+Rule: a worktree is retired when its branch is merged into the integration
+ref, its tree is clean, it is not detached, no build runs inside it, and it is
+neither the shared checkout nor the one you are running from. Everything else
+is a decision — land it or abandon it — and the plan names which.
+
+```sh
+just prune-worktrees            # plan: remove/keep, with a reason per worktree
+just prune-worktrees --apply    # remove the planned trees and their branches
+```
+
 ## "git cherry says those commits are not upstream, but they are"
 
 Rule: `git cherry -v fork/main main` prefixes a commit with `-` when its patch
@@ -169,6 +185,9 @@ bash scripts/check-quality.sh format   # cargo fmt --all -- --check
 | `detached-unique` | a detached `HEAD` holds commits no branch or remote contains |
 | `disk-low` | free space is below the floor |
 | `target-size`, `archive-duplicate`, `worktree-stale`, `no-integration-ref` | reported, never fatal |
+
+`worktree-stale` is the one finding with a command of its own: `just
+prune-worktrees` acts on it, `doctor` only reports it.
 
 `--quiet` prints only failures, for a CI or manual gate. The repo's
 `.githooks/pre-push` does not call it on purpose: a dirty shared checkout is a
