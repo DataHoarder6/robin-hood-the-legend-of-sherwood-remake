@@ -330,6 +330,8 @@ struct SoundRuntime {
     dialog_finished: bool,
     has_dialog: bool,
     stop_dialog: bool,
+    narration_finished: bool,
+    has_narration: bool,
     pending_jingle: Option<Jingle>,
 }
 
@@ -387,6 +389,7 @@ impl SoundManager {
             },
             runtime: SoundRuntime {
                 dialog_finished: true,
+                narration_finished: true,
                 ..SoundRuntime::default()
             },
         }
@@ -1161,6 +1164,41 @@ impl SoundManager {
         }
     }
 
+    /// Play a narration clip on the music stream without entering dialogue
+    /// mode. Popup narration is not dialogue: it must not set `has_dialog`,
+    /// which the dialogue modal polls to advance its sentences.
+    pub fn play_narration(&mut self, file_path: &str, backend: &mut dyn AudioBackend) {
+        if !self.persisted.sound_system_ready {
+            return;
+        }
+
+        backend.halt_music();
+        self.runtime.has_mission_music = false;
+        self.runtime.narration_finished = true;
+
+        if backend.play_music(file_path, false) {
+            backend.set_music_volume(self.persisted.geometry_engine.get_volume_for_dialogue() / 2);
+            self.runtime.narration_finished = false;
+            self.runtime.has_narration = true;
+        }
+    }
+
+    pub fn close_narration(&mut self, backend: &mut dyn AudioBackend) {
+        if self.persisted.sound_system_ready {
+            backend.halt_music();
+            self.runtime.has_narration = false;
+            self.runtime.narration_finished = true;
+        }
+    }
+
+    pub fn is_narration_finished(&self) -> bool {
+        if self.persisted.sound_system_ready {
+            self.runtime.narration_finished
+        } else {
+            true
+        }
+    }
+
     pub fn close_dialog(&mut self, backend: &mut dyn AudioBackend) {
         if self.persisted.sound_system_ready {
             backend.halt_music();
@@ -1319,3 +1357,37 @@ mod tests;
 mod channels;
 use channels::*;
 mod exclamations;
+
+/// Owns at most one narration clip for a screen: starts it once, halts it when
+/// the screen is dismissed.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct NarrationLane {
+    started: bool,
+}
+
+impl NarrationLane {
+    /// Start the clip at most once. A second call on the same screen is a
+    /// no-op, so a per-tick caller cannot restart the audio.
+    pub(crate) fn begin(
+        &mut self,
+        path: Option<&str>,
+        sound: &mut SoundManager,
+        backend: &mut dyn AudioBackend,
+    ) {
+        if self.started {
+            return;
+        }
+        let Some(path) = path else {
+            return;
+        };
+        self.started = true;
+        sound.play_narration(path, backend);
+    }
+
+    /// Halt the clip if this lane started one.
+    pub(crate) fn end(&mut self, sound: &mut SoundManager, backend: &mut dyn AudioBackend) {
+        if std::mem::take(&mut self.started) {
+            sound.close_narration(backend);
+        }
+    }
+}

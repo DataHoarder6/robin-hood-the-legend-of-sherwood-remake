@@ -908,6 +908,19 @@ pub(super) fn start_active_popup_scroll_batch(
             .as_mut()
             .expect("checked above")
             .picture_from(ctx.renderer, text_res, picture_id);
+        let narration_path =
+            if text_res.has_resource(robin_assets::resource_manager::NARRATION_WAVE_TABLE) {
+                usize::try_from(text_id)
+                    .ok()
+                    .and_then(|index| {
+                        text_res
+                            .get_sample(robin_assets::resource_manager::NARRATION_WAVE_TABLE, index)
+                            .ok()
+                    })
+                    .map(str::to_owned)
+            } else {
+                None
+            };
         let kind = engine_player_command::ModalKind::PopupText { text_id };
         let replay_result = None;
         pending.push_back(PopupScrollItem {
@@ -918,6 +931,7 @@ pub(super) fn start_active_popup_scroll_batch(
             body_font_name: None,
             align: TextAlign::Justified,
             universal_frame,
+            narration_path,
             replay_result,
         });
     }
@@ -957,6 +971,7 @@ pub(super) fn start_active_sherwood_report(
         body_font_name: Some("Debrief".to_string()),
         align: TextAlign::Left,
         universal_frame: engine.frame_counter(),
+        narration_path: None,
         replay_result,
     };
 
@@ -1358,6 +1373,7 @@ pub(super) async fn drain_pending_popup_scroll(
                 body_font_name: None,
                 align: TextAlign::Justified,
                 universal_frame,
+                narration_path: None,
                 replay_result,
             };
             let result =
@@ -1423,6 +1439,7 @@ pub(super) async fn drain_pending_sherwood_stat(
                 body_font_name: Some("Debrief".to_string()),
                 align: TextAlign::Left,
                 universal_frame: engine.frame_counter(),
+                narration_path: None,
                 replay_result,
             };
             let result =

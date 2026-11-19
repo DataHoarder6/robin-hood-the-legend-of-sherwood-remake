@@ -128,6 +128,8 @@ fn persisted_projection_preserves_historical_wire_and_reconstructs_scratch() {
         has_dialog: true,
         stop_dialog: true,
         pending_jingle: Some(Jingle::MissionWon),
+        narration_finished: false,
+        has_narration: false,
     };
     let historical = HistoricalSoundManager {
         sound_cache: manager.persisted.sound_cache.clone(),
@@ -195,6 +197,8 @@ fn persisted_projection_preserves_historical_wire_and_reconstructs_scratch() {
         has_dialog: old_decoded.has_dialog,
         stop_dialog: old_decoded.stop_dialog,
         pending_jingle: old_decoded.pending_jingle,
+        narration_finished: false,
+        has_narration: false,
     };
     assert_eq!(
         empty_runtime,
@@ -358,6 +362,8 @@ struct MockBackend {
     ticks: u32,
     next_channel: i32,
     music_volume: u16,
+    music_plays: usize,
+    music_halts: usize,
 }
 
 impl MockBackend {
@@ -368,6 +374,8 @@ impl MockBackend {
             ticks: 0,
             next_channel: 0,
             music_volume: 0,
+            music_plays: 0,
+            music_halts: 0,
         }
     }
 }
@@ -401,9 +409,12 @@ impl AudioBackend for MockBackend {
     fn pause_channels(&mut self, _ch: i32) {}
     fn resume_channels(&mut self, _ch: i32) {}
     fn play_music(&mut self, _path: &str, _looping: bool) -> bool {
+        self.music_plays += 1;
         true
     }
-    fn halt_music(&mut self) {}
+    fn halt_music(&mut self) {
+        self.music_halts += 1;
+    }
     fn pause_music(&mut self) {}
     fn resume_music(&mut self) {}
     fn set_music_volume(&mut self, v: u16) {
@@ -673,4 +684,75 @@ fn listen_point_triggers_update() {
     mgr.runtime.update_pending_sounds = false;
     mgr.set_listen_point(MapPoint::new(100.0, 200.0), 1.0);
     assert!(mgr.runtime.update_pending_sounds);
+}
+
+#[test]
+fn narration_streams_on_the_music_channel_and_reports_finished() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    assert!(sound.is_narration_finished(), "idle narration is finished");
+
+    sound.play_narration("narration.ogg", &mut backend);
+    assert_eq!(backend.music_plays, 1);
+    assert!(!sound.is_narration_finished());
+
+    backend.music_finished_flag = true;
+    sound.hourglass(
+        &mut backend,
+        &|_| None,
+        &mut |_| 0,
+        AlertStatus::Green,
+        &robin_engine::sound_source::SoundSourceManager::new(),
+        &mut Vec::new(),
+    );
+    assert!(sound.is_narration_finished());
+}
+
+#[test]
+fn closing_narration_halts_the_stream() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    sound.play_narration("narration.ogg", &mut backend);
+    let halts_before = backend.music_halts;
+
+    sound.close_narration(&mut backend);
+    assert_eq!(backend.music_halts, halts_before + 1);
+    assert!(sound.is_narration_finished());
+}
+
+#[test]
+fn narration_lane_starts_at_most_once_and_stops_when_ended() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    let mut lane = NarrationLane::default();
+
+    lane.begin(Some("a.ogg"), &mut sound, &mut backend);
+    lane.begin(Some("a.ogg"), &mut sound, &mut backend);
+    assert_eq!(backend.music_plays, 1, "a second tick must not restart it");
+
+    let halts_before = backend.music_halts;
+    lane.end(&mut sound, &mut backend);
+    assert_eq!(backend.music_halts, halts_before + 1);
+    lane.end(&mut sound, &mut backend);
+    assert_eq!(
+        backend.music_halts,
+        halts_before + 1,
+        "ending an ended lane is a no-op"
+    );
+}
+
+#[test]
+fn narration_lane_without_a_clip_stays_silent() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    let mut lane = NarrationLane::default();
+
+    lane.begin(None, &mut sound, &mut backend);
+    assert_eq!(backend.music_plays, 0);
+    lane.end(&mut sound, &mut backend);
+    assert_eq!(backend.music_halts, 0);
 }

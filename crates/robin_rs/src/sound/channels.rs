@@ -170,7 +170,10 @@ impl SoundManager {
 
         // Check for music/dialog finished callbacks
         if backend.take_music_finished() {
-            if self.runtime.has_dialog {
+            if self.runtime.has_narration {
+                self.runtime.narration_finished = true;
+                self.runtime.has_narration = false;
+            } else if self.runtime.has_dialog {
                 self.runtime.dialog_finished = true;
                 self.runtime.stop_dialog = true;
             } else if self.runtime.has_mission_music {

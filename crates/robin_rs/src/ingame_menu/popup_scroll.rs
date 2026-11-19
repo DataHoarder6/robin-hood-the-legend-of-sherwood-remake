@@ -102,6 +102,9 @@ pub struct PopupScrollItem {
     pub body_font_name: Option<String>,
     pub align: TextAlign,
     pub universal_frame: u32,
+    /// Datadir-relative narration clip for this text id, when the installed
+    /// language pack carries one.
+    pub narration_path: Option<String>,
     /// When present, `show_popup_scroll` short-circuits without
     /// opening a window — the replay path reproduces the recorded
     /// dismissal edge only.
@@ -195,6 +198,9 @@ pub struct PopupScrollModalState {
     noise_tracker: widget_bridge::NoisyTracker,
     dismissal: super::modal_net::ModalDismissalGate,
     waiting_message: Option<String>,
+    /// Clip this popup narrates, if the language pack carries one.
+    narration_path: Option<String>,
+    narration: crate::sound::NarrationLane,
 }
 
 impl PopupScrollModalState {
@@ -208,6 +214,7 @@ impl PopupScrollModalState {
             body_font_name,
             align,
             universal_frame,
+            narration_path,
             kind: _,
             replay_result: _,
         } = item;
@@ -267,6 +274,8 @@ impl PopupScrollModalState {
             noise_tracker: widget_bridge::NoisyTracker::new(),
             dismissal: super::modal_net::ModalDismissalGate::default(),
             waiting_message: None,
+            narration_path,
+            narration: crate::sound::NarrationLane::default(),
         };
         state.rebuild_page_widgets();
         state
@@ -275,7 +284,7 @@ impl PopupScrollModalState {
     pub fn tick(
         &mut self,
         io: &mut ModalScreenIo<'_, '_>,
-        audio: ScreenAudio<'_>,
+        mut audio: ScreenAudio<'_>,
         modal_net: Option<&super::ModalNet<'_>>,
     ) -> Option<DialogResult> {
         let mut dismissed = false;
@@ -301,13 +310,19 @@ impl PopupScrollModalState {
         } else {
             ScreenFrame::dispatch(&mut self.input_state, &mut self.frame)
         };
+        if let (Some(sound), Some(backend)) =
+            (audio.sound.as_deref_mut(), audio.backend.as_deref_mut())
+        {
+            self.narration
+                .begin(self.narration_path.as_deref(), sound, backend);
+        }
         // Popups observe the noise tracker only with a live backend.
         if audio.backend.is_some() {
             widget_bridge::play_frame_widget_noise(
                 &events,
                 &self.frame,
                 widget_bridge::WIDGET_NOISY_BUTTON,
-                audio,
+                audio.reborrow(),
                 &mut self.noise_tracker,
             );
         }
@@ -327,6 +342,7 @@ impl PopupScrollModalState {
         self.render(io, &screen);
 
         if let Some(result) = remote_result {
+            self.stop_narration(&mut audio);
             return Some(self.finish(result));
         }
         if dismissed {
@@ -335,6 +351,7 @@ impl PopupScrollModalState {
                 self.rebuild_page_widgets();
                 return None;
             }
+            self.stop_narration(&mut audio);
             let result = DialogResult::Completed;
             return self
                 .dismissal
@@ -342,6 +359,15 @@ impl PopupScrollModalState {
                 .map(|result| self.finish(result));
         }
         None
+    }
+
+    /// Halt the narration clip when the popup closes.
+    fn stop_narration(&mut self, audio: &mut ScreenAudio<'_>) {
+        if let (Some(sound), Some(backend)) =
+            (audio.sound.as_deref_mut(), audio.backend.as_deref_mut())
+        {
+            self.narration.end(sound, backend);
+        }
     }
 
     fn rebuild_page_widgets(&mut self) {
