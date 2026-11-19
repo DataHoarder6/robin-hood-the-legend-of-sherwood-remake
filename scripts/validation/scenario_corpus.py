@@ -59,7 +59,7 @@ SCENARIO_DIRECTORY = ROOT / "scripts/validation/scenarios"
 HARNESS = ROOT / "docs/multiplayer/HARNESS.md"
 GAME_OPERATION = ROOT / "crates/robin_engine/src/game_operation.rs"
 
-SCHEMA = 1
+SCHEMA = 2
 
 # Section 1: the three layers and the five barriers a scenario may name.
 LAYERS = ("core", "transport", "process")
@@ -106,6 +106,9 @@ EXPECT_FIELDS = {
     "exit": ({"peers", "status"}, set()),
     "count": ({"subject", "name", "times"}, set()),
     "seat": ({"seat"}, {"selected", "owns"}),
+    # Each named seat has been through `count` distinct missions in this run and
+    # they are on the same one now: one host-owned campaign, not two saves.
+    "mission": ({"peers", "count"}, set()),
 }
 COUNT_SUBJECTS = ("barrier", "transition", "operation", "reconnect")
 
@@ -121,7 +124,7 @@ RUST_CRATES = {"core": frozenset({"robin_engine", "robin_rs"}),
 PROCESS_RUNNER = "scripts/validation/multiplayer_e2e.py"
 
 DEFAULTS_FIELDS = {"schema", "mission", "seed", "expected_players", "peer_count"}
-SCENARIO_FIELDS = {"schema", "id", "extends", "proves", "peers", "faults", "expect", "requires", "budget_s"}
+SCENARIO_FIELDS = {"schema", "id", "extends", "proves", "peers", "faults", "expect", "requires", "budget_s", "campaign"}
 PEER_FIELDS = {"seat", "role", "start", "timeline"}
 TIMELINE_FIELDS = {"at", "command"}
 AT_FIELDS = {"frame"}
@@ -204,6 +207,9 @@ def canonical(expectation):
         return "seat(" + ",".join(fields) + ")"
     if verb == "exit":
         return f"exit(peers={seats(expectation['peers'])},status={expectation['status']})"
+    if verb == "mission":
+        return (f"mission(peers={seats(expectation['peers'])},"
+                f"count={expectation['count']})")
     raise ContractError(f"no canonical token for assertion {verb!r}")
 
 
@@ -509,6 +515,8 @@ class Checker:
             self.fail(where, "extends must be a scenario id")
         if "budget_s" in document and not _is_int(document["budget_s"], 1):
             self.fail(where, "budget_s must be a positive integer")
+        if "campaign" in document and not isinstance(document["campaign"], bool):
+            self.fail(where, "campaign must be a boolean")
         if "requires" in document:
             required = document["requires"]
             if not isinstance(required, list) or any(item not in REQUIRES for item in required):
@@ -720,6 +728,10 @@ class Checker:
                     self.fail(at, "count must name what it counts")
                 if not _is_int(expectation["times"], 0):
                     self.fail(at, "times must be a non-negative integer")
+            elif verb == "mission":
+                self.seats(f"{at}.peers", expectation["peers"], seats)
+                if not _is_int(expectation["count"], 1):
+                    self.fail(at, "count must be a positive integer")
             elif verb == "seat":
                 self.seats(f"{at}.seat", [expectation["seat"]], seats)
                 if not ({"selected", "owns"} & set(expectation)):
@@ -866,6 +878,8 @@ def expanded(identifier, scenarios, defaults, contract):
         "faults": document.get("faults", []),
         "expect": [item for step in order for item in scenarios[step][1].get("expect", [])],
     }
+    if document.get("campaign"):
+        result["campaign"] = True
     if "proves" in document:
         result["proves"] = document["proves"]
     if "requires" in document:

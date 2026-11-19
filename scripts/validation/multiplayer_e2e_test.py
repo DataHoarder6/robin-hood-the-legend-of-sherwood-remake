@@ -43,7 +43,7 @@ class SelectionTest(unittest.TestCase):
         process = {identifier for identifier, (_, document) in self.scenarios.items()
                    if document["proves"]["layer"] == "process"}
         self.assertEqual(set(self.run) | {item["id"] for item in self.refused}, process)
-        self.assertEqual({"H12", "H14", "H19"}, process)
+        self.assertEqual({"H12", "H14", "H19", "H30"}, process)
         for item in self.skipped:
             self.assertNotIn(item["id"], process)
 
@@ -278,6 +278,55 @@ class AssertionTest(unittest.TestCase):
             suite.evaluate_expectation(
                 {"assert": "transition", "payload": "Save", "acked": [0, 1], "committed": True},
                 self.record({}))
+
+
+class MissionTest(unittest.TestCase):
+    """`mission` counts the maps a seat entered and demands the seats agree."""
+
+    def record(self, maps, latest=None):
+        trace = [({"seat": seat, "role": "host" if seat == 0 else "client"},
+                  {"map": name, "multiplayer": {}})
+                 for seat, names in maps.items() for name in names]
+        current = latest if latest is not None else {
+            seat: {"map": names[-1]} for seat, names in maps.items() if names}
+        return {"texts": {}, "peers": [{"seat": 0, "role": "host"},
+                                       {"seat": 1, "role": "client"}],
+                "trace": trace, "statuses": {}, "latest": current}
+
+    def test_both_seats_entered_both_missions_together(self):
+        record = self.record({0: ["Lin", "Lin", "Sherwood"], 1: ["Lin", "Sherwood"]})
+        ok, detail, observed = suite.evaluate_expectation(
+            {"assert": "mission", "peers": [0, 1], "count": 2}, record)
+        self.assertTrue(ok, detail)
+        self.assertEqual(observed["entered"], {0: 2, 1: 2})
+
+    def test_a_repeated_map_is_one_mission(self):
+        record = self.record({0: ["Lin", "Lin"], 1: ["Lin", "Lin"]})
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "mission", "peers": [0, 1], "count": 2}, record)
+        self.assertFalse(ok)
+        self.assertIn("entered {0: 1, 1: 1}", detail)
+
+    def test_a_seat_left_behind_fails_the_handoff(self):
+        record = self.record({0: ["Lin", "Sherwood"], 1: ["Lin"]})
+        ok, _, _ = suite.evaluate_expectation(
+            {"assert": "mission", "peers": [0, 1], "count": 2}, record)
+        self.assertFalse(ok)
+
+    def test_two_installs_on_two_saves_are_not_one_campaign(self):
+        record = self.record({0: ["Lin", "Sherwood"], 1: ["Lin", "Barnsdale"]})
+        ok, detail, observed = suite.evaluate_expectation(
+            {"assert": "mission", "peers": [0, 1], "count": 2}, record)
+        self.assertFalse(ok)
+        self.assertEqual(observed["current"], {0: "Sherwood", 1: "Barnsdale"})
+        self.assertIn("now on", detail)
+
+    def test_a_seat_that_never_reported_a_map_has_entered_nothing(self):
+        record = self.record({0: ["Lin", "Sherwood"]})
+        ok, _, observed = suite.evaluate_expectation(
+            {"assert": "mission", "peers": [0, 1], "count": 1}, record)
+        self.assertFalse(ok)
+        self.assertEqual(observed["entered"][1], 0)
 
 
 class HashCadenceTest(unittest.TestCase):

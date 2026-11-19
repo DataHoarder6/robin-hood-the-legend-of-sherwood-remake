@@ -60,6 +60,22 @@ Map transfer is retry's outer-mission rebuild
   `expected_players - 1` peers, so no seat budget is left; it becomes expressible
   when #25 releases the start barrier without every expected seat.
 
+A campaign is not one of these transitions: it is the dimension that decides how
+many of them a session has. One host-owned campaign is a *session* over its
+missions (`crates/robin_rs/src/game_session/mod.rs`), so a mission end hands the
+whole party to the next mission instead of ending the session and leaving each
+install to write its own save. H30 is its baseline: a host that advertises a
+campaign — the listing says `campaign` and the fixed party size, and no roster —
+and a second seat from its own install that joins it with no local save, both
+then running the same mission at equal hashes. Its failure cells are the ordinary ones — a drop
+before or after a mission-end commit is H13/H14, a reconnect during one is H07 —
+so the row adds no column to the matrix. The mission-end handoff itself has no
+process row yet: ending a live mission from outside needs a rollback-safe
+mission-end command and the two-seat debriefing acknowledgement, which the
+terminal matrix rows (H21-H27) own; until they land, the handoff is stated by
+the session route (`crates/robin_rs/src/game_session/mod.rs:run_session_body`)
+and its unit tests rather than by a process row.
+
 ### Corpus
 
 `baseline` runs first in every scenario of its row; `fault` is the cell's own
@@ -88,6 +104,7 @@ case; `invariant` and `vocabulary` are not cells.
 | H19 | process | fault | host exit with a seat admitted — the kill is anchored on the monotonic `begin_sim_frame`, the only fact that says the seat was admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row. asserts: `log(contains=giving up on reconnection,count=1)`; `exit(peers=1,status=nonzero)` | `.../multiplayer/client_session.rs` |
 | H20 | core | fault | a prepare whose commit frame is lost with the transport generation that received it never suppresses the replacement mission: the peer adopts the replacement snapshot, and a fresh `BeginSim` releases it to `running` (the #43 deadlock). asserts: `barrier(name=snapshot-adopt,state=reached)`; `barrier(name=begin-sim,state=released)` | `story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim` |
 | H21 | core | invariant | the `modal-ack` barrier counts only seats in this session's simulation: a page drawn while a roster seat is still waiting for `BeginSim` completes on the host's decision, and a seat the start barrier released before the page closed still owes an answer. asserts: `barrier(name=modal-ack,state=released)` | `story_regression::a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim` + `a_page_awaits_a_seat_released_into_the_mission` |
+| H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=0,1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
 row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
@@ -114,7 +131,8 @@ out-of-scope reason is one line with a code pointer.
 One file per scenario in a corpus directory that #16 creates, plus
 `defaults.json` (mission, seed, `expected_players`, peer count). A scenario is
 deltas and fixed verbs: a new verb bumps `schema` and changes the runner, never a
-scenario.
+scenario. Schema 2 added the campaign dimension (`campaign`) and one assertion
+(`mission`); every schema 1 row is unchanged in meaning.
 
 The corpus file `H13.json` is the worked example: a transport row, its prover,
 one fault and two assertions.
@@ -139,6 +157,12 @@ be the layer section 1 gives the row, and a `log` or `exit` assertion (or
 `requires: ["graphical"]`) belongs only to a `process` row: those are the
 assertions no Rust test makes, so a row that needs one is proved by the suite.
 
+`campaign: true` on a scenario is the host's launch being a campaign
+(`--mp-campaign`): one session over the campaign's missions, a fixed party, and
+no local save on the joining seat. Only the host names it — a joiner learns the
+campaign from the lobby it joined, which is what lets a second seat join a
+campaign it has no save for.
+
 `extends` runs the parent's `expect` list first: composition, not copying. `at`
 is `{"frame": N}` in the issuing peer's numbering or `{"barrier": name,
 "after": n}`; `peers[].start` is `"launch"`, `{"join_at_frame": N}` or
@@ -148,8 +172,8 @@ needs one is refused by name and the suite fails until it exists.
 `expect[].assert` is `hash-equal`, `hash-diverged`, `barrier`
 (`reached|released|absent`), `transition`, `transition-id-equal`, `modal`, `log`
 (`contains|absent`, and exactly one of `count` or `at_least`), `final-operation`
-(a `GameCode::wire_name` from `crates/robin_engine/src/game_operation.rs`), `count` or
-`exit`. Transition ids are generated per run, so `transition-id-equal` compares
+(a `GameCode::wire_name` from `crates/robin_engine/src/game_operation.rs`), `count`,
+`mission` or `exit`. Transition ids are generated per run, so `transition-id-equal` compares
 peers instead of pinning one. `count` on a log line is exact; `at_least` is its
 floor, for a line printed once per retry — a refused handshake prints its reason
 on every attempt, so that line's exact number is a retry schedule, not a
@@ -173,7 +197,11 @@ reading log wording: `{"assert": "count", "subject": "barrier"|"transition"|
 selection or a refused late joiner is asserted. `exit` states how a seat's
 process ended — `zero`, `nonzero`, or `running`, the last being a peer still
 there, which is how a row says the host survived a fault: `/state` samples stop
-when the process does, so they cannot on their own.
+when the process does, so they cannot on their own. `mission` states how many
+missions each named seat has entered and that they are together: `{"assert":
+"mission", "peers": [0, 1], "count": 1}`, where a mission is one distinct
+`/state.map` the seat was in, so two installs on two saves fail it even when
+each one played two missions.
 
 | verb | core | transport | process |
 | --- | --- | --- | --- |

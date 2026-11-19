@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "H11",
   "proves": { "layer": "transport", "tests": [
       "robin_rs::multiplayer::transport::native::peer_sessions::tests::ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner",

@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "H09",
   "proves": { "layer": "core", "tests": [
       "robin_rs::game_session::multiplayer::story_regression::modal_session_delayed_surface_and_delivery_matrix"

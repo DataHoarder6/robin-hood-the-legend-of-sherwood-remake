@@ -36,7 +36,7 @@ TRANSPORT_CONTRACT = corpus.Contract(
     asserts={**CONTRACT.asserts, "H03": CONTRACT.asserts["H01"]},
 )
 DEFAULTS = {
-    "schema": 1,
+    "schema": corpus.SCHEMA,
     "mission": "H01_Lin_VL",
     "seed": 0,
     "expected_players": 2,
@@ -48,7 +48,7 @@ PROVES = {"layer": "core", "tests": CORE_TESTS}
 
 
 def scenario(identifier, **fields):
-    document = {"schema": 1, "id": identifier, "proves": PROVES, "peers": PEERS,
+    document = {"schema": corpus.SCHEMA, "id": identifier, "proves": PROVES, "peers": PEERS,
                 "expect": PROVEN}
     document.update(fields)
     return document

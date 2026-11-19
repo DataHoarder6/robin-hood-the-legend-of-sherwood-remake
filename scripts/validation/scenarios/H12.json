@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "H12",
   "proves": { "layer": "process", "runner": "scripts/validation/multiplayer_e2e.py" },
   "peers": [

@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "H02",
   "proves": { "layer": "core", "tests": [
       "robin_engine::engine::coop::tests::ownership_rules_and_disconnect"

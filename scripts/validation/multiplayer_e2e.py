@@ -160,7 +160,8 @@ CLIENT_PHASE_ORDER = (
 CLIENT_CONTENT_PHASE = "peer_waiting_for_snapshot"
 CLIENT_SNAPSHOT_PHASE = "peer_waiting_for_begin"
 RUNNING_PHASES = frozenset({"running"})
-POSITIVE_ASSERTIONS = frozenset({"exit", "barrier", "final-operation"})
+POSITIVE_ASSERTIONS = frozenset({"exit", "barrier", "final-operation", "mission",
+                                  "hash-equal"})
 # `exit` states a peer is gone: zero or nonzero. `running` states it is still
 # there, which is how a row says "the host survived this fault" — `/state`
 # evidence alone cannot, because the samples stop when the process does.
@@ -480,6 +481,30 @@ def evaluate_hash_diverged(expectation, record):
     return ok, f"hash divergence counted on seats {peers}: {observed}", observed
 
 
+def evaluate_mission(expectation, record):
+    """Each named seat has been through `count` missions and they are together.
+
+    `/state` reports the map the mission built, one map per mission, so a seat's
+    distinct maps are the missions it entered. The seats must also be on the
+    same one now: a session that handed the campaign to a second local save
+    would leave them on different missions, and a seat left behind would show
+    fewer maps than the others.
+    """
+    seats, count = expectation["peers"], expectation["count"]
+    maps = {seat: [] for seat in seats}
+    for peer, sample in record["trace"]:
+        if peer["seat"] in maps and sample.get("map"):
+            if sample["map"] not in maps[peer["seat"]]:
+                maps[peer["seat"]].append(sample["map"])
+    current = {seat: (record["latest"].get(seat) or {}).get("map") for seat in seats}
+    entered = {seat: len(maps[seat]) for seat in seats}
+    together = len(set(current.values())) == 1 and current[seats[0]] is not None
+    ok = all(value >= count for value in entered.values()) and together
+    detail = (f"missions for seats {seats}: entered {entered} of {count}; "
+              f"now on {current}; maps {maps}")
+    return ok, detail, {"entered": entered, "current": current, "maps": maps}
+
+
 def evaluate_expectation(expectation, record):
     """One `expect` entry against everything the run recorded."""
     verb = expectation["assert"]
@@ -495,6 +520,8 @@ def evaluate_expectation(expectation, record):
         return evaluate_hash_equal(expectation, record)
     if verb == "hash-diverged":
         return evaluate_hash_diverged(expectation, record)
+    if verb == "mission":
+        return evaluate_mission(expectation, record)
     raise Unprovable(f"assertion `{verb}` is not implemented at the process layer")
 
 
@@ -679,6 +706,11 @@ class Peer:
             argv += ["--server", "--mp-expected-players",
                      str(scenario.defaults["expected_players"]),
                      "--record", str(scenario.record_path)]
+            if scenario.expanded.get("campaign"):
+                # A campaign is one host-owned session: the host names it, and a
+                # joiner learns it from the lobby listing, never from its own
+                # flags, so a client needs no local campaign save.
+                argv += ["--mp-campaign"]
         else:
             argv += ["--connect", json.dumps(scenario.connect)]
         return argv
