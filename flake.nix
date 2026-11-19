@@ -102,6 +102,23 @@
             ]
             ++ runtimeLibs;
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
+
+            # `pkgs.gcc` above is in `packages`, so its setup hook exports
+            # CC=gcc/CXX=g++ into the shell and cc-rs (which builds zstd-sys's
+            # bundled C) honours CC for *every* target. A host gcc cannot
+            # target wasm32: it defines __linux__, so zstd's cover.c takes its
+            # _GNU_SOURCE qsort_r path, which the wasm shim's stdlib.h does not
+            # declare (`cover.c:332: implicit declaration of function
+            # 'qsort_r'`) — and even a compiling run would archive x86-64
+            # objects into the wasm crate. The per-target variables win over
+            # CC in cc-rs, so only wasm32 moves to clang, which cc-rs then
+            # invokes as `clang --target=wasm32-unknown-unknown`; there
+            # __linux__ is absent and zstd takes its C90 qsort fallback, which
+            # the same shim maps to rust_zstd_wasm_shim_qsort. Unwrapped on
+            # purpose: the nix clang wrapper injects host x86-64 flags
+            # (`-fzero-call-used-regs`) that a wasm32 compile rejects.
+            CC_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang";
+            CXX_wasm32_unknown_unknown = "${pkgs.llvmPackages.clang-unwrapped}/bin/clang++";
           };
         }
       );
