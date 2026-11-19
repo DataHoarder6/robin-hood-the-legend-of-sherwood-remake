@@ -190,8 +190,8 @@ needs one is refused by name and the suite fails until it exists.
 seats named by `peers` showed a terminal page (`shown`, optionally of a named
 `kind`) or showed one and left it (`gone`); a page that never appeared is not
 `gone`, so the assertion cannot pass for a session that skipped the debriefing.
-Transition ids are generated per run, so `transition-id-equal` compares
-peers instead of pinning one. `count` on a log line is exact; `at_least` is its
+Transition ids are generated per run, so `transition-id-equal` compares peers
+instead of pinning one. `count` on a log line is exact; `at_least` is its
 floor, for a line printed once per retry — a refused handshake prints its reason
 on every attempt, so that line's exact number is a retry schedule, not a
 contract.
