@@ -180,6 +180,9 @@ On first glance this looks pretty good and i think it's good for inspiration, bu
 
 I tried a few different approaches - starting with a layout SVG or a sketch, generating the image in tiles (this map is too detailed to generate one shot at full resolution), etc, but it's clear that it's not possible right now to create a new map for this game with only low-effort AI.
 
+The authoring route that avoids generated backgrounds, with the size limits and
+the plan: [NEW_MAP_FEASIBILITY](slop/NEW_MAP_FEASIBILITY.md).
+
 
 ## Existing 3D Models
 
