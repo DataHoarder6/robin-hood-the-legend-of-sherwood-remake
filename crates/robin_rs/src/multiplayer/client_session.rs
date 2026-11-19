@@ -142,14 +142,17 @@ pub(super) trait ClientTimer {
 }
 
 /// Deadlines of one platform. `None` means the phase is unbounded apart from
-/// cancellation.
+/// cancellation — never the whole of an attempt, because the reconnect budget
+/// is only read between attempts: an attempt without a deadline makes the
+/// budget unreachable and the loop permanent.
 pub(super) struct ClientTimings {
     /// Each Hello write and Welcome/offer read.
     pub(super) handshake_frame: Option<Duration>,
     /// One whole initial connect + Hello + Welcome attempt.
     pub(super) initial_attempt: Duration,
-    /// One whole reconnect attempt.
-    pub(super) reconnect_attempt: Option<Duration>,
+    /// One whole reconnect attempt: the handshake and the content prelude it
+    /// opened, capped further by whatever is left of [`Self::reconnect_budget`].
+    pub(super) reconnect_attempt: Duration,
     /// How long repeated reconnect attempts may continue after a drop.
     pub(super) reconnect_budget: Duration,
     pub(super) post_content_welcome: Duration,
@@ -374,17 +377,12 @@ async fn handshake<T: ClientTransport>(
 /// One bounded, cancellable handshake attempt; `None` when cancelled.
 async fn attempt_handshake<T: ClientTransport>(
     transport: &T,
-    timeout: Option<Duration>,
+    timeout: Duration,
 ) -> Option<Result<HandshakePrelude, MultiplayerError>> {
     let attempt = async {
-        match timeout {
-            None => handshake(transport).await,
-            Some(timeout) => with_timeout::<T::Timer, _>(timeout, handshake(transport))
-                .await
-                .unwrap_or_else(|()| {
-                    Err(MultiplayerError::timeout("multiplayer handshake", timeout))
-                }),
-        }
+        with_timeout::<T::Timer, _>(timeout, handshake(transport))
+            .await
+            .unwrap_or_else(|()| Err(MultiplayerError::timeout("multiplayer handshake", timeout)))
     };
     cancellable::<T::Timer, _>(transport.cancellation(), attempt).await
 }
@@ -398,8 +396,7 @@ async fn initial_handshake<T: ClientTransport>(
         if transport.cancellation().load(Ordering::Acquire) {
             return Err(MultiplayerError::Cancelled(T::CANCELLED.into()));
         }
-        let Some(attempt) = attempt_handshake(transport, Some(T::TIMINGS.initial_attempt)).await
-        else {
+        let Some(attempt) = attempt_handshake(transport, T::TIMINGS.initial_attempt).await else {
             return Err(MultiplayerError::Cancelled(T::CANCELLED.into()));
         };
         let error = match attempt {
@@ -612,18 +609,73 @@ async fn resolve_reconnect_prelude<T: ClientTransport>(
     }
 }
 
+/// One whole reconnect attempt under one deadline: the handshake and the
+/// content prelude that handshake opened belong to the same attempt, so the
+/// deadline covers both. Bounding only the handshake would leave the prelude's
+/// reads and writes outside every deadline, where the budget is not read and no
+/// later check can run.
+async fn attempt_reconnect<T: ClientTransport>(
+    transport: &T,
+    admitted: Option<&DistributedModOffer>,
+    deadline: Duration,
+) -> Option<Result<(ClientSession, WelcomeData), MultiplayerError>> {
+    let work = async {
+        let prelude = handshake(transport).await?;
+        resolve_reconnect_prelude::<T>(prelude, admitted).await
+    };
+    let attempt = async {
+        with_timeout::<T::Timer, _>(deadline, work)
+            .await
+            .unwrap_or_else(|()| {
+                Err(MultiplayerError::timeout(
+                    "reconnecting to the host",
+                    deadline,
+                ))
+            })
+    };
+    cancellable::<T::Timer, _>(transport.cancellation(), attempt).await
+}
+
 // ─── Connection lifecycle ────────────────────────────────────────
 
-/// The fatal timeout a dropped session publishes once its reconnect budget is
-/// spent. `None` while it may still retry, and for a session that never
-/// dropped — a live session has no budget open.
-fn reconnect_gave_up(
+/// What the reconnect loop may do next: one attempt with this deadline, or the
+/// named end of the session.
+enum ReconnectStep {
+    Attempt(Duration),
+    Spent(MultiplayerError),
+}
+
+/// One pass of the reconnect loop against the budget the drop opened.
+///
+/// The budget is a wall-clock cap on the whole loop, so an attempt is capped by
+/// whatever is left of it: a host that never returns ends the session at the
+/// budget, not one whole attempt after it. `started` is `None` while no budget
+/// is open — a live session, which has nothing to spend — and a whole attempt
+/// is then the right answer.
+fn reconnect_step(
     started: Option<web_time::Instant>,
     budget: Duration,
-) -> Option<MultiplayerError> {
-    started
-        .is_some_and(|started| started.elapsed() >= budget)
-        .then(|| MultiplayerError::timeout("reconnecting to the host", budget))
+    attempt: Duration,
+    host: &str,
+) -> ReconnectStep {
+    match started.map(|started| budget.saturating_sub(started.elapsed())) {
+        Some(remaining) if remaining.is_zero() => ReconnectStep::Spent(MultiplayerError::timeout(
+            format!("reconnecting to host {host}"),
+            budget,
+        )),
+        Some(remaining) => ReconnectStep::Attempt(attempt.min(remaining)),
+        None => ReconnectStep::Attempt(attempt),
+    }
+}
+
+/// Leave the session because the host did not come back in time.
+///
+/// The published fatal is the outcome, not the log: it is what the game loop
+/// turns into leaving the mission, and therefore what releases the
+/// `pause_simulation` that `reconnecting()` holds for the whole retry.
+fn give_up_on_reconnect(incoming: &Sender<NetEvent>, error: MultiplayerError) {
+    tracing::warn!(%error, "multiplayer: giving up on reconnection");
+    let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
 }
 
 /// Drive one connection: initial handshake and content admission, then each
@@ -735,6 +787,7 @@ pub(super) async fn run_client_io<T: ClientTransport>(
 
     let mut backoff = RECONNECT_BACKOFF;
     let mut reconnect_started: Option<web_time::Instant> = None;
+    let host = transport.server_addr().id.to_string();
     loop {
         match run_session(transport, session, outbound, &incoming).await {
             SessionEnd::Drop(reason) => {
@@ -747,13 +800,17 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                     );
                 }
                 // A drop opens the reconnect budget; a successful reconnect
-                // closes it.
+                // closes it. A budget already spent ends the session before the
+                // reconnect is announced, so the player never sees a
+                // "reconnecting" that cannot happen.
                 reconnect_started.get_or_insert_with(web_time::Instant::now);
-                if let Some(error) =
-                    reconnect_gave_up(reconnect_started, T::TIMINGS.reconnect_budget)
-                {
-                    tracing::warn!(%error, "multiplayer: giving up on reconnection");
-                    let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
+                if let ReconnectStep::Spent(error) = reconnect_step(
+                    reconnect_started,
+                    T::TIMINGS.reconnect_budget,
+                    T::TIMINGS.reconnect_attempt,
+                    &host,
+                ) {
+                    give_up_on_reconnect(&incoming, error);
                     return;
                 }
                 if deliver_lifecycle(
@@ -788,84 +845,88 @@ pub(super) async fn run_client_io<T: ClientTransport>(
             if transport.cancellation().load(Ordering::Acquire) {
                 return;
             }
-            let Some(attempt) = attempt_handshake(transport, T::TIMINGS.reconnect_attempt).await
+            let deadline = match reconnect_step(
+                reconnect_started,
+                T::TIMINGS.reconnect_budget,
+                T::TIMINGS.reconnect_attempt,
+                &host,
+            ) {
+                ReconnectStep::Attempt(deadline) => deadline,
+                ReconnectStep::Spent(error) => {
+                    give_up_on_reconnect(&incoming, error);
+                    return;
+                }
+            };
+            let Some(attempt) =
+                attempt_reconnect(transport, admitted_offer.as_ref(), deadline).await
             else {
                 return;
             };
-            let (failure_kind, error) = match attempt {
-                Ok(prelude) => {
-                    match resolve_reconnect_prelude::<T>(prelude, admitted_offer.as_ref()).await {
-                        Ok((new_session, welcome)) => {
-                            let WelcomeData {
-                                seat: new_seat,
+            match attempt {
+                Ok((new_session, welcome)) => {
+                    let WelcomeData {
+                        seat: new_seat,
+                        mission_id: new_mission_id,
+                        mission_seed: new_seed,
+                        sim_config: new_config,
+                        speech_timing_locale: new_speech_timing_locale,
+                        session_id: new_session_id,
+                    } = welcome;
+                    if let Err(error) = validate_reconnect_state(
+                        ReconnectIdentity {
+                            seat: your_seat,
+                            mission_id: &mission_id,
+                            seed: mission_seed,
+                            config: sim_config,
+                            speech_timing_locale: speech_timing_locale.as_deref(),
+                            session_id,
+                        },
+                        ReconnectIdentity {
+                            seat: new_seat,
+                            mission_id: &new_mission_id,
+                            seed: new_seed,
+                            config: new_config,
+                            speech_timing_locale: new_speech_timing_locale.as_deref(),
+                            session_id: new_session_id,
+                        },
+                    ) {
+                        let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
+                        return;
+                    }
+                    tracing::info!(?new_seat, seed = new_seed, "client reconnected");
+                    // Reconnect validation proved the published identity is unchanged.
+                    if deliver_lifecycle(
+                        &incoming,
+                        [
+                            NetEvent::Reconnected,
+                            NetEvent::AssignedLocalSeat(new_seat),
+                            NetEvent::MissionConfig {
                                 mission_id: new_mission_id,
-                                mission_seed: new_seed,
+                                rng_seed: new_seed,
                                 sim_config: new_config,
                                 speech_timing_locale: new_speech_timing_locale,
-                                session_id: new_session_id,
-                            } = welcome;
-                            if let Err(error) = validate_reconnect_state(
-                                ReconnectIdentity {
-                                    seat: your_seat,
-                                    mission_id: &mission_id,
-                                    seed: mission_seed,
-                                    config: sim_config,
-                                    speech_timing_locale: speech_timing_locale.as_deref(),
-                                    session_id,
-                                },
-                                ReconnectIdentity {
-                                    seat: new_seat,
-                                    mission_id: &new_mission_id,
-                                    seed: new_seed,
-                                    config: new_config,
-                                    speech_timing_locale: new_speech_timing_locale.as_deref(),
-                                    session_id: new_session_id,
-                                },
-                            ) {
-                                let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
-                                return;
-                            }
-                            tracing::info!(?new_seat, seed = new_seed, "client reconnected");
-                            // Reconnect validation proved the published identity is unchanged.
-                            if deliver_lifecycle(
-                                &incoming,
-                                [
-                                    NetEvent::Reconnected,
-                                    NetEvent::AssignedLocalSeat(new_seat),
-                                    NetEvent::MissionConfig {
-                                        mission_id: new_mission_id,
-                                        rng_seed: new_seed,
-                                        sim_config: new_config,
-                                        speech_timing_locale: new_speech_timing_locale,
-                                    },
-                                ],
-                            )
-                            .is_err()
-                            {
-                                return;
-                            }
-                            let discarded = T::discard_outbound(outbound);
-                            if discarded != 0 {
-                                tracing::warn!(
-                                    discarded,
-                                    "multiplayer: discarded commands queued while transport was reconnecting"
-                                );
-                            }
-                            backoff = RECONNECT_BACKOFF;
-                            reconnect_started = None;
-                            break new_session;
-                        }
-                        Err(error) => ("content handshake", error),
+                            },
+                        ],
+                    )
+                    .is_err()
+                    {
+                        return;
                     }
+                    let discarded = T::discard_outbound(outbound);
+                    if discarded != 0 {
+                        tracing::warn!(
+                            discarded,
+                            "multiplayer: discarded commands queued while transport was reconnecting"
+                        );
+                    }
+                    backoff = RECONNECT_BACKOFF;
+                    reconnect_started = None;
+                    break new_session;
                 }
-                Err(error) => ("transport", error),
-            };
-            if let Some(error) = reconnect_gave_up(reconnect_started, T::TIMINGS.reconnect_budget) {
-                tracing::warn!(%error, "multiplayer: giving up on reconnection");
-                let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
-                return;
+                Err(error) => {
+                    tracing::warn!("reconnect failed: {error}; will retry in {backoff:?}");
+                }
             }
-            tracing::warn!("reconnect {failure_kind} failed: {error}; will retry in {backoff:?}");
             if sleep_or_cancel::<T::Timer>(transport.cancellation(), backoff).await {
                 return;
             }
@@ -1020,23 +1081,98 @@ pub(super) mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn a_spent_reconnect_budget_ends_the_session_with_the_timeout() {
+        let host = "endpoint-under-test";
         assert!(
-            reconnect_gave_up(None, RECONNECT_BUDGET).is_none(),
+            matches!(
+                reconnect_step(None, RECONNECT_BUDGET, RECONNECT_BUDGET, host),
+                ReconnectStep::Attempt(_)
+            ),
             "a live session has no reconnect budget open"
         );
         assert!(
-            reconnect_gave_up(Some(web_time::Instant::now()), RECONNECT_BUDGET).is_none(),
+            matches!(
+                reconnect_step(
+                    Some(web_time::Instant::now()),
+                    RECONNECT_BUDGET,
+                    RECONNECT_BUDGET,
+                    host
+                ),
+                ReconnectStep::Attempt(_)
+            ),
             "a reconnect that has not spent its budget keeps retrying"
         );
         // A budget already spent is the observable end of the session: the
-        // fatal timeout the player sees when the host stays away.
-        let error = reconnect_gave_up(Some(web_time::Instant::now()), Duration::ZERO)
-            .expect("a spent budget ends the session");
-        assert!(matches!(
-            error,
-            MultiplayerError::Timeout { ref phase, after }
-                if phase.as_ref() == "reconnecting to the host" && after == Duration::ZERO
-        ));
+        // fatal timeout the player sees when the host stays away. It names the
+        // host it was dialling, because the log line alone does not say which
+        // session ended.
+        let ReconnectStep::Spent(error) = reconnect_step(
+            Some(web_time::Instant::now()),
+            Duration::ZERO,
+            RECONNECT_BUDGET,
+            host,
+        ) else {
+            panic!("a spent budget ends the session");
+        };
+        assert!(error.to_string().contains(host), "{error}");
+    }
+
+    /// The budget is a wall-clock cap on the whole loop, so one attempt is
+    /// never longer than what is left of it. This is the arithmetic that keeps
+    /// a host that never returns from costing the budget plus one attempt.
+    #[test]
+    fn an_attempt_is_capped_by_what_is_left_of_the_budget() {
+        let host = "endpoint-under-test";
+        let attempt = Duration::from_secs(15);
+        let budget = Duration::from_secs(60);
+        let ago = |elapsed: Duration| {
+            web_time::Instant::now()
+                .checked_sub(elapsed)
+                .expect("a test clock that has run that long")
+        };
+        let deadline =
+            |elapsed: Duration| match reconnect_step(Some(ago(elapsed)), budget, attempt, host) {
+                ReconnectStep::Attempt(deadline) => deadline,
+                ReconnectStep::Spent(error) => panic!("budget not spent: {error}"),
+            };
+        assert_eq!(
+            deadline(Duration::ZERO),
+            attempt,
+            "a fresh budget allows a whole attempt"
+        );
+        assert!(
+            deadline(Duration::from_secs(55)) <= Duration::from_secs(5),
+            "what is left of the budget caps the attempt"
+        );
+        let ReconnectStep::Spent(error) = reconnect_step(Some(ago(budget)), budget, attempt, host)
+        else {
+            panic!("a spent budget is the end, not a shorter attempt");
+        };
+        let message = error.to_string();
+        assert!(message.contains(host), "{message}");
+        assert!(message.contains("60s"), "{message}");
+    }
+
+    /// Giving up is the published fatal, not the log: that event is what the
+    /// game loop turns into leaving the mission, and so what releases the
+    /// `pause_simulation` that `reconnecting()` holds while the retry runs.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn giving_up_publishes_the_fatal_that_ends_the_session() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ReconnectStep::Spent(error) = reconnect_step(
+            Some(web_time::Instant::now()),
+            Duration::ZERO,
+            Duration::from_secs(15),
+            "host-under-test",
+        ) else {
+            panic!("a spent budget ends the session");
+        };
+        give_up_on_reconnect(&tx, error);
+        let NetEvent::Fatal(fatal) = rx.try_recv().expect("the fatal is the outcome") else {
+            panic!("giving up must publish a fatal");
+        };
+        assert!(fatal.to_string().contains("host-under-test"), "{fatal}");
+        assert!(rx.try_recv().is_err(), "one outcome, one event");
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]

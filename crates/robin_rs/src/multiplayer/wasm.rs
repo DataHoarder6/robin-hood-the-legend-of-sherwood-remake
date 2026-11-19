@@ -35,6 +35,11 @@ use wasm_bindgen::JsCast as _;
 const OUTGOING_POLL: Duration = Duration::from_millis(4);
 const RELAY_ONLINE_TIMEOUT: Duration = Duration::from_secs(15);
 const HANDSHAKE_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(5);
+/// One whole reconnect attempt. A reconnect is the same connect + Hello +
+/// Welcome the native client bounds at 15 s, so the browser does not need a
+/// different number: the retry loop is cheap, and `RECONNECT_BUDGET` — not the
+/// attempt — is what decides that the host is gone.
+const RECONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONTENT_DECISION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const CONTENT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -189,10 +194,10 @@ impl ClientTransport for BrowserClientTransport {
     const TIMINGS: ClientTimings = ClientTimings {
         handshake_frame: None,
         initial_attempt: HANDSHAKE_ATTEMPT_TIMEOUT,
-        reconnect_attempt: None,
+        reconnect_attempt: RECONNECT_ATTEMPT_TIMEOUT,
         reconnect_budget: client_session::RECONNECT_BUDGET,
         post_content_welcome: CONTENT_IDLE_TIMEOUT,
-        content_write: None,
+        content_write: Some(CONTENT_IDLE_TIMEOUT),
         content_chunk_idle: CONTENT_IDLE_TIMEOUT,
         content_transfer: CONTENT_TRANSFER_TIMEOUT,
         content_decision: Some(CONTENT_DECISION_TIMEOUT),
