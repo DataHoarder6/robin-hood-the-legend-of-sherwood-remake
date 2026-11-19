@@ -63,8 +63,10 @@ suite=$1
 name=$(copy_name "${2:-}")
 
 # Validate against the script's own suite list, so nothing user-controlled is
-# interpolated into the remote command.
-suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 | sed -n 's/^suites: //p')
+# interpolated into the remote command. `check-quality.sh` prints that list and
+# exits non-zero when it gets no suite, hence the tolerant capture.
+suites=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
+suites=${suites#*suites: }
 case " $suites " in
     *" $suite "*) ;;
     *)
@@ -81,9 +83,41 @@ printf 'remote-check: %s %s -> %s:%s\n' "$suite" "$repository" "$host" "$remote_
 
 # --delete keeps a copy faithful to this worktree; the Cargo target directory
 # is excluded so the copy keeps its build cache across runs.
+ssh "$host" bash -s <<EOF
+mkdir -p ~/$remote_root
+# A worktree's .git points into the caller's repository, which does not exist
+# on the build host. The copy gets its own one-commit repository instead: the
+# build script derives the replay build identity from `git rev-parse HEAD`, so
+# a copy with no history builds with an invalid identity and fails the replay
+# and leaderboard suites.
+rm -rf ~/$remote_root/$name/.git
+EOF
+
 rsync -a --delete \
     --exclude target \
+    --exclude .git \
     --exclude .worktrees \
     "$repository/" "$host:$remote_dir/"
 
-ssh "$host" "mkdir -p ~/$remote_root && cd $remote_dir && exec systemd-inhibit --what=idle:sleep --why='check-quality $suite' flock -w 7200 $lock nix develop --command bash scripts/check-quality.sh $suite"
+# `git rev-parse HEAD` in the build script tags replays with the build
+# identity; without history the replay and leaderboard suites fail.
+ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+if [ ! -d .git ]; then
+    git init -q
+fi
+git -c user.name=remote-check -c user.email=remote-check@localhost add -A
+git -c user.name=remote-check -c user.email=remote-check@localhost \
+    commit -q --no-verify -m "remote-check copy" || true
+EOF
+
+# The build host's login shell is fish: the remote body goes through `bash -s`
+# on stdin so no shell-specific quoting is involved.
+ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+exec systemd-inhibit --what=idle --why='check-quality $suite' \
+    flock -w 7200 $lock \
+    nix develop --command bash scripts/check-quality.sh $suite
+EOF
