@@ -3,9 +3,11 @@
 Written 2026-11-19 against `fork/main` `ac74b98c0a90`, re-read twice the same
 day: section 5 and items 1-2 of section 6 after the reconnect-attempt and
 content-write holes were closed, then the artifact section after the build plan
-was fixed. The production changes this file caused are the build plan, two wasm
-compile fixes, the compatibility export's single source and the budget bounds;
-the devShell's wasm C compiler belongs to
+was fixed. Re-read again at `81264ba8929b`, when the join driver first passed
+and section 10 replaced its own earlier reading of the modal barrier. The
+production changes this file caused are the build plan, two wasm compile fixes,
+the compatibility export's single source, the budget bounds and the join driver
+itself; the devShell's wasm C compiler belongs to
 [the wasm build evidence](wasm-build-host.md). The owner's question is
 whether a browser (wasm) seat can join a multiplayer session today, and what
 exactly proves it. Adjacent material this file links rather than restates: [the
@@ -16,9 +18,9 @@ a browser row would sit beside), [the multiplayer architecture](../MULTIPLAYER.m
 
 ## Verdict
 
-| Direction | State (2026-11-19, after the build-plan fix) | What decides it |
+| Direction | State (2026-11-19, after the join run) | What decides it |
 | --- | --- | --- |
-| native host + browser client, the repo's own artifact | **artifact ready, join unproved** | `wasm-www/scripts/build-runtime.mjs` now builds `audio,multiplayer` (threaded: `+wasm-threads`), so the artifact exports the real `ticketSchema` and the shell no longer refuses the invitation. No browser seat has joined a native host: no run is recorded, and the one driver was deleted on 2026-11-19 because it could not pass (§3) |
+| native host + browser client, the repo's own artifact | **join proved; mission play unproved** | §10: a browser seat joins a native host through the public relay, is welcomed as seat 1, adopts the frame-0 snapshot, and matches the host's canonical state hash at every 25-frame comparison up to frame 350 with zero desyncs. What stays unproved is *play*: the Demo mission's own script reports defeat on its first tick, with one seat and no browser at all (§10.5), so the run replays a lost mission rather than a played one |
 | native host + browser client, before this change | **impossible** | the artifact every repo script built had no multiplayer transport, so the join died before it reached a relay |
 | browser host + native client | **impossible by construction** | browser hosting is not implemented and its server handle type has no values (`crates/robin_rs/src/multiplayer/wasm/native_only.rs:25-26`, `crates/robin_rs/src/game_session/multiplayer/session_setup.rs:35-38`) |
 | browser reconnect, no hang | **bounded 2026-11-19** | a reconnect attempt carries a deadline of its own, so the 60 s give-up budget is reachable while an attempt is in flight (`crates/robin_rs/src/multiplayer/wasm.rs:197`, `crates/robin_rs/src/multiplayer/client_session.rs:617-637`, `:655-673`); section 6 still lists three wasm ways to hang that no attempt bound fixes |
@@ -194,14 +196,15 @@ a join (`lifecycle_gate.py:25-31`).
 
 | Harness | What it starts | What it dials | What it asserts | Verdict |
 | --- | --- | --- | --- | --- |
-| `scripts/validation/browser-game.mjs` | `google-chrome --headless=new` against a Node HTTPS server on `127.0.0.1:0`, self-signed cert with SANs for both game names (`:40-42`, `:63-97`, `:127-130`) | Only `robinhood.phiresky.xyz` and `identity.robinhood.phiresky.xyz`, force-resolved to loopback (`:28-29`, `:96`, `:130`); every other host is refused with 403 (`:67`) and every non-GET, non-https or off-allowlist request is failed in CDP (`:155-163`) | single-player Demo boot, first mission state, replay export through the real wasm admission worker, pause-menu replay restart, bfcache restore, no console "required mission text" errors, no desync lines (`:252-398`) | no multiplayer anywhere: it navigates to `/?<query>` with no ticket and no fragment (`:265-268`) |
+| `scripts/validation/browser-game.mjs` | `google-chrome --headless=new` against a Node HTTPS server on `127.0.0.1:0`, self-signed cert with SANs for both game names (`:40-42`, `:63-97`, `:127-130`) | Single-player mode: every hostname to loopback. Join mode: only the game and signer hostnames to loopback; the ticket's relay resolves normally (`--host-resolver-rules` in the launch line) | Single-player Demo boot, first mission state, replay export through the real wasm admission worker, pause-menu replay restart, bfcache restore, no console "required mission text" errors, no desync lines (`:252-398`). Join mode additionally: the shell's manifest check, the browser's own `state`/`events` RPC, the host's `/state`/`/events`, canonical-hash parity, and the host's reaction to the page vanishing | join mode is the recorded run in §10; the single-player acceptance path is unchanged |
 
-The `browser-game.mjs` isolation is deliberate and total: `MAP * 127.0.0.1:${port}`
-sends *every* hostname to the fixture server, and the handler serves only two
-names. A relay is a third name and would be answered `local acceptance: denied`
-(`:67`). In other words the loopback harness is loopback by construction, and it
-cannot host a browser multiplayer run without changing both the resolver rule and
-the allowlist.
+In single-player mode the `browser-game.mjs` isolation is deliberate and total:
+`MAP * 127.0.0.1:${port}` sends *every* hostname to the fixture server, and the
+handler serves only two names. A relay is a third name and would be answered
+`local acceptance: denied` (`:67`). Join mode is the one mode that leaves the
+loopback: it maps only the two page origins and lets the relay resolve, because
+a browser seat's transport is the public relay and nothing in the ticket names a
+local one (§10.1).
 
 `wasm-www/scripts/live-relay-e2e.mjs` was the only browser-join driver, and it was
 deleted on 2026-11-19. It failed at its first assertion: it waited for
@@ -224,23 +227,24 @@ hypothetical. Repairing the two dead waits was not enough to make it coverage: i
 also pressed the host through `POST /step-forward`, which advances the host and
 re-admits every peer from the new snapshot
 (`docs/multiplayer/HARNESS.md:226-234`), so even a passing run would not have
-proved input scheduling — and the run it needed is the §4 stack, which has never
-existed here.
+proved input scheduling — and the run it needed is the §4 stack, which exists
+now (§10).
 
-Nothing in the tree records a browser join having happened: no evidence
-directory, no gate invoked the driver (`grep -rn live-relay-e2e
-scripts docs wasm-www/package.json` → this file and `MULTIPLAYER.md`, nothing
-else), and
-`scripts/README.md` lists `browser-game.mjs` but not a relay driver. What the
-tree does now prove is narrower and exact: the artifact the repo builds exports
-the manifest's `ticketSchema` (§2.1), so the documented capability no longer
-dies at the shell's first check. No browser seat has joined a host.
+The join mode added on 2026-11-19 is the driver §10 records. It waits on lines
+the game prints (`browser multiplayer client welcomed`), reads the two live
+surfaces (`/state`, `/events` on both seats) and asserts canonical-hash parity
+rather than a screenshot; nothing in it presses `POST /step-forward`, so the
+comparisons describe the running mission, not a re-admission from a fresh
+snapshot.
 
 ## 4. What a driver that runs would need
 
 The artifact blocker is gone: `wasm-www/scripts/build-runtime.mjs` builds the
-relay client, and §2.1 checks the export. Nothing below has been run against a
-native host, so this section is still a recipe, not a runbook.
+relay client, and §2.1 checks the export. §10 is the run this recipe produced;
+the steps below are still the way to stand the stack up, with the three
+additions the run needed: an `Xvfb` display and a page warden for the host
+(§10.4), and a `--join-content`/`--join-datadir` pair whose digests the driver
+re-measures.
 
 Native host, same commit as the wasm artifact, browser links on (default), with
 an explicit install home so it cannot collide with another seat
@@ -446,9 +450,9 @@ first is what blocked everything:
    `requires` entry (today `{"game-data","graphical","netem"}`, `:112`) and an
    explicit exception in section 6 — or the relay requirement is removed from the
    game, which is a much larger change than a row.
-5. **A driver that works.** None exists: the stale one was deleted on
-   2026-11-19 (§3), so a row needs a driver written to the lines the game
-   actually prints before it can name one.
+5. **A driver that works.** Done for a single join: `browser-game.mjs` join
+   mode (§10). A row still needs the runner seam (item 3) and a repeatable
+   rejoin (§8) before it can name one.
 
 Given 1–5, a browser row is a `process`-shaped row with a different runner and a
 different terminal observation, not a fourth execution site of the same scenario:
@@ -458,26 +462,36 @@ has no HTTP surface.
 
 ## 8. What is unproved
 
-Answered by the run in §10: the artifact boots a multiplayer mission in a
-browser, and iroh's relay-over-WebSocket path works from a browser against a
-host built from this tree. What that run also found — the modal acknowledgement
-a late-joining browser seat never receives — is the current blocker.
+The join itself is answered by §10; what remains is play, and the defects the
+run exposed on the way.
 
 Proved now, and no longer listed here: the plan builds the relay client, the
 `wasm-release` threaded binary links, and its
-`wasm_multiplayer_compatibility()` reports the manifest's `ticketSchema` (§2.1).
+`wasm_multiplayer_compatibility()` reports the manifest's `ticketSchema` (§2.1);
+the artifact boots a multiplayer mission in a browser; iroh's
+relay-over-WebSocket path works from a browser against a host built from this
+tree; and the browser seat replays the host's canonical state hashes without a
+mismatch (§10.3).
 
-- ~~That the artifact **boots a multiplayer mission in a browser**.~~
-  §10: it boots, joins the relay, receives the initial snapshot and starts the
-  mission; it then waits at frame 0 for the host's frame schedule.
-- ~~Whether iroh's relay-over-WebSocket path works from a browser against a host
-  built from this tree at all.~~ §10: it works — seat 1 admitted, initial
-  snapshot delivered.
+- Whether a browser seat can **play**: the Demo mission's script returns "lost"
+  on its first tick, with one seat and no browser (§10.5), so no run has put a
+  browser-controlled character into a mission that is still in progress. This
+  is the first thing to settle, and it is not a browser question — the same
+  defeat reproduces in a single native seat.
+- Whether player input reaches the guest's simulation. Parity proves the world
+  agrees; it does not prove that a key pressed in the page becomes a
+  `PlayerCommand` the host applies, because nothing pressed a gameplay key.
+- Whether a **fresh page** can rejoin with the same invitation. One run rejoined
+  after the page was closed and the seat evicted (browser `begin_sim_frame`
+  852, first comparison after the rejoin at 875), and a later attempt booted to
+  the main menu and never reached the relay. The rejoin path exists
+  (`transport reconnected; awaiting host snapshot`) but is not yet a repeatable
+  observation, so the driver does not assert it.
 - Whether `~/Games/robin-hood-data`'s closure equals the published Demo
   generation's `nativeContentSha256` (`verify-datadir-corpus.mjs:42`). §10 shows
-  the published `v23` generation does not match any Demo build obtainable here,
-  so a locally hosted game and the published artifact are built from different
-  Demo bytes.
+  the published generation does not match the Demo build converted here, so a
+  locally hosted game and the published artifact are built from different Demo
+  bytes.
 - What the wasm client does with `NetEvent::Fatal` after
   `RECONNECT_BUDGET` — the native path records a diagnostic bundle and returns to
   the menu (`game_session/multiplayer.rs:719-728`); the browser path has no
@@ -487,32 +501,35 @@ Proved now, and no longer listed here: the plan builds the relay client, the
 
 ## 9. What to do next, in order
 
-1. ~~Stand up the §4 stack and write a driver that waits on the lines the game
+1. Find why the Demo mission's `CheckVictoryCondition` returns 2 at
+   `game_seconds = 0` (§10.5). Until it returns 0, no browser seat can play a
+   mission, and every parity run replays a mission that is already lost. The
+   single-seat reproduction (`--mp-expected-players 1`, no browser) makes this a
+   mission/script question, not a multiplayer one.
+2. ~~Stand up the §4 stack and write a driver that waits on the lines the game
    prints.~~ Done: `browser-game.mjs` join mode drives a real host's signed
-   invitation (§10). The next step is the blocker it found — a seat that joins
-   after the modal announcement must not be waited on forever, which is a
-   decision about `modal_session.rs` and the admission protocol.
-2. ~~Bound the wasm reconnect attempt and the content write.~~ Done
-   2026-11-19: the attempt is 15 s like native (`wasm.rs:42`, `:197`) and now
-   covers the content prelude it opens, and the write is 30 s (`wasm.rs:200`).
-   The remaining wasm hangs are §6.3 (timer starvation) and §6.4 (bfcache),
-   neither of which an attempt bound reaches.
-3. Publish the join code on `/state` (`diagnostics.rs:191`) so a runner never
+   invitation and asserts parity (§10).
+3. Press a gameplay key in the page and read the host's applied commands, so
+   "input reaches the guest" becomes an assertion rather than an assumption.
+4. Make the rejoin repeatable — a closed page, a fresh page, the same
+   invitation — and decide whether the invitation is single-use, since one
+   attempt reached the relay and one did not.
+5. Publish the join code on `/state` (`diagnostics.rs:191`) so a runner never
    parses a user-facing log line, then add `proves.layer: "browser"`, the
    runner, and the peer platform field (`scenario_corpus.py:65`, `:121`, `:125`).
-4. Only then write the browser row beside H21+, with `requires: ["relay"]`
+6. Only then write the browser row beside H21+, with `requires: ["relay"]`
    declared and section 6's hermetic bootstrap given an explicit exception.
-5. Correct `MULTIPLAYER.md:404-411` and `NEW_FEATURES.md:2039-2051` to say what
+7. Correct `MULTIPLAYER.md:404-411` and `NEW_FEATURES.md:2039-2051` to say what
    the artifact does, not what the code path was written to do — done: they now
    name the artifact proof and the unproved join.
 
-## 10. The 2026-11-19 join attempt: a browser seat on the public relay
+## 10. The join, run and recorded (2026-11-19, `81264ba8929b`)
 
-One recorded run on `build-host`, artifact and host from `e6d67589404d`. The
-evidence directory holds the CDP journal, every request the page made, the
-screenshots, and the host's own log. It settles the two questions §8 could only
-list: the relay path from a browser works, and the join stops on the host's
-modal acknowledgement, not on the transport.
+One recorded run on `build-host`, host and artifact from the same commit. The
+evidence is `/home/admin/join-evidence-20261119-230156`: `browser/result.json`
+(every assertion named below), the CDP journal, the page's requests, the
+screenshot, and the host's own log. It answers §8's join questions and corrects
+this file's earlier reading of the modal barrier (§10.4).
 
 ### 10.1 What ran
 
@@ -522,36 +539,40 @@ addition with its module closure:
 ```
 node wasm-www/scripts/build-runtime.mjs --threads \
   --bindgen /home/admin/build/robin/.tools/wasm-bindgen-0.2.129/bin/wasm-bindgen \
-  --out-dir target/static-runtime-addition/wasm/e6d67589404d
+  --out-dir target/static-runtime-addition/wasm/81264ba8929b
 node wasm-www/scripts/stage-engine-preload-assets.mjs assets/core-datadir \
-  target/static-runtime-addition/wasm/e6d67589404d
+  target/static-runtime-addition/wasm/81264ba8929b
 node wasm-www/scripts/runtime-javascript-modules.mjs \
-  target/static-runtime-addition/wasm/e6d67589404d > target/static-runtime-addition/js-modules.json
+  target/static-runtime-addition/wasm/81264ba8929b > target/static-runtime-addition/js-modules.json
 node wasm-www/scripts/verify-runtime-multiplayer.mjs \
-  --pkg target/static-runtime-addition/wasm/e6d67589404d --expect-ticket-schema 3
+  --pkg target/static-runtime-addition/wasm/81264ba8929b --expect-ticket-schema 3
 ```
 
 | file | bytes | sha256 |
 | --- | --- | --- |
-| `wasm/e6d67589404d/robin_bg.wasm` | 21,474,815 | `569500b623d98115b989dbc55cfac1c63a764bc8f5be34a2419dc6075ad097da` |
-| `wasm/e6d67589404d/robin.js` | 163,873 | `6f3a9d14dc5eeadb7c7156b39f11f189af98b0bd23374484bd051f9b22d3f3ac` |
+| `wasm/81264ba8929b/robin_bg.wasm` | 21,497,396 | `e072a3e4ff2e96f81a5cf20989f7096d1a6a0e19155b35c8963e1ed840e4da4a` |
+| `wasm/81264ba8929b/robin.js` | 163,873 | `69500448f388a8f27156ea4512ab401b0c82f78dd7a2a9ec4da9246f6a1d1d3e` |
 | `js-modules.json` | — | `e71b1e9a2bf305f2fc94711cbdc49101e710a352d023f4b5a108635ce1283eb9` |
+
+`verify-runtime-multiplayer.mjs` prints
+`{"engineCommit":"81264ba8929b4178a11fac09c77c087beaf83130","artifactShort":"81264ba8929b","netProtocol":72,"ticketSchema":3}`.
 
 Demo generation: `convert_datadir --format shipping --web-content-manifest
 --web-content-edition demo` over the Linux demo's `Data` + `1033/Data`;
-`Data/datadir.bin` 11,214,173 bytes, `sha256
-f6a81ca88a98536308d5b660d06f2a229a11dad772b8f13e80c3bc82c114dfc7`, native
+`Data/datadir.bin` 11,211,392 bytes, `sha256
+62abd8003e69bb83f6453a4998f236e8d27fc49626e517dd5932f4451f9d8dd5`, native
 content identity `b69b4e8f…febe` (the ticket's `content_identity_sha256`).
 
 Host, from a directory with no `mods/` (an overlay makes the host refuse
-browser invitations — `content_identity.rs:137`):
+browser invitations — `content_identity.rs:137`). The devShell has no
+`xvfb-run`, so the display is a bare `Xvfb :98 -screen 0 1280x900x24`:
 
 ```
 ROBINHOOD_INSTALL_HOME=/tmp/robin-host-test \
 ROBINHOOD_DATA_DIR=~/Games/robin-hood/demo-leicester/robinhood_demo \
 ROBINHOOD_MODS_DIR=/tmp/robin-mods-empty \
 ROBINHOOD_BROWSER_URL=https://robinhood.phiresky.xyz/ \
-  xvfb-run -n 98 robin --server --mp-browser-join-links true \
+  DISPLAY=:98 robin --server --mp-browser-join-links true \
     --mp-expected-players 2 --mp-nickname host --http-server 18641 \
     --mission Dem_Lei_MP --no-sound
 ```
@@ -572,34 +593,39 @@ server, maps only those two hostnames, and lets the relay resolve normally:
 node scripts/validation/browser-game.mjs \
   --pkg target/static-runtime-addition \
   --join-ticket "$TICKET" \
-  --join-content ~/demo-local/Data \
-  --join-datadir ~/demo-local/Data/datadir.bin \
+  --join-content ~/demo-local-81264ba8929b/Data \
+  --join-datadir ~/demo-local-81264ba8929b/Data/datadir.bin \
+  --host-display :98 \
+  --join-log-timeout 420000 --timeout 1800000 \
   --evidence ~/join-evidence
 ```
 
-### 10.2 Four defects the run found
+`--host-display` is not optional in join mode: it is the display the page
+warden answers the host's shared story page on (§10.4). The 420 s log timeout
+is the host's own `MODAL_ACK_BUDGET_MS` (300 s, `modal_session.rs`) plus
+margin; a shorter wait reads that budget as a hang.
 
-1. **The signer origin had no bridge.** `pnpm build:signer-shell` emits the
-   shell only; `scripts/build_identity_signer.sh` also builds and stages
-   `identity-signer/bridge/leaderboard_identity_bridge.{js,wasm}`. Without it
-   the page logs `Secure multiplayer identity signer did not become ready` and
-   never reaches the engine. Fixed by running the documented build, not by
-   changing code.
-2. **The browser had no save directory.** `rust_init_finish` asked
-   `save_file::default_save_directory()`, which resolves a filesystem path and
-   is `None` on wasm, so boot failed with `no install directory for player
-   profiles`. The browser's profile archive, key configs and saves live in page
-   storage keyed by a label, so the directory is a platform fact:
-   `platform::player_profile_directory()` returns the install root natively and
-   `player_profile_store::BROWSER_SAVE_DIRECTORY` on wasm
-   (`main_entry/platform/{native,wasm}.rs`).
-3. **`std::process::id()` panicked at mission start** — `no pids on this
-   platform` — inside the event ring's run identifier
-   (`observability/events.rs`), which is built on the first event of a session.
-   A browser page is the run, so the identifier is the timestamp plus the ring
-   generation there, and the timestamp plus the pid natively.
-4. **Not fixed: the host waits for a modal acknowledgement the browser never
-   sends.** See 10.4.
+### 10.2 What the driver asserts
+
+Every assertion reads a live surface, never a log line, and the log waits it
+does use name lines the game actually prints (`browser multiplayer client
+welcomed`, `wasm.rs:260`):
+
+1. The ticket's `engine_version`, `net_protocol` and `ticket_schema` match the
+   staged artifact, and every digest in the manifest it serves is re-measured
+   from the bytes it hands out (`buildJoinManifest`).
+2. The page is a secure, cross-origin-isolated origin — the threaded artifact
+   imports shared memory.
+3. The host's ring records a `seat_connected` for a peer after the join began.
+4. Both seats report `admission: running`, the same `map`, and the same
+   `begin_sim_frame`, on different seats.
+5. The browser's own `last_compared_hash_frame` passes 300 with
+   `desync_count: 0`, and no `hash comparison missed` line was logged — the
+   host is the only seat that publishes canonical hashes
+   (`send_state_hash` is server-side), so the guest's comparisons are the
+   parity surface.
+6. Closing the page makes the host record `seat_evicted` (or a transport loss)
+   and keeps the session `running`.
 
 ### 10.3 What the run proves
 
@@ -607,58 +633,85 @@ node scripts/validation/browser-game.mjs \
   `home is now relay https://euc1-1.relay.n0.iroh.link./`, dialed
   `wss://…/relay`, connected to the host's endpoint, and the host answered with
   `received authoritative multiplayer Welcome your_seat = PlayerId(1)`.
-- **The host admits the seat and ships the world.** The host logged `multiplayer
-  peer claimed seat seat=1 generation=1 kind=Fresh` and `sending initial
-  snapshot to peer seat=1 frame=0 bytes=192084`, and recorded
-  `seat_connected`.
-- **The mission starts in the browser.** `Mission "Save Scarlett" (Dem_Lei_MP)
-  launched!`, ingame menus, fonts, cursor and audio initialized, and the page
-  rendered at 4 fps on SwiftShader with `crossOriginIsolated: true`.
+- **The host admits the seat and ships the world.** The host logged `sending
+  initial snapshot to peer seat=1 frame=0 bytes=192084`, `ready barrier
+  complete frame=0`, `begin-sim barrier released at frame 0`, and the browser's
+  `/state` moved `peer_waiting_for_snapshot → peer_waiting_for_begin → running`
+  22 s after navigation.
+- **Both seats agree on the world, frame by frame.** The browser logged
+  `multiplayer hash OK frame = N` for 23 consecutive comparisons (frames 25 to
+  575), and the driver's assertion — a compared frame past 300 with
+  `desync_count: 0` — held at frame 350, the thirteenth comparison. A
+  mismatch would have logged `multiplayer DESYNC` and incremented the counter
+  (`pre_tick.rs:133-160`); neither happened.
+- **The page disappearing does not take the host with it.** Closing the target
+  made the host record `seat evicted: player` (`seat=1`, frame 990) and its
+  `/state` still answered `admission: running`, `desync_count: 0`.
 - **The artifact contract is enforced end to end.** The shell's manifest check
   (`wasm-www/src/multiplayer_content.ts`) accepted the served manifest only
   because `commit`, `short`, `netProtocol`, `ticketSchema` and the Demo's
-  `nativeContentSha256` all matched the host-signed ticket; the driver
-  independently re-measured every digest in the manifest from the bytes it
-  served.
+  `nativeContentSha256` all matched the host-signed ticket.
 
-### 10.4 The blocker: a modal acknowledgement that never arrives
+One measurement is a trap worth naming: `/state.frame` is the Original's
+hourglass tick (`engine/host_accessors.rs:881`), not simulation progress, and it
+stays 0 for a mission this short on both seats. The driver therefore never uses
+`frame` as a progress signal; `last_compared_hash_frame` is what moves.
 
-Both sides sit at frame 0. The browser logs, once per frame:
+### 10.4 The "modal blocker" was an unanswered host page
+
+The earlier reading of the failed runs was that `modal_session.rs` strands a
+late-joining browser seat. The code does not replay a page to a seat that joins
+after its announcement (`announce_modal_instance` returns early when the
+instance is already announced, `crates/robin_engine/src/multiplayer/modal_session.rs:853-865`),
+but the run that failed was not a late joiner's problem: **nobody answered the
+host's own page at all.** The host has no player at its window, so the
+`PopupText { text_id: 0 }` page announced at frame 0
+(`modal_announced`, `role: "host"`) held the begin-sim barrier until the
+300 s budget expired (`MODAL_ACK_BUDGET_MS`, `modal_session.rs:26`), and the
+browser sat at `peer_waiting_for_begin` for the whole of that wait.
+
+The driver now runs a page warden: it reads the host's event ring from its first
+event and, for every `modal_announced` with `role: "host"`, presses Return on
+the host's display with the same helper the native harness uses
+(`scripts/validation/briefing_x11.py`). The browser seat answers nothing: a
+peer's copy of a shared page is dismissed by the host's decision
+(`modal_acked`, "modal decided (host authority)"), and the browser's own ring
+carries no `modal_announced` — the recorded run answered exactly one page, on
+the host (`hostPageAnswered: {"page":"PopupText { text_id: 0 }","seq":3}`).
+
+So the modal is a harness gap, not a game defect. A real host has a person at
+the window; an unattended host needs a synthetic one.
+
+### 10.5 What it does not prove: the mission is lost on its first tick
+
+The session is healthy; the mission inside it is not. The host's own log, in
+this run and in every earlier one, has
 
 ```
-multiplayer: waiting for host frame schedule scheduled_frame = 0; local_frame = 0
+Engine tick returned: LevelFailed
 ```
 
-and the host's `/state` never leaves
+one tick after `admission … → running`, and both seats' `/state` report
+`presentation.kind.FinalDebriefing { text_id: { Lose: { index: 0 } } }` while
+the simulation keeps ticking behind it (the hash comparisons above are of that
+lost mission).
+
+This is not a browser or multiplayer defect. With `--mp-expected-players 1`,
+no browser, and the same warden answering the same page
+(`/home/admin/solo-victory-20261119-221832`), the engine logs
 
 ```
-{"frame":0,"multiplayer":{"admission":"running","begin_sim_frame":0,
- "desync_count":0,"last_compared_hash_frame":null,…}}
+DEBUG victory: CheckVictoryCondition game_seconds=0 result=Ok(2) mission_won=false
+  blocked_by_combat=false pc_positions=[(Pc(PcId(198)), (209.0, 1881.0)),
+  (Pc(PcId(81)), (184.0, 1039.0))]
 ```
 
-The host's own log names the wait: the begin-sim barrier releases
-(`ready barrier complete frame=0`, `admission … → running`), and then
+The Demo mission's script says "lost" at game second 0, with a single native
+seat and two live PCs. Nothing in the join path is involved. Until that returns
+0, "a browser seat can play" is unproved, and this file says so rather than
+upgrading "instantiated, admitted, in lockstep" into "played".
 
-```
-multiplayer: modal acknowledgement expired for PopupText { text_id: 0 };
-the host continued without seats [1]
-```
-
-five minutes later — the host was waiting for seat 1 to acknowledge the modal it
-announced before that seat existed. The browser connected ~50 s after the host's
-`modal announced`, received the initial snapshot, launched the mission, and
-never acknowledged, because the acknowledgement is a response to an
-announcement it was not present for. A browser seat cannot beat that race: the
-ticket is published at session start and the modal is announced about a second
-later, while the page still has to fetch the manifest, 11 MB of Demo datadir and
-21 MB of wasm before it can connect.
-
-Whether the host should send the outstanding modal to a seat that joins after
-the announcement, or whether a late seat's acknowledgement should not gate the
-barrier, is a decision about `modal_session.rs` and the admission protocol —
-outside this evidence run.
-
-### 10.5 What a public deployment needs
+### 10.6 What a public deployment still needs
 
 A link the owner can send, and nothing else:
 
@@ -675,8 +728,8 @@ A link the owner can send, and nothing else:
    `nativeContentSha256`; the shell refuses a mismatch. So the site's datadir
    has to be built by `convert_datadir --web-content-manifest` from the same
    Demo build the host has installed — publishing bytes from a different build
-   makes every invitation invalid (`datadirs/demo-leicester/v23` does not match
-   any Demo build obtainable here).
+   makes every invitation invalid (the published generation does not match the
+   Demo build converted here).
 3. **The relay URL comes from the ticket, not from the site.** The host signs
    `relay_url` (the public n0 relay today) and the page dials it; no
    deployment-side relay configuration and no self-hosted relay are needed. A
@@ -690,4 +743,5 @@ A link the owner can send, and nothing else:
    runtime uses wasm threads and `Atomics.wait`), accept a ~32 MB download, and
    wait for the host's world. Nothing is installed and no port is forwarded.
 6. **What the host needs:** the public relay reachable within 15 s of session
-   start, browser join links enabled, and an unmodified content closure.
+   start, browser join links enabled, an unmodified content closure, and
+   somebody — or something — at the window to answer the mission's first page.
