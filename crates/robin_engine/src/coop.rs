@@ -109,6 +109,23 @@ impl CoopRules {
             .count()
     }
 
+    /// The rules a campaign lobby carries and a campaign mission launches with.
+    ///
+    /// A campaign owns its roster: the party comes from the host's campaign
+    /// slot, so the lobby publishes the seat count and no explicit team, and
+    /// every seat shares that party. A save's own rules hold the roster it
+    /// played with (`campaign` plus a team), which is exactly what
+    /// [`Self::validate`] refuses for a campaign; this is the one place that
+    /// converts those words into the campaign's.
+    pub fn campaign_lobby(self) -> Self {
+        Self {
+            campaign: true,
+            team: [0; MAX_PLAYERS],
+            control: CharacterControl::Shared,
+            ..self
+        }
+    }
+
     pub fn validate(self) -> Result<(), String> {
         if !(1..=MAX_PLAYERS as u8).contains(&self.players) {
             return Err("co-op requires one to five players".into());
@@ -210,5 +227,28 @@ mod tests {
         rules.players = 2;
         rules.assignments = [0, 0, 2, 3, 4];
         assert!(rules.validate().is_err());
+    }
+
+    /// A campaign save plays with the roster it recorded, so its own rules are
+    /// `campaign` plus a team — the one shape a campaign lobby may not carry.
+    /// The lobby words are derived from them, and those validate.
+    #[test]
+    fn campaign_lobby_rules_drop_the_saved_party_and_keep_the_seats() {
+        let saved = CoopRules {
+            campaign: true,
+            players: 2,
+            control: CharacterControl::Assigned,
+            team: [b'R', b'J', 0, 0, 0],
+            enemy_health_per_duplicate: 50,
+            ..Default::default()
+        };
+        assert!(saved.validate().is_err());
+        let lobby = saved.campaign_lobby();
+        assert!(lobby.validate().is_ok());
+        assert!(lobby.campaign);
+        assert_eq!(lobby.team_len(), 0);
+        assert_eq!(lobby.players, 2);
+        assert_eq!(lobby.control, CharacterControl::Shared);
+        assert_eq!(lobby.enemy_health_per_duplicate, 50);
     }
 }
