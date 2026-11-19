@@ -749,6 +749,36 @@ impl TerminalDebriefingState {
         let TerminalDebriefingPhase::Debriefing(state) = &mut self.phase else {
             unreachable!("tick_debriefing_page runs only in the Debriefing phase");
         };
+        // The click is published and the session owns the outcome until the
+        // authoritative decision arrives. The page then says whom it is waiting
+        // for — the same words, and the same seat set, as a scripted story page
+        // — instead of accepting a second decision on top of the first.
+        if self.final_dismissal.is_pending() {
+            let message = Self::modal_net(context, self.page.kind.clone()).map_or_else(
+                || "Waiting for the host to continue...".to_owned(),
+                |net| net.waiting_message(),
+            );
+            let resources = context
+                .resources
+                .menu
+                .as_ref()
+                .expect("terminal debriefing resources disappeared");
+            let cursor = default_modal_cursor(
+                &mut context.presentation.sprites.cursor_renderer,
+                &mut context.resources.cursor,
+                &mut context.presentation.renderer,
+            );
+            state.show_waiting(
+                &mut ModalScreenIo {
+                    window: context.window,
+                    renderer: &mut context.presentation.renderer,
+                    resources,
+                    cursor: Some(&cursor),
+                },
+                message,
+            );
+            return TerminalDebriefingProgress::Pending;
+        }
         let resources = context
             .resources
             .menu
@@ -808,7 +838,9 @@ impl TerminalDebriefingState {
         ) {
             self.finish_final_decision(context, result)
         } else {
-            self.phase = TerminalDebriefingPhase::AwaitingFinalAuthority;
+            // Stay on the page: it is still on screen, and the next tick draws
+            // it as a wait that names the seats the barrier counts instead of
+            // leaving a frozen page that accepts nothing.
             TerminalDebriefingProgress::Pending
         }
     }

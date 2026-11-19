@@ -227,6 +227,32 @@ impl DebriefingModalState {
         page.render(io, &screen, font, &lines);
     }
 
+    /// Draw the page the player last saw, with `message` in place of its body,
+    /// while the session — not the player — owns the outcome.
+    ///
+    /// The player's click is already published; accepting a second one would
+    /// discard it, and leaving the screen blank would hide a bounded wait that
+    /// names the seats it is waiting for. Used by the mission-end debriefing,
+    /// which asks the same question of the same seat set as a scripted story
+    /// page (`ModalNet::waiting_message`).
+    pub(crate) fn show_waiting(&mut self, io: &mut ModalScreenIo<'_, '_>, message: String) {
+        if self.current_page.is_none() {
+            // The final click lands on the stat page; without one (a flow with
+            // no statistics) the body it was opened with is what was on screen.
+            let page = match self.stat_text.clone() {
+                Some(stat) => DebriefingPageState::new(io, self, stat, BodyFont::Debrief),
+                None => {
+                    DebriefingPageState::new(io, self, self.body.clone(), BodyFont::PopupScroll)
+                }
+            };
+            self.current_page = Some(page);
+        }
+        self.current_page
+            .as_mut()
+            .expect("waiting page was just opened")
+            .show_waiting(io, message);
+    }
+
     pub fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> Option<DebriefingOutcome> {
         match self.phase {
             DebriefingPhase::Body => {
@@ -471,6 +497,9 @@ struct DebriefingPageState {
     input_state: ModalInputState,
     tooltip: TooltipState,
     scroll_view: ScrollView,
+    /// Replaces the body while the session owns the outcome; the page accepts
+    /// nothing until the authoritative decision arrives.
+    waiting_message: Option<String>,
 }
 
 impl DebriefingPageState {
@@ -576,10 +605,25 @@ impl DebriefingPageState {
             input_state,
             tooltip: TooltipState::new(),
             scroll_view,
+            waiting_message: None,
         }
     }
 
+    /// Draw this page with `message` in place of its body. No input is read and
+    /// no button is drawn: the outcome belongs to the session now.
+    fn show_waiting(&mut self, io: &mut ModalScreenIo<'_, '_>, message: String) {
+        self.waiting_message = Some(message);
+        let (font, lines) = self.prepare_body(io.resources);
+        self.scroll_view.set_total(lines.len());
+        let screen = ScreenFrame::poll(io);
+        self.transform = screen.transform;
+        self.render(io, &screen, font, &lines);
+    }
+
     fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> Option<PageOutcome> {
+        // A page that was drawn as a wait resumes its body once the session
+        // hands the outcome back (a cancel, or a new page).
+        self.waiting_message = None;
         let mut outcome = None;
         let (font, lines) = self.prepare_body(io.resources);
         self.scroll_view.set_total(lines.len());
@@ -661,7 +705,7 @@ impl DebriefingPageState {
         .expect("debriefing body requires its font");
         let lines = super::layout::wrap_text_for_box_font(
             font,
-            &self.body,
+            self.waiting_message.as_deref().unwrap_or(&self.body),
             self.scroll_view.content_width() - 4,
             usize::MAX,
         )
@@ -725,7 +769,10 @@ impl DebriefingPageState {
         self.scroll_view
             .draw_scrollbar(renderer, self.transform, resources);
 
-        widget_bridge::draw_frame_buttons(renderer, resources, self.transform, &self.frame);
+        // A waiting page offers no outcome, so it draws no buttons.
+        if self.waiting_message.is_none() {
+            widget_bridge::draw_frame_buttons(renderer, resources, self.transform, &self.frame);
+        }
 
         let mouse_pt =
             engine_coordinates::ScreenPoint::new(self.input_state.virt_x, self.input_state.virt_y);

@@ -311,6 +311,7 @@ mod tests {
     fn host_proposal_is_advisory_until_host_ui_decides() {
         let (net, incoming, outgoing) = fixture();
         net.set_modal_player_count(2);
+        net.session_seats().publish(0b11);
         let modal = bind_modal(&net, kind(), true);
         assert!(matches!(
             outgoing.try_recv().unwrap(),
@@ -352,6 +353,7 @@ mod tests {
     fn host_waits_for_every_client_including_late_loading_clients() {
         let (net, incoming, outgoing) = fixture();
         net.set_modal_player_count(3);
+        net.session_seats().publish(0b111);
         let modal = bind_modal(&net, kind(), true);
         assert!(matches!(
             outgoing.try_recv().unwrap(),
@@ -402,6 +404,9 @@ mod tests {
             net.set_modal_player_count(3);
             net.set_modal_player_names(vec!["Alice".into(), "Bob".into(), "Carol".into()]);
         }
+        // The host's transport published both peers into its simulation; the
+        // client published nothing, because a client never decides the barrier.
+        host.session_seats().publish(0b111);
         let host_modal = bind_modal(&host, kind(), true);
         assert!(matches!(
             host_out.try_recv().unwrap(),
@@ -417,7 +422,18 @@ mod tests {
         };
         client_in.send(NetEvent::ModalProgress(progress)).unwrap();
         assert_eq!(client_modal.poll_remote_dismissal(), None);
-        assert_eq!(client_modal.waiting_message(), "Waiting for Bob, Carol...");
+        // The peer names only the seats it can vouch for: the host whose
+        // decision it awaits. It does not name itself, and it cannot name a
+        // seat whose participation it never saw published.
+        assert_eq!(
+            client_modal.waiting_message(),
+            "Waiting for the host to continue..."
+        );
+        // The host counts the seats in its simulation. Its countdown starts
+        // when the session first observes the page blocked, so the message here
+        // names the seats and the next one carries the remaining budget.
+        let host_message = host_modal.waiting_message();
+        assert_eq!(host_message, "Waiting for Bob, Carol...");
         host_in
             .send(NetEvent::ModalProposal {
                 from: PlayerId(1),
@@ -435,8 +451,8 @@ mod tests {
         };
         client_in.send(NetEvent::ModalProgress(progress)).unwrap();
         assert_eq!(client_modal.poll_remote_dismissal(), None);
-        assert_eq!(client_modal.waiting_message(), "Waiting for Carol...");
-        // The host also shows the bounded wait; the client cannot know it.
+        // The host counts the seats in its simulation, not its roster: Carol
+        // still owes the only answer the barrier is waiting for.
         let host_message = host_modal.waiting_message();
         assert!(
             host_message.starts_with("Waiting for Carol (continuing without them in ")
@@ -445,12 +461,51 @@ mod tests {
         );
     }
 
+    /// The story path and the mission-end page ask one seat set, in one
+    /// wording: a seat outside the simulation is named by neither, and a
+    /// simulating one is named by both.
+    #[test]
+    fn terminal_and_story_pages_name_the_same_await_set() {
+        let terminal = ModalKind::FinalDebriefing {
+            text_id: robin_engine::player_command::DebriefingTextId::Win { index: 0 },
+        };
+        for kind in [kind(), terminal] {
+            let (host, _incoming, _outgoing) = fixture();
+            host.set_modal_player_count(2);
+            host.set_modal_player_names(vec!["Desktop".into(), "Laptop".into()]);
+            let modal = bind_modal(&host, kind.clone(), true);
+            let mut gate = ModalDismissalGate::default();
+            assert_eq!(
+                gate.request(DialogResult::Completed, Some(&modal)),
+                Some(DialogResult::Completed),
+                "a page whose roster seat is outside the simulation decides at once"
+            );
+            assert!(!gate.is_pending(), "the page shows no wait at all");
+
+            let (host, _incoming, _outgoing) = fixture();
+            host.set_modal_player_count(2);
+            host.set_modal_player_names(vec!["Desktop".into(), "Laptop".into()]);
+            host.session_seats().publish(0b11);
+            let modal = bind_modal(&host, kind.clone(), true);
+            let mut gate = ModalDismissalGate::default();
+            assert_eq!(gate.request(DialogResult::Completed, Some(&modal)), None);
+            assert!(gate.is_pending());
+            let message = modal.waiting_message();
+            assert!(
+                message.starts_with("Waiting for Laptop (continuing without them in ")
+                    && message.ends_with(" s)..."),
+                "unexpected wait message for {kind:?}: {message}"
+            );
+        }
+    }
+
     #[test]
     fn client_ahead_of_host_opens_missing_story_with_host_identity_once() {
         let (host, host_in, host_out) = fixture();
         let (client, client_in, client_out) = fixture();
         host.set_modal_player_count(2);
         client.set_modal_player_count(2);
+        host.session_seats().publish(0b11);
         host.publish_frame(666);
         client.publish_frame(704);
         let host_modal = bind_modal(&host, kind(), true);
@@ -525,6 +580,7 @@ mod tests {
         let (client, client_in, client_out) = fixture();
         host.set_modal_player_count(2);
         client.set_modal_player_count(2);
+        host.session_seats().publish(0b11);
         let first = bind_modal(&host, kind(), true);
         let NetOutbound::ModalProgress(opening) = host_out.try_recv().unwrap() else {
             panic!("expected first opening");
@@ -729,6 +785,7 @@ mod tests {
         let _events = crate::observability::isolate_session_events();
         let (net, _incoming, _outgoing) = fixture();
         net.set_modal_player_count(2);
+        net.session_seats().publish(0b11);
         let kind = ModalKind::PopupText { text_id: 17 };
         net.modal_effect_admission()
             .admit(std::slice::from_ref(&kind))
@@ -762,6 +819,7 @@ mod tests {
     #[test]
     fn retained_outcome_cannot_publish_into_a_different_modal_occurrence() {
         let (net, _incoming, outgoing) = fixture();
+        net.session_seats().publish(0b11);
         drop(outgoing);
         let modal = bind_modal(&net, kind(), true);
         let mut gate = ModalDismissalGate::default();
