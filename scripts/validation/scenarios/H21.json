@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "H21",
   "proves": { "layer": "core", "tests": [
       "robin_rs::game_session::multiplayer::story_regression::a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim",
