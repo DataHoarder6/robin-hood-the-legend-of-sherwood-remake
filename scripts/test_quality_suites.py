@@ -86,7 +86,10 @@ class QualitySuitesTests(unittest.TestCase):
 
     def test_client_build_is_a_separate_command(self):
         self.run_suite("client")
-        self.assertEqual([call[0] for call in self.calls()], ["test", "build"])
+        # nextest runs the tests, the doc pass stays on `cargo test` (nextest
+        # runs no doctests), and the build is its own command so a running game
+        # cannot hang a build.
+        self.assertEqual([call[0] for call in self.calls()], ["nextest", "test", "build"])
 
     def test_replay_format_boundary_rejects_client_packages(self):
         for package in ("robin_rs", "wgpu", "winit", "kira", "cpal", "ffmpeg-next"):
