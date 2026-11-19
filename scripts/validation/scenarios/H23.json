@@ -1,0 +1,68 @@
+{
+  "schema": 3,
+  "id": "H23",
+  "proves": {
+    "layer": "process",
+    "runner": "scripts/validation/multiplayer_e2e.py"
+  },
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
+  ],
+  "faults": [
+    {
+      "at": {
+        "frame": 40
+      },
+      "peer": 0,
+      "fault": "mission-result",
+      "result": "aborted"
+    }
+  ],
+  "resolve": [
+    {
+      "peer": 0,
+      "result": "Restart"
+    }
+  ],
+  "expect": [
+    {
+      "assert": "presentation",
+      "peers": [
+        0
+      ],
+      "state": "gone"
+    },
+    {
+      "assert": "log",
+      "contains": "snapshot transition prepared (Save)",
+      "at_least": 1
+    },
+    {
+      "assert": "log",
+      "contains": "rebuilding mission transport",
+      "at_least": 1
+    },
+    {
+      "assert": "hash-equal",
+      "peers": [
+        1
+      ],
+      "every": 25
+    },
+    {
+      "assert": "exit",
+      "peers": [
+        0,
+        1
+      ],
+      "status": "running"
+    }
+  ]
+}

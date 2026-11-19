@@ -137,6 +137,55 @@ class CorpusValidationTests(unittest.TestCase):
         self.assertEqual([error for error in errors if "matrix cells" in error],
                          ["corpus: matrix cells without a scenario: H02"])
 
+    def process_scenario(self, identifier, **fields):
+        return scenario(identifier, proves=PROCESS_PROVES, **fields)
+
+    def process_refused(self, documents, message):
+        errors = corpus.validate(DEFAULTS, corpus_of(*documents), PROCESS_CONTRACT)
+        self.assertTrue(any(message in error for error in errors), errors)
+
+    def test_a_mission_end_names_its_result_and_only_the_host(self):
+        good = {"at": {"frame": 40}, "peer": 0, "fault": "mission-result", "result": "lost"}
+        document = self.process_scenario(
+            "H01", faults=[good],
+            expect=PROVEN + [{"assert": "presentation", "peers": [0, 1], "state": "gone"}])
+        self.assertEqual(corpus.validate(DEFAULTS,
+                                         corpus_of(document, self.process_scenario("H02")),
+                                         PROCESS_CONTRACT), [])
+        broken = self.process_scenario("H01", faults=[{**good, "peer": 1}])
+        self.process_refused([broken, self.process_scenario("H02")], "only the host")
+        broken = self.process_scenario("H01", faults=[{**good, "result": "draw"}])
+        self.process_refused([broken, self.process_scenario("H02")], "must name one of")
+
+    def test_a_page_that_is_gone_cannot_name_a_kind(self):
+        omitted = self.process_scenario("H01", expect=PROVEN + [
+            {"assert": "presentation", "peers": [0, 1], "state": "gone"}])
+        self.assertEqual(corpus.validate(DEFAULTS,
+                                         corpus_of(omitted, self.process_scenario("H02")),
+                                         PROCESS_CONTRACT), [])
+        named = self.process_scenario("H01", expect=PROVEN + [
+            {"assert": "presentation", "peers": [0], "state": "gone",
+             "kind": "FinalDebriefing"}])
+        self.process_refused([named, self.process_scenario("H02")], "no kind")
+
+    def test_a_command_carries_the_player_command_it_posts(self):
+        good = self.process_scenario(
+            "H01",
+            faults=[{"at": {"frame": 40}, "peer": 1, "fault": "command",
+                     "command": {"ModalDismiss": {"kind": "X", "result": "Completed"}}}],
+            expect=PROVEN)
+        self.assertEqual(corpus.validate(DEFAULTS,
+                                         corpus_of(good, self.process_scenario("H02")),
+                                         PROCESS_CONTRACT), [])
+        broken = self.process_scenario("H01", faults=[
+            {"at": {"frame": 40}, "peer": 1, "fault": "command"}])
+        self.process_refused([broken, self.process_scenario("H02")], "externally tagged")
+
+    def test_resolve_belongs_to_the_process_layer(self):
+        resolving = scenario("H01", resolve=[{"peer": 0, "result": "Completed"}])
+        self.assert_refused([resolving, scenario("H02")],
+                            "only the process layer reads a page")
+
     def test_extends_cycle_is_refused(self):
         errors = corpus.validate(
             DEFAULTS,

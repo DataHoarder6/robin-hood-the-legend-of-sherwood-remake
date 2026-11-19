@@ -1,0 +1,64 @@
+{
+  "schema": 3,
+  "id": "H26",
+  "proves": {
+    "layer": "process",
+    "runner": "scripts/validation/multiplayer_e2e.py"
+  },
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
+  ],
+  "faults": [
+    {
+      "at": {
+        "frame": 40
+      },
+      "peer": 0,
+      "fault": "mission-result",
+      "result": "aborted"
+    }
+  ],
+  "budget_s": 700,
+  "settle_deadline_s": 420,
+  "resolve": [
+    {
+      "peer": 0,
+      "result": "Completed"
+    }
+  ],
+  "expect": [
+    {
+      "assert": "presentation",
+      "peers": [
+        0,
+        1
+      ],
+      "state": "gone"
+    },
+    {
+      "assert": "log",
+      "contains": "snapshot transition prepared (CampaignExit)",
+      "at_least": 1
+    },
+    {
+      "assert": "log",
+      "contains": "snapshot transition committed",
+      "at_least": 1
+    },
+    {
+      "assert": "exit",
+      "peers": [
+        0,
+        1
+      ],
+      "status": "zero"
+    }
+  ]
+}

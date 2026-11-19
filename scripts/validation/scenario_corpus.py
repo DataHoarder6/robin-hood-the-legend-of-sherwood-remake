@@ -59,7 +59,7 @@ SCENARIO_DIRECTORY = ROOT / "scripts/validation/scenarios"
 HARNESS = ROOT / "docs/multiplayer/HARNESS.md"
 GAME_OPERATION = ROOT / "crates/robin_engine/src/game_operation.rs"
 
-SCHEMA = 2
+SCHEMA = 3
 
 # Section 1: the three layers and the five barriers a scenario may name.
 LAYERS = ("core", "transport", "process")
@@ -86,7 +86,23 @@ FAULT_VERBS = {
     "truncate": frozenset({"core", "transport"}),
     "restart": frozenset(LAYERS),
     "stall-surface": frozenset(LAYERS),
+    # Section 1's terminal-choice rows. Ending a mission is a process decision
+    # (`POST /mission-result`); a key is the only way to reach the save surface,
+    # which is a window, so it is the process layer's alone.
+    "mission-result": frozenset({"process"}),
+    "key": frozenset({"process"}),
+    "command": frozenset({"core", "process"}),
+    "native": frozenset({"core", "process"}),
 }
+# The fields each verb carries beyond `at`, `peer` and `fault`. An extra the
+# verb does not own is an unknown field, so a `command` cannot carry a `result`.
+FAULT_EXTRAS = {
+    "mission-result": frozenset({"result"}),
+    "command": frozenset({"command"}),
+    "native": frozenset({"op", "args"}),
+    "key": frozenset({"key"}),
+}
+MISSION_RESULTS = ("won", "lost", "aborted")
 MESSAGE_VERBS = frozenset({"drop", "duplicate", "reorder", "delay"})
 TRUNCATE_BYTES = 1
 RESTART_IDENTITY = ("same", "fresh")
@@ -109,29 +125,39 @@ EXPECT_FIELDS = {
     # Each named seat has been through `count` distinct missions in this run and
     # they are on the same one now: one host-owned campaign, not two saves.
     "mission": ({"peers", "count"}, set()),
+    "presentation": ({"peers", "state"}, {"kind"}),
 }
 COUNT_SUBJECTS = ("barrier", "transition", "operation", "reconnect")
+
+# `/state.presentation` is the terminal page a peer is showing, so a row can say
+# it appeared (`shown`) or that the seat left it after it had appeared (`gone`).
+PRESENTATION_STATES = ("shown", "gone")
 
 REQUIRES = frozenset({"game-data", "graphical", "netem"})
 EXIT_STATUS = ("zero", "nonzero", "running")
 
 # Section 2: the process layer's own assertions. No Rust test in the tree reports
 # stderr text or a process exit code, so a row carrying one is a process row.
-PROCESS_ASSERTIONS = frozenset({"log", "exit"})
+PROCESS_ASSERTIONS = frozenset({"log", "exit", "presentation"})
 PROVES_FIELDS = {"layer", "tests", "runner"}
 RUST_CRATES = {"core": frozenset({"robin_engine", "robin_rs"}),
                "transport": frozenset({"robin_rs"})}
 PROCESS_RUNNER = "scripts/validation/multiplayer_e2e.py"
 
 DEFAULTS_FIELDS = {"schema", "mission", "seed", "expected_players", "peer_count"}
-SCENARIO_FIELDS = {"schema", "id", "extends", "proves", "peers", "faults", "expect", "requires", "budget_s", "campaign"}
+SCENARIO_FIELDS = {"schema", "id", "extends", "proves", "peers", "faults", "resolve", "expect",
+                    "requires", "budget_s", "settle_deadline_s", "campaign"}
 PEER_FIELDS = {"seat", "role", "start", "timeline"}
 TIMELINE_FIELDS = {"at", "command"}
 AT_FIELDS = {"frame"}
 BARRIER_AT_FIELDS = {"barrier", "after"}
 JOIN_FRAME_FIELDS = {"join_at_frame"}
 JOIN_BARRIER_FIELDS = {"join_at_barrier"}
-FAULT_FIELDS = {"at", "peer", "fault", "message", "ms", "bytes", "identity"}
+FAULT_FIELDS = {"at", "peer", "fault", "message", "ms", "bytes", "identity",
+                 "result", "command", "op", "args", "key"}
+RESOLVE_FIELDS = {"peer", "result"}
+# `DialogResult` as it serializes: a unit variant by name, or the load selection.
+RESOLVE_RESULTS = ("Completed", "Restart", "Aborted")
 
 TABLE_ROW = re.compile(r"^\|.*\|\s*$")
 SEPARATOR = re.compile(r"^\|[\s:|-]+\|\s*$")
@@ -210,6 +236,11 @@ def canonical(expectation):
     if verb == "mission":
         return (f"mission(peers={seats(expectation['peers'])},"
                 f"count={expectation['count']})")
+    if verb == "presentation":
+        fields = [f"peers={seats(expectation['peers'])}", f"state={expectation['state']}"]
+        if "kind" in expectation:
+            fields.append(f"kind={expectation['kind']}")
+        return "presentation(" + ",".join(fields) + ")"
     raise ContractError(f"no canonical token for assertion {verb!r}")
 
 
@@ -517,6 +548,8 @@ class Checker:
             self.fail(where, "budget_s must be a positive integer")
         if "campaign" in document and not isinstance(document["campaign"], bool):
             self.fail(where, "campaign must be a boolean")
+        if "settle_deadline_s" in document and not _is_int(document["settle_deadline_s"], 1):
+            self.fail(where, "settle_deadline_s must be a positive integer")
         if "requires" in document:
             required = document["requires"]
             if not isinstance(required, list) or any(item not in REQUIRES for item in required):
@@ -528,6 +561,7 @@ class Checker:
         if seats is None:
             return
         self.faults(where, identifier, document, seats)
+        self.resolve(where, document, seats)
         self.expect(where, document, seats)
 
     def proves(self, where, identifier, document):
@@ -677,6 +711,63 @@ class Checker:
                     self.fail(at, "'restart' must name identity same or fresh")
             elif "identity" in fault:
                 self.fail(at, f"{verb!r} does not take identity")
+            for extra in ("result", "command", "op", "args", "key"):
+                if extra in fault and extra not in FAULT_EXTRAS.get(verb, frozenset()):
+                    self.fail(at, f"{verb!r} does not take {extra}")
+            if verb == "mission-result":
+                if fault["peer"] != 0:
+                    self.fail(at, "only the host (seat 0) may end the session's mission")
+                if fault.get("result") not in MISSION_RESULTS:
+                    self.fail(at, f"'mission-result' must name one of {list(MISSION_RESULTS)}")
+            elif verb == "command":
+                self.player_command(f"{at}.command", fault.get("command"))
+            elif verb == "native":
+                if not isinstance(fault.get("op"), str) or not fault["op"]:
+                    self.fail(at, "'native' must name the native in op")
+                args = fault.get("args")
+                if not isinstance(args, list) or not all(_is_int(arg, -(2**31)) for arg in args):
+                    self.fail(at, "'native' must carry an integer args list")
+            elif verb == "key":
+                if not isinstance(fault.get("key"), str) or not fault["key"]:
+                    self.fail(at, "'key' must name an X keysym such as F1")
+
+    def player_command(self, where, value):
+        """A `PlayerCommand` as the `/command` endpoint takes it: one tagged variant."""
+        if isinstance(value, str):
+            if not value:
+                self.fail(where, "command must name a PlayerCommand variant")
+            return
+        if not isinstance(value, dict) or len(value) != 1:
+            self.fail(where, "command must be one externally tagged PlayerCommand object")
+
+    def resolve(self, where, document, seats):
+        """Section 3: pressing a seat's own debriefing page, read from `/state`."""
+        if "resolve" not in document:
+            return
+        layer = self.contract.layers.get(document["id"])
+        if layer is not None and layer != "process":
+            self.fail(f"{where}: resolve",
+                      f"only the process layer reads a page and presses it, not {layer!r}")
+        steps = document["resolve"]
+        if not isinstance(steps, list) or not steps:
+            return self.fail(f"{where}: resolve", "must be a non-empty list")
+        for index, step in enumerate(steps):
+            at = f"{where}: resolve[{index}]"
+            if not self.fields(at, step, RESOLVE_FIELDS, RESOLVE_FIELDS):
+                continue
+            if step["peer"] not in seats:
+                self.fail(at, f"peer {step['peer']!r} is not a declared seat")
+            result = step["result"]
+            if isinstance(result, str):
+                if result not in RESOLVE_RESULTS:
+                    self.fail(at, f"result must be one of {list(RESOLVE_RESULTS)}")
+            elif (isinstance(result, dict) and set(result) == {"Load"}
+                  and isinstance(result["Load"], dict) and set(result["Load"]) == {"slot"}
+                  and _is_int(result["Load"]["slot"], 0)):
+                continue
+            else:
+                self.fail(at, 'result must be "Completed", "Restart", "Aborted" or '
+                              '{"Load": {"slot": n}}')
 
     def expect(self, where, document, seats):
         if "expect" not in document:
@@ -732,6 +823,16 @@ class Checker:
                 self.seats(f"{at}.peers", expectation["peers"], seats)
                 if not _is_int(expectation["count"], 1):
                     self.fail(at, "count must be a positive integer")
+            elif verb == "presentation":
+                self.seats(f"{at}.peers", expectation["peers"], seats)
+                state = expectation["state"]
+                if state not in PRESENTATION_STATES:
+                    self.fail(at, f"unknown presentation state {state!r}")
+                if "kind" in expectation:
+                    if state == "gone":
+                        self.fail(at, "a page that is gone has no kind")
+                    if not isinstance(expectation["kind"], str) or not expectation["kind"]:
+                        self.fail(at, "kind must name a ModalKind variant")
             elif verb == "seat":
                 self.seats(f"{at}.seat", [expectation["seat"]], seats)
                 if not ({"selected", "owns"} & set(expectation)):
@@ -836,7 +937,8 @@ def validate(defaults, scenarios, contract):
         layer = contract.layers.get(identifier)
         verbs = {item["assert"] for item in composed}
         if layer is not None and layer != "process" and (
-                verbs & PROCESS_ASSERTIONS or "graphical" in requires):
+                verbs & PROCESS_ASSERTIONS or "graphical" in requires
+                or "resolve" in scenarios[identifier][1]):
             checker.fail(
                 scenarios[identifier][0],
                 f"a log/exit assertion or `requires: [\"graphical\"]` makes this a process row, "
@@ -876,6 +978,7 @@ def expanded(identifier, scenarios, defaults, contract):
         "defaults": {key: value for key, value in defaults.items() if key != "schema"},
         "peers": document.get("peers", []),
         "faults": document.get("faults", []),
+        "resolve": document.get("resolve", []),
         "expect": [item for step in order for item in scenarios[step][1].get("expect", [])],
     }
     if document.get("campaign"):
@@ -888,6 +991,10 @@ def expanded(identifier, scenarios, defaults, contract):
         # Section 5's per-scenario bound: the run is an alarm for the caller,
         # so it survives expansion instead of being read from the defaults.
         result["budget_s"] = document["budget_s"]
+    if "settle_deadline_s" in document:
+        # A promised state the game reaches on its own schedule (the modal
+        # acknowledgement budget is minutes) states how long this row may wait.
+        result["settle_deadline_s"] = document["settle_deadline_s"]
     return result
 
 

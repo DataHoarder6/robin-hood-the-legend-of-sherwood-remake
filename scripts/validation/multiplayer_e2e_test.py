@@ -27,7 +27,7 @@ PROCESS_PROVES = {"layer": "process", "runner": "scripts/validation/multiplayer_
 
 
 def row(identifier, **fields):
-    document = {"schema": 1, "id": identifier, "proves": PROCESS_PROVES,
+    document = {"schema": scenario_corpus.SCHEMA, "id": identifier, "proves": PROCESS_PROVES,
                 "peers": [{"seat": 0, "role": "host"}, {"seat": 1, "role": "client"}],
                 "expect": [{"assert": "log", "contains": "anything", "count": 1}]}
     document.update(fields)
@@ -43,7 +43,6 @@ class SelectionTest(unittest.TestCase):
         process = {identifier for identifier, (_, document) in self.scenarios.items()
                    if document["proves"]["layer"] == "process"}
         self.assertEqual(set(self.run) | {item["id"] for item in self.refused}, process)
-        self.assertEqual({"H12", "H14", "H19", "H30"}, process)
         for item in self.skipped:
             self.assertNotIn(item["id"], process)
 
@@ -82,6 +81,22 @@ class SelectionTest(unittest.TestCase):
         run, _, refused = suite.select(scenarios)
         self.assertEqual((run, [item["id"] for item in refused]), ([], ["H97"]))
         self.assertIn("no netem driver", refused[0]["reason"])
+
+    def test_a_terminal_row_runs_here_with_its_own_verbs(self):
+        """Ending a mission and pressing the page are this layer's alone."""
+        scenarios = {"H95": row(
+            "H95",
+            faults=[{"at": {"frame": 40}, "peer": 0, "fault": "mission-result",
+                     "result": "aborted"},
+                    {"at": {"frame": 80}, "peer": 1, "fault": "command",
+                     "command": "QuitMissionRequested"},
+                    {"at": {"frame": 80}, "peer": 0, "fault": "native",
+                     "op": "CompleteObjective", "args": [1]},
+                    {"at": {"frame": 80}, "peer": 0, "fault": "key", "key": "F1"}],
+            resolve=[{"peer": 0, "result": "Completed"}],
+            expect=[{"assert": "presentation", "peers": [0, 1], "state": "gone"}])}
+        run, skipped, refused = suite.select(scenarios)
+        self.assertEqual((run, skipped, refused), (["H95"], [], []))
 
     def test_the_container_extension_problem_is_absent(self):
         """`extended` scenarios contribute their parent's faults and expectations."""
@@ -272,6 +287,49 @@ class AssertionTest(unittest.TestCase):
             {"assert": "final-operation", "operation": "quit"}, self.record({}, latest=latest))
         self.assertTrue(ok)
         self.assertEqual(set(observed.values()), {"quit"})
+
+    def presentation_record(self, pages, seat=0):
+        record = self.record({})
+        record["trace"] = [({"seat": seat, "role": "host"}, {"presentation": page})
+                           for page in pages]
+        return record
+
+    def test_a_page_that_appeared_and_was_left_is_gone(self):
+        page = {"kind": {"FinalDebriefing": {"text_id": {"Lose": {"index": 0}}}}}
+        record = self.presentation_record([None, page, page, None])
+        ok, detail, observed = suite.evaluate_expectation(
+            {"assert": "presentation", "peers": [0], "state": "gone"}, record)
+        self.assertTrue(ok, detail)
+        self.assertEqual(observed[0]["pages"], 2)
+        self.assertTrue(observed[0]["left"])
+
+    def test_a_page_that_never_appeared_does_not_pass_for_gone(self):
+        record = self.presentation_record([None, None, None])
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "presentation", "peers": [0], "state": "gone"}, record)
+        self.assertFalse(ok)
+        self.assertIn("never appeared", detail)
+
+    def test_a_page_that_stayed_is_not_gone(self):
+        page = {"kind": {"FinalDebriefing": {"text_id": {"Won": {"index": 1}}}}}
+        record = self.presentation_record([page, page, page])
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "presentation", "peers": [0], "state": "gone"}, record)
+        self.assertFalse(ok)
+        self.assertIn("never left", detail)
+
+    def test_a_named_kind_is_the_page_the_row_means(self):
+        page = {"kind": {"FinalDebriefing": {"text_id": {"Won": {"index": 1}}}}}
+        record = self.presentation_record([page])
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "presentation", "peers": [0], "state": "shown",
+             "kind": "FinalDebriefing"}, record)
+        self.assertTrue(ok, detail)
+        ok, detail, _ = suite.evaluate_expectation(
+            {"assert": "presentation", "peers": [0], "state": "shown",
+             "kind": "MissionState"}, record)
+        self.assertFalse(ok)
+        self.assertIn("never appeared", detail)
 
     def test_an_unimplemented_assertion_is_unprovable(self):
         with self.assertRaises(suite.Unprovable):

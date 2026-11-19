@@ -126,7 +126,8 @@ PROCESS_LAYER = "process"
 # fourth: the table names `netem` for them, but this runner applies faults with
 # signals and relaunches only, so selection refuses them by name instead of
 # letting `apply` read a harness gap as a game failure.
-PROCESS_FAULTS = frozenset({"kill", "stop", "continue", "restart"})
+PROCESS_FAULTS = frozenset({"kill", "stop", "continue", "restart",
+                            "mission-result", "command", "native", "key"})
 NETEM_FAULTS = frozenset({"duplicate", "drop", "reorder", "delay"})
 NETEM_GAP = ("section 2 names `netem {verb}` for the process layer and this suite has no "
              "netem driver, so the row is a harness gap")
@@ -161,10 +162,14 @@ CLIENT_CONTENT_PHASE = "peer_waiting_for_snapshot"
 CLIENT_SNAPSHOT_PHASE = "peer_waiting_for_begin"
 RUNNING_PHASES = frozenset({"running"})
 POSITIVE_ASSERTIONS = frozenset({"exit", "barrier", "final-operation", "mission",
-                                  "hash-equal"})
+                                  "hash-equal", "presentation"})
 # `exit` states a peer is gone: zero or nonzero. `running` states it is still
 # there, which is how a row says "the host survived this fault" — `/state`
 # evidence alone cannot, because the samples stop when the process does.
+# `hash-equal` is positive because it only holds once a cadence was observed at
+# all; a row whose whole promise is "the peers agree and the session keeps
+# running" would otherwise wait out the deadline instead of settling when the
+# agreement it names has been watched.
 EXIT_RUNNING = "running"
 
 # Section 5 evidence per run. `binary.sha256` is repeated inside each run so a
@@ -399,6 +404,45 @@ def evaluate_final_operation(expectation, record):
     return ok, f"final operation {expectation['operation']}: {observed}", observed
 
 
+def presentation_samples(record, seat):
+    """Every `presentation` document one seat's samples carried, in order.
+
+    `/state.presentation` is null unless the terminal flow is showing a page, so
+    the list is the page's appearances and disappearances as they were observed.
+    """
+    return [sample.get("presentation")
+            for peer, sample in record["trace"] if peer["seat"] == seat]
+
+
+def evaluate_presentation(expectation, record):
+    """The terminal page a seat showed, or that it left the one it showed.
+
+    `shown` is a page appearing (of the named kind, when the row names one);
+    `gone` is a page that appeared and a later sample with nothing on screen,
+    which is what "this seat left the debriefing" means and what "the page was
+    never reached" must not pass for.
+    """
+    state, kind = expectation["state"], expectation.get("kind")
+    observed, problems = {}, []
+    for seat in expectation["peers"]:
+        samples = presentation_samples(record, seat)
+        pages = [page for page in samples if page]
+        named = [page for page in pages if kind is None or kind in (page.get("kind") or {})]
+        left = any(page and None in samples[index + 1:]
+                   for index, page in enumerate(samples))
+        observed[seat] = {"samples": len(samples), "pages": len(pages),
+                          "matching": len(named), "left": left}
+        wanted = f"a page of kind {kind}" if kind else "a page"
+        if not named:
+            problems.append(f"seat {seat}: {wanted} never appeared in {len(samples)} samples")
+        elif state == "gone" and not left:
+            problems.append(f"seat {seat}: {wanted} appeared but was never left")
+    detail = f"presentation {state} for seats {expectation['peers']}: {observed}"
+    if problems:
+        detail += "; " + "; ".join(problems)
+    return not problems, detail, observed
+
+
 def multiplayer_samples(record, seat):
     """Every `(frame, multiplayer block)` of one seat, in sampling order."""
     return [(sample.get("frame"), sample.get("multiplayer") or {})
@@ -522,6 +566,8 @@ def evaluate_expectation(expectation, record):
         return evaluate_hash_diverged(expectation, record)
     if verb == "mission":
         return evaluate_mission(expectation, record)
+    if verb == "presentation":
+        return evaluate_presentation(expectation, record)
     raise Unprovable(f"assertion `{verb}` is not implemented at the process layer")
 
 
@@ -680,6 +726,9 @@ class Peer:
     def __init__(self, spec, name, scenario):
         self.seat = spec["seat"]
         self.role = spec["role"]
+        # One X server per peer: a window is how a seat presses a key, and two
+        # windows on one display cannot say whose key it was.
+        self.xvfb, self.display = start_display(scenario.run)
         self.start = spec.get("start", "launch")
         self.name = name
         self.scenario = scenario
@@ -727,7 +776,7 @@ class Peer:
             ROBINHOOD_DATA_DIR=str(self.scenario.data),
             ROBINHOOD_INSTALL_HOME=str(self.install),
             ROBINHOOD_MODS_DIR=str(self.install / "mods"),
-            DISPLAY=self.scenario.display,
+            DISPLAY=self.display,
             WGPU_BACKEND="gl",
             RUST_LOG="info,robin_rs::game_session=debug,robin_rs::multiplayer=debug",
         )
@@ -739,7 +788,8 @@ class Peer:
                                             stderr=subprocess.STDOUT)
         self.scenario.events.event("launch", peer=self.name, seat=self.seat,
                                    pid=self.process.pid, port=self.port, argv=argv,
-                                   install=str(self.install), launch=self.launches)
+                                   install=str(self.install), display=self.display,
+                                   launch=self.launches)
 
     def alive(self):
         return self.process is not None and self.process.poll() is None
@@ -772,13 +822,12 @@ class Peer:
 class ScenarioRun:
     """One expanded scenario: its peers, its faults, its clock and its trace."""
 
-    def __init__(self, identifier, expanded, binary, data, run, display, events):
+    def __init__(self, identifier, expanded, binary, data, run, events):
         self.id = identifier
         self.expanded = expanded
         self.binary = binary
         self.data = data
         self.run = run
-        self.display = display
         self.events = events
         self.defaults = expanded["defaults"]
         self.trace = []
@@ -788,6 +837,7 @@ class ScenarioRun:
         self.connect = None
         self.peers = []
         self.faults = list(expanded["faults"])
+        self.resolves = [dict(step) for step in expanded.get("resolve", [])]
         self.fired = []
         self.last_fault_at = time.monotonic()
         self.activity = {}
@@ -795,6 +845,9 @@ class ScenarioRun:
         self.last_frame = None
         self.last_presented = time.monotonic()
         self.dismissals = 0
+        self.post_terminal_dismissals = 0
+        self.terminal_page_seen = False
+        self.pages_seen = set()
 
     # ── observation ────────────────────────────────────────────────────
 
@@ -805,10 +858,14 @@ class ScenarioRun:
             "frame": state.get("frame"),
             "map": state.get("map"),
             "multiplayer": state.get("multiplayer"),
+            "presentation": state.get("presentation"),
         }
         with peer.samples.open("a") as handle:
             handle.write(json.dumps({"elapsed_s": round(time.monotonic() - self.events.started, 3),
                                      **record}) + "\n")
+        if record["presentation"]:
+            self.terminal_page_seen = True
+            self.pages_seen.add(peer.seat)
         self.trace.append(({"seat": peer.seat, "role": peer.role}, record))
         self.latest[peer.seat] = record
 
@@ -824,6 +881,7 @@ class ScenarioRun:
                 self.sample(peer, state)
         self.seconds_since_change()
         self.keep_moving()
+        self.resolve()
 
     def keep_moving(self):
         """Dismiss the in-game surface so the session's frame can advance.
@@ -836,6 +894,19 @@ class ScenarioRun:
         attempt. Nothing here steps the timeline; a session that still does not
         move is a hang, not something the driver papers over.
         """
+        for peer in self.peers:
+            # A presented terminal page is a decision to make, not a story
+            # scroll: Return would answer it with the default and steal the
+            # choice the row is about.
+            if (self.latest.get(peer.seat) or {}).get("presentation"):
+                self.last_presented = time.monotonic()
+                return
+        if self.terminal_page_seen and self.post_terminal_dismissals >= 2:
+            # The page after the debriefing is the mission-end leaderboard's
+            # notice, which needs an OK to release the session. Two attempts
+            # cover it on both seats; past that a further Return would be input
+            # on the campaign map the row is there to watch reopen.
+            return
         multiplayer = (self.latest.get(0) or {}).get("multiplayer") or {}
         if multiplayer.get("admission") not in RUNNING_PHASES:
             return
@@ -854,13 +925,20 @@ class ScenarioRun:
                                   detail="no frame advance after dismissing every surface")
             return
         self.dismissals += 1
+        if self.terminal_page_seen:
+            self.post_terminal_dismissals += 1
         self.last_presented = time.monotonic()
-        try:
-            windows = input_worker.dismiss_briefings(self.display, self.run)
-        except RuntimeError as error:
-            self.events.event("surface_dismissal_failed", attempt=self.dismissals,
-                              error=str(error))
-            return
+        windows = []
+        for peer in self.peers:
+            # Each seat has its own display, so the surface is dismissed on the
+            # one that is showing it.
+            if not peer.alive():
+                continue
+            try:
+                windows += input_worker.dismiss_briefings(peer.display, self.run)
+            except RuntimeError as error:
+                self.events.event("surface_dismissal_failed", attempt=self.dismissals,
+                                  peer=peer.name, error=str(error))
         self.events.event("surface_dismissed", attempt=self.dismissals, frame=frame,
                           windows=windows)
 
@@ -932,11 +1010,18 @@ class ScenarioRun:
                      and expectation["status"] == EXIT_RUNNING)
         ]
         exit_pending = any(expectation["assert"] == "exit" for expectation in positives)
-        deadline = time.monotonic() + SESSION_DEADLINE_S
+        # A row may promise a state the game reaches on its own schedule — the
+        # modal acknowledgement budget is five minutes — so the scenario's own
+        # `settle_deadline_s` extends this wait and nothing else does.
+        deadline = time.monotonic() + max(SESSION_DEADLINE_S,
+                                          self.expanded.get("settle_deadline_s", 0))
         while time.monotonic() < deadline:
             self.poll()
             self.dispatch_faults()
-            if self.faults or time.monotonic() - self.last_fault_at < SETTLE_S:
+            if self.faults or self.resolves:
+                time.sleep(0.1)
+                continue
+            if time.monotonic() - self.last_fault_at < SETTLE_S:
                 time.sleep(0.1)
                 continue
             if positives and all(self.holds(item) for item in positives):
@@ -948,7 +1033,8 @@ class ScenarioRun:
                 return
             time.sleep(0.1)
         raise ScenarioDeadline(
-            f"timed out after {SESSION_DEADLINE_S}s settling the session; "
+            f"timed out after {max(SESSION_DEADLINE_S, self.expanded.get('settle_deadline_s', 0))}s "
+            "settling the session; "
             f"{len(positives) - sum(self.holds(item) for item in positives)} "
             "positive expectation(s) never became observable"
         )
@@ -999,8 +1085,77 @@ class ScenarioRun:
             peer.signal(signal.SIGCONT, "corpus continue")
         elif verb == "restart":
             self.restart(peer, fault)
+        elif verb == "mission-result":
+            self.end_mission(peer, fault)
+        elif verb == "command":
+            self.post(peer, "command", "/command", fault["command"], "player_command")
+        elif verb == "native":
+            self.post(peer, "native", "/native",
+                      {"op": fault["op"], "args": fault["args"]}, "native")
+        elif verb == "key":
+            input_worker.client_key(peer.display, fault["key"], self.run)
+            self.events.event("key", peer=peer.name, key=fault["key"])
         else:
             raise Unprovable(f"fault verb `{verb}` is not implemented at the process layer")
+
+    def post(self, peer, name, path, body, description):
+        """One dev-surface request, so a refusal names itself instead of timing out."""
+        try:
+            reply = request(peer.port, path, body)
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError) as error:
+            raise RuntimeError(f"{peer.name}: {path} {description} failed: {error}") from error
+        if not isinstance(reply, dict) or "error" in reply:
+            raise RuntimeError(f"{peer.name}: {path} refused {description}: {reply}")
+        self.events.event(name, peer=peer.name, request=body, reply=reply)
+        return reply
+
+    def end_mission(self, peer, fault):
+        """The host ends the mission through its own terminal flow."""
+        self.post(peer, "mission_result", "/mission-result", {"result": fault["result"]},
+                  f"mission-result {fault['result']}")
+
+    def resolve(self):
+        """Press the debriefing button whose page a seat is actually showing.
+
+        `/state.presentation` publishes the exact `ModalKind` the terminal flow
+        validates a dismissal against, so the runner never invents the text
+        index. The dismissal travels on the step endpoint, which is the one
+        surface that queues a terminal decision — a client's is forwarded to the
+        host, exactly as the keyboard would forward it.
+        """
+        if not self.resolves:
+            return
+        waiting = []
+        for step in list(self.resolves):
+            if not any(peer.seat == step["peer"] for peer in self.peers):
+                continue
+            peer = self.peer(step["peer"])
+            presentation = (self.latest.get(peer.seat) or {}).get("presentation")
+            if presentation and peer.alive():
+                body = {
+                    "n": 1,
+                    "auto_dismiss": False,
+                    "synchronized_multiplayer": True,
+                    "dismissals": [{"kind": presentation["kind"], "result": step["result"]}],
+                }
+                self.post(peer, "resolve", "/step-forward", body,
+                          f"terminal dismissal {step['result']}")
+                self.resolves.remove(step)
+                self.last_fault_at = time.monotonic()
+                continue
+            if peer.seat in self.pages_seen:
+                # The session answered this seat's page before the runner could
+                # press it (the host's decision closes every seat's copy); that
+                # is the same promise, and pressing a page that is gone is not.
+                self.events.event("resolve_answered_by_session", peer=peer.name)
+                self.resolves.remove(step)
+                continue
+            waiting.append(peer.name)
+        if waiting and not self.faults and (
+                time.monotonic() - self.last_fault_at > BARRIER_DEADLINE_S):
+            raise ScenarioDeadline(
+                "no page appeared for " + ", ".join(waiting)
+                + f" within {BARRIER_DEADLINE_S}s of the last fault, so it cannot be resolved")
 
     def restart(self, peer, fault):
         """`SIGKILL`, then relaunch as a new process (section 2's process meaning).
@@ -1142,9 +1297,6 @@ def run_scenario(identifier, expanded, options, evidence):
     }
     children, scenario = [], None
     try:
-        xvfb, display = start_display(run)
-        children.append(xvfb)
-        events.event("display", display=display)
         # Section 4: the run owns the account's data directory, so a module that
         # still resolves per-install state through `dirs::data_dir()` writes into
         # this run instead of the account.
@@ -1153,7 +1305,7 @@ def run_scenario(identifier, expanded, options, evidence):
         installed = install_facts(run / "account-data")
         before = snapshot_facts(installed)
         scenario = ScenarioRun(identifier, expanded, options.binary, options.data, run,
-                               display, events)
+                               events)
 
         def interrupted(signum, _frame):
             raise DriverInterrupted(f"scenario interrupted by signal {signum}")
@@ -1198,7 +1350,8 @@ def run_scenario(identifier, expanded, options, evidence):
             summary.setdefault("peers", peer_summaries(scenario))
         (run / "hashes.json").write_text(json.dumps(hash_manifest(scenario), indent=2) + "\n")
         summary["elapsed_s"] = round(time.monotonic() - events.started, 3)
-        finish_children(children, summary)
+        servers = [peer.xvfb for peer in scenario.peers] if scenario is not None else []
+        finish_children(children + servers, summary)
         (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         events.event("summary", id=identifier, verdict=summary["verdict"],
                      failures=summary["failures"])

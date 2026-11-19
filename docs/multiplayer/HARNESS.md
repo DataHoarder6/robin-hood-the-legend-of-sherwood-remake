@@ -15,10 +15,9 @@ returns, **SM** stays at a modal, **DC** two peers pick one character, **HX**
 host exits. Barriers named below: `content-ready` and `snapshot-adopt` are
 transport admission (`.../multiplayer/native/server.rs`); `begin-sim` is
 `ReadyBarrier` and `transition-commit` is `SnapshotTransitions`
-(`.../multiplayer/native/server_protocol.rs`); `modal-ack` is the shared-page
-barrier, which counts only the seats in the session's simulation (H21). A
-barrier is *reached* when a peer is at it and *released* when it is past it, so
-`running` never satisfies `content-ready` or `snapshot-adopt`. The
+(`.../multiplayer/native/server_protocol.rs`); `modal-ack` is the shared-story
+barrier. A barrier is *reached* when a peer is at it and *released* when it is
+past it, so `running` never satisfies `content-ready` or `snapshot-adopt`. The
 process layer schedules a fault only on a fact that persists — a frame counter, a
 set `begin_sim_frame`, a seat — because both pre-acknowledgement admission
 phases (`peer_waiting_for_snapshot`, `peer_waiting_for_begin`) are shorter than
@@ -104,7 +103,21 @@ case; `invariant` and `vocabulary` are not cells.
 | H19 | process | fault | host exit with a seat admitted — the kill is anchored on the monotonic `begin_sim_frame`, the only fact that says the seat was admitted → that seat's reconnects are bounded: it gives up and exits non-zero within the client's reconnect budget (`RECONNECT_BUDGET`), and the process leaves well after the host died because the drop first waits out the transport's 30 s idle timeout; the content-transfer window itself stays a transport row. asserts: `log(contains=giving up on reconnection,count=1)`; `exit(peers=1,status=nonzero)` | `.../multiplayer/client_session.rs` |
 | H20 | core | fault | a prepare whose commit frame is lost with the transport generation that received it never suppresses the replacement mission: the peer adopts the replacement snapshot, and a fresh `BeginSim` releases it to `running` (the #43 deadlock). asserts: `barrier(name=snapshot-adopt,state=reached)`; `barrier(name=begin-sim,state=released)` | `story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim` |
 | H21 | core | invariant | the `modal-ack` barrier counts only seats in this session's simulation: a page drawn while a roster seat is still waiting for `BeginSim` completes on the host's decision, and a seat the start barrier released before the page closed still owes an answer. asserts: `barrier(name=modal-ack,state=released)` | `story_regression::a_page_never_awaits_a_seat_that_is_still_waiting_for_begin_sim` + `a_page_awaits_a_seat_released_into_the_mission` |
+| H22 | process | fault | both seats acknowledge the aborted mission's page with Continue: the engine's `LevelInterrupted` reaches the debriefing, each seat leaves the page, and the session publishes and commits its campaign-exit snapshot rather than ending on one seat's answer. A forced-mission launch has no next mission, so the host's own exit is what ends it, and the client — whose transport generation the committed snapshot already ended — leaves on its unconfirmed-end budget (`SNAPSHOT_CONFIRM_BUDGET`) instead of reconnecting forever. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelInterrupted,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
+| H23 | process | fault | the host answers the aborted mission's page with Restart and the client presses nothing: the host's vote is the decision, the session publishes a restart snapshot, the client adopts it and agreement resumes on the 25-frame cadence. asserts: `presentation(peers=0,state=gone)`; `log(contains=snapshot transition prepared (Save),at_least=1)`; `log(contains=rebuilding mission transport,at_least=1)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)` | `.../game_session/terminal_debriefing.rs` |
+| H24 | process | fault | the client answers Completed and the host answers Restart: the client's answer is a proposal, the host's Restart is the decision, and the client adopts the restart snapshot and keeps agreeing on it. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=modal outcome proposed to host,at_least=1)`; `log(contains=snapshot transition prepared (Save),at_least=1)`; `log(contains=rebuilding mission transport,at_least=1)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)` | `.../game_session/terminal_debriefing.rs` |
+| H25 | process | fault | both seats answer Restart: the host's answer is the decision and closes the page for both seats, so the client's arrives at a seat with no terminal page left and is refused there rather than becoming a second decision — the server publishes exactly one restart snapshot (one `payload_bytes=` line) and both seats stay in agreement on the replacement mission. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=payload_bytes=,count=1)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)` | `.../game_session/terminal_debriefing.rs` |
+| H26 | process | fault | the host answers the page and the client never does: no frame schedules the client's acknowledgement while the host holds its decision, so the host is the one seat that ends the wait — it waits out the modal acknowledgement budget (`MODAL_ACK_BUDGET_MS`, .../multiplayer/modal_session.rs) and continues into the campaign exit. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../multiplayer/modal_session.rs` |
+| H27 | process | fault | a won mission's page is acknowledged by both seats: the engine's `LevelSucceeded` reaches the debriefing, both seats leave the page, and the session publishes and commits the campaign-exit snapshot. The forced-mission launch then ends the application on both seats, as every mission end does there. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
+| H28 | process | fault | the same for a lost mission: `LevelFailed` reaches the debriefing, both seats leave the page, and the campaign-exit snapshot is published and committed before the forced-mission launch ends. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelFailed,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
+| H29 | process | baseline | the host presses quick-save then quick-load under two seats: a standalone multiplayer mission has no campaign to save, so quick-save writes the executor's local diagnostic and quick-load finds no quick slot; neither press ends the session, opens a page or moves the client out of agreement. asserts: `log(contains=multiplayer quick-save captured as a local diagnostic,count=1)`; `hash-equal(peers=1,every=25)`; `final-operation(operation=level_in_progress)`; `exit(peers=0,1,status=running)` | `.../game_session/live_gameplay.rs` |
 | H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
+| H31 | process | baseline | the client presses quick-load under two seats: only the host may load a session, so the press is refused in the UI and nothing moves — no page, no mission end, and the 25-frame agreement holds. asserts: `hash-equal(peers=1,every=25)`; `final-operation(operation=level_in_progress)`; `exit(peers=0,1,status=running)` | `.../game_session/live_gameplay.rs` |
+
+The mission-end rows are H22–H29 and H31: H21 is a core row about the same
+page, and H30 opens a campaign session a second seat joins. The sketch in
+`docs/slop/multiplayer-terminal-matrix.md` numbers the six terminal rows
+H21–H26, one lower.
 
 `asserts:` is the machine-checked part of each cell: the exact expectations the
 row's JSON must declare, and `scripts/validation/scenario_corpus.py --check`
@@ -172,8 +185,12 @@ needs one is refused by name and the suite fails until it exists.
 `expect[].assert` is `hash-equal`, `hash-diverged`, `barrier`
 (`reached|released|absent`), `transition`, `transition-id-equal`, `modal`, `log`
 (`contains|absent`, and exactly one of `count` or `at_least`), `final-operation`
-(a `GameCode::wire_name` from `crates/robin_engine/src/game_operation.rs`), `count`,
-`mission` or `exit`. Transition ids are generated per run, so `transition-id-equal` compares
+(a `GameCode::wire_name` from `crates/robin_engine/src/game_operation.rs`),
+`presentation`, `count`, `mission` or `exit`. `presentation` states that the
+seats named by `peers` showed a terminal page (`shown`, optionally of a named
+`kind`) or showed one and left it (`gone`); a page that never appeared is not
+`gone`, so the assertion cannot pass for a session that skipped the debriefing.
+Transition ids are generated per run, so `transition-id-equal` compares
 peers instead of pinning one. `count` on a log line is exact; `at_least` is its
 floor, for a line printed once per retry — a refused handshake prints its reason
 on every attempt, so that line's exact number is a retry schedule, not a
@@ -219,6 +236,56 @@ each one played two missions.
 | `truncate` | cut the serialized event at `bytes` | cut the frame at `bytes` | unsupported |
 | `restart` | rebuild the peer from its `PeerOwner` | restart the client runtime with a fresh state | `SIGKILL` then relaunch as a new process |
 | `stall-surface` | hold the modal surface open past its deadline | same | same |
+| `mission-result` | unsupported | unsupported | `POST /mission-result` on the host |
+| `command` | deliver the `PlayerCommand` to the peer | unsupported | `POST /command` on that peer |
+| `native` | call the native on the peer | unsupported | `POST /native` on that peer |
+| `key` | unsupported | unsupported | that keysym on the peer's own window |
+
+A scenario may also end the mission and answer the page it opens, which is the
+schema-3 half of the vocabulary (`campaign` and `mission` came with schema 2).
+`mission-result` posts the decision on the host and
+nothing else: the command it queues is replicated, so both seats end the same
+mission at the same frame. A `resolve` list — not a fault — names a seat and a
+`DialogResult`; the runner reads that seat's own `/state.presentation.kind` and
+posts the typed dismissal on `/step-forward`, so it never guesses the
+debriefing's text index and never presses a page the session already closed by
+authority. The list is a sequence: a step whose seat has no page yet holds every
+later one, because the first decision ends the page on every seat and a later
+answer would only ever be refused. `settle_deadline_s` says how long a row may wait for a promise the
+game reaches on its own schedule (the modal acknowledgement budget is minutes);
+it extends only that row's settling window, never the suite's.
+
+`key` is how a row reaches a surface that is only a window: the save keys are
+`F1` (quick save) and `F5` (quick load), and each peer owns its own X server so
+a key press belongs to exactly one seat. In a standalone multiplayer mission
+there is no campaign to save, so the host's quick save is the executor's local
+diagnostic and quick load finds no quick slot; a loadable quick save exists only
+in a campaign co-op session, which starts from the lobby and has no developer
+launch. H29 and H30 therefore prove the save surface and the two-seat liveness
+around it, and the snapshot adoption a real quick load performs is proven by the
+restart transfer H23 and H24 drive — the same
+`begin_multiplayer_snapshot_transition` → validate → adopt code path.
+
+The page a mission end leaves behind is not the last surface: the debriefing
+completes into the mission-end leaderboard, which with no leaderboard endpoint
+shows an error notice that needs an OK before the mission-end handoff finishes.
+The driver keeps pressing Return for a stalled frame, but stops after two
+post-debriefing attempts: enough to release that notice, not enough to answer
+anything a later surface asks. A row that wants a page answered presses it
+through `resolve`, never through Return.
+
+These rows run a forced mission (`--mission`), not the campaign lobby, and the
+two handoffs behave differently there. A mission that *ends* (Completed over an
+aborted, won or lost mission) finishes the forced run: the host exits with the
+mission's code, and the client, whose transport generation the committed
+snapshot already ended, leaves on the debriefing's unconfirmed-end budget
+(`SNAPSHOT_CONFIRM_BUDGET`) instead of reconnecting to an endpoint no process
+serves — both processes leaving is how H22, H27 and H28 prove no seat hung. A
+*restart* is a snapshot load, so the direct loop re-enters the same mission in
+the same process with its transport intact: H23, H24 and H25 watch agreement
+resume on the replacement generation instead. A campaign co-op session, which
+would hand over to the next mission on the same transport, has no developer
+launch (as above); the snapshot handoff itself is what these rows prove.
 
 `drop`, `duplicate`, `reorder` and `delay` name a `NetMsg` variant in `message`;
 `truncate` also names `bytes`; `restart` names whether the seat keeps its
@@ -329,9 +396,13 @@ read as a broken game.
 
 Evidence per run at `<evidence>/<scenario-id>/<run>/`: the expanded scenario,
 `summary.json`, `events.jsonl`, one log per peer, `hashes.json` — one entry per
-`/state` sample's compared frame and desync count, plus the host replay's path
-and SHA-256 (or the fact that the host died before writing one) — and the
-binary's SHA-256. A non-empty directory is refused, as
+`/state` sample's compared frame and desync count, plus every mission recording
+the host install holds under its `replays/` (directory, files, `mission.json`
+SHA-256; a host killed at frame zero wrote none, and a run that re-entered its
+mission wrote two) — and the binary's SHA-256. The harness names no `--record`
+path because a named directory holds one mission: the recorder's own
+`replays/<stamp>.mission` naming is what lets a second attempt exist at all. A
+non-empty directory is refused, as
 `scripts/validation/lifecycle_gate.py` already does. Each run is bounded twice,
 by the scenario's `budget_s` (default 600) and by the harness alarm; a barrier
 wait is bounded by the transition-watchdog deadline (#4) plus a margin, so exit
@@ -340,7 +411,11 @@ last fault a row is read one evidence window later, and a pending `exit` is
 never settled by silence: a dropped session is not noticed until the transport's
 idle timeout expires, then retries for the client's `RECONNECT_BUDGET` before it
 publishes the fatal that ends the process, so the settle deadline covers both
-plus the capped backoff and the same margin.
+plus the capped backoff and the same margin. A row settles on its positive
+promises — a page, a barrier, a final operation and a hash cadence, which only
+counts once two compared frames were watched — or, with none left to wait for,
+on a quiet session. A row that promises only agreement and a live session would
+otherwise run to its deadline and read as a hang.
 
 Faults that cannot run there: Windows-specific ones (WinDivert duplication,
 Known Folder paths, MSVC replay hashes), faults needing a real WAN (NAT rebinding,

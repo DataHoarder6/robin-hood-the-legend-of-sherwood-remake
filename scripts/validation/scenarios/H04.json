@@ -1,5 +1,5 @@
 {
-  "schema": 2,
+  "schema": 3,
   "id": "H04",
   "proves": { "layer": "core", "tests": [
       "robin_rs::game_session::multiplayer::story_regression::completed_mission_snapshot_commits_the_hosts_campaign_before_rebuilding"
