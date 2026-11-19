@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Crash-bundle receiver: authenticate, keep the evidence, file one issue per crash.
+"""Bug and crash bundle receiver: authenticate, keep evidence, file one issue each.
 
-A game client POSTs one JSON document per crash to ``/crash``. This service
-authenticates it, stores the bundle under its state directory, and files one
-GitHub issue per fingerprint through the REST API; a repeat fingerprint adds a
-comment carrying the occurrence count instead of a second issue.
+A game client POSTs one JSON document per crash to ``/crash`` and one per
+voluntary report to ``/bug-report``. This service authenticates both, stores the
+bundle under its state directory, and files one GitHub issue per fingerprint
+through the REST API; a repeat fingerprint adds a comment instead of a second
+issue, and a bug report says so in the comment.
 
 Why a service at all: the GitHub credential, the dedupe state and the rate
 limit live here, where they can be revoked, and the shipped binary only needs a
-URL. See ``docs/CRASHES.md`` for the endpoint contract and the environment the
-service reads.
+URL. ``docs/CRASHES.md`` documents the crash contract, ``docs/BUG_REPORTS.md``
+the bug-report one, and both name the environment this service reads.
 
 Standard library only: this runs beside the leaderboard service on the estate's
 server and must not need a dependency it did not already have.
@@ -32,13 +33,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 CRASH_PATH = "/crash"
+BUG_REPORT_PATH = "/bug-report"
+BUG_REPORT_DOWNLOAD_PREFIX = "/bug-reports/"
 HEALTH_PATH = "/healthz"
 # Bigger than any bundle the client writes (bounded tails, one /state document)
 # and small enough that a hostile body cannot exhaust this process.
 DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024
 DEFAULT_GITHUB_API = "https://api.github.com"
 FINGERPRINT = re.compile(r"^[0-9a-f]{16}$")
+BUNDLE_ID = re.compile(r"^[0-9a-f]{16}$")
+SESSION_SLUG = re.compile(r"[^0-9A-Za-z_-]+")
 GITHUB_TIMEOUT_SECONDS = 20
+
+# Every bug report is labelled; the second label separates voluntary reports
+# from crashes in one issue list.
+BUG_LABELS = ("bug", "bug-report")
 
 # The fields a bundle must carry to be worth filing. Everything else is quoted
 # when present and reported as "not captured" when absent.
@@ -60,6 +69,14 @@ class GitHubError(Exception):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def session_slug(session: object) -> str:
+    """A path-safe name for one session id; anything unusable is 'unlabelled'."""
+    if not isinstance(session, str):
+        return "unlabelled"
+    slug = SESSION_SLUG.sub("", session)[:64]
+    return slug or "unlabelled"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -143,20 +160,116 @@ class Store:
     def _occurrence_path(self, fingerprint: str) -> Path:
         return self.directory / "occurrences" / f"{fingerprint}.json"
 
+    # ── Bug reports ─────────────────────────────────────────────────────
+    #
+    # A bug report is stored under a random id, because a report's identity is
+    # its evidence, not its fingerprint: two seats of one stuck session file two
+    # bundles that an issue must be able to link separately.
+
+    def save_bug_bundle(self, bundle: dict) -> str:
+        directory = self.directory / "bug-bundles"
+        directory.mkdir(parents=True, exist_ok=True)
+        while True:
+            bundle_id = os.urandom(8).hex()
+            path = directory / f"{bundle_id}.json"
+            if not path.exists():
+                break
+        _write_atomically(path, json.dumps(bundle).encode())
+        return bundle_id
+
+    def bug_bundle(self, bundle_id: str) -> dict | None:
+        path = self.directory / "bug-bundles" / f"{bundle_id}.json"
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+
+    def bug_occurrence(self, fingerprint: str) -> dict | None:
+        path = self.directory / "bug-occurrences" / f"{fingerprint}.json"
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+
+    def record_bug_occurrence(
+        self, fingerprint: str, bundle_id: str, issue: int | None, session: str
+    ) -> dict:
+        existing = self.bug_occurrence(fingerprint) or {
+            "fingerprint": fingerprint,
+            "count": 0,
+            "issue": None,
+            "sessions": [],
+            "first_seen": utc_now(),
+        }
+        existing["count"] += 1
+        existing["last_seen"] = utc_now()
+        existing.setdefault("bundles", []).append(bundle_id)
+        if session not in existing["sessions"]:
+            existing["sessions"].append(session)
+        if issue is not None:
+            existing["issue"] = issue
+        path = self.directory / "bug-occurrences" / f"{fingerprint}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomically(path, json.dumps(existing, indent=2).encode())
+        return existing
+
+    def group_session(self, session: str, entry: dict) -> None:
+        """Keep one session's reports together, whatever order they arrive in."""
+        slug = session_slug(session)
+        directory = self.directory / "bug-sessions"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{slug}.json"
+        try:
+            grouped = json.loads(path.read_text())
+        except FileNotFoundError:
+            grouped = {"session": session, "reports": []}
+        grouped["reports"].append(entry)
+        _write_atomically(path, json.dumps(grouped, indent=2).encode())
+
+    def session_group(self, session: str) -> dict | None:
+        path = self.directory / "bug-sessions" / f"{session_slug(session)}.json"
+        try:
+            return json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+
 
 class GitHub:
-    """The two REST calls this service needs, and nothing more."""
+    """The REST calls this service needs, and nothing more."""
 
     def __init__(self, api: str, repo: str, token: str):
         self.api = api.rstrip("/")
         self.repo = repo
         self.token = token
 
-    def create_issue(self, title: str, body: str) -> int:
-        response = self._request("POST", f"/repos/{self.repo}/issues", {
-            "title": title,
-            "body": body,
-        })
+    def ensure_labels(self, names: tuple[str, ...]) -> None:
+        """Create each label once; 422 means it is already there."""
+        for name in names:
+            try:
+                self._request(
+                    "POST",
+                    f"/repos/{self.repo}/labels",
+                    {
+                        "name": name,
+                        "color": "d73a4a" if name == "bug" else "1d76db",
+                        "description": (
+                            "A defect the game reports itself"
+                            if name == "bug"
+                            else "A voluntary in-game bug report with a bundle"
+                        ),
+                    },
+                )
+            except GitHubError as error:
+                if "HTTP 422" not in str(error):
+                    raise
+
+    def create_issue(
+        self, title: str, body: str, labels: tuple[str, ...] = ()
+    ) -> int:
+        payload: dict = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = list(labels)
+        response = self._request("POST", f"/repos/{self.repo}/issues", payload)
         number = response.get("number")
         if not isinstance(number, int):
             raise GitHubError(f"issue response has no number: {response!r}")
@@ -291,6 +404,180 @@ def validate(bundle: object) -> dict:
     return bundle
 
 
+def validate_bug(bundle: object) -> dict:
+    """A bug report exists to be reproduced: description, fingerprint, build, session."""
+    if not isinstance(bundle, dict):
+        raise Refused(400, "body is not a JSON object")
+    description = bundle.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise Refused(400, "missing or empty field 'description'")
+    fingerprint = bundle.get("fingerprint")
+    if not isinstance(fingerprint, str) or not FINGERPRINT.match(fingerprint):
+        raise Refused(400, "fingerprint is not 16 lowercase hex characters")
+    for field_name in ("build", "session"):
+        if not isinstance(bundle.get(field_name), dict):
+            raise Refused(400, f"missing field {field_name!r}")
+    return bundle
+
+
+def _dig(document: object, *path: str, default: object = None) -> object:
+    """One value from a nested document, never raising on a wrong shape."""
+    value = document
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+def bug_title(bundle: dict) -> str:
+    return " ".join(str(bundle["description"]).split())[:120] or "bug report without a description"
+
+
+def bug_facts(bundle: dict) -> list[str]:
+    """The reproduction facts, first thing in the issue body."""
+    session = bundle["session"]
+    build = bundle["build"]
+    game = bundle.get("game") if isinstance(bundle.get("game"), dict) else {}
+    tick = session.get("tick") if isinstance(session.get("tick"), dict) else {}
+    mission = session.get("mission") if isinstance(session.get("mission"), dict) else {}
+    transport = session.get("transport") if isinstance(session.get("transport"), dict) else {}
+    desync = session.get("desync") if isinstance(session.get("desync"), dict) else {}
+    world = bundle.get("world") if isinstance(bundle.get("world"), dict) else {}
+    alive = world.get("alive") if isinstance(world.get("alive"), dict) else {}
+    seats = session.get("players") if isinstance(session.get("players"), list) else []
+    roster = ", ".join(
+        f"seat {seat.get('seat')}"
+        f"{' ' + seat['nickname'] if seat.get('nickname') else ''}"
+        f"{' (connected)' if seat.get('connected') else ' (empty)'}"
+        for seat in seats
+        if isinstance(seat, dict)
+    )
+    return [
+        f"- Session: `{bounded(session.get('session_id'), 80)}` — "
+        f"{bounded(session.get('kind'), 20)}, local seat "
+        f"`{bounded(transport.get('local_seat'), 8)}` of "
+        f"`{bounded(transport.get('expected_players'), 8)}`, "
+        f"transport reconnecting: `{bounded(transport.get('reconnecting'), 8)}`",
+        f"- Mission: `{bounded(mission.get('title'), 120)}` "
+        f"(`{bounded(mission.get('filename'), 120)}`, profile "
+        f"`{bounded(mission.get('profile_id'), 12)}`), map `{bounded(mission.get('map'), 60)}`",
+        f"- Tick: timeline frame `{bounded(tick.get('timeline_frame'), 12)}`, "
+        f"simulation tick `{bounded(tick.get('simulation_tick'), 12)}`",
+        f"- Build: `{bounded(build.get('version'), 120)}` at `{bounded(build.get('git_rev'), 80)}`, "
+        f"{bounded(build.get('target'), 60)} {bounded(build.get('profile'), 20)}, "
+        f"release `{bounded(build.get('release'), 8)}`",
+        f"- Operation: `{bounded(game.get('operation'), 40)}`",
+        f"- Seats: {roster or 'not captured'}",
+        f"- Desync: hash `{bounded(desync.get('current_state_hash'), 32)}`, "
+        f"last agreeing frame `{bounded(desync.get('last_compared_hash_frame'), 12)}`, "
+        f"mismatches `{bounded(desync.get('desync_count'), 12)}`",
+        f"- Alive characters: `{bounded(alive.get('count'), 8)}` "
+        f"({bounded(alive.get('predicate'), 80)})",
+    ]
+
+
+def bug_issue_body(bundle: dict, bundle_id: str, bundle_path: Path) -> str:
+    """The issue body: reproduction facts first, the bundle summarised, not pasted."""
+    script = _dig(bundle, "game", "script", default={}) or {}
+    counts = script.get("instance_counts") if isinstance(script, dict) else None
+    terminal = _dig(bundle, "game", "terminal", default={})
+    presentation = _dig(bundle, "game", "presentation", default={})
+    saves = _dig(bundle, "files", "saves", default=[])
+    replay = _dig(bundle, "files", "replay", default=[])
+    save_lines = (
+        "\n".join(
+            f"  - `{bounded(item.get('file'), 120)}`: {bounded(item.get('bytes'), 20)} bytes"
+            for item in saves
+            if isinstance(item, dict)
+        )
+        or "  - none copied"
+    )
+    replay_lines = (
+        "\n".join(
+            f"  - `{bounded(item.get('file'), 120)}`: {bounded(item.get('bytes'), 20)} bytes"
+            + (
+                f" ({bounded(item.get('truncation'), 80)})"
+                if item.get("truncation")
+                else ""
+            )
+            for item in replay
+            if isinstance(item, dict)
+        )
+        or "  - no recording was active"
+    )
+    sections = [
+        "### Reproduction facts",
+        "",
+        *bug_facts(bundle),
+        "",
+        "### Description",
+        "",
+        fenced(bounded(bundle.get("description"), 4000)),
+        "",
+        "### Note",
+        "",
+        fenced(bounded(bundle.get("note") or "not given", 4000)),
+        "",
+        "### Script state",
+        "",
+        f"Global script instance `{bounded(_dig(script, 'global', 'class'), 80)}`; "
+        f"instances: {bounded(counts, 300)}.",
+        "",
+        fenced(bounded(_dig(script, "global", "members"), 8000)),
+        "",
+        "### Mission-end and presentation",
+        "",
+        fenced(
+            bounded(
+                {
+                    "terminal": terminal,
+                    "presentation": presentation,
+                },
+                4000,
+            )
+        ),
+        "",
+        "### Bundle",
+        "",
+        f"- Id: `{bundle_id}`",
+        f"- Download: `GET {BUG_REPORT_DOWNLOAD_PREFIX}{bundle_id}` "
+        f"(the same bearer token this service demands)",
+        f"- On the receiver: `{bundle_path}`",
+        "",
+        "Saves copied into the bundle:",
+        "",
+        save_lines,
+        "",
+        "Replay copied into the bundle:",
+        "",
+        replay_lines,
+    ]
+    notes = bundle.get("notes")
+    if notes:
+        sections += ["", "### Capture notes", "", fenced(bounded(notes, 4000))]
+    return "\n".join(sections)
+
+
+def bug_comment_body(bundle: dict, bundle_id: str, occurrences: int) -> str:
+    session = bundle["session"]
+    tick = _dig(session, "tick", "timeline_frame")
+    return "\n".join(
+        [
+            f"Another report of this state (fingerprint "
+            f"`{bounded(bundle.get('fingerprint'), 32)}`, occurrence {occurrences}).",
+            "",
+            f"- Session: `{bounded(session.get('session_id'), 80)}` "
+            f"({bounded(session.get('kind'), 20)})",
+            f"- Tick: `{bounded(tick, 12)}`",
+            f"- Build: `{bounded(_dig(bundle, 'build', 'version'), 120)}`",
+            "",
+            f"The new bundle is `{bundle_id}`: "
+            f"`GET {BUG_REPORT_DOWNLOAD_PREFIX}{bundle_id}` with the receiver's bearer token.",
+        ]
+    )
+
+
 class Service:
     """One authenticated report: store it, then dedupe into GitHub.
 
@@ -303,6 +590,7 @@ class Service:
         self.store = Store(config.state_dir)
         self.github = GitHub(config.github_api, config.github_repo, config.github_token)
         self.lock = threading.Lock()
+        self.labels_ready = False
 
     def report(self, raw: bytes) -> dict:
         try:
@@ -332,6 +620,63 @@ class Service:
             "occurrences": occurrence["count"],
         }
 
+    def report_bug(self, raw: bytes) -> dict:
+        """One voluntary report: store its bundle, then file or comment once.
+
+        The lock covers the read-decide-write of the occurrence record, so two
+        seats filing the same stuck state at the same moment cannot both create
+        an issue; the second becomes a comment that names its own bundle.
+        """
+        try:
+            bundle = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise Refused(400, f"body is not JSON: {error}") from error
+        bundle = validate_bug(bundle)
+        fingerprint = bundle["fingerprint"]
+        bundle_id = self.store.save_bug_bundle(bundle)
+        path = self.config.state_dir / "bug-bundles" / f"{bundle_id}.json"
+        session = _dig(bundle, "session", "session_id")
+        with self.lock:
+            occurrence = self.store.bug_occurrence(fingerprint)
+            if occurrence is None:
+                if not self.labels_ready:
+                    self.github.ensure_labels(BUG_LABELS)
+                    self.labels_ready = True
+                number = self.github.create_issue(
+                    bug_title(bundle),
+                    bug_issue_body(bundle, bundle_id, path),
+                    labels=BUG_LABELS,
+                )
+                occurrence = self.store.record_bug_occurrence(
+                    fingerprint, bundle_id, number, session if isinstance(session, str) else ""
+                )
+            else:
+                self.github.comment(
+                    occurrence["issue"],
+                    bug_comment_body(bundle, bundle_id, occurrence["count"] + 1),
+                )
+                occurrence = self.store.record_bug_occurrence(
+                    fingerprint, bundle_id, None, session if isinstance(session, str) else ""
+                )
+            self.store.group_session(
+                session if isinstance(session, str) else "",
+                {
+                    "bundle": bundle_id,
+                    "fingerprint": fingerprint,
+                    "issue": occurrence["issue"],
+                    "seat": _dig(bundle, "session", "transport", "local_seat"),
+                    "kind": _dig(bundle, "session", "kind"),
+                    "tick": _dig(bundle, "session", "tick", "timeline_frame"),
+                    "received_at": utc_now(),
+                },
+            )
+        return {
+            "fingerprint": fingerprint,
+            "bundle": bundle_id,
+            "issue": occurrence["issue"],
+            "occurrences": occurrence["count"],
+        }
+
 
 def make_handler(config: Config, service: Service):
     """A handler class for one configuration and its one service."""
@@ -343,16 +688,55 @@ def make_handler(config: Config, service: Service):
         def do_GET(self) -> None:  # noqa: N802 - http.server's spelling
             if self.path == HEALTH_PATH:
                 self._reply(200, b"ok\n", "text/plain")
-            else:
-                self._reply(404, b"not found\n", "text/plain")
+                return
+            if self.path.startswith(BUG_REPORT_DOWNLOAD_PREFIX):
+                self._download_bug_report()
+                return
+            self._reply(404, b"not found\n", "text/plain")
+
+        def _download_bug_report(self) -> None:
+            """The authenticated bundle download an issue links.
+
+            Never public: the bundle carries saves, a replay and the player's
+            own words.
+            """
+            try:
+                self._authorize()
+                target = self.path[len(BUG_REPORT_DOWNLOAD_PREFIX) :]
+                if target.startswith("by-session/"):
+                    session = target[len("by-session/") :]
+                    grouped = service.store.session_group(session)
+                    if grouped is None:
+                        raise Refused(404, "no reports for that session")
+                    self._reply(
+                        200,
+                        json.dumps(grouped).encode(),
+                        "application/json",
+                    )
+                    return
+                if not BUNDLE_ID.match(target):
+                    raise Refused(400, "bundle id is not 16 lowercase hex characters")
+                bundle = service.store.bug_bundle(target)
+                if bundle is None:
+                    raise Refused(404, "no such bundle")
+                self._reply(200, json.dumps(bundle).encode(), "application/json")
+            except Refused as refusal:
+                self._reply(
+                    refusal.status,
+                    (refusal.reason + "\n").encode(),
+                    "text/plain",
+                )
 
         def do_POST(self) -> None:  # noqa: N802 - http.server's spelling
             try:
-                if self.path != CRASH_PATH:
+                if self.path == CRASH_PATH:
+                    self._authorize()
+                    answer = service.report(self._read_body())
+                elif self.path == BUG_REPORT_PATH:
+                    self._authorize()
+                    answer = service.report_bug(self._read_body())
+                else:
                     raise Refused(404, "unknown path")
-                self._authorize()
-                raw = self._read_body()
-                answer = service.report(raw)
             except Refused as refusal:
                 self._reply(
                     refusal.status,
