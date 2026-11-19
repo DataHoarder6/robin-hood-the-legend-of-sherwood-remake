@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1792 1280" width="1792" height="1280">
+  <title>Ravensholt — terrain layout</title>
+  <desc>Schematic for authoring: river and crossings, village, curtain wall, buildings, upper floor, routes.</desc>
+  <style>
+    .ground  { fill: #d8d2bd; }
+    .wood    { fill: #a9b78e; }
+    .water   { fill: #8fb2c4; }
+    .ford    { fill: #b6cdd8; }
+    .bank    { fill: none; stroke: #7d8a6b; stroke-width: 3; }
+    .road    { fill: none; stroke: #b49a6e; stroke-width: 14; stroke-linecap: round; }
+    .lane    { fill: none; stroke: #b49a6e; stroke-width: 7; stroke-linecap: round; }
+    .wall    { fill: none; stroke: #6b6257; stroke-width: 12; }
+    .upper   { fill: none; stroke: #8a6f4a; stroke-width: 6; stroke-dasharray: 18 10; }
+    .tower   { fill: #8c8377; stroke: #4e463d; stroke-width: 4; }
+    .bldg    { fill: #c9b79a; stroke: #6b5f4e; stroke-width: 4; }
+    .inner   { fill: #e3d6bf; stroke: #6b5f4e; stroke-width: 3; stroke-dasharray: 10 6; }
+    .tree    { fill: #7f9463; }
+    .label   { font: 22px "DejaVu Sans"; fill: #3d372f; }
+    .small   { font: 18px "DejaVu Sans"; fill: #4b443a; }
+    .route   { fill: none; stroke: #a33; stroke-width: 4; stroke-dasharray: 6 12; }
+    .marker  { fill: #a33; }
+  </style>
+
+  <rect class="ground" x="0" y="0" width="1792" height="1280"/>
+
+  <!-- wooded margins: west and north -->
+  <path class="wood" d="M0,0 L380,0 L360,240 L300,520 L200,700 L0,760 Z"/>
+  <path class="wood" d="M380,0 L1792,0 L1792,150 L1240,170 L900,120 L560,180 L380,150 Z"/>
+  <path class="wood" d="M1180,690 L1400,690 L1440,820 L1200,900 L1060,860 Z" opacity="0.55"/>
+
+  <!-- river, flowing east: banks descend eastwards -->
+  <path class="water" d="M0,780 L1792,700 L1792,820 L0,900 Z"/>
+  <path class="bank" d="M0,780 L1792,700"/>
+  <path class="bank" d="M0,900 L1792,820"/>
+  <!-- ford: shallow crossing -->
+  <path class="ford" d="M1300,762 L1420,748 L1420,832 L1300,842 Z"/>
+
+  <!-- village, south bank -->
+  <path class="road" d="M60,1140 L360,1080 L620,1000 L690,930"/>
+  <path class="road" d="M620,1000 L900,960 L1150,900 L1360,850"/>
+  <path class="lane" d="M240,1080 L260,960"/>
+  <path class="lane" d="M520,1020 L540,930"/>
+  <path class="lane" d="M120,1130 L120,1230"/>
+  <path class="lane" d="M900,960 L910,1080"/>
+  <path class="lane" d="M1150,900 L1170,1010"/>
+
+  <!-- millrace and mill -->
+  <path class="water" d="M300,940 L380,940 L380,1010 L300,1010 Z" opacity="0.8"/>
+  <rect class="bldg" x="200" y="990" width="90" height="70"/>
+  <text class="small" x="196" y="985">mill</text>
+
+  <!-- cottages -->
+  <rect class="bldg" x="150" y="1050" width="80" height="55"/>
+  <rect class="bldg" x="300" y="1010" width="90" height="60"/>
+  <rect class="bldg" x="440" y="1060" width="80" height="55"/>
+  <rect class="bldg" x="560" y="1090" width="70" height="50"/>
+  <rect class="bldg" x="330" y="1150" width="100" height="60"/>
+  <rect class="bldg" x="500" y="1160" width="80" height="55"/>
+  <rect class="bldg" x="800" y="1000" width="80" height="55"/>
+  <rect class="bldg" x="930" y="960" width="90" height="60"/>
+  <rect class="bldg" x="1080" y="1010" width="80" height="55"/>
+  <rect class="bldg" x="1180" y="930" width="70" height="50"/>
+  <rect class="bldg" x="880" y="1100" width="90" height="60"/>
+  <rect class="bldg" x="1050" y="1120" width="80" height="55"/>
+
+  <!-- bridge -->
+  <path class="bldg" d="M640,742 L730,735 L730,936 L640,944 Z"/>
+  <path class="lane" d="M685,742 L685,940"/>
+  <text class="small" x="745" y="820">stone bridge</text>
+
+  <!-- roads, north bank -->
+  <path class="road" d="M685,930 L700,800 L715,700"/>
+  <path class="lane" d="M715,700 L715,520 L760,430"/>
+  <path class="lane" d="M715,560 L660,470"/>
+  <path class="lane" d="M760,430 L860,430 L880,400"/>
+  <!-- ford road to postern -->
+  <path class="lane" d="M1360,790 L1360,700 L1300,650 L1225,610"/>
+
+  <!-- curtain wall -->
+  <rect class="wall" x="400" y="200" width="780" height="490"/>
+  <!-- upper floor: wall walk, inset -->
+  <rect class="upper" x="424" y="224" width="732" height="442"/>
+
+  <!-- towers -->
+  <circle class="tower" cx="400" cy="200" r="34"/>
+  <circle class="tower" cx="790" cy="200" r="30"/>
+  <circle class="tower" cx="1180" cy="200" r="34"/>
+  <circle class="tower" cx="400" cy="445" r="30"/>
+  <circle class="tower" cx="400" cy="690" r="34"/>
+  <circle class="tower" cx="1180" cy="445" r="30"/>
+  <circle class="tower" cx="1180" cy="690" r="34"/>
+
+  <!-- gatehouse -->
+  <rect class="bldg" x="655" y="640" width="130" height="90"/>
+  <path class="upper" d="M662,648 L778,648 L778,722 L662,722 Z"/>
+  <text class="small" x="528" y="748">gatehouse</text>
+
+  <!-- postern -->
+  <rect class="bldg" x="1170" y="560" width="30" height="60"/>
+  <text class="small" x="1210" y="600">postern</text>
+
+  <!-- keep -->
+  <rect class="bldg" x="440" y="240" width="240" height="200"/>
+  <rect class="inner" x="470" y="270" width="180" height="140"/>
+  <text class="small" x="452" y="470">keep</text>
+
+  <!-- chapel -->
+  <rect class="bldg" x="740" y="240" width="120" height="140"/>
+  <rect class="inner" x="760" y="260" width="80" height="100"/>
+  <text class="small" x="752" y="408">chapel</text>
+
+  <!-- hall, with the blazon -->
+  <rect class="bldg" x="900" y="240" width="240" height="170"/>
+  <rect class="inner" x="930" y="270" width="180" height="110"/>
+  <text class="small" x="912" y="440">hall</text>
+  <circle class="marker" cx="1020" cy="325" r="12"/>
+  <text class="small" x="1040" y="332">blazon</text>
+
+  <!-- stable yard -->
+  <rect class="bldg" x="900" y="520" width="140" height="70"/>
+  <text class="small" x="898" y="512">stables</text>
+
+  <!-- courtyard -->
+  <text class="small" x="700" y="500">courtyard</text>
+
+  <!-- routes in -->
+  <path class="route" d="M690,1000 L690,930 L705,800 L715,700 L715,600"/>
+  <path class="route" d="M1360,880 L1360,790 L1360,700 L1300,650 L1225,610"/>
+
+  <!-- labels -->
+  <text class="label" x="60" y="840">river Ravens</text>
+  <text class="label" x="1180" y="980">village street</text>
+  <text class="label" x="60" y="60">wood</text>
+  <text class="label" x="1450" y="900">ford road</text>
+</svg>
