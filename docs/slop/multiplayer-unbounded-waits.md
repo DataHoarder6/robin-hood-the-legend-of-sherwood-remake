@@ -3,10 +3,12 @@
 Audit of every place one participant's progress depends on a message another
 participant may never send. Read-only: no production code was changed.
 
-Last verified: 2026-11-17, `fork/main` @ `5e1d2b17e`; re-checked 2026-11-19
-against `af1f3f779` — the ranked list is unchanged, and each ranked item is
-closed by a change that gives the wait a budget and a named consequence,
-never by a note in this file.
+Last verified: 2026-11-19, `fork/main` @ `ed1a378fe`. Written against
+`5e1d2b17e`; ranks 2 and 3 were bounded before `af1f3f779` (`45fc7fb96`,
+`9ff945a46`, `05bca0b90`) and the earlier re-check of this file said otherwise,
+so their rows now sit in "Waits that do have deadlines" and the ranked entries
+state the new behaviour. Each open ranked item is closed by a change that gives
+the wait a budget and a named consequence, never by a note in this file.
 
 Scope: `crates/robin_rs/src/game_session/terminal_debriefing.rs`,
 `crates/robin_rs/src/multiplayer/native/{server.rs,server_protocol.rs,peer_sessions.rs}`,
@@ -53,8 +55,6 @@ repo-relative.
 | --- | --- | --- | --- | --- | --- | --- |
 | Host terminal debriefing holds for its own snapshot transition commit (`TerminalDebriefingPhase::AwaitingSnapshot`) | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Host finished the debriefing leaderboard, published `BeginSnapshotTransition`, and at least one connected peer is still in `awaiting` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session: `TerminalDebriefingProgress::SnapshotUnconfirmed` takes the same exit as an emergency end, so the campaign loop reopens the menu instead of freezing the mission | A `session_failed` event names the wait and the budget (`waited_ms`, `budget_ms`); the run log carries the same wording | Closed 2026-11-19. The wait can no longer outlive its budget; the host barrier it waits on is bounded separately (row 2). |
 | Client terminal debriefing holds for the host's snapshot commit | `terminal_debriefing.rs` (`await_remote_snapshot`, the `AwaitingSnapshot` arm of `tick`) | Client finished its debriefing with outcome `Ok`/`Load` | **30 s** (`SNAPSHOT_CONFIRM_BUDGET`) | Leaves the session with `GameCode::Quit` and reopens the menu; it does not keep waiting for a host that may never answer | The same `session_failed` event and log line as the host row | Closed 2026-11-19 with the host row: both sides of the same wait now expire. |
-| Host snapshot-transition acknowledgement barrier (`SnapshotTransitions::awaiting`) | `server_protocol.rs:62-126`; created `server_dispatch.rs:269-292`; committed `server.rs:247-272` | Host began any transition (load, restart, campaign exit, `ReconnectAllForSnapshot`) while that seat's writer was connected | **none** — `take_completed` returns only when `awaiting` is empty (`server_protocol.rs:111-116`) | Nothing. `retain_for_reconnect` re-inserts a seat on disconnect: "Connectivity never shrinks the barrier, including after an ack." A peer that never returns keeps the transition pending forever. | The `awaiting` set is per-seat state in memory and in the server diagnostic JSON. No log line, no UI. | Whole session frozen at the transition boundary: no participant can reach the next mission, and `maybe_begin_sim_locked` also refuses to run while a transition is pending (`server.rs:277-279`). |
-| Host ready barrier (`ReadyBarrier::candidate`) | `server_protocol.rs:24-46`; invoked `server.rs:275-299`, `server.rs:1442-1458`, `server.rs:717-731` | Mission start, or resync after a late input / manual step, with `expected_players > 1` | **none** | Nothing. Quorum is `connected >= expected_players - 1` (`server_protocol.rs:45`); a seat that is released leaves `readiness()` (`peer_sessions.rs:340-348`), and a seat with a detached writer fails `!attached`. Either way the count can only drop. The check only re-runs on the next `ReadyToSim`, so there is not even a poll. | "ready barrier complete" is logged on success (`server_dispatch.rs:363-368`). On failure: nothing. `ready_frame` per seat and `host_frame` are only in the diagnostic JSON. | Mission never starts (or never resumes after a resync). Players sit on the loading screen with no explanation and no way out but quitting. |
 | Client waits for `BeginSim` | `runtime/admission.rs:14-22` (`PeerWaitingForBegin`, `HostWaitingForBegin`, `HostWaitingForResyncBegin`); gate `runtime/multiplayer_sync.rs:60-74`; pause `multiplayer.rs:1274` | Peer adopted the snapshot and sent `ReadyToSim`, or host's mission is loaded and waiting on peers | **none** | Nothing in the game layer. Only the transport notices a dead host. | No log for the wait itself. `BeginSim` arrival logs "begin-sim barrier released" (`multiplayer.rs:625-629`). | Mission loaded but never simulated; input disabled by `set_gameplay_input_enabled(false)` (`host/transport.rs:178`). |
 | Client waits for `InitialSnapshot` after (re)connect | `runtime/admission.rs:50-57` (`PeerWaitingForSnapshot`) | `Disconnected`, or a first join before the host's snapshot cache exists | **none** | Nothing. The host skips the send silently when its `initial_snapshot` cache is empty (`server.rs:995-1010`). | Console: "Disconnected; reconnecting…" and "Reconnected; synchronizing game…" (`multiplayer.rs:519-551`). No indication that the snapshot never arrived. | Peer frozen indefinitely on a snapshot it never receives; reconnect loops never converge. |
 | Story / terminal modal acknowledgement barrier | `modal_session.rs:19-22` (`requires_modal_acknowledgements`), `:632-671` (votes), `:828-845` (unanimous over the roster), `:751-761` (`story_barrier_pending`); pause `multiplayer.rs:1295-1303` | Any shared story modal, and any `FinalDebriefing`/`MissionState EndState` page, while another seat is admitted | **none** | Nothing. The roster (`required_players`) is set once at `install_session` (`host/transport.rs:177`) and never shrinks when a seat leaves. | Host UI shows "Waiting for Player 2…" from `modal_waiting_names` (`modal_net.rs:159-164`) for scripted story modals only. The terminal debriefing uses `ModalDismissalGate` (`terminal_debriefing.rs:224-225`, `modal_net.rs:16-103`), which shows no waiting text at all. | Simulation paused for every participant. One player who never opens the page (or left the session) freezes everyone until they return. |
@@ -96,10 +96,27 @@ the constants the transports actually read, not comments.
 | Matchmaking Start debounce (gives an in-flight Join time to arrive) | 750 ms | `matchmaking.rs:818-824` |
 | Matchmaking listing soft TTL | 60 s | `matchmaking.rs:36` |
 | Synchronized start gate once `BeginSim` arrives | host clock + 500 ms | `server.rs:287-292`; opened at `multiplayer_sync.rs:61-69` |
+| Host snapshot-transition acknowledgement barrier (`SnapshotTransitions::awaiting`) | 60 s + 1 s per 64 KiB of payload | `robin_engine/src/multiplayer.rs:260` (`TRANSITION_COMMIT_MS`), `:286` (`transition_budget`); stamped `server_dispatch.rs:283-287`; expired on the 500 ms tick `server.rs:866-874` |
+| Host ready barrier (`ReadyBarrier::candidate`) | 120 s, refreshed once for a seat admitted mid-wait | `server_protocol.rs:23` (`READY_BUDGET_MS`), `:89-104` (wait start, one extension, expiry); expired on the same tick `server.rs:316-327` |
 
-The start gate above is the only barrier in the system that resolves on a
-*clock* rather than on a peer message. Every other barrier in the first table
-waits for a message.
+The synchronized start gate and the two host barriers above resolve on a clock.
+Every remaining row in the first table waits for a message that may never
+arrive.
+
+The two host barriers expire into the same shape, so it is stated once: the
+seats still waiting are evicted, one `tracing::warn!` names the transition (or
+the evicted seats) and the time waited, and the host proceeds with the
+participants that did answer (`server.rs:866-874` for a transition, `:316-327`
+for readiness). An evicted seat keeps its authenticated owner and re-admits
+from an authoritative snapshot like any late joiner; a message it sends after
+eviction is dropped as
+`PeerDispatchFailure::Inactive` (`server.rs:208-218`, `peer_sessions.rs:78-80`),
+so a late ack cannot resurrect a barrier that already committed. The transition
+deadline is stamped at prepare time, so a disconnect that calls
+`retain_for_reconnect` (`server_protocol.rs:231-236`) re-adds the seat but
+cannot push the deadline out: the deadline is absolute from prepare time, and
+the tick that expires the barrier commits it under the same lock, after which
+`retain_for_reconnect` finds no pending transition and does nothing.
 
 ## Ranked: most likely to produce a permanent hang
 
@@ -113,22 +130,55 @@ waits for a message.
    mission is pinned in `LevelInProgress`. This is the exact wait the ticket
    named, and the in-code comment is accurate: there is no timeout and no local
    fallback.
-2. **Host snapshot-transition acknowledgement barrier** —
-   `server_protocol.rs:62-126`, especially `:104-108` ("Connectivity never
-   shrinks the barrier, including after an ack") and `:111-116` (completion
-   requires an empty `awaiting` set). A peer that crashes at mission end, or
-   simply never processes `PrepareSnapshotTransition`, freezes the host at the
-   transition, and every later mission start is blocked too because
-   `maybe_begin_sim_locked` refuses while a transition is pending.
-3. **Ready barrier against a static `expected_players`** —
-   `server_protocol.rs:45` (`connected >= expected_players.saturating_sub(1)`),
-   fed by `peer_sessions.rs:340-348`, whose pool shrinks when a seat is
-   released. `--mp-expected-players` is documented as "total player count the
-   host should wait for at the multiplayer ready barrier"
-   (`main_entry/cli.rs:246-248`), and matchmaking fixes it at
-   `1 + joiners.len()` when Start is pressed (`matchmaking.rs:779`). A
-   joiner who leaves between Start and the barrier makes the count permanently
-   unsatisfiable, and nothing logs which seat is missing.
+2. **Host snapshot-transition acknowledgement barrier — closed 2026-11-18
+   (`45fc7fb96`, `05bca0b90`).** The deadline is stamped at prepare time
+   (`server_dispatch.rs:283-287`) from the payload's own budget —
+   `TRANSITION_COMMIT_MS` plus one second per 64 KiB
+   (`robin_engine/src/multiplayer.rs:260`, `:286`), the same number the peer
+   enforces on the transition it prepared, so there is one budget and not two.
+   The 500 ms watchdog tick (`server.rs:699`, `:856-874`) calls
+   `SnapshotTransitions::expire` (`server_protocol.rs:215-229`), which drains
+   the seats still `awaiting` into `answered` and logs one warning naming the
+   transition id, the evicted seats, the waited time and the payload size; the
+   same tick commits the transition for the peers that answered
+   (`server.rs:253-292`). `retain_for_reconnect` still re-adds a seat on
+   disconnect, but the deadline is absolute, so a reconnect buys no extra time,
+   and once the tick has committed there is no pending transition left to
+   resurrect. A late ack is a no-op twice over: while the transition is pending
+   it matches `answered` (`server_protocol.rs:199-203`), and after the commit
+   the seat's writer is detached, so dispatch returns
+   `PeerDispatchFailure::Inactive` and the frame is dropped
+   (`server.rs:208-218`, dispatched at `:1453`). Proved by
+   `expired_transition_evicts_absent_seats_and_completes_the_barrier`
+   (`server/tests.rs:785`), which commits once with the acks that arrived, and by
+   `snapshot_tracker_rejects_wrong_acks_and_treats_duplicates_as_no_ops`
+   (`server/tests.rs:747`), which H10 and H17 name.
+3. **Ready barrier against a static `expected_players` — closed 2026-11-18
+   (`9ff945a46`).** `ReadyBarrier` records when it first became blocked
+   (`server_protocol.rs:42`, `:89-91`) and returns `Expired` after
+   `READY_BUDGET_MS` = 120 s (`:23`, `:100-104`), evaluated on the same
+   watchdog tick even when no `ReadyToSim` ever arrives. On expiry the host
+   evicts the admitted seats that are unattached or not readiness-complete
+   (`peer_sessions.rs:180-201`), logs one warning naming those seats, the
+   budget and the waited time (`server.rs:316-327`), and releases with the
+   host frame plus every ready frame that did arrive, quorum ignored
+   (`server_protocol.rs:115-126`). A seat admitted after the wait began
+   refreshes the budget exactly once (`:91-95`), so a late joiner still gets a
+   full load window and a second joiner cannot extend it again. The release is
+   still single: `commit` asserts `begun.is_none()` (`:128-131`) and a begun
+   barrier answers `Wait` (`:68-70`), and a late `ReadyToSim` from the evicted
+   seat is dropped as `Inactive` because its writer is gone
+   (`peer_sessions.rs:78-80`, `server.rs:1544`). `--mp-expected-players`
+   keeps its meaning as what the host waits for
+   (`main_entry/cli.rs:246-248`); `/state`'s
+   `multiplayer.expected_players` stays that configured count, and the warning
+   names the seats that never arrived or never loaded, so the two are read
+   together and the barrier is never silent about having fewer seats than the
+   count. Proved by
+   `ready_barrier_expires_after_its_budget_and_extends_once_for_a_joiner`
+   (`server/tests.rs:472`) and
+   `ready_barrier_eviction_drops_admission_and_writer_but_keeps_the_owner`
+   (`peer_sessions.rs:509`), the pair H11 names.
 4. **Modal acknowledgement barrier, including terminal summaries** —
    `modal_session.rs:19-22` makes `FinalDebriefing` and `MissionState EndState`
    require acknowledgements, `:837-845` requires every roster seat, and
@@ -155,11 +205,13 @@ Not hangs, but they are what turns some of the above from "wait" into "hard
 failure", so they belong with this evidence:
 
 - A peer that reconnects while a transition is pending receives
-  `PrepareSnapshotTransition` again (`server.rs:1025-1032`), but its transport
-  still holds the prepared payload, so
-  `on_prepare_snapshot_transition` fails the protocol assertion
-  `!host.transport.has_snapshot_transition()` (`multiplayer.rs:878-880`). The
-  barrier's reconnect path and the client's prepare path disagree.
+  `PrepareSnapshotTransition` again, and used to fail the protocol assertion
+  `!host.transport.has_snapshot_transition()` because its transport still held
+  the earlier payload. A prepare now belongs to the transport generation that
+  received it (`68e655837`): ending that generation calls
+  `await_authoritative_snapshot`, which drops the prepare and names it in the
+  log (`transport.rs:323-350`), so the re-sent prepare arrives against an empty
+  slot and the peer acknowledges the same session-bound id (H17).
 - `establish` on native reads `handle.content_offer()` without waiting
   (`session_setup.rs:63`); the value is only published by the I/O task that
   just started, so a slow first handshake can be mistaken for "no content".
