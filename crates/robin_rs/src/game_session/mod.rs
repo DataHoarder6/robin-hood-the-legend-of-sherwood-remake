@@ -19,6 +19,7 @@ mod loading_progress;
 mod modal_state;
 mod mouse_input;
 mod multiplayer;
+pub(crate) mod remote_cursor;
 /// The voluntary bug report's game-state half. Desktop-only, like the bundle
 /// writer it drains: every surface that queues a report (`/bug`, the pause-menu
 /// screen, `POST /bug-report`) is stubbed out on wasm32, so a browser build has

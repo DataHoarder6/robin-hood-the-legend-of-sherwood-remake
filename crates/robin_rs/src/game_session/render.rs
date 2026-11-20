@@ -160,6 +160,13 @@ pub(super) fn prepare_fixed_tick_hud(
         ui,
         has_hud_fonts,
     } = frontend;
+    hud.remote_cursors_visible = super::remote_cursor::remote_cursors_visible(
+        host.frontend.preferences().show_teammate_cursors(),
+        ui.pause_menu.is_some(),
+        ui.active_ui_task.is_some(),
+        input.translator.user_locked(),
+        ui.console_overlay.is_visible(),
+    );
     let mp = input.threaded.position();
     let sw = presentation.renderer.screen_width();
     let sh = presentation.renderer.screen_height();
@@ -882,6 +889,7 @@ fn begin_wide_map_rgba(
         threaded_input: ctx.threaded_input,
         game: ctx.game,
         pause_menu: ctx.pause_menu,
+        remote_cursors_visible: ctx.remote_cursors_visible,
         sherwood_enable: ctx.sherwood_enable,
         sherwood_rail: ctx.sherwood_rail,
         shift_held: ctx.shift_held,
@@ -1169,9 +1177,10 @@ pub(super) fn update_mouse_and_cursor(
         .minimap()
         .is_over_widget(mouse_screen)
         || host.frontend.pointer_capture().minimap_drag_active();
+    let mouse_map = host.frontend.viewport.screen_to_map(mouse_screen);
     let mut new_cursor = if portrait_hit.is_some() || over_minimap {
         engine_resource_ids::RHMOUSE_DEFAULT
-    } else if let Some(mouse_map) = host.frontend.viewport.screen_to_map(mouse_screen) {
+    } else if let Some(mouse_map) = mouse_map {
         crate::host_mouse::update_mouse(
             engine,
             host,
@@ -1259,6 +1268,17 @@ pub(super) fn update_mouse_and_cursor(
         cursor_renderer.load_cursor(new_cursor, cursor_res, renderer);
         *last_cursor_id = new_cursor;
     }
+
+    let now_ms = u64::from(crate::window::process_uptime_ms());
+    let states = host.frontend.remote_cursors.render_states(now_ms);
+    host.frontend
+        .remote_cursors
+        .sync_sprites(cursor_res, renderer, &states);
+    if !engine.user_locked() {
+        if let Some(map_point) = mouse_map {
+            super::remote_cursor::publish_local_cursor(host, now_ms, map_point, new_cursor);
+        }
+    }
 }
 
 /// Bundle of render-only state threaded through [`render_frame`] —
@@ -1300,6 +1320,8 @@ pub struct RenderContext<'a> {
     pub threaded_input: &'a crate::input::ThreadedInput,
     pub game: &'a Game,
     pub pause_menu: Option<&'a PauseMenu>,
+    /// Whether teammates' cursors are currently allowed on screen.
+    pub remote_cursors_visible: bool,
 
     // Copy values threaded through from the outer loop.
     pub sherwood_enable: SherwoodButtonEnable,
@@ -1783,6 +1805,7 @@ fn render_overlay_pass(
     let short_briefing_strings = ctx.short_briefing_strings;
     let threaded_input = ctx.threaded_input;
     let pause_menu = ctx.pause_menu;
+    let remote_cursors_visible = ctx.remote_cursors_visible;
     let game = ctx.game;
     let shift_held = ctx.shift_held;
     let rewind_active = ctx.rewind_active;
@@ -1987,17 +2010,11 @@ fn render_overlay_pass(
     }
 
     if host.frontend.local_player_count > 0 {
-        const COLORS: [[u8; 3]; 5] = [
-            [100, 210, 255],
-            [255, 180, 80],
-            [130, 240, 130],
-            [240, 130, 235],
-            [255, 235, 100],
-        ];
         for (&seat, &point) in &host.frontend.local_cursors {
             let x = point[0] as i32;
             let y = point[1] as i32;
-            let color = COLORS[usize::from(seat) % COLORS.len()];
+            let color = super::remote_cursor::SEAT_COLORS
+                [usize::from(seat) % super::remote_cursor::SEAT_COLORS.len()];
             renderer.render_gpu_line(x - 7, y, x + 7, y, color);
             renderer.render_gpu_line(x, y - 7, x, y + 7, color);
             if let Some(font) = console_font {
@@ -2018,6 +2035,13 @@ fn render_overlay_pass(
     // been loaded by that point; `last_cursor_id` is the live id.
 
     // ── GPU phase: cursor on top of everything ──
+    if remote_cursors_visible {
+        let now_ms = u64::from(crate::window::process_uptime_ms());
+        let states = host.frontend.remote_cursors.render_states(now_ms);
+        host.frontend
+            .remote_cursors
+            .draw(renderer, &host.frontend.viewport, &states);
+    }
     // The cursor blits first and advances its animation afterwards,
     // so the displayed frame this tick is the one chosen by the
     // previous tick's animation step.

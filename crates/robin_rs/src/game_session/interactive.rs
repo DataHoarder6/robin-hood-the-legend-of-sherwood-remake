@@ -244,6 +244,7 @@ pub(super) struct MissionHud {
     pub(super) sherwood_tooltip: SherwoodTooltipTracker,
     pub(super) pc_action_tooltip: PcActionTooltipTracker,
     pub(super) last_cursor_id: i32,
+    pub(super) remote_cursors_visible: bool,
 }
 
 impl MissionHud {
@@ -851,6 +852,7 @@ impl InteractiveFrontendAssembly {
                 sherwood_tooltip: SherwoodTooltipTracker::new(),
                 pc_action_tooltip: PcActionTooltipTracker::new(),
                 last_cursor_id: robin_engine::resource_ids::RHMOUSE_DEFAULT,
+                remote_cursors_visible: false,
             },
             presentation: MissionPresentation {
                 renderer,
@@ -974,6 +976,7 @@ impl MissionPresentation {
             threaded_input: &input.threaded,
             game,
             pause_menu: ui.pause_menu.as_ref(),
+            remote_cursors_visible: hud.remote_cursors_visible,
             sherwood_enable: hud.sherwood_enable,
             sherwood_rail: hud.sherwood_rail,
             shift_held: state.shift_held,

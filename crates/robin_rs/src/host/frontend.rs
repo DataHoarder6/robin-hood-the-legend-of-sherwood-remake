@@ -1,5 +1,6 @@
 //! Frontend rendering, resources and local interaction lifetime.
 use super::*;
+use crate::game_session::remote_cursor::{LocalCursorTx, RemoteCursorStore};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct QueueStripAnimation {
@@ -107,6 +108,7 @@ pub struct FrontendPreferences {
     native_refresh_presentation: bool,
     quick_action_cursor_pulse: bool,
     diplomacy_visuals: bool,
+    show_teammate_cursors: bool,
     gameplay_config: robin_engine::gameplay_config::GameplayConfig,
 }
 
@@ -125,6 +127,7 @@ impl FrontendPreferences {
         custom_key_config: KeyConfig,
         gameplay: robin_engine::gameplay_config::GameplayConfig,
         graphics: &robin_engine::graphic_config::GraphicConfig,
+        multiplayer: &robin_engine::multiplayer_config::MultiplayerConfig,
     ) -> Self {
         Self {
             key_config,
@@ -135,6 +138,7 @@ impl FrontendPreferences {
             native_refresh_presentation: graphics.native_refresh_presentation,
             quick_action_cursor_pulse: graphics.quick_action_cursor_pulse,
             diplomacy_visuals: graphics.diplomacy_visuals,
+            show_teammate_cursors: multiplayer.show_teammate_cursors,
             gameplay_config: gameplay,
         }
     }
@@ -173,6 +177,9 @@ impl FrontendPreferences {
     }
     pub fn diplomacy_visuals(&self) -> bool {
         self.diplomacy_visuals
+    }
+    pub fn show_teammate_cursors(&self) -> bool {
+        self.show_teammate_cursors
     }
 }
 
@@ -233,6 +240,9 @@ pub struct HostFrontend {
     pub local_keyboard_player: bool,
     pub local_disconnected: std::collections::BTreeSet<u8>,
     pub local_cursors: std::collections::BTreeMap<u8, [f32; 2]>,
+    /// Presentation-only teammates' cursor samples and their GPU sprites.
+    pub(crate) remote_cursors: RemoteCursorStore,
+    pub(crate) local_cursor_tx: LocalCursorTx,
     pub split_screen: crate::split_screen::SplitScreen,
     /// Per-seat player-controlled follow cameras. Mission-script director
     /// locks remain in the deterministic engine; these targets only affect
