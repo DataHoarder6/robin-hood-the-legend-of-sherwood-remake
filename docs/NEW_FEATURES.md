@@ -26,9 +26,9 @@
   can be replayed, and a dimmed pin with a dark corner marks a locked one. The
   state comes once from `accessible_mission_indices` plus the attempt record
   (`Campaign::is_mission_accessible` / `is_mission_replayable`), so no pin can
-  offer a commit the engine would reject. Clicking or pressing Return on a
-  locked pin starts nothing; the tooltip and the description window name the
-  unmet condition instead of offering the start action. The map opens on the
+  offer a commit the engine would reject. A locked pin is inert: it keeps its
+  dimmed artwork, but has no hover highlight, no tooltip and no click claim —
+  there is deliberately no "locked — reason" tooltip. The map opens on the
   first ready pin.
 
 - **Sherwood perk purchases.** A sixth Sherwood HUD button opens a perks panel
@@ -2965,8 +2965,10 @@ The Sherwood/mission rail now offers only the controls the current situation
 has: the campaign-map button before a mission is committed, the deploy/start/
 cancel column after, and finish/abandon while a mission plays. Presence is
 derived from campaign state every frame (host, client and mid-Sherwood load
-alike), while a control whose gate is closed — mission requirements unmet, the
-hourglass transient, trading unavailable — stays on the rail drawn disabled.
+alike). The Sherwood StartMission button is not rendered at all when the
+committed mission's requirements are unmet; the other closed gates — the
+hourglass transient, trading unavailable — still keep their control on the
+rail drawn disabled.
 
 Abandoning a live mission ends the level as `LevelInterrupted` and now shows
 the original's third mission-end page: the retail "Mission aborted" title

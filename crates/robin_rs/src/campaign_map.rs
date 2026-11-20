@@ -5,7 +5,7 @@
 
 use crate::campaign_progress::{
     CampaignProgressGraph, ExhibitGridNavigator, MissionAvailability, MissionKind,
-    MissionProgressState, availability_notes,
+    MissionProgressState,
 };
 use crate::gfx_types::{GameEvent, Keycode};
 use crate::host::ApplicationContext;
@@ -1433,10 +1433,11 @@ impl CampaignMapModalState {
             self.input.end_frame();
 
             for (idx, item) in self.items.iter().enumerate() {
-                if self
-                    .frame
-                    .widget(item.loc_idx as u32)
-                    .is_some_and(|w| w.base().state != UiState::Default)
+                if pin_is_interactive(item)
+                    && self
+                        .frame
+                        .widget(item.loc_idx as u32)
+                        .is_some_and(|w| w.base().state != UiState::Default)
                 {
                     self.selected_classic = idx;
                 }
@@ -2923,6 +2924,13 @@ fn campaign_map_items(
     items
 }
 
+/// Whether a classic-map pin may be interacted with at all. Locked missions
+/// keep their dimmed artwork, but are inert: no hover highlight, no tooltip,
+/// no click claim — nothing a pointer can act on or read.
+fn pin_is_interactive(item: &CampaignMapItem) -> bool {
+    item.availability.starts_mission()
+}
+
 fn build_campaign_frame(
     items: &[CampaignMapItem],
     campaign_map: &CampaignMapState,
@@ -3018,7 +3026,7 @@ fn build_campaign_frame(
         frame.add_widget_absolute(widget_bridge::make_button_with_resource(
             item.loc_idx as u32,
             "",
-            true,
+            pin_is_interactive(item),
             LOCATION_RESOURCE_IDS[item.loc_idx],
             x as i32,
             y as i32,
@@ -3087,9 +3095,10 @@ fn render_campaign_map(
     let blink_visible = marker_blink_on(crate::window::process_uptime_us());
     for item in items {
         let (x, y) = LOCATION_POSITIONS[item.loc_idx];
-        let focused = frame
-            .widget(item.loc_idx as u32)
-            .is_some_and(|w| w.base().state != UiState::Default);
+        let focused = pin_is_interactive(item)
+            && frame
+                .widget(item.loc_idx as u32)
+                .is_some_and(|w| w.base().state != UiState::Default);
         if let Some(surface) = assets.locations[item.loc_idx] {
             if focused {
                 renderer.draw_rect_outline_screen(
@@ -3139,7 +3148,7 @@ fn render_campaign_map(
         }
     }
 
-    if let Some(item) = items.get(selected) {
+    if let Some(item) = items.get(selected).filter(|item| pin_is_interactive(item)) {
         draw_selection(renderer, transform, item.loc_idx, &assets.locations);
         render_tooltip(
             renderer,
@@ -3306,25 +3315,10 @@ fn render_tooltip(renderer: &mut Renderer, transform: MenuTransform, view: Toolt
     }
 }
 
-/// The tooltip body: availability first, then — for a locked pin — the reason
-/// it cannot start, then the mission blurb.
-fn short_description(
-    campaign: &Campaign,
-    profiles: &engine_profiles::ProfileManager,
-    item: &CampaignMapItem,
-) -> String {
-    match item.availability {
-        MissionAvailability::Locked => {
-            let reasons = availability_notes(campaign, profiles, item.mission_idx).join(" ");
-            format!(
-                "{} - {}\n{}",
-                item.availability.label(),
-                reasons,
-                item.description
-            )
-        }
-        _ => format!("{}\n{}", item.availability.label(), item.description),
-    }
+/// The tooltip body for an interactive pin: availability, then the mission
+/// blurb. Locked pins are inert and never reach the tooltip at all.
+fn short_description(item: &CampaignMapItem) -> String {
+    format!("{}\n{}", item.availability.label(), item.description)
 }
 
 impl ShortMissionDescriptionWindow {
@@ -3398,7 +3392,7 @@ impl ShortMissionDescriptionWindow {
         ));
         frame.add_widget_absolute(widget_bridge::make_label(
             SHORT_DESC_TEXT_WIDGET_ID,
-            &short_description(campaign, profiles, item),
+            &short_description(item),
             x + 48,
             y + 5,
             167,
@@ -4411,6 +4405,7 @@ mod browser_tests {
 #[cfg(test)]
 mod availability_tests {
     use super::*;
+    use crate::campaign_progress::availability_notes;
     use robin_engine::campaign_history::ProfileCampaignHistory;
     use robin_engine::mission::{Mission, MissionStatus};
     use robin_engine::profiles::{MissionProfile, MissionType};
@@ -4648,6 +4643,62 @@ mod availability_tests {
         let mission_idx = items[locked].mission_idx;
         assert!(!campaign.is_mission_accessible(mission_idx));
         assert!(!campaign.is_mission_replayable(mission_idx));
+    }
+
+    #[test]
+    fn a_locked_pin_has_no_hover_highlight_selection_or_click_claim() {
+        let (campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        let locked = items
+            .iter()
+            .position(|item| item.availability == MissionAvailability::Locked)
+            .expect("locked pin");
+        let mut state = classic_state(items.clone(), &campaign, &profiles);
+        let transform = MenuTransform::centered(640, 480);
+        let initial = state.selected_classic;
+        assert_ne!(initial, locked, "the map opens on a ready pin");
+
+        // A locked pin is not an interactive widget: nothing to highlight,
+        // nothing to press, and no hover state that could open a tooltip.
+        assert!(
+            !state
+                .frame
+                .widget(items[locked].loc_idx as u32)
+                .expect("locked pin widget")
+                .base()
+                .enabled,
+            "a locked pin must not be an interactive widget"
+        );
+
+        let (x, y) = LOCATION_POSITIONS[items[locked].loc_idx];
+        let (sx, sy) = transform.to_screen(x as i32 + 2, y as i32 + 2);
+        assert_eq!(
+            state.handle_events(
+                vec![GameEvent::MouseMove {
+                    x: sx,
+                    y: sy,
+                    xrel: 0,
+                    yrel: 0
+                }],
+                transform,
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            state.selected_classic, initial,
+            "hovering a locked pin must not select it or surface its tooltip"
+        );
+        assert_eq!(
+            state
+                .frame
+                .widget(items[locked].loc_idx as u32)
+                .expect("locked pin widget")
+                .base()
+                .state,
+            UiState::Default,
+            "a locked pin must not show a hover highlight"
+        );
     }
 
     /// Screen corners and edge midpoints, where a pointer-driven child window

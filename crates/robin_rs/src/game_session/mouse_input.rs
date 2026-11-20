@@ -2003,11 +2003,21 @@ pub(super) fn handle_sherwood_hud_buttons(
     } = ctx;
     // Presence comes from campaign state, every frame, before any early return:
     // a multiplayer client and a mid-Sherwood load must draw the same rail as
-    // the host.
-    *sherwood_rail = SherwoodRail::from_campaign(
-        game.is_sherwood,
-        engine.campaign().next_mission_idx.is_some(),
-    );
+    // the host. The StartMission gate is part of presence now, so compute the
+    // live requirements (or blazon-conversion) answer here too.
+    let (has_next_mission, start_ready) = {
+        let campaign = engine.campaign();
+        let has_next = campaign.next_mission_idx.is_some();
+        let ready = if game.is_men_to_blazon_conversion() {
+            campaign.next_mission_idx.is_some_and(|idx| {
+                campaign.can_convert_merry_men_to_blazons(idx, &assets.profile_manager)
+            })
+        } else {
+            campaign.mission_requirements_met(&assets.profile_manager)
+        };
+        (has_next, ready)
+    };
+    *sherwood_rail = SherwoodRail::from_campaign(game.is_sherwood, has_next_mission, start_ready);
     if host.transport.net().is_some()
         && host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST
     {
