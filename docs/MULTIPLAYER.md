@@ -129,11 +129,12 @@ boards. Co-op mission-end screens explain this restriction and allow browsing
 the mission's general board without offering an upload. Non-host clients never
 prepare submission evidence from their local prediction/reconnect journals.
 
-## Protocol 53
+## Protocol
 
-Messages are bitcode-encoded binary frames, class-tagged and length-prefixed
-on a single bidirectional iroh stream per peer. The handshake rejects a
-different protocol version.
+The wire version is `NET_PROTOCOL_VERSION` in
+`crates/robin_run_types/src/lib.rs`; never restate its value here. Messages are
+bitcode-encoded binary frames, class-tagged and length-prefixed on a single
+bidirectional iroh stream per peer. The handshake rejects a different version.
 
 | Direction | Message | Purpose |
 | --- | --- | --- |
