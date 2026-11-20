@@ -7,7 +7,7 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
+    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -237,6 +237,11 @@ case "$1" in
             printf 'advisory: unreferenced-item scan unavailable (exit %s); is rust-analyzer installed?\n' \
                 "$scan_status"
         fi
+        ;;
+    docs)
+        # Deterministic check of relative links in tracked Markdown. A doc-only
+        # landing would otherwise run no suite at all.
+        python3 scripts/check_markdown_links.py
         ;;
     web) pnpm --dir wasm-www verify:web ;;
     editor) pnpm --dir level-editor verify ;;
