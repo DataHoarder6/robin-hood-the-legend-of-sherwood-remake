@@ -34,7 +34,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 host=$1; shift
-if [[ $* == 'bash -s' ]]; then exec bash -s; fi
+if [[ $* == 'bash -s' ]]; then
+    # Keep the exact heredoc body the outer remote-check rendered (variables
+    # expanded, remote-side `\$` escaped) so the fixture can syntax-check the
+    # generated script, not the source that produced it.
+    if [[ -n ${FIXTURE_RENDERED:-} ]]; then
+        rendered=$FIXTURE_RENDERED/rendered-$$.sh
+        cat > "$rendered"
+        exec bash -s < "$rendered"
+    fi
+    exec bash -s
+fi
 exec bash -c "$*"
 STUB
 
@@ -97,6 +107,8 @@ export REAL_GIT=$real_git
 
 export FIXTURE_RESULTS=$work/results
 export FIXTURE_STARTED=$work/started
+export FIXTURE_RENDERED=$work/rendered
+mkdir -p "$FIXTURE_RENDERED"
 
 make_repo() {
     local dir=$1 token=$2
@@ -165,6 +177,30 @@ if [[ $disk_status -ne 0 ]] && grep -q 'below the .* GB floor' "$work/disk.out";
     printf 'ok   full disk refuses the sync\n'
 else
     printf 'FAIL full disk did not refuse the sync (status %s)\n' "$disk_status"
+    failures=$((failures + 1))
+fi
+
+# The copy root must have been touched after sync even though rsync copied
+# files with --no-times and left the directory with an old mtime.
+copy_dir="$HOME/build/robin/race-copy"
+# Every heredoc remote-check rendered over ssh must be a well-formed shell
+# script. `bash -n` parses the captured output, so a broken escaped variable
+# or an unterminated construct in the generated text fails here rather than
+# on the build host.
+rendered_count=0
+for script in "$FIXTURE_RENDERED"/rendered-*.sh; do
+    [[ -f $script ]] || continue
+    rendered_count=$((rendered_count + 1))
+    if bash -n "$script" 2>"$work/syntax.err"; then
+        printf 'ok   rendered heredoc %s parses\n' "$(basename "$script")"
+    else
+        printf 'FAIL rendered heredoc %s does not parse: %s\n' \
+            "$(basename "$script")" "$(cat "$work/syntax.err")"
+        failures=$((failures + 1))
+    fi
+done
+if (( rendered_count == 0 )); then
+    printf 'FAIL no remote heredocs were captured for the syntax check\n'
     failures=$((failures + 1))
 fi
 
