@@ -455,6 +455,7 @@ mod tests {
                 mission_profile_id: Some(4),
                 expected_players: 2,
             },
+            InvitationLifetime::Timed,
         )
         .unwrap()
     }
@@ -576,6 +577,7 @@ mod tests {
                 mission_profile_id: None,
                 expected_players: 2,
             },
+            InvitationLifetime::Timed,
         )
         .unwrap_err();
         assert!(error.to_string().contains("canonical HTTPS"));
@@ -599,6 +601,7 @@ mod tests {
                 mission_profile_id: None,
                 expected_players: 2,
             },
+            InvitationLifetime::Timed,
         )
         .unwrap();
         assert!(
