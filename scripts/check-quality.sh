@@ -189,6 +189,7 @@ case "$1" in
         # Child processes must be OS-supervised, and a browser join must fail
         # at the host when its artifact was never staged.
         node --test scripts/validation/supervised.test.mjs
+        node --experimental-strip-types --test wasm-www/src/content_cache.test.ts
         node --test scripts/validation/browser-boot.test.mjs
         # A published manifest must be same-origin to the page that serves it,
         # not to a hard-coded upstream hostname.

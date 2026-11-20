@@ -1,4 +1,5 @@
 import { withAbort } from "./cancellation.ts";
+import { readCachedContent, writeCachedContent } from "./content_cache.ts";
 import runtimeContract from "../runtime-contract.json" with { type: "json" };
 import type { BrowserContentEdition, VerifiedBrowserJoinTicket } from "./join_ticket.js";
 
@@ -225,6 +226,16 @@ async function fetchExactDemo(
   if (content.byteLength > MAX_CONTENT_FILE_BYTES) {
     throw new Error("Demo multiplayer datadir exceeds the browser content limit");
   }
+  const cached = await readCachedContent(content);
+  if (cached !== undefined) {
+    return {
+      edition: "demo",
+      datadir: cached,
+      dataBaseUrl: content.url.slice(0, content.url.lastIndexOf("/")),
+      assets: [],
+      shippingFiles: [],
+    };
+  }
   const response = await withAbort(signal, () =>
     fetch(content.url, { cache: "force-cache", signal }),
   );
@@ -240,6 +251,7 @@ async function fetchExactDemo(
   ) {
     throw new Error("Demo multiplayer content does not match its exact build manifest");
   }
+  await writeCachedContent(content, datadir);
   return {
     edition: "demo",
     datadir,
