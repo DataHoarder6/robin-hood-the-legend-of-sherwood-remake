@@ -252,7 +252,7 @@ an explicit install home so it cannot collide with another seat
 
 ```
 cargo build --locked --release --features desktop,multiplayer -p robin_rs --bin robin
-ROBINHOOD_INSTALL_HOME=/tmp/robin-host ROBINHOOD_DATA_DIR=~/Games/robin-hood-data \
+ROBINHOOD_INSTALL_HOME=/tmp/robin-host ROBINHOOD_DATA_DIR=~/Games/robin-hood/game \
   target/release/robin --server --mp-expected-players 2 --mp-nickname host --http-server 18641
 ```
 
@@ -290,7 +290,7 @@ Serving, and the three things a fixture server must add over `browser-game.mjs`:
    be served over `https` and be the byte-exact generation whose *native* closure
    the host has (`content_identity.rs:152-176`). Today's published corpus carries
    one native closure for every generation (`wasm-www/scripts/verify-datadir-corpus.mjs:42`)
-   and the local data tree is `~/Games/robin-hood-data/DATA/robinhood.bks`
+   and the local data tree is `~/Games/robin-hood/game/DATA/robinhood.bks`
    (1.1 GB); whether that closure equals the published one is **not verified here**
    — `cargo run --example content_identity -- <install>/Data` prints it.
 2. The resolver rule must stop being `MAP * 127.0.0.1`. The relay host has to
@@ -329,7 +329,7 @@ under `/wasm/<commit>/` on the page origin.
   wasm-bindgen-test runner, `lifecycle_gate.py:121-130`); `openssl 3.5.9`;
   `node v24.22.2`; `pnpm 12.9.0`. This runtime host has node 24 but no `openssl`
   on `PATH`, so `browser-game.mjs:41` would fail here.
-- Licensed data on this host: `ls ~/Games/robin-hood-data/DATA` →
+- Licensed data on this host: `ls ~/Games/robin-hood/game/DATA` →
   `Animations Characters Configuration Interface Levels Musics robinhood.bks …`,
   `du -sh` → `1.1G`; a source tree, the shape that lets a host mint a ticket
   (`content_identity.rs:157-176`). A `find /home/you /srv -maxdepth 5` for
@@ -487,7 +487,7 @@ mismatch (§10.3).
   the main menu and never reached the relay. The rejoin path exists
   (`transport reconnected; awaiting host snapshot`) but is not yet a repeatable
   observation, so the driver does not assert it.
-- Whether `~/Games/robin-hood-data`'s closure equals the published Demo
+- Whether `~/Games/robin-hood/game/DATA`'s closure equals the published Demo
   generation's `nativeContentSha256` (`verify-datadir-corpus.mjs:42`). §10 shows
   the published generation does not match the Demo build converted here, so a
   locally hosted game and the published artifact are built from different Demo
@@ -794,8 +794,10 @@ serves that generation from its own origin. The published generation does
 **not** match, and neither does the full retail install: a host on either of
 those closures would be refused by this site's Demo catalog. That is the same
 fact §8 recorded; self-hosting fixes the hosting, not the closure mismatch.
-(There is also no `~/Games/robin-hood-data` on build-host — that path in §4 and §8
-is stale; the two installs are under `~/Games/robin-hood/`.)
+Both installs live under `~/Games/robin-hood/`.
+
+Build identity — flake rev/tag object → `ROBIN_PACKAGE_COMMIT` → the 12-char
+version short → `/wasm/<short>/` — is `docs/NIX.md`'s chain, not restated here.
 
 ### 11.2 Three deployment facts the shell enforces
 
