@@ -96,13 +96,13 @@ scripts/remote-check.sh client-release
 
 There is **one** build copy: `~/build/robin-gate/gate-shared` on `minipc`, held
 under a lock from the first sync until the last suite finishes, outside the
-pruned root. Cargo incremental is on (`CARGO_INCREMENTAL=1`,
-`SCCACHE_ALLOW_INCREMENTAL=1`), so unchanged crates are reused by Cargo's own
-freshness check and `sccache` only sees genuinely new inputs. A per-tree copy
+pruned root. Cargo incremental is off in gates (`CARGO_INCREMENTAL=0`); the
+stable copy gives Cargo's own freshness check the same cwd and target dir on
+every run, and `sccache` only sees genuinely new inputs. A per-tree copy
 was tried and removed: a fresh cwd gives `sccache` new working-dir and out-dir
 keys, and measured 0.36 % Rust hits. The evidence and the rejected alternatives
 are [`2026-11-20-build-reduction-research.md`](slop/2026-11-20-build-reduction-research.md)
-and [`docs/slop/build-freshness-and-profiling-research.md`](slop/2026-11-20-build-freshness-and-profiling-research.md).
+and [`2026-11-20-build-freshness-and-profiling-research.md`](slop/2026-11-20-build-freshness-and-profiling-research.md).
 
 ### Measuring a build before changing it
 

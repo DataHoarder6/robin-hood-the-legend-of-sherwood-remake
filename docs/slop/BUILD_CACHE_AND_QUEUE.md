@@ -248,8 +248,9 @@ The copy lock prevents tree swaps; `rsync --checksum --no-times` keeps unchanged
 mtimes and only changed crates' artifacts are purged. sccache stays enabled for
 the cases where it does hit (C/C++, identical native invocations).
 
-With the stable gate copy, the `CARGO_INCREMENTAL=0` advice in §1 no longer
-applies: it existed to give sccache one shareable key space across copies.
-Gates now set `CARGO_INCREMENTAL=1` and `SCCACHE_ALLOW_INCREMENTAL=1` (sccache
-skips incremental crates rather than erroring; Cargo's incremental state in the
-stable copy makes changed workspace crates cheaper to rebuild).
+The stable gate copy removes the cold rebuild, so incremental is not needed for
+speed. Gate builds keep `CARGO_INCREMENTAL=0`: a trial with
+`SCCACHE_ALLOW_INCREMENTAL=1` broke a real landing when sccache rejected
+clippy's `rustc -vV` probe with "incremental compilation is prohibited". See
+[ADR 0007](../adr/0007-no-cargo-incremental-in-gates.md) before changing
+either variable; a version probe is not proof, only a full gate is.

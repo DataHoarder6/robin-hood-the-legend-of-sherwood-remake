@@ -232,10 +232,10 @@ skipped rather than failing.
 Recipes: `just doctor`, `just reconcile-main`, `just check SUITE`
 (`scripts/check-quality.sh` suites; `tooling` is the fixture-free one).
 
-Gate builds use Cargo incremental (`CARGO_INCREMENTAL=1` plus
-`SCCACHE_ALLOW_INCREMENTAL=1`): the shared copy keeps its incremental state, so
-a changed crate recompiles less. sccache no longer needs one shareable Rust key
-space across copies.
+Gate builds set `CARGO_INCREMENTAL=0`. A trial with incremental and
+`SCCACHE_ALLOW_INCREMENTAL=1` broke a landing gate; the stable warm copy, not
+incremental, is the speed fix. See
+[ADR 0007](adr/0007-no-cargo-incremental-in-gates.md).
 
 The shared gate copy lives in `~/build/robin-gate/`, outside the `~/build/robin/`
 root that every `--prune` scans. No agent's prune can delete a gate's cwd

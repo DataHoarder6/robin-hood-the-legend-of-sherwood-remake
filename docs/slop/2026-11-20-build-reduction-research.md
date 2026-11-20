@@ -161,9 +161,9 @@ Other primary facts relevant here:
   ([sccache `docs/Rust.md`](https://github.com/mozilla/sccache/blob/main/docs/Rust.md)).
   `CARGO_INCREMENTAL` overrides the profile
   ([Cargo config](https://doc.rust-lang.org/cargo/reference/config.html#buildincremental)).
-  So `=0` is correct only when cross-copy sccache sharing is the goal; with one
-  stable copy, `=1` plus `SCCACHE_ALLOW_INCREMENTAL=1` is a deliberate, different
-  trade-off ([`BUILD_CACHE_AND_QUEUE.md`, §5](BUILD_CACHE_AND_QUEUE.md)).
+  `=1` plus `SCCACHE_ALLOW_INCREMENTAL=1` was trialled with the stable copy and
+  reverted: it broke a real landing gate. Gate builds keep `=0`;
+  [ADR 0007](../adr/0007-no-cargo-incremental-in-gates.md) records why.
 - With basedirs, a hit can return an artifact built in another checkout: debug
   info and panic messages name that directory unless paths are remapped, and
   `env!("CARGO_MANIFEST_DIR")` needs `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS`
@@ -258,7 +258,7 @@ data
 ([cargo-build(1)](https://doc.rust-lang.org/cargo/commands/cargo-build.html),
 [cargo-check(1), --timings](https://doc.rust-lang.org/cargo/commands/cargo-check.html#--timings)).
 Use it to find a dominant crate — phase 3 of the
-[gate-throughput design](../../superpowers/specs/2026-11-20-gate-throughput-design.md) —
+[gate-throughput design](../superpowers/specs/2026-11-20-gate-throughput-design.md) —
 not as a gate metric.
 For the cache itself, `sccache --show-stats` is the source of truth
 ([sccache README, Debugging](https://github.com/mozilla/sccache/blob/main/README.md#debugging)).
