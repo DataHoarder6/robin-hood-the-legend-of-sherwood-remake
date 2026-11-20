@@ -213,6 +213,7 @@ case "$1" in
         bash scripts/test_land.sh
         bash scripts/test_push_gate.sh
         bash scripts/test_build_host.sh
+        bash scripts/test_remote_check.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every
