@@ -245,9 +245,14 @@ case "$1" in
         fi
         ;;
     docs)
-        # Deterministic check of relative links in tracked Markdown. A doc-only
-        # landing would otherwise run no suite at all.
-        python3 scripts/check_markdown_links.py
+        # Relative links in the Markdown a landing touches. The gate supplies
+        # the changed paths; without them this audits every tracked Markdown
+        # file, including retained historical docs with known rot.
+        doc_paths=()
+        if [ -n "${ROBIN_DOCS_CHECK_PATHS:-}" ]; then
+            read -r -a doc_paths <<< "$ROBIN_DOCS_CHECK_PATHS"
+        fi
+        python3 scripts/check_markdown_links.py "${doc_paths[@]}"
         ;;
     web) pnpm --dir wasm-www verify:web ;;
     editor) pnpm --dir level-editor verify ;;

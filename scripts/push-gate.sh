@@ -108,8 +108,12 @@ if [ "$tools_changed" = 1 ]; then
     suites+=(tooling)
 fi
 # A docs-only landing would otherwise select nothing and run zero checks.
+# The suite checks only the Markdown this landing changes; retained historical
+# docs are not a gate on an unrelated change.
 if printf '%s\n' "$paths" | grep -qE '(^docs/|\.md$)'; then
     suites+=(docs)
+    ROBIN_DOCS_CHECK_PATHS=$(printf '%s\n' "$paths" | grep -E '\.md$' | paste -sd' ' -)
+    export ROBIN_DOCS_CHECK_PATHS
 fi
 # wasm-www JS/TS and its configs run the `web` suite. The release scripts'
 # JS/TS is already gated by `tooling` (pnpm --dir scripts/release verify).

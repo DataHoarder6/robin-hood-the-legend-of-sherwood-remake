@@ -12,6 +12,7 @@ from __future__ import annotations
 import posixpath
 import re
 import subprocess
+import sys
 import urllib.parse
 from pathlib import Path
 
@@ -93,18 +94,25 @@ def check_target(relative: str, lineno: int, raw: str) -> list[str]:
     return []
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    # Paths are supplied by the landing gate: it checks the Markdown files a
+    # change touches, not the retained historical/vendor docs that already
+    # carry known rot. With no arguments this audits the whole tree.
+    files = list(argv) if argv else tracked_markdown()
     errors: list[str] = []
-    for relative in tracked_markdown():
+    for relative in files:
+        if not (ROOT / relative).is_file():
+            errors.append(f"{relative}: not a file in this checkout")
+            continue
         errors.extend(check_file(relative))
     if errors:
         for error in errors:
             print(error)
-        print(f"markdown links: {len(errors)} broken relative target(s)")
+        print(f"markdown links: {len(errors)} broken relative target(s) in {len(files)} file(s)")
         return 1
-    print(f"markdown links: {len(tracked_markdown())} tracked files, all relative targets exist")
+    print(f"markdown links: {len(files)} file(s), all relative targets exist")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
