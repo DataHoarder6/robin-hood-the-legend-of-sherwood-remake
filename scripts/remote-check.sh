@@ -318,7 +318,11 @@ require_host
 # is required: a single parent leaves `<copy>` in the key, so two identical
 # trees still miss. The server reads this list at startup, so restart it when
 # the set changes. The cache lock is taken before any copy lock and released
-# immediately: no path ever takes them in the other order.
+# immediately: no path ever takes them in the other order. The remap prefix is
+# written with \$PWD inside double quotes so the remote shell expands it to the
+# copy root after `cd`; single quotes left the literal text `$(pwd)` in rustc's
+# arguments, making the remap a no-op. SCCACHE_CLIENT_SIDE=1 is upstream's
+# recommended mode (sccache 0.19), keeping the daemon as a cache gateway only.
 prepare_cache() {
     local state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
     local list_file=$state_dir/sccache-basedirs
@@ -364,8 +368,9 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_ALLOW_INCREMENTAL=1 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
+    SCCACHE_CLIENT_SIDE=1 \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
@@ -384,8 +389,9 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_ALLOW_INCREMENTAL=1 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
+    SCCACHE_CLIENT_SIDE=1 \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash scripts/check-quality.sh ${requested[0]}
 EOF
