@@ -129,11 +129,11 @@ if grep -F 'SCCACHE_BASEDIRS=$(pwd)' "$source_root/scripts/remote-check.sh" >/de
 else
     pass "remote-check does not override SCCACHE_BASEDIRS per invocation"
 fi
-if [ "$(grep -c 'CARGO_INCREMENTAL=1' "$source_root/scripts/remote-check.sh")" -eq 2 ] &&
-   [ "$(grep -c 'SCCACHE_ALLOW_INCREMENTAL=1' "$source_root/scripts/remote-check.sh")" -eq 2 ]; then
-    pass "both remote commands use Cargo incremental with sccache's allowance"
+if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -eq 2 ] &&
+   [ "$(grep -c 'SCCACHE_ALLOW_INCREMENTAL' "$source_root/scripts/remote-check.sh")" -eq 0 ]; then
+    pass "both remote commands disable Cargo incremental for sccache"
 else
-    fail "remote-check does not enable incremental compilation in both commands"
+    fail "remote-check must disable incremental and not set SCCACHE_ALLOW_INCREMENTAL (ADR 0007)"
 fi
 for flag in CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS; do
     if grep -F "$flag" "$source_root/scripts/remote-check.sh" >/dev/null && \

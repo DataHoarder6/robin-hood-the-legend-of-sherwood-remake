@@ -364,8 +364,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
-    CARGO_INCREMENTAL=1 \
-    SCCACHE_ALLOW_INCREMENTAL=1 \
+    CARGO_INCREMENTAL=0 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
@@ -385,8 +384,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
-    CARGO_INCREMENTAL=1 \
-    SCCACHE_ALLOW_INCREMENTAL=1 \
+    CARGO_INCREMENTAL=0 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
