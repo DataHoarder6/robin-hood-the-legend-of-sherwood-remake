@@ -115,10 +115,11 @@ copy, and the first failure stops the landing. `wasm` joins them when anything
 under `crates/` changed: the browser client is a shipped artifact and no other
 suite compiles it.
 
-`check`, `docs`, `web` and `editor` are also gate suites; `client-check` is
-local-only (`bash scripts/check-quality.sh client-check`). `scripts/build-status.sh`
-reports build and gate state. Run `bash scripts/check-quality.sh` for the live
-suite list; the scripts own selection and contents.
+The in-flight gate work adds `check`, `docs`, `web` and `editor` as gate suites,
+`client-check` as a local-only suite (`bash scripts/check-quality.sh client-check`)
+and `scripts/build-status.sh` as a build/gate reporter. Run
+`bash scripts/check-quality.sh` for the live suite list; the scripts own
+selection and contents.
 
 Two entry points run that gate. `scripts/land.sh` is the loop's landing command:
 it fetches `fork/main`, rebases `HEAD` onto it when the branch is not already
