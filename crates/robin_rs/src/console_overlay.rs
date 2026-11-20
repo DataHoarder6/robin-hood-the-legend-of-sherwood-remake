@@ -188,6 +188,10 @@ pub struct ConsoleOverlay {
     /// Set to true when the most recent dispatch should auto-close the
     /// console (e.g. WIN / LOSE).
     pending_close: bool,
+    /// A mission-ending cheat must be staged as the authoritative replicated
+    /// command, never applied to this one engine's state. The host drains it
+    /// on the next frame.
+    pending_mission_result: Option<robin_engine::game_operation::MissionResult>,
     /// When the `CAMPAIGN <path>` dispatcher command fires, the requested
     /// save-file path is stored here so the host game loop can drain it
     /// and initiate the load (the engine has no access to save-file I/O).
@@ -541,6 +545,14 @@ impl ConsoleOverlay {
             FrameConsoleResponse::DeityInvoked
         } else if let Some(command) = parse_with_final(trimmed, dev.console.use_final) {
             dev.console.push_history(trimmed);
+            if let Some(result) = command.mission_result() {
+                // This is a session decision, not a local cheat. Stage it for
+                // the host to send as one authoritative command; the cheat
+                // dispatcher's local mutation would desync every other seat.
+                self.pending_mission_result = Some(result);
+                self.pending_close = true;
+                return;
+            }
             if command.is_host_only() {
                 let mut selected = host.frontend.selected_view_element();
                 let response = engine
@@ -849,6 +861,14 @@ impl ConsoleOverlay {
         self.pending_load_campaign.take()
     }
 
+    /// Drain the mission end a console cheat asked for. The host stages it as
+    /// one authoritative command so every seat ends in the same frame.
+    pub fn take_pending_mission_result(
+        &mut self,
+    ) -> Option<robin_engine::game_operation::MissionResult> {
+        self.pending_mission_result.take()
+    }
+
     /// Drain the deity-easter-egg flag.  When `true`, the host should
     /// invoke `InputTranslator::deity_call()` to apply its rebind table.
     pub fn take_pending_deity_invoked(&mut self) -> bool {
@@ -1019,6 +1039,42 @@ mod tests {
     }
 
     #[test]
+    fn a_console_mission_end_is_staged_for_the_session_not_applied_locally() {
+        use robin_engine::game_operation::MissionResult;
+        for (line, result) in [
+            ("/WIN", MissionResult::Won),
+            ("/LOOSE", MissionResult::Lost),
+        ] {
+            let (mut engine, assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+            let mut host = Host::scratch(640.0, 480.0);
+            let mut overlay = ConsoleOverlay::new();
+            let mut dev = DevState::default();
+            let mut actions = Vec::new();
+            overlay.toggle();
+            overlay.input = line.into();
+            overlay.submit(&mut host, &mut engine, &assets, &mut dev, &mut actions);
+            assert!(
+                actions.is_empty(),
+                "{line}: a mission end must not be a local external action"
+            );
+            assert!(
+                !engine.mission().quit_won && !engine.mission().quit_lost,
+                "{line}: the local engine must not end the mission"
+            );
+            assert_eq!(
+                overlay.take_pending_mission_result(),
+                Some(result),
+                "{line}: the host stages one authoritative mission end"
+            );
+            assert_eq!(
+                overlay.take_pending_mission_result(),
+                None,
+                "{line}: the request is drained once"
+            );
+        }
+    }
+
+    #[test]
     fn presentation_drains_only_the_explicit_console_queue_once() {
         let mut overlay = ConsoleOverlay::new();
         let mut pending = vec![String::new(), "first\nsecond".into(), "third".into()];
@@ -1078,6 +1134,7 @@ mod tests {
                 scroll_from_bottom: 4,
                 caret_timer: 17,
                 pending_close: true,
+                pending_mission_result: Some(robin_engine::game_operation::MissionResult::Won),
                 pending_load_campaign: Some("campaign.sav".into()),
                 pending_deity_invoked: true,
             };

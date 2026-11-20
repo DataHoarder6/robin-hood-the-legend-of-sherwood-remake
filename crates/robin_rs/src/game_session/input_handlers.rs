@@ -215,6 +215,23 @@ pub(super) fn handle_console_overlay_events(
     // we only act once.
     let auto_closed = console_overlay.take_pending_close();
 
+    // A mission-ending cheat is one authoritative command, never a local
+    // engine mutation: every seat applies it in the same frame. Only the
+    // session authority may emit it, whichever console surface it came from.
+    if let Some(result) = console_overlay.take_pending_mission_result() {
+        if host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST {
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::ForceMissionEnd { result },
+            );
+        } else {
+            host.frontend
+                .diagnostics_mut()
+                .queue_console_output("Only the mission host can end the session".to_owned());
+        }
+    }
+
     // Deity easter egg: once the console signals `DeityInvoked`, apply
     // the host-owned input-translator rebind.
     if console_overlay.take_pending_deity_invoked() {
