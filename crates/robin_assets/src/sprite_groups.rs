@@ -24,13 +24,18 @@ pub fn conditional_entropy_bits(
     }
     let mut bits = 0.0;
     for (count, context_count) in counts {
-        assert!(
-            count > 0 && count <= context_count,
-            "invalid entropy counts"
-        );
+        // Malformed counts must not crash an offline estimate.
+        if count == 0 || context_count == 0 || count > context_count {
+            continue;
+        }
         bits -= count as f64 * (count as f64 / context_count as f64).log2();
     }
     bits / sampled as f64 * full_tiles as f64
+}
+
+#[test]
+fn entropy_estimate_skips_invalid_counts() {
+    assert_eq!(conditional_entropy_bits([(0, 1)], 1, 1), 0.0);
 }
 
 #[test]

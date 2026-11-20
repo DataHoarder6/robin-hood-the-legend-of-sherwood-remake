@@ -154,7 +154,9 @@ pub(crate) struct RequestIds(u64);
 
 impl RequestIds {
     pub(crate) fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1).max(1);
+        // Wrapping would reissue handle 1, which may still have an in-flight
+        // completion. Exhaustion is practically unreachable, so fail loudly.
+        self.0 = self.0.checked_add(1).expect("request id space exhausted");
         self.0
     }
 }
@@ -270,6 +272,14 @@ pub(crate) fn should_cache_decoded(decoded_bytes: u64, budget_bytes: u64) -> boo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[should_panic(expected = "request id space exhausted")]
+    fn request_ids_fail_loudly_on_exhaustion_instead_of_reissuing_a_handle() {
+        let mut ids = super::RequestIds(u64::MAX - 1);
+        assert_eq!(ids.next(), u64::MAX);
+        ids.next();
+    }
+
     #[test]
     fn startup_warmup_boundary_defaults_to_frame_and_preserves_comparison_modes() {
         use super::StartupWarmupBoundary;

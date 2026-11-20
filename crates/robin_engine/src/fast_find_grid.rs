@@ -1247,7 +1247,7 @@ impl FastFindGrid {
     pub fn size_map(&mut self, width: u16, height: u16) {
         let level = self.level_mut();
         level.grid_width = width;
-        level.grid_height = height + 4; // +4-row pad inherited from level format
+        level.grid_height = height.saturating_add(4); // +4-row pad from level format
         level.map_bbox = MapBBox::from_coords(
             0.0,
             0.0,
@@ -3828,6 +3828,13 @@ impl ThickMoveCorridor {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn size_map_saturates_extreme_height_without_overflow() {
+        let mut grid = super::FastFindGrid::new();
+        grid.size_map(1, u16::MAX - 2);
+        assert_eq!(grid.level.grid_height, u16::MAX);
+    }
+
     #[test]
     fn runtime_grid_clone_and_serialization_keep_distinct_level_ownership() {
         let mut grid = super::FastFindGrid::new();
