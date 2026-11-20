@@ -57,6 +57,13 @@ pub struct Frame {
     pub return_value: i32,
 }
 
+/// Validate a script-supplied byte offset into the incoming parameter block.
+/// Malformed bytecode must stop the VM, not index out of bounds or overflow.
+fn valid_param_offset(offset: i32, parameter_bytes: usize) -> Option<usize> {
+    let offset = usize::try_from(offset).ok()?;
+    offset.checked_add(4).filter(|&end| end <= parameter_bytes)
+}
+
 /// Execution result when the interpreter stops.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StopReason {
@@ -750,7 +757,11 @@ impl Vm {
                 self.ip = addr;
             }
             Aff1GetParam { dst, param_offset } => {
-                let off = param_offset as usize;
+                let Some(off) =
+                    valid_param_offset(param_offset, self.current_frame().parameters.len())
+                else {
+                    return Some(StopReason::HitEmpty);
+                };
                 let bytes = &self.current_frame().parameters[off..off + 4];
                 let v = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                 self.write_i32(dst, v);
@@ -758,7 +769,11 @@ impl Vm {
             }
             Aff1SetParam { dst_offset, src } => {
                 let v = self.read_i32(src);
-                let off = dst_offset as usize;
+                let Some(off) =
+                    valid_param_offset(dst_offset, self.current_frame().parameters.len())
+                else {
+                    return Some(StopReason::HitEmpty);
+                };
                 self.current_frame_mut().parameters[off..off + 4].copy_from_slice(&v.to_le_bytes());
                 self.ip += 1;
             }
@@ -1702,5 +1717,15 @@ mod tests {
         let program = [Nop];
         let mut vm = Vm::new();
         assert_eq!(vm.run_up_to(&program, 1), StopReason::RanOff);
+    }
+
+    #[test]
+    fn negative_parameter_offset_is_fatal_not_a_panic() {
+        let program = [Aff1GetParam {
+            dst: tmp(0),
+            param_offset: -4,
+        }];
+        let mut vm = Vm::new();
+        assert_eq!(vm.run(&program), StopReason::HitEmpty);
     }
 }
