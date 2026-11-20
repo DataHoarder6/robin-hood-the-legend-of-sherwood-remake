@@ -745,3 +745,119 @@ A link the owner can send, and nothing else:
 6. **What the host needs:** the public relay reachable within 15 s of session
    start, browser join links enabled, an unmodified content closure, and
    somebody — or something — at the window to answer the mission's first page.
+
+## 11. The public, self-hosted join (2026-11-20, `81264ba8929b`)
+
+A second, independent run of §10 against an origin the estate owns, with no
+GitHub Actions, no payment and no phiresky infrastructure for hosting. The
+share URL is **https://robin.jautis.lt/** (a second origin,
+`https://robin-id.jautis.lt/identity-signer/`, is the isolated signer). The
+nixos-config change that serves both is `c28aa9f` ("relay-vm: serve Robin Hood
+browser seat and its signer"); the two vhosts, their headers and their
+Cloudflare A records live in `hosts/relay-vm/{caddy,cloudflare-dns}.nix`.
+
+### 11.1 Bytes and identities
+
+Host and artifact are the same commit as §10. The threaded runtime was built on
+build-host from `81264ba8929b` with `wasm-www/scripts/build-runtime.mjs --threads`
+and staged by §10's exact recipe; the bytes deployed to `/var/www/robin/` are
+the ones §10.1 hashes:
+
+| file | sha256 |
+| --- | --- |
+| `wasm/81264ba8929b/robin_bg.wasm` | `e072a3e4ff2e96f81a5cf20989f7096d1a6a0e19155b35c8963e1ed840e4da4a` |
+| `wasm/81264ba8929b/robin.js` | `69500448f388a8f27156ea4512ab401b0c82f78dd7a2a9ec4da9246f6a1d1d3e` |
+| `wasm/81264ba8929b/manifest.json` | `6be56a8ad6ddaf7f3768a6077a7183dbc3a8f10d3a8ad2b9f0008ef2482f9129` |
+
+The served manifest was fetched back over HTTPS and its SHA-256 re-measured;
+it is identical to the artifact's. The Demo datadir was fetched from
+`https://robin.jautis.lt/datadirs/demo-local/datadir.bin`: 11,211,392 bytes,
+SHA-256 `62abd8003e69bb83f6453a4998f236e8d27fc49626e517dd5932f4451f9d8dd5`,
+equal to the manifest's `multiplayerContent.demo.sha256`.
+
+The content identity was measured, not assumed. Command:
+
+```
+cargo run -p robin_rs --example content_identity -- <Data directory>
+```
+
+| Data directory | native content identity |
+| --- | --- |
+| `~/Games/robin-hood/demo-leicester/robinhood_demo/Data` (the host's) | `b69b4e8fb2d395abef1f4dd0965e28674c798e4c9fefa0fe835a181c3fa1febe` |
+| host ticket `content_identity_sha256` | `b69b4e8fb2d395abef1f4dd0965e28674c798e4c9fefa0fe835a181c3fa1febe` |
+| locally converted `~/demo-local-81264ba8929b/Data` (`native_content_sha256`) | `b69b4e8fb2d395abef1f4dd0965e28674c798e4c9fefa0fe835a181c3fa1febe` |
+| published corpus, retained Demo generations | `b86d7c960d960f33a504905bc3b6e7d7dd0b168944fa34fcfb55787c34b3f8b3` |
+| `~/Games/robin-hood/game/DATA` (full retail install) | `9db4d58d3482f2c027faf1767c880a5eb412e7f6d117a1f9d108f33af9b96e8d` |
+
+The host's closure matches the locally converted Demo generation, so the site
+serves that generation from its own origin. The published generation does
+**not** match, and neither does the full retail install: a host on either of
+those closures would be refused by this site's Demo catalog. That is the same
+fact §8 recorded; self-hosting fixes the hosting, not the closure mismatch.
+(There is also no `~/Games/robin-hood-data` on build-host — that path in §4 and §8
+is stale; the two installs are under `~/Games/robin-hood/`.)
+
+### 11.2 Three deployment facts the shell enforces
+
+1. **The signer must be a second origin that allows this page.** The public
+   `identity.robinhood.phiresky.xyz/identity-signer/` answers 200 but sends
+   `Content-Security-Policy: frame-ancestors https://robinhood.phiresky.xyz`,
+   so this page cannot frame it. The site builds its own shell with
+   `VITE_IDENTITY_SIGNER_URL=https://robin-id.jautis.lt/identity-signer/` and
+   its own signer with `VITE_GAME_ORIGIN=https://robin.jautis.lt`, and Caddy
+   sends the matching `frame-src` / `frame-ancestors` headers.
+2. **The built `index.html` carries its own meta CSP.** Its `frame-src` is
+   baked to `https://identity.robinhood.phiresky.xyz`; the HTTP header alone
+   cannot widen it. The served file's meta CSP must be changed to
+   `frame-src https://robin-id.jautis.lt`. Until that was done the page logged
+   `Secure multiplayer identity signer did not become ready` and a
+   `net::ERR_BLOCKED_BY_CSP` document load.
+3. **The signer bridge is origin-bound and split.** `wasm-www/signer-dist`
+   contains only the shell; the bridge under `identity-signer/bridge/` is built
+   by `scripts/build_identity_signer.sh` with
+   `ROBINHOOD_LEADERBOARD_WEB_ORIGIN=https://robin.jautis.lt` and
+   `ROBINHOOD_IDENTITY_SIGNER_ORIGIN=https://robin-id.jautis.lt`, plus its
+   `snippets/` subtree. Using the phiresky-built bridge fails with
+   `leaderboard bridge caller origin does not match this deployment`; omitting
+   `snippets/` fails its dynamic import.
+
+The threaded runtime needs COOP `same-origin`, COEP `require-corp` and CORP
+`cross-origin`; the vhosts send all three. No second relay is hosted —
+`relay_url` is signed by the host (`euc1-1.relay.n0.iroh.link.` here).
+
+### 11.3 The join, on the public origin
+
+Host: `0.1.0+81264ba8929b`, on build-host, launched from an empty install home
+(a `mods/` overlay beside the binary makes the host refuse browser
+invitations — `content_identity.rs:137`) with
+`ROBINHOOD_BROWSER_URL=https://robin.jautis.lt/`,
+`ROBINHOOD_DATA_DIR=~/Games/robin-hood/demo-leicester/robinhood_demo`,
+`--mp-browser-join-links true --mp-expected-players 2 --mission Dem_Lei_MP`,
+`Xvfb :98`, and a warden answering the host's `PopupText { text_id: 0 }` page.
+
+Evidence: `/home/admin/join-evidence-public` on build-host — `host-version.txt`,
+`ticket.txt`, `host.log`, `observer.log`, `xvfb.log`, and
+`browser/{result.json,cdp-events.jsonl,chrome.log,join.png}`. The observer
+drove real headless Chrome 157 over CDP against the public URL (no loopback
+resolver mapping, no fixture server) and asserted only live surfaces:
+
+- `browser multiplayer client welcomed seat = PlayerId(1)` (`wasm.rs:260`);
+- `begin-sim barrier released at frame 120` in the page's own event ring and
+  `begin-sim barrier released at frame 0` in the host's log — the browser is a
+  late joiner, so its barrier frame is the one it adopted, not the host seat's;
+- `multiplayer hash OK frame = 125` (`pre_tick.rs:184`), with
+  `desync: false` and no `hash comparison missed`;
+- `secureContext: true`, `crossOriginIsolated: true`,
+  `origin: https://robin.jautis.lt`, zero certificate errors and zero console
+  exceptions.
+
+The ticket carried `netProtocol 72`, `schema 3`, `missionId Dem_Lei_MP` and
+`contentIdentity b69b4e8f…febe`; the served manifest was accepted only
+because commit, short, protocol, schema and `nativeContentSha256` all agreed.
+
+**What this does not prove.** As in §10.5, the Demo mission reports defeat on
+its first tick (`Engine tick returned: LevelFailed`; the browser's
+`final_operation` was `level_failed`), so the hash agreement is of a lost
+mission still ticking. Mission play, player input reaching the guest, and a
+repeatable fresh-page rejoin remain unproved (§8). The URL is real and the
+join is real; a playable mission is a separate problem.
