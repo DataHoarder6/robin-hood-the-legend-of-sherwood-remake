@@ -175,6 +175,20 @@ impl ConsoleCommand {
                 | Self::UsageError(_)
         )
     }
+
+    /// The mission outcome a console cheat asks for, if it ends the mission.
+    ///
+    /// Mission endings are session facts: they must travel as the one
+    /// authoritative command every seat applies in the same frame, never as a
+    /// local engine mutation. The cheat dispatcher still owns the reward
+    /// bookkeeping for other commands; ending the mission is the session's job.
+    pub fn mission_result(&self) -> Option<crate::game_operation::MissionResult> {
+        match self {
+            Self::WinMission => Some(crate::game_operation::MissionResult::Won),
+            Self::LoseMission => Some(crate::game_operation::MissionResult::Lost),
+            _ => None,
+        }
+    }
 }
 
 // ─── Console struct ─────────────────────────────────────────────
