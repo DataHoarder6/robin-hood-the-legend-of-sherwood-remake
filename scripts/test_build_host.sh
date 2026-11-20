@@ -104,6 +104,102 @@ if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -
 else
     fail "remote-check does not set CARGO_INCREMENTAL=0 in both commands"
 fi
+if grep -F 'SCCACHE_BASEDIRS=\"' "$source_root/scripts/remote-check.sh" >/dev/null; then
+    fail "the remote heredoc has literal backslashes before quotes"
+else
+    pass "the remote heredoc quotes the basedirs command substitution correctly"
+fi
+
+# --- every remote gate runs in a bounded transient scope ----------------------
+rc=0
+for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=build-' 'RuntimeMaxSec=7200' 'TimeoutStopSec=30'; do
+    count=$(grep -F -c -- "$needle" "$source_root/scripts/remote-check.sh" || true)
+    if [ "$count" -ge 2 ]; then
+        pass "remote-check has two scoped commands with $needle"
+    else
+        fail "remote-check has $count occurrences of $needle, expected at least two"
+    fi
+done
+
+# --- gate copies are named by tree, not by worktree ----------------------------
+tree_sha=0123456789abcdef0123456789abcdef01234567
+other_sha=fedcba9876543210fedcba9876543210fedcba98
+name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo")
+if [ "$name" = "$(basename "$repo")" ]; then
+    pass "an interactive copy keeps the worktree name"
+else
+    fail "interactive copy was '$name'"
+fi
+name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$tree_sha")
+if [ "$name" = "gate-0123456789ab" ]; then
+    pass "a gate copy is named by the tree"
+else
+    fail "gate copy was '$name', expected gate-0123456789ab"
+fi
+same=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$tree_sha")
+other=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$other_sha")
+if [ "$same" = "$name" ] && [ "$other" != "$name" ]; then
+    pass "the same tree shares a copy and a different tree gets another"
+else
+    fail "gate naming is not stable and distinct"
+fi
+
+git -C "$repo" worktree add --quiet -b gate-check "$work/gate-check" HEAD
+live=$(cd "$repo" && bash "$source_root/scripts/live-worktrees.sh")
+case "$live" in
+    *gate-check*) fail "live-worktrees printed a gate copy: $live" ;;
+    *) pass "live-worktrees ignores gate copies" ;;
+esac
+
+if grep -F 'GATE_COPY_TTL_DAYS' "$source_root/scripts/remote-check.sh" >/dev/null && \
+   grep -F 'gate-' "$source_root/scripts/remote-check.sh" >/dev/null; then
+    pass "gate copies have a bounded retention rule"
+else
+    fail "remote-check has no gate-copy retention rule"
+fi
+
+# --- slot admission is FIFO and bounded ---------------------------------------
+mkdir -p "$work/slots-fifo"
+bash "$slot" "$work/slots-fifo" 1 bash -c '
+    touch "$1/held"
+    while [ ! -e "$1/release" ]; do sleep 0.05; done
+' _ "$work/slots-fifo" &
+holder=$!
+for _attempt in {1..100}; do [ -e "$work/slots-fifo/held" ] && break; sleep 0.05; done
+: > "$work/slots-fifo/order"
+bash "$slot" "$work/slots-fifo" 1 bash -c 'printf "A\n" >> "$1/order"' _ "$work/slots-fifo" &
+first_waiter=$!
+sleep 0.3
+bash "$slot" "$work/slots-fifo" 1 bash -c 'printf "B\n" >> "$1/order"' _ "$work/slots-fifo" &
+second_waiter=$!
+sleep 0.3
+touch "$work/slots-fifo/release"
+wait "$holder" "$first_waiter" "$second_waiter"
+if [ "$(cat "$work/slots-fifo/order")" = "$(printf 'A\nB')" ]; then
+    pass "waiters enter in arrival order"
+else
+    fail "waiter order was '$(cat "$work/slots-fifo/order")', expected A then B"
+fi
+
+mkdir -p "$work/slots-timeout"
+bash "$slot" "$work/slots-timeout" 1 bash -c '
+    touch "$1/held"
+    while [ ! -e "$1/release" ]; do sleep 0.05; done
+' _ "$work/slots-timeout" &
+holder=$!
+for _attempt in {1..100}; do [ -e "$work/slots-timeout/held" ] && break; sleep 0.05; done
+set +e
+timeout 3 env BUILD_SLOT_WAIT_SECS=1 bash "$slot" "$work/slots-timeout" 1 true \
+    > "$work/timeout.out" 2> "$work/timeout.err"
+timeout_rc=$?
+set -e
+touch "$work/slots-timeout/release"
+wait "$holder"
+if [ "$timeout_rc" -ne 0 ] && grep -F 'timed out' "$work/timeout.err" >/dev/null; then
+    pass "a blocked waiter exits with a named timeout"
+else
+    fail "timeout rc=$timeout_rc, stderr: $(cat "$work/timeout.err")"
+fi
 
 printf '\n%s passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

@@ -46,7 +46,7 @@ copy_name() {
     if [ $# -ge 1 ] && [ -n "$1" ]; then
         printf '%s' "$1"
     else
-        basename "$repository"
+        bash "$repository/scripts/gate-copy-name.sh" "$repository" "${ROBIN_GATE_TREE:-}"
     fi
 }
 
@@ -64,6 +64,9 @@ lock_copy() {
     exec 9>"$lock_dir/$safe.lock"
     flock -w 7200 9
 }
+
+# Gate copies have no worktree owner, so --prune keeps them only until this old.
+gate_ttl=${GATE_COPY_TTL_DAYS:-7}
 
 require_host() {
     if ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
@@ -178,7 +181,7 @@ case "${1:-}" in
     --prune-stale)
         require_host
         keep=$(copy_name "")
-        days=${2:-7}
+        days=${2:-$gate_ttl}
         case $days in
             '' | *[!0-9]*)
                 printf 'remote-check: --prune-stale takes a day count, not %s\n' "$days" >&2
@@ -224,6 +227,11 @@ for d in */; do
     kept=0
     for k in "\${keep[@]}"; do [ "\$d" = "\$k" ] && kept=1; done
     [ "\$kept" = 1 ] && continue
+    case "\$d" in
+        gate-*)
+            [ -n "\$(find "\$d" -maxdepth 0 -mtime +$gate_ttl)" ] || continue
+            ;;
+    esac
     rm -rf -- "\$d" "\$d.lock"
 done
 du -sh ~/$remote_root 2>/dev/null || true
@@ -310,8 +318,11 @@ if ((multi)); then
     # build cache. `\$suite` reaches the remote shell untouched.
     ssh "$host" bash -s <<EOF
 set -euo pipefail
+export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 cd $remote_dir
-exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
+systemd-run --user --scope --unit=build-${name} \
+    -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
+    systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
     CARGO_INCREMENTAL=0 \
@@ -326,8 +337,11 @@ else
     printf 'remote-check: %s -> %s:%s\n' "${requested[0]}" "$host" "$remote_dir" >&2
     ssh "$host" bash -s <<EOF
 set -euo pipefail
+export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 cd $remote_dir
-exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
+systemd-run --user --scope --unit=build-${name} \
+    -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
+    systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
     CARGO_INCREMENTAL=0 \
