@@ -1274,10 +1274,10 @@ pub(super) fn update_mouse_and_cursor(
     host.frontend
         .remote_cursors
         .sync_sprites(cursor_res, renderer, &states);
-    if !engine.user_locked() {
-        if let Some(map_point) = mouse_map {
-            super::remote_cursor::publish_local_cursor(host, now_ms, map_point, new_cursor);
-        }
+    if !engine.user_locked()
+        && let Some(map_point) = mouse_map
+    {
+        super::remote_cursor::publish_local_cursor(host, now_ms, map_point, new_cursor);
     }
 }
 

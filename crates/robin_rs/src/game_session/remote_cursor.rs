@@ -136,10 +136,7 @@ impl RemoteCursorStore {
             if self.loaded_sprite.get(&seat.0) == Some(&state.sprite_id) {
                 continue;
             }
-            let cursor = self
-                .renderers
-                .entry(seat.0)
-                .or_insert_with(CursorRenderer::new);
+            let cursor = self.renderers.entry(seat.0).or_default();
             cursor.load_cursor(state.sprite_id, resources, renderer);
             self.loaded_sprite.insert(seat.0, state.sprite_id);
         }
