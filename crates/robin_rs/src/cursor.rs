@@ -468,6 +468,51 @@ impl CursorRenderer {
         }
     }
 
+    /// Render the current cursor tinted and scaled, without a shadow layer.
+    ///
+    /// Remote teammate cursors use this path: the colour layer is drawn through
+    /// [`Renderer::render_gpu_image_tinted`] so each teammate's tint applies,
+    /// and the frame is scaled around its hotspot. The local cursor draw
+    /// ([`Self::render`] / [`Self::render_with_effect`]) is unchanged.
+    pub fn render_tinted_scaled(
+        &self,
+        renderer: &mut Renderer,
+        mouse_x: f32,
+        mouse_y: f32,
+        scale: f32,
+        tint: [f32; 4],
+    ) {
+        let Some(frame) = self.frames.get(self.current_frame as usize) else {
+            return;
+        };
+        if !frame.is_valid() {
+            return;
+        }
+
+        let src_box = BBox::from_coords(0.0, 0.0, frame.width as f32, frame.height as f32);
+        let dst_box = scaled_cursor_dst_box(
+            mouse_x,
+            mouse_y,
+            self.hotspot_x,
+            self.hotspot_y,
+            frame.width as f32,
+            frame.height as f32,
+            scale,
+        );
+
+        // Remote cursors have no authored shadow layer to preserve: only the
+        // colour layer is drawn, tinted to the teammate's colour.
+        if let Some(color) = frame.color.as_ref() {
+            renderer.render_gpu_image_tinted(
+                color,
+                Some(&src_box),
+                Some(&dst_box),
+                BlendMode::Blend,
+                tint,
+            );
+        }
+    }
+
     /// Dimensions of the frame currently being rendered.  Returns
     /// `(0, 0)` when no cursor is loaded.
     pub fn current_frame_size(&self) -> (u16, u16) {
@@ -595,9 +640,38 @@ fn quick_action_pulse_value(tick: u32) -> u16 {
     (distance * 100 / QUICK_ACTION_PULSE_PEAK_TICK) as u16
 }
 
+/// Destination box for a cursor drawn at `scale`: the hotspot is scaled so it
+/// stays under the mouse point, and the frame's width/height scale with it.
+fn scaled_cursor_dst_box(
+    mouse_x: f32,
+    mouse_y: f32,
+    hotspot_x: f32,
+    hotspot_y: f32,
+    width: f32,
+    height: f32,
+    scale: f32,
+) -> BBox {
+    let dst_x = mouse_x - hotspot_x * scale;
+    let dst_y = mouse_y - hotspot_y * scale;
+    let scaled_width = width * scale;
+    let scaled_height = height * scale;
+    BBox::from_coords(dst_x, dst_y, dst_x + scaled_width, dst_y + scaled_height)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaled_cursor_dst_box_keeps_hotspot_and_scales_dimensions() {
+        let b = scaled_cursor_dst_box(100.0, 80.0, 8.0, 4.0, 16.0, 16.0, 0.5);
+        assert_eq!(b.min.x, 96.0);
+        assert_eq!(b.min.y, 78.0);
+        assert_eq!(b.max.x, 104.0);
+        assert_eq!(b.max.y, 86.0);
+        assert_eq!(b.width(), 8.0);
+        assert_eq!(b.height(), 8.0);
+    }
 
     #[test]
     fn cursor_pixel_layers_preserve_every_rgb565_value_and_shadow_policy() {
