@@ -7,13 +7,13 @@
 use crate::ingame_menu::widget_bridge::{ModalScreenIo, ScreenFrame};
 use crate::renderer::Renderer;
 
+use super::MissionEndKind;
 use super::layout::{
-    draw_background, render_clipped_text_in_box_font, MenuRect, MenuTransform, TextAlign, VAlign,
-    MENU_H, MENU_W,
+    MENU_H, MENU_W, MenuRect, MenuTransform, TextAlign, VAlign, draw_background,
+    render_clipped_text_in_box_font,
 };
 use super::resources::IngameMenuResources;
 use super::yesno::{ConfirmButtons, YesNoModalState};
-use super::MissionEndKind;
 
 /// The panel travels the short distance from the right edge in nine ticks
 /// (~150 ms at 60 Hz), rather than growing from wherever a button happened
@@ -151,18 +151,13 @@ impl MissionStateTransition {
         renderer: &Renderer,
         resources: &IngameMenuResources,
         message: &str,
-        won: bool,
+        end: MissionEndKind,
         direction: TransitionDirection,
     ) -> Self {
         let transform = MenuTransform::for_renderer(renderer);
         let final_y = (MENU_H - POPUP_H) / 2;
 
-        let title_id = if won {
-            MT_TTL_MISSION_WON
-        } else {
-            MT_TTL_MISSION_LOST
-        };
-        let title = resources.menu_text.get(title_id);
+        let title = resources.menu_text.get(end.title_id());
 
         Self {
             transform,
