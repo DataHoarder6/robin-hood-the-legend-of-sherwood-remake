@@ -72,9 +72,9 @@
 
 - Commit by pathspec, `git commit -- <files>`, in small focused commits — never
   `git add` plus a bare `git commit`, which would carry a co-worker's staged file.
-- Land finished work in the same session: rebase onto `fork/main`, re-run suites,
-  push `git push fork HEAD:main`, confirm with `git ls-remote`, remove worktree and
-  branch. No PRs and no parked feature branches here — `docs/adr/0002-finished-work-lands-in-session.md`.
+- Land finished work in the same session: run `scripts/land.sh` (fetch, rebase,
+  gate, push, remote read-back), then remove worktree and branch. No PRs and no
+  parked feature branches here — `docs/adr/0002-finished-work-lands-in-session.md`.
 
 ## Repo structure
 
