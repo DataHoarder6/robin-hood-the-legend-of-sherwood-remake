@@ -1238,10 +1238,8 @@ pub fn decode_msg(bytes: &[u8]) -> Result<NetMsg, String> {
                 );
             }
         }
-        NetMsg::Cursor { state, .. } => {
-            if !state.map_x.is_finite() || !state.map_y.is_finite() {
-                return Err("cursor coordinates must be finite".to_string());
-            }
+        NetMsg::Cursor { state, .. } if !state.map_x.is_finite() || !state.map_y.is_finite() => {
+            return Err("cursor coordinates must be finite".to_string());
         }
         _ => {}
     }
