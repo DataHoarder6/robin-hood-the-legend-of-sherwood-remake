@@ -1,7 +1,7 @@
 # Working in parallel: symptoms, rules, commands
 
-Last verified 2026-11-20. The sizes and commit counts below are 2026-11-17
-measurements; the gate section records the current mechanism.
+Every value below is printed by the command beside it, never stamped here; the
+gate section records the mechanism, not a measurement.
 
 Every trap here has cost a session real work. Each section starts with what you
 see, then the rule that avoids it and the command that applies the rule.
@@ -48,6 +48,8 @@ duplicates it. Unique commits are the only reason to stop.
 
 ```sh
 git cherry -v fork/main main
+git rev-list --count fork/main..main   # commits unique to main
+git rev-list --count main..fork/main   # how far main is behind
 ```
 
 Recovery from a stale `main`: archive the old tip on a branch (it records what
@@ -95,11 +97,11 @@ across agents: queue behind the other agent's `runbg` unit instead of starting
 a competing gate.
 
 ```sh
-ROBIN_BUILD_HOST=minipc scripts/remote-check.sh --suites format lint  # one sync, one lock
-ROBIN_BUILD_HOST=minipc scripts/land.sh                                # rebase, gate, push, read-back
+scripts/remote-check.sh --suites format lint  # one sync, one lock
+scripts/land.sh                               # rebase, gate, push, read-back
 ```
 
-The default `build-host` alias is stale; set the override. Mechanics, primary
+`minipc` is the code default; no override is needed. Mechanics, primary
 sources and the measurement checklist are in
 [`docs/slop/BUILD_CACHE_AND_QUEUE.md`](slop/BUILD_CACHE_AND_QUEUE.md).
 
@@ -159,11 +161,14 @@ acceptable after the new system has booted and been verified.
 nix-collect-garbage --delete-older-than 14d
 ```
 
-## "target/ is 14 GiB and the disk is full"
+## "target/ is filling the disk"
 
-Measured 2026-11-17 on the runtime: `target/` 13.1 GiB, of which
-`target/debug/incremental` is 8.4 GiB. One checkout plus worktrees is the right
-shape; a second full source copy made to get a parallel build is not.
+One checkout plus worktrees is the right shape; a second full source copy made
+to get a parallel build is not. Measure before acting:
+
+```sh
+du -sh target/ target/debug/incremental
+```
 
 Rule: prune `target/debug/incremental` before deleting a whole `target`, and
 delete a whole `target` only when nothing cheaper is left. Each checkout owns
