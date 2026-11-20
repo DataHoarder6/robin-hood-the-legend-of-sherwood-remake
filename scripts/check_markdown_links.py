@@ -9,7 +9,6 @@ same-file anchors and query endpoints are not this checker's business.
 """
 from __future__ import annotations
 
-import os
 import posixpath
 import re
 import subprocess
