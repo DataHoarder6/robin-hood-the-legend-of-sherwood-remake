@@ -756,3 +756,32 @@ fn narration_lane_without_a_clip_stays_silent() {
     lane.end(&mut sound, &mut backend);
     assert_eq!(backend.music_halts, 0);
 }
+
+#[test]
+fn narration_lane_does_not_restart_after_it_was_ended() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    let mut lane = NarrationLane::default();
+
+    lane.begin(Some("a.ogg"), &mut sound, &mut backend);
+    lane.end(&mut sound, &mut backend);
+    lane.begin(Some("a.ogg"), &mut sound, &mut backend);
+    assert_eq!(
+        backend.music_plays, 1,
+        "a pending dismissal must not restart the clip next tick"
+    );
+}
+
+#[test]
+fn narration_lane_restores_the_previous_music_volume() {
+    let mut backend = MockBackend::new();
+    let mut sound = SoundManager::new();
+    sound.initialize(&mut backend, false).unwrap();
+    backend.set_music_volume(1234);
+
+    let mut lane = NarrationLane::default();
+    lane.begin(Some("a.ogg"), &mut sound, &mut backend);
+    lane.end(&mut sound, &mut backend);
+    assert_eq!(backend.music_volume, 1234);
+}
