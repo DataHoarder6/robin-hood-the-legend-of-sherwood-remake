@@ -259,6 +259,7 @@ impl UiTaskOutcomeTarget<'_> {
             result.custom_key_config.clone(),
             result.profile_gameplay_config,
             &result.graphic_config,
+            &result.multiplayer_config,
         )
         .apply(&mut host.frontend);
         // Preserve live side-effect order: cancel planning, update

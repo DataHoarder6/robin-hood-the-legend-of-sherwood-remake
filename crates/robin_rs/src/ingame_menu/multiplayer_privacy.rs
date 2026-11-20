@@ -7,6 +7,7 @@ use super::layout::render_text_virt_font;
 use super::widget_bridge::{self, ModalInputState, ModalScreenIo, OkCancelScreen, ScreenFrame};
 
 const ID_PUBLICATION: u32 = 200;
+const ID_CURSORS: u32 = 201;
 const ID_OK: u32 = 300;
 const ID_CANCEL: u32 = 301;
 
@@ -42,6 +43,14 @@ impl MultiplayerPrivacyModalState {
             "Publish Browser Join Links",
             30,
             110,
+            field_w,
+            field_h,
+        ));
+        frame.add_widget_absolute(widget_bridge::make_button(
+            ID_CURSORS,
+            "Show Teammate Cursors",
+            30,
+            140,
             field_w,
             field_h,
         ));
@@ -81,12 +90,16 @@ impl MultiplayerPrivacyModalState {
             for (line, y) in [
                 ("Applies to the next game you host.", 75),
                 (
-                    "Published invitations include the endpoint, HTTPS relay,",
-                    170,
+                    "Cursor sharing shows teammates' cursors and shares yours.",
+                    165,
                 ),
-                ("mission, build, content edition, and player count.", 190),
-                ("The relay can observe IPs, timing, and byte counts.", 220),
-                ("Gameplay traffic remains end-to-end encrypted.", 240),
+                (
+                    "Published invitations include the endpoint, HTTPS relay,",
+                    195,
+                ),
+                ("mission, build, content edition, and player count.", 215),
+                ("The relay can observe IPs, timing, and byte counts.", 245),
+                ("Gameplay traffic remains end-to-end encrypted.", 265),
             ] {
                 render_text_virt_font(renderer, font, transform, line, 30, y);
             }
@@ -100,6 +113,15 @@ impl MultiplayerPrivacyModalState {
                 self.working.publish_browser_join_links,
             );
         }
+        if let Some(widget) = self.frame.widget(ID_CURSORS) {
+            widget_bridge::draw_widget_radio(
+                renderer,
+                resources,
+                transform,
+                widget,
+                self.working.show_teammate_cursors,
+            );
+        }
         self.close
             .draw_buttons(renderer, resources, transform, &self.frame);
         screen.finish(io, &self.input);
@@ -108,9 +130,19 @@ impl MultiplayerPrivacyModalState {
     }
 
     fn activate(&mut self, id: u32) {
-        if !self.close.activate(id) && id == ID_PUBLICATION {
-            self.working.publish_browser_join_links = !self.working.publish_browser_join_links;
-            self.dirty = true;
+        if self.close.activate(id) {
+            return;
+        }
+        match id {
+            ID_PUBLICATION => {
+                self.working.publish_browser_join_links = !self.working.publish_browser_join_links;
+                self.dirty = true;
+            }
+            ID_CURSORS => {
+                self.working.show_teammate_cursors = !self.working.show_teammate_cursors;
+                self.dirty = true;
+            }
+            _ => {}
         }
     }
 
@@ -166,5 +198,28 @@ mod tests {
         let mut toggled = original;
         toggled.publish_browser_join_links = !toggled.publish_browser_join_links;
         assert_ne!(toggled, original);
+    }
+
+    #[test]
+    fn toggling_cursor_preference_commits_only_on_accept() {
+        for (actions, expected) in [
+            (vec![ID_CURSORS, ID_OK], true),
+            (vec![ID_CURSORS, ID_CANCEL], false),
+            (vec![ID_CURSORS, ID_CURSORS, ID_OK], false),
+        ] {
+            let original = MultiplayerConfig::default();
+            let mut target = original;
+            let mut state = state(original);
+            for action in actions {
+                state.activate(action);
+                assert_eq!(target, original, "staged edits must not publish early");
+            }
+            assert_eq!(state.commit(&mut target), expected);
+            assert_eq!(target.show_teammate_cursors, expected);
+            assert_eq!(
+                target.publish_browser_join_links,
+                original.publish_browser_join_links
+            );
+        }
     }
 }

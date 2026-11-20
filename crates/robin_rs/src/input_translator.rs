@@ -394,6 +394,10 @@ impl InputTranslator {
         self.user_locked = locked;
     }
 
+    pub fn user_locked(&self) -> bool {
+        self.user_locked
+    }
+
     pub fn set_edge_scrolling(&mut self, enabled: bool) {
         self.edge_scrolling = enabled;
     }

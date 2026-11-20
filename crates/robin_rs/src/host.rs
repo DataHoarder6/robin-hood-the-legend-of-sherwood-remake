@@ -68,6 +68,7 @@ impl ApplicationContext {
                 keys.custom.clone(),
                 profile.gameplay_config,
                 &profile.graphic_config,
+                &profile.multiplayer_config,
             )
         })?;
         Ok(HostContextSnapshot {

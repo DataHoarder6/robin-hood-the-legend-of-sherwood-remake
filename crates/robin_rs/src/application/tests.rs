@@ -903,6 +903,7 @@ fn startup_and_options_use_the_same_frontend_projection() {
             ..Default::default()
         },
         &Default::default(),
+        &Default::default(),
     )
     .apply(&mut live.frontend);
     live.frontend.route_touch_plan_event(
@@ -930,6 +931,7 @@ fn startup_and_options_use_the_same_frontend_projection() {
         custom_keys,
         profile.gameplay_config,
         &profile.graphic_config,
+        &profile.multiplayer_config,
     )
     .apply(&mut live.frontend);
     assert_eq!(
@@ -950,6 +952,7 @@ fn startup_and_options_use_the_same_frontend_projection() {
                 frontend.preferences().custom_key_config().clone(),
                 frontend.preferences().gameplay_config(),
                 &profile.graphic_config,
+                &profile.multiplayer_config,
             ))
             .unwrap(),
             serde_json::to_value(context.host_snapshot().unwrap().preferences).unwrap(),
@@ -1007,6 +1010,7 @@ fn frontend_projection_preserves_session_planning_policy() {
         KeyConfig::default(),
         KeyConfig::default(),
         gameplay,
+        &Default::default(),
         &Default::default(),
     )
     .apply(&mut frontend);

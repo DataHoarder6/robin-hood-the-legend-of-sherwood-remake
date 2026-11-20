@@ -24,12 +24,18 @@ pub struct MultiplayerConfig {
     /// this preference controls publication, not packet routing.
     #[serde(default = "crate::serde_defaults::enabled")]
     pub publish_browser_join_links: bool,
+
+    /// Show teammates' cursors and broadcast this player's cursor in co-op.
+    /// Presentation-only: never a simulation, replay, or snapshot input.
+    #[serde(default)]
+    pub show_teammate_cursors: bool,
 }
 
 impl Default for MultiplayerConfig {
     fn default() -> Self {
         Self {
             publish_browser_join_links: true,
+            show_teammate_cursors: false,
         }
     }
 }
@@ -46,9 +52,17 @@ mod tests {
     }
 
     #[test]
+    fn teammate_cursors_default_off_for_fresh_and_partial_profiles() {
+        assert!(!MultiplayerConfig::default().show_teammate_cursors);
+        let partial: MultiplayerConfig = serde_json::from_str("{}").unwrap();
+        assert!(!partial.show_teammate_cursors);
+    }
+
+    #[test]
     fn disabled_preference_roundtrips_without_becoming_default() {
         let config = MultiplayerConfig {
             publish_browser_join_links: false,
+            show_teammate_cursors: false,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(

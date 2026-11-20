@@ -719,6 +719,7 @@ fn double_click_ground_runs_allies_in_mixed_selection() {
             ..preferences.gameplay_config()
         },
         &robin_engine::graphic_config::GraphicConfig::default(),
+        &robin_engine::multiplayer_config::MultiplayerConfig::default(),
     )
     .apply(&mut host.frontend);
     let pc = add_pc(&mut engine, 10.0, 10.0, Posture::Upright);

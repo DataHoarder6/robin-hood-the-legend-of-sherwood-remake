@@ -2409,6 +2409,7 @@ mod tests {
                 Default::default(),
                 preferences,
                 &Default::default(),
+                &Default::default(),
             )
             .apply(&mut host.frontend);
             let landing = MapPoint::new(75.0, 80.0);
