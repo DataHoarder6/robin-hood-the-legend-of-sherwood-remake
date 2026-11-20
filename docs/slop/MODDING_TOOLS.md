@@ -12,8 +12,9 @@ executables. Each tool supports `--help`.
 | `encode_mod_sprites` | Encode authored sprite directories and terrain PNGs. |
 | `disasm_scb` | Disassemble or decompile compiled mission scripts. |
 | `dump_res` | Dump resource archive metadata as JSON. |
+| `translate_level_res` | Rewrite selected `Level.res` strings from a TOML line table, splicing only TEXT payloads so pictures are untouched. |
 
-Build all four from source:
+Build all five from source:
 
 ```sh
 cargo build -p robin_modding_tools --bins
