@@ -240,3 +240,14 @@ incremental, is the speed fix. See
 The shared gate copy lives in `~/build/robin-gate/`, outside the `~/build/robin/`
 root that every `--prune` scans. No agent's prune can delete a gate's cwd
 mid-build, and the shared copy is also explicitly skipped by the prune guards.
+
+## Landings are a FIFO queue
+
+`scripts/land.sh` admits one landing at a time: a ticket per caller under
+`$XDG_STATE_HOME/robin-land-queue/tickets`, ordered by arrival, and a lock held
+from admission through the remote read-back. No agent can rebase or push while
+another's gate is proving a tree — the merge-queue pattern that replaces
+racing retries on a busy integration branch. Queue position is printed while
+waiting; `ROBIN_LAND_QUEUE_WAIT_SECS` (default 7200) bounds it, and a killed
+holder's ticket is reaped by its PID. `bash scripts/test_land.sh` covers FIFO
+admission, the named timeout, and stale-ticket reaping.

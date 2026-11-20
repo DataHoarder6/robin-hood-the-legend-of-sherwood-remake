@@ -21,6 +21,11 @@
 #
 # It prints the remote tip it landed and refuses to claim success until the
 # remote reports the commit: a push's exit status is not evidence.
+#
+# Landings are admitted FIFO by a ticket under XDG_STATE_HOME/robin-land-queue.
+# One lock is held from admission through the push, so a parallel agent cannot
+# move the integration tip while a gate is proving this tree. ROBIN_LAND_QUEUE_WAIT_SECS
+# bounds the wait; a dead holder's ticket is reaped by its PID.
 set -euo pipefail
 
 exec </dev/null
@@ -31,6 +36,23 @@ cd -- "$repository"
 remote=${ROBIN_LAND_REMOTE:-fork}
 integration=main
 rounds=3
+
+# A landing is an integration step, so only one may run at a time. Parallel
+# agents used to rebase and gate against a moving integration tip, then lose the
+# push and repeat an hour-long gate. Tickets make admission FIFO; the lock is
+# held from here through the push, so no other agent moves the base while a gate
+# is proving a tree. This is the local form of a merge queue.
+queue_state=${XDG_STATE_HOME:-$HOME/.local/state}/robin-land-queue
+queue_dir=$queue_state/tickets
+queue_wait=${ROBIN_LAND_QUEUE_WAIT_SECS:-7200}
+if [[ ! $queue_wait =~ ^[1-9][0-9]*$ ]]; then
+    printf 'land: ROBIN_LAND_QUEUE_WAIT_SECS must be a positive integer, got %s\n' "$queue_wait" >&2
+    exit 2
+fi
+mkdir -p -- "$queue_dir"
+queue_deadline=$(( $(date +%s) + queue_wait ))
+ticket="$queue_dir/$(printf '%020d' "$queue_deadline")-$(date +%s%N)-$$-$RANDOM"
+: >"$ticket"
 
 usage() {
     awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
@@ -53,11 +75,62 @@ head=$(git rev-parse --verify HEAD^{commit})
 # worktree is written only here. It is not FETCH_HEAD's replacement for a human,
 # only for the one read below, and it is removed on exit.
 landing_ref="refs/robin/land/$(printf '%s' "$repository" | git hash-object --stdin)"
-trap 'git update-ref -d "$landing_ref" 2>/dev/null || true' EXIT
+trap 'git update-ref -d "$landing_ref" 2>/dev/null || true; rm -f -- "$ticket"' EXIT
 
 fetch_integration() {
     git fetch --quiet --no-tags "$remote" "+refs/heads/$integration:$landing_ref" >/dev/null
     git rev-parse --verify "$landing_ref^{commit}"
+}
+
+# Wait until my ticket is first and the global landing lock is free, then hold
+# that lock for the whole round. A killed agent releases both the fd lock and,
+# after its deadline, its stale ticket; nothing needs a reaper.
+acquire_landing_slot() {
+    local first position count now old old_name old_deadline old_pid announced=
+    while :; do
+        now=$(date +%s)
+        for old in "$queue_dir"/*; do
+            [ -f "$old" ] || continue
+            old_name=${old##*/}
+            old_deadline=${old_name%%-*}
+            case $old_deadline in
+                *[!0-9]*) continue ;;
+            esac
+            old_pid=${old_name#*-}
+            old_pid=${old_pid#*-}
+            old_pid=${old_pid%%-*}
+            # A dead holder's fd lock is released but its ticket is not. Reap it
+            # by owner PID so one killed agent cannot stall the queue for hours.
+            if (( 10#$old_deadline < now )) ||
+               { [[ $old_pid =~ ^[0-9]+$ ]] && ! kill -0 "$old_pid" 2>/dev/null; }; then
+                rm -f -- "$old"
+            fi
+        done
+
+        first=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort | head -1)
+        if [ "$first" = "${ticket##*/}" ]; then
+            exec 9>"$queue_state/land.lock"
+            if flock -n 9; then
+                printf 'land: landing slot acquired\n' >&2
+                return 0
+            fi
+            exec 9>&-
+        fi
+
+        count=$(find "$queue_dir" -maxdepth 1 -type f | wc -l)
+        position=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort |
+            awk -v t="${ticket##*/}" '$0 == t { print NR }')
+        if [ "${position:-?}" != "$announced" ]; then
+            printf 'land: waiting in landing queue (%s/%s)\n' "${position:-?}" "$count" >&2
+            announced=${position:-?}
+        fi
+        if (( now >= queue_deadline )); then
+            printf 'land: timed out waiting for a landing slot after %s seconds\n' \
+                "$queue_wait" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
 }
 
 # Move HEAD onto BASE, or stop with the branch exactly as it was. `head` is the
@@ -85,6 +158,8 @@ integrate() {
     fi
     exit 1
 }
+
+acquire_landing_slot
 
 for _round in $(seq 1 "$rounds"); do
     base=$(fetch_integration)

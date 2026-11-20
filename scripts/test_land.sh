@@ -97,6 +97,9 @@ case_repo() { # NAME
 # prove, then lets a case move the remote the way a concurrent landing does.
 set -euo pipefail
 printf '%s %s\n' "$1" "${2:-HEAD}" >>"$FAKE_GATE_LOG"
+if [ -n "${FAKE_GATE_SLEEP:-}" ]; then
+    sleep "$FAKE_GATE_SLEEP"
+fi
 if [ -n "${FAKE_GATE_MOVE_REMOTE:-}" ]; then
     bash "$FAKE_GATE_MOVE_REMOTE"
 fi
@@ -260,6 +263,88 @@ run_land refused
 unset FAKE_GATE_MOVE_REMOTE
 expect_status 1 'a remote that moves on every gate fails the run'
 expect_contains 'the failure names the rounds it spent' 'after 3 rounds'
+
+# A merge queue: two simultaneous landings must not race on the remote. The
+# loser waits its turn instead of rebasing into a moving integration branch.
+case_repo queue-a
+case_repo queue-b
+commit_file queue-a 'my work' mine.txt mine
+commit_file queue-b 'other work' mine.txt mine
+: >"$work/queue.gate.log"
+export FAKE_GATE_LOG=$work/queue.gate.log
+export FAKE_GATE_SLEEP=1
+(cd "$work/queue-a" && ROBIN_LAND_REMOTE=$work/queue-a.git bash scripts/land.sh) \
+    >"$work/queue-a.out" 2>&1 &
+pid_a=$!
+sleep 0.2
+(cd "$work/queue-b" && ROBIN_LAND_REMOTE=$work/queue-b.git bash scripts/land.sh) \
+    >"$work/queue-b.out" 2>&1 &
+pid_b=$!
+wait "$pid_a"; rc_a=$?
+wait "$pid_b"; rc_b=$?
+unset FAKE_GATE_SLEEP
+if [ "$rc_a" -eq 0 ] && [ "$rc_b" -eq 0 ]; then
+    pass 'queued landings both succeed'
+else
+    fail "queued landings failed (a=$rc_a b=$rc_b)"
+fi
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 2 ]; then
+    pass 'each queued landing gates once'
+else
+    fail "queued landings gated $(wc -l <"$FAKE_GATE_LOG") times"
+fi
+if grep -q 'waiting in landing queue' "$work/queue-a.out" "$work/queue-b.out"; then
+    pass 'the queued landing reports its position'
+else
+    fail 'no landing reported a queue position'
+fi
+if [ "$(remote_tip queue-a)" = "$(git -C "$work/queue-a" rev-parse HEAD)" ] &&
+   [ "$(remote_tip queue-b)" = "$(git -C "$work/queue-b" rev-parse HEAD)" ]; then
+    pass 'both queued commits reached their integration refs'
+else
+    fail 'a queued commit did not reach its integration ref'
+fi
+
+# The queue wait is bounded by a named timeout, never an indefinite stall.
+case_repo queued-timeout
+commit_file queued-timeout 'my work' mine.txt mine
+queue_state=$HOME/.local/state/robin-land-queue
+mkdir -p -- "$queue_state/tickets"
+# Hold the lock directly: a ticket with a later deadline would sort behind ours
+# and let us through, which is the opposite of a blocked queue.
+(
+    exec 9>"$queue_state/land.lock"
+    flock -x 9
+    sleep 3
+) &
+holder=$!
+sleep 0.2
+export ROBIN_LAND_QUEUE_WAIT_SECS=1
+run_land queued-timeout
+unset ROBIN_LAND_QUEUE_WAIT_SECS
+kill "$holder" 2>/dev/null || true
+wait "$holder" 2>/dev/null || true
+expect_status 1 'a blocked landing times out at its bound'
+expect_contains 'the timeout is named' 'timed out waiting for a landing slot'
+
+# A killed agent leaves a future-dated ticket behind. Its owner PID is gone, so
+# the queue must reap it instead of blocking every later landing for hours.
+case_repo stale-ticket
+commit_file stale-ticket 'my work' mine.txt mine
+stale_dir=$HOME/.local/state/robin-land-queue/tickets
+mkdir -p -- "$stale_dir"
+stale_deadline=$(( $(date +%s) + 30 ))
+stale_name=$(printf '%020d' "$stale_deadline")-stale-99999999-1
+: >"$stale_dir/$stale_name"
+export ROBIN_LAND_QUEUE_WAIT_SECS=2
+run_land stale-ticket
+unset ROBIN_LAND_QUEUE_WAIT_SECS
+expect_status 0 'a dead holder does not block the queue'
+if [ ! -e "$stale_dir/$stale_name" ]; then
+    pass 'the dead holder ticket is reaped'
+else
+    fail 'the dead holder ticket was left behind'
+fi
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
