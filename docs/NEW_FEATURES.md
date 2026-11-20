@@ -1,5 +1,15 @@
 # Post-port Features
 
+- **Opt-in teammate cursors.** In co-op, a profile preference under Options →
+  Multiplayer / Privacy ("Show Teammate Cursors") shows other seats' cursors in
+  real time, smaller and tinted in that seat's colour, and broadcasts your own
+  cursor while enabled. It is off by default. Cursor state travels as a
+  presentation-only, host-relayed message on the existing reliable stream
+  (world coordinates, never screen pixels), is buffered 120 ms and interpolated
+  for smoothness, and disappears for stale or disconnected peers. It never
+  enters simulation, snapshots, replays, or state hashes. Browser builds use
+  the same wire path but have no privacy-screen entry point yet.
+
 - **Empty selection boxes leave your party alone.** A left-drag box that
   catches no selectable hero and no controllable allied soldier dispatches no
   selection command: heroes, allied soldiers, the selected action, and

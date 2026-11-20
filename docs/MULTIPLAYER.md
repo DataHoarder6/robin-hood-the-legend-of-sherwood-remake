@@ -41,6 +41,15 @@ hosted discovery infrastructure. Each session uses one bidirectional stream
 per peer carrying class-tagged, length-prefixed frames. The browser applies
 the same directional allocation limits as native before decoding a body.
 
+`NetMsg::Cursor` is a presentation-only exception to the gameplay flow: a peer
+publishes its world-space cursor position and cursor sprite id, the host stamps
+it with the authenticated seat and relays it as a diagnostic on the same
+stream, and each client buffers and interpolates it locally. Cursor samples
+never enter `PlayerCommand`, `BroadcastInput`, snapshots, replays, or state
+hashes. Display and broadcast are one opt-in profile preference (off by
+default); cursors hide when another UI owns the pointer, go stale after 300 ms,
+and are forgotten on disconnect.
+
 ### Browser invitations, identity, and content
 
 - Browser-link publication is a persisted Multiplayer/Privacy setting. It is
