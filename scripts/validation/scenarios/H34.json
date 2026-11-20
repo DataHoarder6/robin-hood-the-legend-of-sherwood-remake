@@ -18,8 +18,7 @@
   "faults": [
     {
       "at": {
-        "barrier": "begin-sim",
-        "after": 0
+        "frame": 40
       },
       "peer": 0,
       "fault": "console",
