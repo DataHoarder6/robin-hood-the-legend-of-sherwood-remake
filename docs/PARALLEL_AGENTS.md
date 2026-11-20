@@ -231,3 +231,8 @@ skipped rather than failing.
 
 Recipes: `just doctor`, `just reconcile-main`, `just check SUITE`
 (`scripts/check-quality.sh` suites; `tooling` is the fixture-free one).
+
+Gate builds use Cargo incremental (`CARGO_INCREMENTAL=1` plus
+`SCCACHE_ALLOW_INCREMENTAL=1`): the shared copy keeps its incremental state, so
+a changed crate recompiles less. sccache no longer needs one shareable Rust key
+space across copies.

@@ -247,3 +247,9 @@ build cache ([Cargo Book, Build cache](https://doc.rust-lang.org/cargo/reference
 The copy lock prevents tree swaps; `rsync --checksum --no-times` keeps unchanged
 mtimes and only changed crates' artifacts are purged. sccache stays enabled for
 the cases where it does hit (C/C++, identical native invocations).
+
+With the stable gate copy, the `CARGO_INCREMENTAL=0` advice in §1 no longer
+applies: it existed to give sccache one shareable key space across copies.
+Gates now set `CARGO_INCREMENTAL=1` and `SCCACHE_ALLOW_INCREMENTAL=1` (sccache
+skips incremental crates rather than erroring; Cargo's incremental state in the
+stable copy makes changed workspace crates cheaper to rebuild).
