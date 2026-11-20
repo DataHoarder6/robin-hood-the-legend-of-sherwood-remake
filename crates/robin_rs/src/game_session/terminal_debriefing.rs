@@ -194,6 +194,24 @@ fn terminal_campaign_update_applied(current_sequence: u64, previous_sequence: u6
     current_sequence > previous_sequence
 }
 
+/// True when the authoritative terminal update is already part of the state a
+/// reconnecting peer adopted, so no later echo will advance the sequence.
+fn terminal_update_already_in_state(
+    campaign: &robin_engine::campaign::Campaign,
+    previous_sequence: u64,
+) -> bool {
+    if campaign.mission_attempt_sequence != previous_sequence {
+        return false;
+    }
+    let Some(mission_index) = campaign.current_mission_idx else {
+        return false;
+    };
+    campaign
+        .mission_attempts(mission_index)
+        .and_then(|attempts| attempts.last())
+        .is_some_and(|attempt| attempt.sequence() == previous_sequence)
+}
+
 struct TerminalDebriefingPage {
     kind: engine_player_command::ModalKind,
     body: String,
@@ -1133,10 +1151,12 @@ fn drive_tick_exit_modals_inner(
     }
 
     if let Some(pending) = context.ui.pending_terminal_debriefing.take() {
+        let campaign = context.manager.engine.campaign();
         if !terminal_campaign_update_applied(
-            context.manager.engine.campaign().mission_attempt_sequence,
+            campaign.mission_attempt_sequence,
             pending.previous_attempt_sequence(),
-        ) {
+        ) && !terminal_update_already_in_state(campaign, pending.previous_attempt_sequence())
+        {
             context.ui.pending_terminal_debriefing = Some(pending);
             return TerminalDebriefingProgress::Pending;
         }
@@ -1668,6 +1688,40 @@ mod tests {
         assert!(outgoing.try_recv().is_err());
         assert!(!terminal_campaign_update_applied(41, previous));
         assert!(terminal_campaign_update_applied(42, previous));
+    }
+
+    #[test]
+    fn a_reconnecting_peer_whose_snapshot_already_carried_the_terminal_update_can_open_its_page() {
+        use robin_engine::campaign::Campaign;
+        use robin_engine::campaign_history::MissionAttemptOutcome;
+        use robin_engine::mission::Mission;
+        let mut campaign = Campaign::default();
+        campaign.missions.push(Mission::new());
+        campaign.current_mission_idx = Some(0);
+        // The host's terminal update was applied before the snapshot this peer
+        // adopted: the sequence and the recorded attempt both name attempt 1.
+        campaign.record_mission_attempt(
+            0,
+            MissionAttemptOutcome::Lost,
+            Some(100),
+            Some(1),
+            60,
+            Default::default(),
+            &Default::default(),
+            None,
+        );
+        assert_eq!(campaign.mission_attempt_sequence, 1);
+        assert!(terminal_update_already_in_state(&campaign, 1));
+        assert!(!terminal_campaign_update_applied(
+            campaign.mission_attempt_sequence,
+            1
+        ));
+
+        // A live peer still waits for the command that advances the sequence.
+        let mut live = Campaign::default();
+        live.missions.push(Mission::new());
+        live.current_mission_idx = Some(0);
+        assert!(!terminal_update_already_in_state(&live, 0));
     }
 
     #[test]
