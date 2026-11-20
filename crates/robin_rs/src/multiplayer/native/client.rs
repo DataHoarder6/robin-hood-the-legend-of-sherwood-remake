@@ -43,7 +43,9 @@ pub fn connect_client_in_campaign(
     outgoing_rx: Receiver<NetOutbound>,
 ) -> std::io::Result<ClientHandle> {
     connect_client_inner(
-        campaign.state().client_key.clone(),
+        campaign
+            .client_transport_key()
+            .map_err(std::io::Error::other)?,
         addr,
         nickname,
         incoming_tx,

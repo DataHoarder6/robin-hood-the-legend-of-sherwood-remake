@@ -53,12 +53,59 @@ fn native_clock_returns_a_real_post_epoch_timestamp() {
     assert!(super::try_current_epoch_ms().expect("native system clock") > 0);
 }
 
+/// A client that restarts on the same install must present the same
+/// authenticated owner to the host, or its reconnect is refused as a fresh
+/// seat while the roster is full. The key is domain-separated from the host's
+/// so one install can host and join without an identity collision.
 #[test]
-fn campaign_owners_isolate_transport_identity_and_handoffs() {
+fn a_restarted_client_reclaims_the_same_authenticated_transport_identity() {
+    let _guard = crate::install_home::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let previous = std::env::var_os("ROBINHOOD_INSTALL_HOME");
+    let home = tempfile::tempdir().unwrap();
+    // Safety: ENV_LOCK is held for the duration of this test.
+    unsafe { std::env::set_var("ROBINHOOD_INSTALL_HOME", home.path()) };
+
+    let a = super::MultiplayerCampaignSession::default();
+    // A new process on the same install creates a new campaign session.
+    let b = super::MultiplayerCampaignSession::default();
+    let host_key = crate::multiplayer::identity::game_secret_key().unwrap();
+    let a_key = a.client_transport_key().unwrap();
+    let b_key = b.client_transport_key().unwrap();
+
+    let outcome = std::panic::catch_unwind(|| {
+        assert_eq!(
+            a_key.public(),
+            b_key.public(),
+            "a restart on the same install must reclaim the same seat owner"
+        );
+        assert_ne!(
+            a_key.public(),
+            host_key.public(),
+            "client and host roles need distinct keys on one install"
+        );
+    });
+    // Safety: restore before releasing ENV_LOCK.
+    unsafe {
+        match previous {
+            Some(value) => std::env::set_var("ROBINHOOD_INSTALL_HOME", value),
+            None => std::env::remove_var("ROBINHOOD_INSTALL_HOME"),
+        }
+    }
+    assert!(outcome.is_ok(), "the identity assertions must hold");
+}
+
+#[test]
+fn campaign_owners_isolate_handoffs_and_share_the_installs_client_identity() {
     let a = super::MultiplayerCampaignSession::default();
     let b = super::MultiplayerCampaignSession::default();
-    assert_eq!(a.state().client_key.public(), a.state().client_key.public());
-    assert_ne!(a.state().client_key.public(), b.state().client_key.public());
+    // Transport identity belongs to the install and the role, not the
+    // campaign object: two sessions in one process are the same joining owner.
+    assert_eq!(
+        a.client_transport_key().unwrap().public(),
+        b.client_transport_key().unwrap().public()
+    );
     let continuation = HostSessionContinuation {
         host_endpoint_id: iroh::SecretKey::from_bytes(&[3; 32]).public(),
         session_id: robin_engine::multiplayer::MultiplayerSessionId([4; 32]),

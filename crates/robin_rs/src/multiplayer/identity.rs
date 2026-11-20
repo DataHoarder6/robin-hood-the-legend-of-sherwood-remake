@@ -35,6 +35,26 @@ fn secret_key_from_seed(seed: [u8; 32]) -> SecretKey {
     SecretKey::from_bytes(&seed)
 }
 
+/// The joining client's durable transport key, domain-separated from the
+/// host's key derived from the same install seed.
+///
+/// The host authenticates a native peer by its iroh endpoint id. A client that
+/// generated a fresh key per process presented a new owner on restart and was
+/// refused as a fresh seat while the roster was full. Both roles now derive
+/// from the install's one durable seed, with a domain tag so one install can
+/// host and join without the two endpoints colliding.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn client_secret_key() -> Result<SecretKey, MultiplayerError> {
+    use sha2::{Digest, Sha256};
+    let seed = crate::native_game_identity::durable_game_identity_seed()
+        .map_err(|error| MultiplayerError::Identity(error.into()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"robinhood/joining-client-transport/v1");
+    hasher.update(seed);
+    let derived: [u8; 32] = hasher.finalize().into();
+    Ok(secret_key_from_seed(derived))
+}
+
 /// Browser gameplay uses an ephemeral iroh transport endpoint and the isolated
 /// stable-shell signer as its one durable identity. Refuse to manufacture a
 /// second durable seed inside game WASM.

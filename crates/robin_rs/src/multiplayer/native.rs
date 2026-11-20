@@ -112,8 +112,6 @@ pub struct MultiplayerCampaignSession {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CampaignTransportState {
-    #[serde(skip, default = "SecretKey::generate")]
-    client_key: SecretKey,
     #[serde(skip)]
     continuation: Mutex<Option<HostSessionContinuation>>,
     #[serde(skip)]
@@ -138,7 +136,6 @@ impl Default for MultiplayerCampaignSession {
     fn default() -> Self {
         Self {
             state: Some(Arc::new(CampaignTransportState {
-                client_key: SecretKey::generate(),
                 continuation: Mutex::new(None),
                 server_active: AtomicBool::new(false),
             })),
@@ -151,6 +148,13 @@ impl MultiplayerCampaignSession {
         self.state
             .as_ref()
             .expect("decoded campaign has no live multiplayer authority")
+    }
+
+    /// The transport identity this install presents when joining a session.
+    /// Derived from the durable install seed, so a process restart reclaims the
+    /// same authenticated owner, and domain-separated from the host's key.
+    pub(crate) fn client_transport_key(&self) -> Result<SecretKey, MultiplayerError> {
+        crate::multiplayer::identity::client_secret_key()
     }
 
     pub(crate) fn discard_host_continuation(&self) -> Result<(), MultiplayerError> {
