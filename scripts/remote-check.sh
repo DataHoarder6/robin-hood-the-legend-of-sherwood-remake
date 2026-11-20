@@ -40,6 +40,10 @@ gate_copy_name=gate-shared
 copy_root=$remote_root
 slots=${ROBIN_BUILD_SLOTS:-3}
 slot_dir="~/$remote_root/.slots"
+# A cold copy has no flake to check before sync, so every devShell invocation
+# also proves cargo/rustc can exec as its first command. A GC'd devShell then
+# fails with a named cause instead of deep in a compile.
+gate_toolchain_guard='set -e; if ! cargo --version >/dev/null || ! rustc --version >/dev/null; then printf "remote-check: gate toolchain cannot exec; a Nix GC may have removed a devShell input.\n" >&2; exit 1; fi; '
 
 usage() {
     awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
@@ -115,6 +119,24 @@ require_disk() {
             "$host" "$((available / 1024 / 1024 / 1024))" "$min_free_gb" >&2
         printf 'remote-check: run `%s --prune` on the runtime to remove copies whose worktree is gone, then retry\n' \
             "$repository/scripts/remote-check.sh" >&2
+        return 1
+    fi
+}
+
+# A Nix GC that removed a devShell input makes the gate fail deep in a compile
+# with an opaque glibc error. Prove cargo and rustc can exec inside the very
+# devShell the suites use before syncing a tree, so the failure names the cause.
+require_toolchain() {
+    printf 'remote-check: checking the gate toolchain on %s\n' "$host" >&2
+    if ! ssh "$host" bash -s <<EOF
+set -euo pipefail
+mkdir -p $remote_dir
+cd $remote_dir
+nix develop --command bash -c 'cargo --version && rustc --version'
+EOF
+    then
+        printf 'remote-check: cargo/rustc failed inside the gate devShell on %s.\n' "$host" >&2
+        printf 'remote-check: a Nix GC may have removed a devShell input; rebuild the shell before retrying.\n' >&2
         return 1
     fi
 }
@@ -348,6 +370,15 @@ prepare_cache() {
 
 lock_copy
 prepare_cache
+remote_dir="~/$remote_root/$name"
+# A warm copy already carries the gate's flake, so prove the toolchain can exec
+# before rsyncing a tree into it. A first-time copy has no flake yet; its check
+# runs as the first command inside the gate devShell below.
+if ssh "$host" "test -f $remote_dir/flake.nix" 2>/dev/null; then
+    require_toolchain
+else
+    printf 'remote-check: no devShell in the copy yet; toolchain is checked inside the gate.\n' >&2
+fi
 sync_worktree
 lock="$remote_dir.lock"
 if ((multi)); then
@@ -358,12 +389,17 @@ if ((multi)); then
     ssh "$host" bash -s <<EOF
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+# A private TMPDIR per gate keeps `nix develop --command` scratch files from
+# accumulating in the shared /tmp; the trap removes them when the gate ends.
+gate_tmp=\$(mktemp -d /tmp/robin-gate.XXXXXX)
+trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
     systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
+    TMPDIR=\$gate_tmp \
     CARGO_INCREMENTAL=0 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
@@ -371,19 +407,24 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
-    nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
+    nix develop --command bash -c '${gate_toolchain_guard}for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
 else
     printf 'remote-check: %s -> %s:%s\n' "${requested[0]}" "$host" "$remote_dir" >&2
     ssh "$host" bash -s <<EOF
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+# A private TMPDIR per gate keeps `nix develop --command` scratch files from
+# accumulating in the shared /tmp; the trap removes them when the gate ends.
+gate_tmp=\$(mktemp -d /tmp/robin-gate.XXXXXX)
+trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
     systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
+    TMPDIR=\$gate_tmp \
     CARGO_INCREMENTAL=0 \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
@@ -391,6 +432,6 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
-    nix develop --command bash scripts/check-quality.sh ${requested[0]}
+    nix develop --command bash -c '${gate_toolchain_guard}bash scripts/check-quality.sh ${requested[0]}'
 EOF
 fi
