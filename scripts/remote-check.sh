@@ -32,6 +32,12 @@ exec </dev/null
 host=${ROBIN_BUILD_HOST:-minipc}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
+# The gate copy is infrastructure, not an abandoned worktree cache. Keep it in
+# its own root: every prune scans $remote_root only, so no agent's prune can
+# delete a gate's cwd mid-build (observed 2026-11-20 with gate-shared).
+gate_root=build/robin-gate
+gate_copy_name=gate-shared
+copy_root=$remote_root
 slots=${ROBIN_BUILD_SLOTS:-3}
 slot_dir="~/$remote_root/.slots"
 
@@ -114,7 +120,7 @@ require_disk() {
 }
 
 sync_worktree() {
-    remote_dir="~/$remote_root/$name"
+    remote_dir="~/$copy_root/$name"
     printf 'remote-check: sync %s -> %s:%s\n' "$repository" "$host" "$remote_dir" >&2
     require_disk
 
@@ -124,7 +130,7 @@ sync_worktree() {
     # gitdir that only exists here, so it must not travel.
     ssh "$host" bash -s <<EOF
 set -euo pipefail
-mkdir -p ~/$remote_root
+mkdir -p ~/$copy_root
 EOF
 
     # `--no-times` after `-a`: a changed file must arrive with a mtime *now*, not
@@ -223,6 +229,9 @@ cd ~/$remote_root 2>/dev/null || exit 0
 for d in */; do
     d=\${d%/}
     [ "\$d" = '$keep' ] && continue
+    # The shared gate copy is infrastructure, not an abandoned worktree cache.
+    # Deleting it mid-gate leaves the scope with a vanished cwd and a failed gate.
+    [ "\$d" = gate-shared ] && continue
     [ -f "\$d/Cargo.toml" ] || continue
     [ -n "\$(find "\$d" -maxdepth 0 -mtime +$days)" ] || continue
     printf 'pruned %s\n' "\$d" >&2
@@ -239,7 +248,7 @@ EOF
         # copy — and delete the rest. Age is the wrong test: a copy can be a
         # week old and still be the only build cache its worktree has.
         keep=$(bash "$repository/scripts/live-worktrees.sh" |
-            { cat; copy_name "${2:-}"; } | sort -u |
+            { cat; copy_name "${2:-}"; printf 'gate-shared\n'; } | sort -u |
             sed 's/.*/"&"/' | paste -sd' ' -)
         # Only real copies: the root is shared, and a cache or scratch directory
         # someone keeps beside the copies is not this script's to delete.
@@ -285,6 +294,10 @@ else
     requested=("$1")
 fi
 
+if [ "$name" = "$gate_copy_name" ]; then
+    copy_root=$gate_root
+fi
+
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
 known=$(bash "$repository/scripts/check-quality.sh" 2>&1 || true)
@@ -314,10 +327,10 @@ prepare_cache() {
     exec 8>"$lock_file"
     flock -w 300 8
     local list
-    list=$(ssh "$host" "find \$HOME/$remote_root -mindepth 1 -maxdepth 1 -type d -printf '%p:' 2>/dev/null | sed 's/:\$//'")
+    list=$(ssh "$host" "find \$HOME/$remote_root \$HOME/$gate_root -mindepth 1 -maxdepth 1 -type d -printf '%p:' 2>/dev/null | sed 's/:\$//'")
     case ":$list:" in
-        *":$HOME/$remote_root/$name:"*) ;;
-        *) list="${list:+$list:}$HOME/$remote_root/$name" ;;
+        *":$HOME/$copy_root/$name:"*) ;;
+        *) list="${list:+$list:}$HOME/$copy_root/$name" ;;
     esac
     if [ ! -f "$list_file" ] || [ "$(cat "$list_file")" != "$list" ]; then
         printf '%s\n' "$list" >"$list_file"
