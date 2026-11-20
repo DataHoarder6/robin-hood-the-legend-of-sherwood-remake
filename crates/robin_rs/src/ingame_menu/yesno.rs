@@ -45,6 +45,45 @@ const BUTTON_GAP: i32 = 18;
 const ID_YES: u32 = 0;
 const ID_NO: u32 = 1;
 
+/// Frames the mission-start confirmation spends flying in from the right
+/// edge. Nine ticks at 60 Hz is ~150 ms — the same budget the leave-mission
+/// popup uses in [`super::mission_state`].
+const FLY_IN_TICKS: f32 = 9.0;
+
+/// Horizontal offset from the centred position of a dialog flying in from
+/// the right edge, as a pure function of `progress` in `[0, 1]`.
+///
+/// At progress 0 the panel sits just off the menu's right edge; at progress
+/// 1 it lands centred. The ease-out cubic is monotonic decreasing, so each
+/// frame moves the panel left until it settles.
+fn fly_in_offset_x(progress: f32) -> i32 {
+    let t = 1.0 - (1.0 - progress.clamp(0.0, 1.0)).powi(3);
+    let final_x = (super::layout::MENU_W - WIN_W) / 2;
+    // Round rather than truncate: truncation reaches zero a frame early and
+    // breaks pixel-level monotonicity on the last two ticks.
+    ((super::layout::MENU_W - final_x) as f32 * (1.0 - t)).round() as i32
+}
+
+/// Frame-driven progress of the mission-start confirmation's fly-in.
+#[derive(Debug, Clone, Copy)]
+struct FlyInTransition {
+    elapsed_ticks: f32,
+}
+
+impl FlyInTransition {
+    fn new() -> Self {
+        Self { elapsed_ticks: 0.0 }
+    }
+
+    fn advance(&mut self) {
+        self.elapsed_ticks += 1.0;
+    }
+
+    fn offset_x(self) -> i32 {
+        fly_in_offset_x(self.elapsed_ticks / FLY_IN_TICKS)
+    }
+}
+
 /// Resolved result of the modal's widget event stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum YesNoChoice {
@@ -71,6 +110,9 @@ pub struct YesNoModalState {
     win_y: i32,
     focus: FrameButtonFocusManager,
     choice: Option<YesNoChoice>,
+    /// `Some` only for the mission-start confirmation; every other Yes/No
+    /// dialog keeps opening in place.
+    fly_in: Option<FlyInTransition>,
 }
 
 impl YesNoModalState {
@@ -154,7 +196,28 @@ impl YesNoModalState {
             win_y,
             focus,
             choice: None,
+            fly_in: None,
         }
+    }
+
+    /// Mission-start confirmation: the panel flies in from the right edge
+    /// over [`FLY_IN_TICKS`] frames. Other Yes/No dialogs use [`Self::new`]
+    /// and open in place.
+    pub fn new_mission_start_confirmation(
+        event_pump: &crate::window::GameWindow,
+        renderer: &Renderer,
+        resources: &IngameMenuResources,
+        message: String,
+    ) -> Self {
+        let mut state = Self::new(event_pump, renderer, resources, message);
+        state.fly_in = Some(FlyInTransition::new());
+        state
+    }
+
+    /// Current horizontal displacement from the centred position, in
+    /// virtual menu units. Zero for dialogs that do not fly in.
+    fn fly_in_offset_x(&self) -> i32 {
+        self.fly_in.map_or(0, FlyInTransition::offset_x)
     }
 
     pub fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> Option<bool> {
@@ -182,6 +245,9 @@ impl YesNoModalState {
         events: &[GameEvent],
         transform: MenuTransform,
     ) -> Option<bool> {
+        if let Some(fly_in) = &mut self.fly_in {
+            fly_in.advance();
+        }
         self.transform = transform;
         if self.choice.is_some() {
             return self.result();
@@ -259,10 +325,17 @@ impl YesNoModalState {
     /// Dialog panel, message, buttons and tooltip; the caller owns the modal
     /// phase/dim before and the cursor/present after.
     fn draw_content(&mut self, renderer: &mut Renderer, resources: &IngameMenuResources) {
+        // The whole panel translates from the right edge; input still uses
+        // `self.transform`, so hit masks stay at the settled position.
+        let draw_transform = MenuTransform {
+            origin_x: self.transform.origin_x + self.fly_in_offset_x(),
+            origin_y: self.transform.origin_y,
+        };
+
         if let Some(bg) = resources.menu_bg_small {
             draw_background(
                 renderer,
-                self.transform,
+                draw_transform,
                 &bg,
                 self.win_x,
                 self.win_y,
@@ -270,7 +343,7 @@ impl YesNoModalState {
                 WIN_H,
             );
         } else {
-            let (sx, sy) = self.transform.to_screen(self.win_x, self.win_y);
+            let (sx, sy) = draw_transform.to_screen(self.win_x, self.win_y);
             renderer.fill_screen(
                 Some(&BBox::from_coords(
                     sx as f32,
@@ -287,7 +360,7 @@ impl YesNoModalState {
             render_clipped_text_in_box_font(
                 renderer,
                 font,
-                self.transform,
+                draw_transform,
                 &self.message,
                 MenuRect {
                     x: self.win_x + MSG_X,
@@ -303,7 +376,7 @@ impl YesNoModalState {
             );
         }
 
-        widget_bridge::draw_frame_buttons(renderer, resources, self.transform, &self.frame);
+        widget_bridge::draw_frame_buttons(renderer, resources, draw_transform, &self.frame);
 
         let mouse_pt =
             engine_coordinates::ScreenPoint::new(self.input_state.virt_x, self.input_state.virt_y);
@@ -538,6 +611,7 @@ fn button_mut(
 mod tests {
     use super::*;
     use crate::gfx_types::Keycode;
+    use crate::ingame_menu::layout::MENU_W;
 
     fn modal_state() -> YesNoModalState {
         let frame = widget_bridge::make_button_frame(&[
@@ -563,6 +637,7 @@ mod tests {
             win_y: 0,
             focus,
             choice: None,
+            fly_in: None,
         }
     }
 
@@ -663,5 +738,44 @@ mod tests {
         ]);
         state.resolve(YesNoChoice::No);
         assert_eq!(state.choice, Some(YesNoChoice::Yes));
+    }
+
+    fn mission_start_modal_state() -> YesNoModalState {
+        let mut state = modal_state();
+        state.fly_in = Some(FlyInTransition::new());
+        state
+    }
+
+    #[test]
+    fn mission_start_fly_in_starts_off_screen_right_and_lands_centered() {
+        let final_x = (MENU_W - WIN_W) / 2;
+        assert_eq!(
+            fly_in_offset_x(0.0) + final_x,
+            MENU_W,
+            "at progress 0 the panel's left edge sits at the right edge of the menu"
+        );
+        assert_eq!(
+            fly_in_offset_x(1.0),
+            0,
+            "at progress 1 the panel sits at its centred position"
+        );
+    }
+
+    #[test]
+    fn a_frame_advances_the_mission_start_fly_in_monotonically() {
+        let transform = MenuTransform::centered(640, 480);
+        let mut state = mission_start_modal_state();
+        let mut previous = state.fly_in_offset_x();
+        assert_eq!(previous, fly_in_offset_x(0.0));
+        for _ in 0..FLY_IN_TICKS as usize {
+            state.handle_events(&[], transform);
+            let current = state.fly_in_offset_x();
+            assert!(current < previous, "each frame must move the panel left");
+            previous = current;
+        }
+        assert_eq!(
+            previous, 0,
+            "the flight ends exactly at the centred position"
+        );
     }
 }

@@ -2183,7 +2183,7 @@ pub(super) fn handle_sherwood_hud_buttons(
                 if let Some(resources) = menu_resources.as_ref() {
                     let msg = resources.menu_text.get(prompt_id);
                     *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
-                        state: ingame_menu::YesNoModalState::new(
+                        state: ingame_menu::YesNoModalState::new_mission_start_confirmation(
                             event_pump, renderer, resources, msg,
                         ),
                         action: SherwoodConfirmationAction::StartMission {
