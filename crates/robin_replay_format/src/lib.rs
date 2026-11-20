@@ -493,9 +493,11 @@ fn zstd_frame_window_size(frame: &[u8]) -> Result<usize, FormatError> {
     let descriptor = *frame
         .get(4)
         .ok_or_else(|| FormatError::InvalidZstdHeader("truncated descriptor".into()))?;
-    if descriptor & 0x18 != 0 {
+    // RFC 8878 §3.1.1.1.1: bit 4 is *unused* and must be ignored by decoders;
+    // only bit 3 is reserved and must be rejected.
+    if descriptor & 0x08 != 0 {
         return Err(FormatError::InvalidZstdHeader(
-            "reserved/unused descriptor bits are set".into(),
+            "reserved descriptor bits are set".into(),
         ));
     }
     let single_segment = descriptor & 0x20 != 0;
@@ -1284,6 +1286,17 @@ impl SerializeStructVariant for Compound<'_, '_> {
 mod tests {
     use super::*;
     use robin_engine::engine::{ExternalAction, SimulationFrameInput};
+
+    #[test]
+    fn frame_header_ignores_the_zstd_unused_bit() {
+        // FHD 0x70 sets the legal "unused" bit 4; only bit 3 is reserved.
+        let frame = [0x28, 0xB5, 0x2F, 0xFD, 0x70, 0x00, 0x00];
+        match zstd_frame_window_size(&frame) {
+            Ok(window) => assert_eq!(window, 256),
+            Err(err) => panic!("valid frame with the unused bit set was rejected: {err}"),
+        }
+    }
+
     use robin_engine::player_command::{PlayerCommand, PlayerInput};
     use robin_engine::replay::{ReplayFrame, ReplayHeader};
     use std::collections::BTreeMap;

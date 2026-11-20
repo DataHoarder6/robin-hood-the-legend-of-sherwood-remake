@@ -145,8 +145,14 @@ impl Validate for RunFilterV2 {
             self.schema_version,
         )?;
         crate::validation::text("run_filter.mission_id", &self.mission_id, 256)?;
-        if self.max_concurrent_players == Some(0) {
-            return Err(ValidationError::EmptyPlayerCount);
+        match self.max_concurrent_players {
+            Some(0) => return Err(ValidationError::EmptyPlayerCount),
+            Some(count) if count > crate::MAX_REPLAY_SEATS_V1 => {
+                return Err(ValidationError::CountOutOfRange {
+                    field: "run_filter.max_concurrent_players",
+                });
+            }
+            _ => {}
         }
         if self.player_public_key.is_some_and(|key| key.is_zero()) {
             return Err(ValidationError::Zero {
@@ -900,6 +906,13 @@ mod tests {
             max_concurrent_players: None,
             player_public_key: None,
         }
+    }
+
+    #[test]
+    fn run_filter_rejects_unreachable_seat_counts() {
+        let mut filter = filter();
+        filter.max_concurrent_players = Some(6);
+        assert!(filter.validate().is_err());
     }
 
     #[test]
