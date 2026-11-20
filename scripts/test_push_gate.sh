@@ -90,10 +90,10 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$head" "$crates_head" 2>&1) || status=$?
 expect_status 0 'a crates change runs the suites its diff selects'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm tooling' ]; then
-    pass 'the crates change selects lint and wasm, the suites that read every target'
+if [ "$selected" = '--suites format lint check client-release wasm tooling' ]; then
+    pass 'the crates change selects check, lint and wasm, the suites that read every target'
 else
-    fail "the crates change selects wasm (selected '$selected')"
+    fail "the crates change selects check (selected '$selected')"
 fi
 
 # A change to the browser build plan, the devShell that supplies wasm-opt and

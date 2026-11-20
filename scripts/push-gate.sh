@@ -90,9 +90,11 @@ printf '%s\n' "$paths" | grep -qE '^(wasm-www/|flake\.nix$|rust-toolchain\.toml$
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
     # `lint` reads the same two feature sets as a crate change, so it follows
-    # the same paths. `wasm` is selected separately below: it also depends on
-    # the build plan and devShell, not only on crates/.
-    suites+=(format lint client-release)
+    # the same paths. `check` compiles the non-test cfg with -D warnings,
+    # catching unused imports that cfg(test) hides. `wasm` is selected
+    # separately below: it also depends on the build plan and devShell, not
+    # only on crates/.
+    suites+=(format lint check client-release)
 fi
 if [ "$wasm_changed" = 1 ]; then
     suites+=(wasm)
