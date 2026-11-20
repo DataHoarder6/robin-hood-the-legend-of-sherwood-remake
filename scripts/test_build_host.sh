@@ -169,7 +169,10 @@ for _attempt in {1..100}; do [ -e "$work/slots-fifo/held" ] && break; sleep 0.05
 : > "$work/slots-fifo/order"
 bash "$slot" "$work/slots-fifo" 1 bash -c 'printf "A\n" >> "$1/order"' _ "$work/slots-fifo" &
 first_waiter=$!
-sleep 0.3
+for _attempt in {1..100}; do
+    [ -n "$(find "$work/slots-fifo/queue" -maxdepth 1 -type f -print -quit 2>/dev/null)" ] && break
+    sleep 0.05
+done
 bash "$slot" "$work/slots-fifo" 1 bash -c 'printf "B\n" >> "$1/order"' _ "$work/slots-fifo" &
 second_waiter=$!
 sleep 0.3
