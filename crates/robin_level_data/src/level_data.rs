@@ -54,6 +54,9 @@ pub enum LevelError {
 
     #[error("unsupported mobile-element data: {0}")]
     UnsupportedMobileData(String),
+
+    #[error("animal chunk has {0} entries but animals are not supported")]
+    UnsupportedAnimalChunk(u16),
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4692,16 +4695,12 @@ fn read_animals(reader: &mut ChunkReader, format: LevelFormat) -> Result<(), Lev
     // the loader skips it with an "Unimplemented chunk" warning and
     // Animal-actor mission initialization asserts false — no
     // shipped level carries any animals.  The Rust port has ripped the animal
-    // system out entirely, so we only accept an empty header and panic on
-    // anything else (which would indicate a modded/corrupt level we can't
-    // handle).
+    // system out entirely, so reject a non-empty header as a load error
+    // rather than panicking on a modded/corrupt level.
     reader.chunk_start(format.animal_tag(), format.animal_ver())?;
     let count = reader.read_u16()?;
     if count != 0 {
-        panic!(
-            "animal chunk has {count} entries but Robin Hood has no animals; \
-             this level is unshippable or corrupt"
-        );
+        return Err(LevelError::UnsupportedAnimalChunk(count));
     }
     reader.chunk_end()?;
     Ok(())
@@ -6223,6 +6222,21 @@ fn receiving_plane_roundoff(points: [[f32; 3]; 3], position: [f64; 3]) -> f64 {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn non_empty_animal_chunk_is_an_error_not_a_panic() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"BETE");
+        bytes.extend_from_slice(&6u32.to_le_bytes()); // size: version + count
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // version
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // count
+        let file = SbFile::from_owned_bytes(bytes, String::from("animal.rhm"));
+        let mut reader = ChunkReader::new(file);
+        assert!(
+            read_animals(&mut reader, LevelFormat::Demo).is_err(),
+            "a modded level with animals must fail to load, not panic"
+        );
+    }
 
     #[test]
     fn steep_receiving_plane_accepts_roundoff_but_rejects_height_mismatch() {
