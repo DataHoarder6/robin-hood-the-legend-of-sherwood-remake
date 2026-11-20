@@ -51,6 +51,7 @@ impl ServerHandle {
         content_identity_sha256: String,
         mission_profile_id: Option<u32>,
         expected_players: u32,
+        lifetime: crate::multiplayer::join_ticket::InvitationLifetime,
     ) -> Result<crate::multiplayer::join_ticket::BrowserJoinTicket, MultiplayerError> {
         crate::multiplayer::join_ticket::BrowserJoinTicket::issue(
             &self.host_key,
@@ -64,6 +65,7 @@ impl ServerHandle {
                 mission_profile_id,
                 expected_players,
             },
+            lifetime,
         )
     }
 

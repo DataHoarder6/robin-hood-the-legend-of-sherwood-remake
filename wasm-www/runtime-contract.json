@@ -2,7 +2,7 @@
   "schema": 1,
   "netProtocol": 73,
   "replaySchema": 78,
-  "ticketSchema": 3,
+  "ticketSchema": 4,
   "joinCodePrefix": "rhmp3-",
   "contentSchema": 2,
   "shippingDatadirSchema": 24

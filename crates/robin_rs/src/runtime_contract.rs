@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const JOIN_CODE_PREFIX: &str = "rhmp3-";
-pub const JOIN_TICKET_SCHEMA: u32 = 3;
+pub const JOIN_TICKET_SCHEMA: u32 = 4;
 pub const BROWSER_CONTENT_SCHEMA: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]

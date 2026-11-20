@@ -335,6 +335,7 @@ fn host_session(
                         content_identity_sha256.clone(),
                         args.multiplayer.mission_profile_id,
                         args.multiplayer.expected_players.unwrap_or(1),
+                        crate::multiplayer::join_ticket::InvitationLifetime::Timed,
                     )
                     .map_err(|source| SessionSetupFailure::Transport {
                         context: "browser invitation unavailable",

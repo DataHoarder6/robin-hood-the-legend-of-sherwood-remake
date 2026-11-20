@@ -9,10 +9,10 @@ import {
 } from "./join_ticket.ts";
 
 const NOW = 2_000_000_000;
-const DOMAIN = new TextEncoder().encode("robinhood/browser-join-ticket/v3\0");
+const DOMAIN = new TextEncoder().encode("robinhood/browser-join-ticket/v4\0");
 
 test("uses the current Rust join-ticket schema", () => {
-  assert.equal(browserJoinTicketConstants.schema, 3);
+  assert.equal(browserJoinTicketConstants.schema, 4);
 });
 
 function base64Url(bytes: Uint8Array): string {
@@ -39,6 +39,7 @@ async function signedTicket(
     session_id: base64Url(new Uint8Array(32).fill(9)),
     issued_at_epoch_s: NOW,
     expires_at_epoch_s: NOW + browserJoinTicketConstants.invitationLifetimeSeconds,
+    expires_never: false,
     content_edition: "demo",
     content_identity_sha256: "01".repeat(32),
     mission_id: "Dem_Lei_MP",
@@ -56,6 +57,14 @@ async function signedTicket(
     payload,
   };
 }
+
+test("a signed never-expiring invitation stays valid past any wall clock", async () => {
+  const { code } = await signedTicket({
+    expires_never: true,
+    expires_at_epoch_s: Number.MAX_SAFE_INTEGER,
+  });
+  await verifyBrowserJoinTicket(code, NOW + 10 * 365 * 24 * 3600);
+});
 
 test("accepts any canonical signed HTTPS relay and exact ticket", async () => {
   const { code, payload } = await signedTicket({

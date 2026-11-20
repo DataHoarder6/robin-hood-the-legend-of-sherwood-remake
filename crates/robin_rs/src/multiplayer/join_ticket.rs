@@ -20,10 +20,13 @@ pub use crate::runtime_contract::{JOIN_CODE_PREFIX, JOIN_TICKET_SCHEMA};
 pub const IROH_RELAY_TRANSPORT: &str = "iroh-relay-websocket";
 pub const MAX_JOIN_CODE_BYTES: usize = 16 * 1024;
 pub const INVITATION_LIFETIME_SECS: u64 = 30 * 60;
+/// JS cannot represent u64::MAX exactly; the wire value for a never-expiring
+/// invitation is the largest safe integer, identical in Rust and TypeScript.
+pub const NEVER_EXPIRES_EPOCH_S: u64 = 9_007_199_254_740_991;
 pub const MAX_CLOCK_SKEW_SECS: u64 = 2 * 60;
 pub const DEFAULT_BROWSER_URL: &str = "https://robinhood.phiresky.xyz/";
 
-const SIGNING_DOMAIN: &[u8] = b"robinhood/browser-join-ticket/v3\0";
+const SIGNING_DOMAIN: &[u8] = b"robinhood/browser-join-ticket/v4\0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -45,6 +48,9 @@ pub struct BrowserJoinTicketPayload {
     pub session_id: String,
     pub issued_at_epoch_s: u64,
     pub expires_at_epoch_s: u64,
+    /// An invitation that never expires is still bound to a live host session;
+    /// this is a claim about the ticket, not about keeping the session alive.
+    pub expires_never: bool,
     pub content_edition: BrowserContentEdition,
     pub content_identity_sha256: String,
     pub mission_id: String,
@@ -70,6 +76,12 @@ pub struct BrowserJoinTicketContent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvitationLifetime {
+    Timed,
+    Never,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvitationUse {
     /// A previously unused invitation. Its wall-clock window is mandatory.
     Initial,
@@ -85,6 +97,7 @@ impl BrowserJoinTicket {
         session_id: [u8; 32],
         issued_at_epoch_s: u64,
         content: BrowserJoinTicketContent,
+        lifetime: InvitationLifetime,
     ) -> Result<Self, MultiplayerError> {
         let BrowserJoinTicketContent {
             content_edition,
@@ -107,9 +120,15 @@ impl BrowserJoinTicket {
                 )
             })?
             .to_string();
-        let expires_at_epoch_s = issued_at_epoch_s
-            .checked_add(INVITATION_LIFETIME_SECS)
-            .ok_or_else(|| invitation("browser invitation timestamp overflow"))?;
+        let (expires_at_epoch_s, expires_never) = match lifetime {
+            InvitationLifetime::Timed => (
+                issued_at_epoch_s
+                    .checked_add(INVITATION_LIFETIME_SECS)
+                    .ok_or_else(|| invitation("browser invitation timestamp overflow"))?,
+                false,
+            ),
+            InvitationLifetime::Never => (NEVER_EXPIRES_EPOCH_S, true),
+        };
         let payload = BrowserJoinTicketPayload {
             schema: JOIN_TICKET_SCHEMA,
             transport: IROH_RELAY_TRANSPORT.to_string(),
@@ -121,6 +140,7 @@ impl BrowserJoinTicket {
             session_id: URL_SAFE_NO_PAD.encode(session_id),
             issued_at_epoch_s,
             expires_at_epoch_s,
+            expires_never,
             content_edition,
             content_identity_sha256,
             mission_id,
@@ -238,7 +258,10 @@ impl BrowserJoinTicket {
                 "browser invitation was issued too far in the future",
             ));
         }
-        if use_kind == InvitationUse::Initial && now_epoch_s >= self.payload.expires_at_epoch_s {
+        if !self.payload.expires_never
+            && use_kind == InvitationUse::Initial
+            && now_epoch_s >= self.payload.expires_at_epoch_s
+        {
             return Err(invitation("browser invitation expired before first use"));
         }
         Ok(())
@@ -375,13 +398,17 @@ fn validate_static_payload(payload: &BrowserJoinTicketPayload) -> Result<(), Mul
             "browser join ticket session id must be non-zero",
         ));
     }
-    if payload
-        .expires_at_epoch_s
-        .checked_sub(payload.issued_at_epoch_s)
-        != Some(INVITATION_LIFETIME_SECS)
-    {
+    let lifetime_ok = if payload.expires_never {
+        payload.expires_at_epoch_s == NEVER_EXPIRES_EPOCH_S
+    } else {
+        payload
+            .expires_at_epoch_s
+            .checked_sub(payload.issued_at_epoch_s)
+            == Some(INVITATION_LIFETIME_SECS)
+    };
+    if !lifetime_ok {
         return Err(invitation(format!(
-            "browser invitation lifetime must be exactly {INVITATION_LIFETIME_SECS} seconds"
+            "browser invitation lifetime must be {INVITATION_LIFETIME_SECS} seconds or never"
         )));
     }
     super::content_identity::validate_sha256(
@@ -430,6 +457,32 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_never_expiring_invitation_remains_valid_after_any_wall_clock() {
+        let key = SecretKey::from_bytes(&[8; 32]);
+        let endpoint = EndpointAddr::from(key.public())
+            .with_relay_url("https://relay.example.invalid/".parse().unwrap());
+        let ticket = BrowserJoinTicket::issue(
+            &key,
+            &endpoint,
+            [7; 32],
+            NOW,
+            BrowserJoinTicketContent {
+                content_edition: BrowserContentEdition::Demo,
+                content_identity_sha256: "ab".repeat(32),
+                mission_id: "Dem_Lei_MP".to_owned(),
+                mission_profile_id: Some(4),
+                expected_players: 2,
+            },
+            InvitationLifetime::Never,
+        )
+        .unwrap();
+        let code = ticket.encode();
+        assert!(BrowserJoinTicket::decode_for_initial_use(&code, u64::MAX - 1).is_ok());
+        assert_eq!(ticket.payload().expires_never, true);
+        assert_eq!(ticket.payload().expires_at_epoch_s, NEVER_EXPIRES_EPOCH_S);
     }
 
     #[test]
