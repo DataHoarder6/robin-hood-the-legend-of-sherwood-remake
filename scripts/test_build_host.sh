@@ -104,6 +104,11 @@ if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -
 else
     fail "remote-check does not set CARGO_INCREMENTAL=0 in both commands"
 fi
+if [ "$(grep -Fc 'SCCACHE_BASEDIRS="\$(bash scripts/sccache-basedirs.sh)"' "$source_root/scripts/remote-check.sh")" -eq 2 ]; then
+    pass "basedirs are passed without literal quote characters"
+else
+    fail "basedirs are quoted into the value, which sccache rejects"
+fi
 
 remap=$(bash "$source_root/scripts/sccache-basedirs.sh" --remap)
 if [ "$remap" = "--remap-path-prefix=$HOME/build/robin/a=/robin --remap-path-prefix=$HOME/build/robin/b=/robin" ]; then

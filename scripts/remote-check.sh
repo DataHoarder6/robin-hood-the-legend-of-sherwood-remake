@@ -266,7 +266,7 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\"\$(bash scripts/sccache-basedirs.sh)\" \\
+    env SCCACHE_BASEDIRS="\$(bash scripts/sccache-basedirs.sh)" \\
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
     CARGO_INCREMENTAL=0 \\
@@ -280,7 +280,7 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\"\$(bash scripts/sccache-basedirs.sh)\" \\
+    env SCCACHE_BASEDIRS="\$(bash scripts/sccache-basedirs.sh)" \\
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
     CARGO_INCREMENTAL=0 \\
