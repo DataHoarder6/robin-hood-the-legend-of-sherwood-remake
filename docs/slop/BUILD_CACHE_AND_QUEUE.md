@@ -226,3 +226,24 @@ See also: [`../TESTING.md`](../TESTING.md),
 [`scripts/remote-check.sh`](../../scripts/remote-check.sh),
 [`scripts/push-gate.sh`](../../scripts/push-gate.sh),
 [`AGENTS.md`](../../AGENTS.md).
+
+## 5. 2026-11-20 correction: tree-keyed gate copies were the bottleneck
+
+Measured on minipc while three landings ran: sccache overall 16.56% hits, but
+**Rust 0.36%** (4 hits / 1092 misses) versus C/C++ 99.46%. sccache's cache key
+includes the working directory, compiler arguments, environment, externs and
+target spec ([sccache Rust.md](https://github.com/mozilla/sccache/blob/main/docs/Rust.md));
+a tree-keyed copy has a fresh `target/`, so each landing's rustc invocations get
+new `-L dependency=...` / `--out-dir` paths and miss. `--remap-path-prefix` is
+itself part of the key, so it does not reliably fix this across copies
+([howardjohn, "Sharing Rust Build Cache", 2026-02](https://blog.howardjohn.info/posts/shared-rust-build/)).
+Hardlinking a warm target works but needs a custom script; `mr-boxington`/`mbx`
+([jdx, 2026-09](https://jdx.dev/posts/2026-09-05-introducing-mr-boxington/))
+packages it but replaces `target/` with a managed symlink, which conflicts with
+this repo's rule that artifacts belong to the producing checkout.
+
+Decision: gates share one stable copy (`gate-shared`) and rely on Cargo's own
+build cache ([Cargo Book, Build cache](https://doc.rust-lang.org/cargo/reference/build-cache.html)).
+The copy lock prevents tree swaps; `rsync --checksum --no-times` keeps unchanged
+mtimes and only changed crates' artifacts are purged. sccache stays enabled for
+the cases where it does hit (C/C++, identical native invocations).

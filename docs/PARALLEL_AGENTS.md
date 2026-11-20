@@ -88,13 +88,17 @@ scripts/remote-check.sh --prune    # drop every copy but this one
 Symptom: 3–5 agents each compile the same wasm/LLVM graph; the build host runs
 16 compilers on 12 cores and every gate gets slower.
 
-Rule: gate on the build host with one copy per pushed tree, not per worktree.
-`sccache` shares rustc results across copies; gate copies are keyed by the
-pushed tree and expire after `GATE_COPY_TTL_DAYS` (default 7), while interactive
-copies keep their worktree names. Each remote gate runs in a bounded user
-scope, so a killed harness leaves no build behind. Keep **one gate in flight**
-across agents: queue behind the other agent's `runbg` unit instead of starting
-a competing gate.
+Rule: gates use ONE stable copy (`gate-shared`); interactive checks keep their
+worktree name. Tree-keyed gate copies were tried and removed: each new tree got
+a fresh `target/`, so Cargo recompiled every dependency and sccache's Rust hit
+rate was 0.36% (measured 2026-11-20). One locked copy lets Cargo reuse its own
+unchanged artifacts across landings; `rsync --checksum --no-times` preserves
+mtimes and `sync_worktree` purges only the crates whose sources changed. The
+copy lock is held from rsync through the suites, so one copy cannot swap trees
+under a running build. Each gate runs in a bounded user scope, so a killed
+harness leaves no build behind. Keep **one gate in flight** across agents:
+queue behind the other agent's `runbg` unit instead of starting a competing
+gate. Gate copies expire after `GATE_COPY_TTL_DAYS` (default 7).
 
 ```sh
 scripts/remote-check.sh --suites format lint  # one sync, one lock

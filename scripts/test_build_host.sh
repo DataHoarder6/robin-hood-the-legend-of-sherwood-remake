@@ -159,7 +159,7 @@ for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=
     fi
 done
 
-# --- gate copies are named by tree, not by worktree ----------------------------
+# --- every gate reuses one locked copy so its target cache survives ------------
 tree_sha=0123456789abcdef0123456789abcdef01234567
 other_sha=fedcba9876543210fedcba9876543210fedcba98
 name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo")
@@ -169,17 +169,17 @@ else
     fail "interactive copy was '$name'"
 fi
 name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$tree_sha")
-if [ "$name" = "gate-0123456789ab" ]; then
-    pass "a gate copy is named by the tree"
+if [ "$name" = "gate-shared" ]; then
+    pass "a gate copy has one stable name"
 else
-    fail "gate copy was '$name', expected gate-0123456789ab"
+    fail "gate copy was '$name', expected gate-shared"
 fi
 same=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$tree_sha")
 other=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$other_sha")
-if [ "$same" = "$name" ] && [ "$other" != "$name" ]; then
-    pass "the same tree shares a copy and a different tree gets another"
+if [ "$same" = "$name" ] && [ "$other" = "$name" ]; then
+    pass "different trees reuse the same gate copy and its build cache"
 else
-    fail "gate naming is not stable and distinct"
+    fail "gate naming is not stable across trees"
 fi
 
 git -C "$repo" worktree add --quiet -b gate-check "$work/gate-check" HEAD
