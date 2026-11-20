@@ -137,6 +137,26 @@ This matters before any number or rule is quoted:
   the bottleneck
   (`.worktrees/cache-reuse/docs/slop/BUILD_CACHE_AND_QUEUE.md:120-126`).
 
+## Measurement after the multi-basedir change (2026-11-20)
+
+`scripts/test_build_host.sh` passes 9/9 fixture tests, including the basedir
+list, per-root remap flags and the absence of literal quotes in the
+`SCCACHE_BASEDIRS` value. An `engine` suite from a fresh `build-cache` copy ran
+green on the build host with the new script.
+
+`sccache --show-stats` on minipc, before/after that single run:
+
+| | Rust hits | Rust misses | Rust hit rate |
+|---|---|---|---|
+| before | 6 | 3257 | 0.18% |
+| after | 461 | 1076 | 29.99% |
+
+This is cumulative daemon state, not a controlled A/B: the daemon's basedir set
+was already multi-root during the experiment, and other agents compiled in the
+same window. It does establish that cross-copy Rust hits now occur; the old
+single-basedir path produced essentially none. A controlled before/after on two
+identical copies is still owed.
+
 ## What was measured and rejected
 
 - **Cold copy vs warm copy.** "about 5 minutes of dependencies on the build
