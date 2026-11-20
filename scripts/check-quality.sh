@@ -191,6 +191,7 @@ case "$1" in
         node --test scripts/validation/supervised.test.mjs
         node --experimental-strip-types --test wasm-www/src/content_cache.test.ts
         node --test scripts/validation/browser-boot.test.mjs
+        node --experimental-strip-types --test wasm-www/src/join_ticket.test.ts
         # A published manifest must be same-origin to the page that serves it,
         # not to a hard-coded upstream hostname.
         node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts
