@@ -33,6 +33,8 @@ pub(crate) struct SummonRequest {
     pub faction: crate::element::Camp,
     /// A specific entry, or any the level offers.
     pub entry: SummonEntry,
+    /// Lowest profile rank allowed to answer. Zero means any body.
+    pub min_tier: u8,
 }
 
 /// Which authored entry a summon uses.
@@ -429,14 +431,36 @@ impl EngineInner {
             return None;
         }
 
-        let body = self.world.npc_registry_ids.iter().copied().find(|id| {
-            self.get_entity(*id).is_some_and(|entity| {
-                !entity.element_data().active
-                    && entity.soldier_data().is_some_and(|soldier| {
-                        soldier.staged && soldier.cached_camp == request.faction
-                    })
-            })
-        })?;
+        // Weakest first: rank order is Soldier, Officer, Knight, None. A
+        // failed profile lookup sorts last rather than inventing a rank.
+        let mut best: Option<(EntityId, u8)> = None;
+        for id in self.world.npc_registry_ids.iter().copied() {
+            let Some(entity) = self.get_entity(id) else {
+                continue;
+            };
+            let Some(soldier) = entity.soldier_data() else {
+                continue;
+            };
+            if !soldier.staged
+                || soldier.cached_camp != request.faction
+                || entity.element_data().active
+            {
+                continue;
+            }
+            let rank = tcx
+                .assets
+                .profile_manager
+                .get_soldier(soldier.soldier_profile_index)
+                .map(|profile| profile.rank as u8)
+                .unwrap_or(u8::MAX);
+            if rank < request.min_tier {
+                continue;
+            }
+            if best.is_none_or(|(_, prior)| rank < prior) {
+                best = Some((id, rank));
+            }
+        }
+        let body = best.map(|(id, _)| id)?;
 
         enum Entry {
             Door {
@@ -512,6 +536,7 @@ impl EngineInner {
                 let camp = actor.soldier.cached_camp;
                 let money = actor.npc.ai.money;
                 actor.soldier.staged = false;
+                actor.soldier.summoned = true;
                 actor.element.active = true;
                 actor.element.set_position_map(point_out);
                 actor.element.set_layer(layer_out);
@@ -545,6 +570,7 @@ impl EngineInner {
                 let camp = actor.soldier.cached_camp;
                 let money = actor.npc.ai.money;
                 actor.soldier.staged = false;
+                actor.soldier.summoned = true;
                 actor.element.active = true;
                 (alert, camp, money)
             }

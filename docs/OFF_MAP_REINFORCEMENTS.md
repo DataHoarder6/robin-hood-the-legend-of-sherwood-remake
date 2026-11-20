@@ -1,11 +1,11 @@
 # Off-map reinforcements
 
-Status: **emitter and budget landed; withdrawal and the native are not.**
-`SimConfig::enable_offmap_reinforcements`, staged garrison bodies,
-`EngineInner::summon_garrison`, authored entry kinds, the shared
-`place_outside_entity`, the per-mission budget and the `AlertSoldiers` emitter
-exist. Withdrawal on alarm decay and the script native do not. Every decision
-below was settled in a grilling session on 2026-11-19.
+Status: **all eight work items landed.** `SimConfig::enable_offmap_reinforcements`,
+staged garrison bodies, `EngineInner::summon_garrison`, authored entry kinds,
+the shared `place_outside_entity`, the per-mission budget, the `AlertSoldiers`
+emitter, weakest-first rank selection, withdrawal on alarm decay and the
+`SummonReinforcements` native exist. Every decision was settled in a grilling
+session on 2026-11-19.
 
 ## What this is
 
@@ -154,8 +154,11 @@ before the first tick, which is what keeps replays and co-op peers in agreement.
    short~~ — `try_summon_offmap` calls when `alerted_us` is empty and the
    officer is not Green; the arriving body takes the officer as `master` and
    its last known position as its goal.
-6. Withdrawal on alarm decay.
-7. The `SummonReinforcements` native.
+6. ~~Withdrawal on alarm decay~~ — `tick_offmap_withdrawals` sends calm-level
+   bodies out through the nearest reinforcement door and frees their budget
+   slot when they actually leave.
+7. ~~The `SummonReinforcements` native~~ — extension native, dispatched through
+   `EngineCommand::SummonReinforcements` to the shared summon path.
 8. ~~`SimConfig` field, its `from_options` value, and its state-hash coverage.~~
 
 ## Open

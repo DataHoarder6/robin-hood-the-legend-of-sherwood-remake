@@ -86,6 +86,7 @@ fn summon_wakes_a_staged_body_at_the_reinforcement_door() {
             SummonRequest {
                 faction: Camp::Lacklandists,
                 entry: crate::engine::reinforcement::SummonEntry::Any,
+                min_tier: 0,
             },
         )
         .expect("a staged garrison body answers the call");
@@ -122,6 +123,7 @@ fn summon_is_off_when_the_sim_flag_is_off() {
                 SummonRequest {
                     faction: Camp::Lacklandists,
                     entry: crate::engine::reinforcement::SummonEntry::Any,
+                    min_tier: 0,
                 },
             )
             .is_none(),
@@ -1611,6 +1613,7 @@ fn summon_uses_an_edge_entry_without_a_door() {
             SummonRequest {
                 faction: Camp::Lacklandists,
                 entry: SummonEntry::Offmap(0),
+                min_tier: 0,
             },
         )
         .expect("an edge entry answers the call without a door");
@@ -1639,6 +1642,7 @@ fn summon_can_use_a_named_door_entry() {
             SummonRequest {
                 faction: Camp::Lacklandists,
                 entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
+                min_tier: 0,
             },
         )
         .expect("the named door answers the call");
@@ -1665,6 +1669,7 @@ fn summon_respects_the_mission_budget() {
     let request = SummonRequest {
         faction: Camp::Lacklandists,
         entry: crate::engine::reinforcement::SummonEntry::Any,
+        min_tier: 0,
     };
     assert!(
         engine
@@ -1701,6 +1706,7 @@ fn summon_is_blocked_by_its_cooldown() {
     let request = SummonRequest {
         faction: Camp::Lacklandists,
         entry: crate::engine::reinforcement::SummonEntry::Any,
+        min_tier: 0,
     };
     assert!(
         engine
@@ -1712,5 +1718,147 @@ fn summon_is_blocked_by_its_cooldown() {
             .summon_garrison(TickCtx::new(&sim, &assets), request)
             .is_none(),
         "two calls in one alarm must not both bring bodies in"
+    );
+}
+
+#[test]
+fn summon_picks_the_lowest_ranked_staged_body_first() {
+    use crate::ai::OffmapReinforcementBudget;
+    use crate::coordinates::MapPoint;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+    use crate::profiles::{ProfileRank, SoldierProfile, SoldierProfileIdx};
+
+    let (mut engine, knight) = staged_garrison_engine();
+    engine.ai.global.offmap_budget = OffmapReinforcementBudget {
+        total: 2,
+        concurrent: 2,
+        cooldown_ticks: 0,
+        remaining: 2,
+        live: 0,
+        next_allowed_frame: 0,
+    };
+    if let Some(Entity::Soldier(soldier)) = engine.get_entity_mut(knight) {
+        soldier.soldier.soldier_profile_index = SoldierProfileIdx(0);
+    }
+
+    let mut rookie = make_test_ai_soldier(Camp::Lacklandists);
+    rookie.element_data_mut().active = false;
+    rookie.position_iface_mut().configure_for_actor(
+        crate::position_interface::PathfinderIndex::new(0).expect("pathfinder index"),
+        crate::coordinates::MoveBoxHalfDiagonal::new(20.0, 20.0),
+        MapPoint::new(500.0, 500.0),
+    );
+    if let Entity::Soldier(soldier) = &mut rookie {
+        soldier.soldier.staged = true;
+        soldier.soldier.soldier_profile_index = SoldierProfileIdx(1);
+    }
+    let rookie = engine.add_test_entity(rookie);
+
+    let mut assets = engine.test_runtime_assets();
+    let profiles = std::sync::Arc::make_mut(&mut assets.profile_manager);
+    while profiles.soldiers.len() < 2 {
+        profiles.soldiers.push(SoldierProfile::default());
+    }
+    profiles.soldiers[0].rank = ProfileRank::Knight;
+    profiles.soldiers[1].rank = ProfileRank::Soldier;
+    let sim = crate::sim_rng::test_context();
+    let picked = engine
+        .summon_garrison(
+            TickCtx::new(&sim, &assets),
+            SummonRequest {
+                faction: Camp::Lacklandists,
+                entry: crate::engine::reinforcement::SummonEntry::Any,
+                min_tier: 0,
+            },
+        )
+        .expect("a staged body answers the call");
+    assert_eq!(picked, rookie, "the weakest garrison body arrives first");
+}
+
+#[test]
+fn summoned_bodies_withdraw_when_the_level_is_calm() {
+    use crate::ai::Substate;
+    use crate::element::Camp;
+    use crate::engine::reinforcement::SummonRequest;
+
+    let (mut engine, body) = staged_garrison_engine();
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    engine
+        .summon_garrison(
+            TickCtx::new(&sim, &assets),
+            SummonRequest {
+                faction: Camp::Lacklandists,
+                entry: crate::engine::reinforcement::SummonEntry::Any,
+                min_tier: 0,
+            },
+        )
+        .expect("body answers the call");
+    assert_eq!(engine.ai.global.offmap_budget.live, 1);
+
+    engine.ai.global.red_alert_soldiers = 0;
+    engine.ai.global.yellow_alert_soldiers = 0;
+    engine
+        .script_domains
+        .interactables
+        .doors
+        .push(crate::gate::Door {
+            gate_type: crate::gate::GateType::Door,
+            door_type: crate::gate::DoorType::Reinforcement,
+            point_in: crate::coordinates::MapPoint::new(100.0, 100.0),
+            point_out: crate::coordinates::MapPoint::new(40.0, 100.0),
+            point_mid: crate::coordinates::MapPoint::new(70.0, 100.0),
+            ..Default::default()
+        });
+    engine.tick_offmap_withdrawals(TickCtx::new(&sim, &assets));
+    assert_eq!(
+        engine
+            .enemy_ai(body, "withdrawing body")
+            .base
+            .current_substate,
+        Substate::FleeingMerryManRunToLeaveMap,
+        "a calm level sends the summoned body back out through a door"
+    );
+
+    engine
+        .get_entity_mut(body)
+        .expect("withdrawing body")
+        .element_data_mut()
+        .active = false;
+    engine.tick_offmap_withdrawals(TickCtx::new(&sim, &assets));
+    assert_eq!(
+        engine.ai.global.offmap_budget.live, 0,
+        "leaving frees the slot"
+    );
+    assert!(
+        !engine
+            .get_entity(body)
+            .and_then(|entity| entity.soldier_data())
+            .expect("soldier data")
+            .summoned
+    );
+}
+
+#[test]
+fn the_native_host_command_summons_a_body() {
+    use crate::element::Camp;
+    use crate::natives::EngineCommand;
+
+    let (mut engine, body) = staged_garrison_engine();
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    engine.apply_host_commands(
+        TickCtx::new(&sim, &assets),
+        [EngineCommand::SummonReinforcements {
+            faction: Camp::LACKLANDIST_ID,
+            min_tier: 0,
+            count: 1,
+            door: None,
+        }],
+    );
+    assert!(
+        engine.get_entity(body).expect("body").element_data().active,
+        "the SummonReinforcements native wakes a staged body"
     );
 }

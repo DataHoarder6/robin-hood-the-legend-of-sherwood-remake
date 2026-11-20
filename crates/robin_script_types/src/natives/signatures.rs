@@ -456,6 +456,7 @@ macro_rules! native_registry {
             GetActorAllegiance => ("int", [("Actor", "actActor")], lua, ScriptCore, Never);
             GetDiplomacyRelationship => ("int", [("int", "iFirst"), ("int", "iSecond")], lua, ScriptCore, Never);
             SetDiplomacyRelationship => ("void", [("int", "iFirst"), ("int", "iSecond"), ("int", "iRelationship")], lua, ScriptCore, Never);
+            SummonReinforcements => ("int", [("int", "iFaction"), ("int", "iMinTier"), ("int", "iCount"), ("int", "iDoor")], lua, Campaign, Always);
             }
         }
     };

@@ -523,6 +523,30 @@ impl NativeContext<'_, '_> {
                 selected.get(idx as usize).copied().unwrap_or(0)
             }
             // ── Spellforge / Lua-only natives ──
+            SummonReinforcements => {
+                let door = stack.pop_i32();
+                let count = stack.pop_i32();
+                let min_tier = stack.pop_i32();
+                let faction = stack.pop_i32();
+                let door = if door < 0 {
+                    None
+                } else {
+                    match crate::gate::DoorIndex::new(door as u32) {
+                        Some(index) => Some(index),
+                        None => {
+                            script_error!(native, "invalid reinforcement door {door}");
+                            return 0;
+                        }
+                    }
+                };
+                self.yield_engine_command(crate::natives::EngineCommand::SummonReinforcements {
+                    faction: faction as u16,
+                    min_tier: min_tier.clamp(0, u8::MAX as i32) as u8,
+                    count: count.clamp(0, u16::MAX as i32) as u16,
+                    door,
+                });
+                1
+            }
             Reveal => {
                 // Spellforge name for "make this actor visible
                 // (un-blip)". Behaves like `UnBlip` but is the

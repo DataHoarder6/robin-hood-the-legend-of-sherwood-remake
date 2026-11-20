@@ -6,6 +6,14 @@
 /// Engine operation requested by one suspended native invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineCommand {
+    /// Bring `count` staged garrison bodies of one faction into the level.
+    /// `iDoor` of -1 means any authored entry. `min_tier` filters by rank.
+    SummonReinforcements {
+        faction: u16,
+        min_tier: u8,
+        count: u16,
+        door: Option<crate::gate::DoorIndex>,
+    },
     /// Smooth-scroll camera to a location's position.
     ///
     /// The native resolves and copies the point synchronously, matching the

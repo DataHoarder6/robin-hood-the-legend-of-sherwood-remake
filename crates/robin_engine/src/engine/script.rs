@@ -3709,6 +3709,33 @@ impl EngineInner {
 
         for cmd in commands {
             match cmd {
+                EngineCommand::SummonReinforcements {
+                    faction,
+                    min_tier,
+                    count,
+                    door,
+                } => {
+                    let faction = crate::element::Camp::from_allegiance_id(faction);
+                    let entry = match door {
+                        Some(index) => crate::engine::reinforcement::SummonEntry::Door(index),
+                        None => crate::engine::reinforcement::SummonEntry::Any,
+                    };
+                    for _ in 0..count {
+                        if self
+                            .summon_garrison(
+                                tcx,
+                                crate::engine::reinforcement::SummonRequest {
+                                    faction,
+                                    entry,
+                                    min_tier,
+                                },
+                            )
+                            .is_none()
+                        {
+                            break;
+                        }
+                    }
+                }
                 EngineCommand::ScrollCameraTo { x, y, speed } => {
                     // Store the raw script point in `camera_wanted` so
                     // resize/zoom can re-derive the slide target later,
