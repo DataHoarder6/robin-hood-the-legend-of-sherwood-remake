@@ -102,6 +102,17 @@ impl EngineInner {
             return false;
         }
 
+        // The authored ambush/convoy intro freezes actors for the whole
+        // horse/carriage/troop travel animation without dispatching
+        // `Command::LockUser`, so `user_locked` alone leaves PCs selectable.
+        // The same global gates that block movement during that sequence own
+        // selection too: no PC is picked until the mission starts and the
+        // sequence releases them. Modelled on the mission-specific
+        // `men_to_blazon_conversion_mode` precedent checked below.
+        if self.control.engine_locked() || self.control.actors_frozen() {
+            return false;
+        }
+
         // Out of order: dead / unconscious / stuck / tied / carried / coma.
         let is_dead = pc.pc.life_points == 0;
         let is_stuck_under_net = pc.human.stuck_under_nets_counter > 0;
@@ -1716,6 +1727,41 @@ mod tests {
                 )
                 .heroes,
             1
+        );
+    }
+
+    /// The authored ambush/convoy intro freezes actors for the whole travel
+    /// animation but never dispatches `Command::LockUser`, so `user_locked`
+    /// alone leaves PCs selectable.  The same global freeze gate that blocks
+    /// movement must also block selection until the mission starts.
+    #[test]
+    fn intro_freeze_blocks_pc_selection_and_unfreeze_restores_it() {
+        let assets = LevelAssets::default();
+        let mut engine = EngineInner::new();
+        let pc = add_selectable_test_pc(&mut engine);
+
+        assert!(
+            engine.is_pc_selectable(&assets, pc),
+            "an ordinary-play PC is selectable"
+        );
+
+        engine.set_actors_frozen(true);
+        assert!(
+            !engine.is_pc_selectable(&assets, pc),
+            "the convoy intro freezes actors without dispatching LockUser"
+        );
+
+        engine.set_engine_locked(true);
+        assert!(
+            !engine.is_pc_selectable(&assets, pc),
+            "an engine-locked sequence also owns selection"
+        );
+
+        engine.set_engine_locked(false);
+        engine.set_actors_frozen(false);
+        assert!(
+            engine.is_pc_selectable(&assets, pc),
+            "selection must return once the mission starts"
         );
     }
 
