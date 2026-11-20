@@ -278,7 +278,11 @@ pub fn get_wounded(
     max_life_points: i16,
     is_sherwood_pc: bool,
 ) -> bool {
-    let new_value = *life_points - damage as i16;
+    // `damage` is a u16 and can exceed i16::MAX; subtracting it as i16 wraps
+    // (or overflows in debug builds) and would heal the victim instead of
+    // killing them. Widen before subtracting, then narrow back safely.
+    let new_value = ((*life_points as i32) - i32::from(damage))
+        .clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
     set_life_points(
         life_points,
         new_value,
@@ -3163,5 +3167,13 @@ mod tests {
 
         let r#gen = DamageEvent::generic(10, 20);
         assert_eq!(r#gen.kind, DamageKind::Generic);
+    }
+
+    #[test]
+    fn get_wounded_large_damage_kills_instead_of_healing() {
+        let mut life_points = 100i16;
+        let died = get_wounded(&mut life_points, 40_000, false, 100, false);
+        assert!(died, "a 40,000-point hit must be lethal");
+        assert_eq!(life_points, 0, "damage must never increase life points");
     }
 }
