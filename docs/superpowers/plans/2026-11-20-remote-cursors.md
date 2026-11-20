@@ -14,7 +14,7 @@ Line numbers in file lists are from refactored base `e2a07835`; prefer the named
 
 ## Global Constraints
 
-- Worktree: `~/git/robin-hood-remake/.worktrees/teammate-cursors`, branch `feat/teammate-cursors`, base `8eece78e1`. `fork/main` is integration; `land` refuses this repo (ADR 0004) — push the branch and use the repo's own loop.
+- Worktree: `/home/matt/git/robin-hood-remake/.worktrees/teammate-cursors`, branch `feat/teammate-cursors`, base `8eece78e1`. `fork/main` is integration; `land` refuses this repo (ADR 0004) — push the branch and use the repo's own loop.
 - Never set `CARGO_TARGET_DIR` or `--target-dir`; no `git stash`; commit by pathspec (`git commit -- <files>`).
 - Only test entry point is `bash scripts/check-quality.sh SUITE`; this host cannot compile, so verify with `bash scripts/remote-check.sh SUITE` (suites `engine`, `client`, `format`). Run cargo unfiltered.
 - Append every new `NetMsg` variant **after** the last variant; bump the single `NET_PROTOCOL_VERSION` in `crates/robin_run_types/src/lib.rs` 72 → 73 and add its history line. `CURRENT_RANKED_NETWORK_PROTOCOL_VERSION_V1` is now derived from it — do not edit `robin_run_protocol`.
