@@ -10,8 +10,9 @@
 ## Worktrees and concurrency
 
 - The shared checkout's `main` is a read mirror: never commit, merge or switch
-  it. Work in `.worktrees/<name>` off `fork/main`; `just doctor` and
-  `docs/PARALLEL_AGENTS.md` carry the rules and the recoveries.
+  it. Work in `.worktrees/<name>` off `fork/main`; read scripts and docs from the
+  integration ref (`git show fork/main:<path>`), never the stale mirror.
+  `just doctor` and `docs/PARALLEL_AGENTS.md` carry the rules and the recoveries.
 - **NEVER redirect Cargo's target directory** — no `CARGO_TARGET_DIR`, no
   `--target-dir`, no Cargo config that moves it. Artifacts belong to the
   checkout that produced them.
@@ -22,18 +23,21 @@
 ## Building and testing
 
 - This workspace does not compile on every host: `scripts/remote-check.sh SUITE`
-  copies this worktree to the build host, wakes `build-host`, runs the suite in the
-  pinned devShell under a per-copy lock, and prunes copies with `--prune`.
+  copies this worktree to the build host (`minipc` by default), wakes it, runs the
+  suite in the pinned devShell under a per-copy lock, and prunes copies with
+  `--prune`.
 - Gate on the build host one at a time; `docs/PARALLEL_AGENTS.md` ("Every
   agent's gate takes an hour") owns the shared-cache, tree-keyed copy and scope
-  rules, including the `ROBIN_BUILD_HOST=minipc` override.
+  rules.
 - `nix develop` gives the same shell locally, with the clang + wild that
   `.cargo/config.toml` expects; without them links are slow and warn.
 - `scripts/check-quality.sh SUITE` is the only test entry point; `docs/TESTING.md`
   maps every crate to its suite (`format` is the whole-tree rustfmt gate). Bare
   `cargo test` selects only the two default members, never a gate. The
-  `.githooks/pre-commit` hook formats the files a commit touches.
-- Clippy belongs in batched cleanup sessions, never inside feature work.
+  `.githooks/pre-commit` hook formats the files a commit touches. For one test,
+  use the `--sync` + `ssh … cargo test <name>` recipe in `docs/TESTING.md`.
+- Clippy is a landing gate (`docs/slop/clippy-gate.md`); batch only fixes of
+  pre-existing warnings, never defer a warning your change introduces.
 - Run cargo unfiltered — no `| head`, no shared log path; a hidden error costs
   more than the extra lines, and parallel agents clobber fixed log names.
 - Build and run in separate steps — `cargo build -p robin_rs --bin robin` without
@@ -65,9 +69,10 @@
 
 ## Searching
 
-- `ast-grep` for structural queries (`ast-grep run --pattern 'panic!($$$)' --lang
-  rust crates/robin_rs/src/`), `rg` for text. `sed -n 'A,Bp'` on a 4000-line file
-  finds one call site and hides its neighbours; prefer the pattern search.
+- Convention (no gate): `ast-grep` for structural queries (`ast-grep run
+  --pattern 'panic!($$$)' --lang rust crates/robin_rs/src/`), `rg` for text.
+  `sed -n 'A,Bp'` on a 4000-line file finds one call site and hides its
+  neighbours; prefer the pattern search.
 - `rg -n` prints line numbers; `-r` is `--replace` and rewrites each match in the
   output (`rg -rn PATTERN` prints `const n: u32`), so a search stays read-only.
 
