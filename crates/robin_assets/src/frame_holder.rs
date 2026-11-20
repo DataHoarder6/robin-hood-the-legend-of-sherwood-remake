@@ -485,12 +485,14 @@ impl FrameDictionary {
             return true;
         }
 
+        let old_shadow_color = self.shadow_color;
         for v in &mut self.values {
-            if *v == new_shadow_color {
-                *v += 1;
-            }
-            if *v == self.shadow_color {
+            if *v == old_shadow_color {
                 *v = new_shadow_color;
+            } else if *v == new_shadow_color {
+                // Keep the bumped pixel distinct from the new shadow key;
+                // a wrapping increment also handles a key of `0xFFFF`.
+                *v = v.wrapping_add(1);
             }
         }
 
@@ -1732,6 +1734,17 @@ pub use robin_util::color::{pack_rgb565, unpack_rgb565};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arno_law_bump_is_not_undone_by_the_old_shadow() {
+        let mut dict = FrameDictionary::from_raw(1, vec![0x001E, 0x1111, 0x2222, 0x3333]);
+        dict.apply_arno_law(0x001E);
+        assert_ne!(
+            dict.lookup_pixels(0)[0],
+            0x001E,
+            "the bumped pixel must not collide with the new shadow key"
+        );
+    }
 
     #[cfg(feature = "engine-adapters")]
     #[test]

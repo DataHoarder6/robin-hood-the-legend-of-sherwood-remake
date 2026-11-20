@@ -76,7 +76,7 @@ impl SpriteStreaming {
         } else {
             (reg.done_bytes as f64 / reg.total_bytes as f64) as f32
         };
-        Some((fraction, reg.done_chunks, reg.total_chunks))
+        Some((fraction.min(1.0), reg.done_chunks, reg.total_chunks))
     }
 
     pub fn note_skipped_draw(&self) -> u64 {
@@ -129,6 +129,18 @@ impl SpritePublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tail_progress_never_exceeds_one() {
+        let streaming = SpriteStreaming::default();
+        let publisher = streaming.publisher(2, 100);
+        assert!(publisher.publish_chunk(150, &[]));
+        let (fraction, done, total) = streaming.tail_status().unwrap();
+        assert!(
+            fraction <= 1.0,
+            "progress {fraction} ({done}/{total}) exceeded 100%"
+        );
+    }
 
     #[test]
     fn overlapping_ids_and_retirement_are_mission_local() {

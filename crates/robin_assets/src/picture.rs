@@ -306,7 +306,11 @@ impl Picture {
         }
         let w = self.width as usize;
         let h = self.height as usize;
-        if self.data.len() < w * h * 2 || w == 0 || h == 0 {
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let pitch = self.pitch as usize;
+        if pitch < w * 2 || self.data.len() < (h - 1) * pitch + w * 2 {
             return None;
         }
         const KEY: u16 = 0x07C0;
@@ -315,7 +319,7 @@ impl Picture {
         let mut x_max = 0usize;
         let mut y_max = 0usize;
         for y in 0..h {
-            let row = y * w * 2;
+            let row = y * pitch;
             for x in 0..w {
                 let off = row + x * 2;
                 let px = u16::from_le_bytes([self.data[off], self.data[off + 1]]);
@@ -1033,6 +1037,25 @@ impl Picture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opaque_bounds_16_respects_the_row_pitch() {
+        let picture = Picture {
+            width: 2,
+            height: 2,
+            pitch: 8,
+            pixel_format: PixelFormat::Rgb16,
+            data: vec![
+                0xC0, 0x07, 0xC0, 0x07, // row 0: both transparent
+                0x00, 0x00, 0x00, 0x00, // padding
+                0x34, 0x12, 0xC0, 0x07, // row 1: one opaque pixel
+                0x00, 0x00, 0x00, 0x00, // padding
+            ],
+            palette: None,
+        };
+        // Returns (x, y, width, height), not (x_min, y_min, x_max, y_max).
+        assert_eq!(picture.opaque_bounds_16(), Some((0, 1, 1, 1)));
+    }
 
     #[test]
     fn minimap_loader_dispatches_on_the_jxl_key_channel() {

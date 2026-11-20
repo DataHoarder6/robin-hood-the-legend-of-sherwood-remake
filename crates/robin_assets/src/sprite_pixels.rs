@@ -32,14 +32,13 @@ pub fn decompress_rle_arno_law(
         let size = src[src_pos];
         src_pos += 1;
 
-        if first != 0xFFFF && first > 0 {
-            for _ in 0..first {
-                dst[dst_pos] = transparent_color;
-                dst_pos += 1;
+        if size != 0xFFFF && size >= first && first != 0xFFFF {
+            if first > 0 {
+                for _ in 0..first {
+                    dst[dst_pos] = transparent_color;
+                    dst_pos += 1;
+                }
             }
-        }
-
-        if size != 0xFFFF {
             let end = size + 1;
             let run = end - first;
             for _ in 0..run {
@@ -47,7 +46,7 @@ pub fn decompress_rle_arno_law(
                 src_pos += 1;
                 if color != SHADOW_KEY {
                     if color == shadow_color {
-                        color += 1;
+                        color = color.wrapping_add(1);
                     }
                 } else {
                     color = shadow_color;
@@ -140,7 +139,9 @@ pub(crate) fn rle_pixel_at(src: &[u16], x: usize, y: usize) -> u16 {
 
         // Skip pixel data for this row
         if size != 0xFFFF {
-            src_pos += (size - first) as usize + 1;
+            src_pos += (size as usize)
+                .saturating_sub(first as usize)
+                .saturating_add(1);
         }
     }
 
@@ -180,7 +181,7 @@ pub fn apply_fog_effect_viewport(data: &mut [u16], level: u16, fog_color: u16, s
     let fog_b = fog_color & 0x001F;
 
     // Pre-scale fog contribution by inverse level
-    let inv_level = 100 - level;
+    let inv_level = 100u16.saturating_sub(level);
     let fog_r = fog_r * inv_level / 100;
     let fog_g = fog_g * inv_level / 100;
     let fog_b = fog_b * inv_level / 100;
@@ -247,5 +248,24 @@ pub fn convert_decompressed_to_16bit(
             }
         }
         row_start += pitch_words;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reversed_rle_row_does_not_underflow() {
+        // `first > size` is malformed but must not panic in either decoder.
+        let mut dst = [0u16; 16];
+        decompress_rle_arno_law(&[10, 5], &mut dst, 16, 16, 1, 0, 0x1F);
+        assert_eq!(rle_pixel_at(&[10, 5], 0, 0), TRANSPARENT_COLOR_16);
+    }
+
+    #[test]
+    fn fog_level_above_100_does_not_underflow() {
+        let mut data = [0xF800u16];
+        apply_fog_effect_viewport(&mut data, 101, 0xFFFF, 0x001F);
     }
 }
