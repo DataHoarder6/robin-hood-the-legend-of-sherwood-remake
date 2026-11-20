@@ -239,9 +239,19 @@ EOF
             sed 's/.*/"&"/' | paste -sd' ' -)
         # Only real copies: the root is shared, and a cache or scratch directory
         # someone keeps beside the copies is not this script's to delete.
+        # The script lives in the checkout that invoked us, not in the build
+        # host's home: `--prune` is also called by the runtime's timer, which
+        # runs from a different directory. Copy it with the stdin script and
+        # execute the copy, so no remote CWD is assumed.
         ssh "$host" bash -s <<EOF
 set -euo pipefail
-bash scripts/prune-copies.sh ~/$remote_root $gate_ttl $keep
+pruner=\$(mktemp)
+cat >"\$pruner" <<'PRUNER'
+$(cat "$repository/scripts/prune-copies.sh")
+PRUNER
+chmod +x "\$pruner"
+bash "\$pruner" ~/$remote_root $gate_ttl $keep
+rm -f "\$pruner"
 du -sh ~/$remote_root 2>/dev/null || true
 EOF
         exit 0
