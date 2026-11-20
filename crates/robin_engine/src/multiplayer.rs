@@ -476,6 +476,16 @@ pub struct ModalProgress {
     pub player_names: Vec<String>,
 }
 
+/// Presentation-only teammate cursor sample in world/map coordinates, never
+/// screen pixels. Carries no simulation meaning: no command, snapshot or state
+/// hash depends on it.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct CursorWireState {
+    pub map_x: f32,
+    pub map_y: f32,
+    pub sprite_id: i32,
+}
+
 /// One on-the-wire message.  Encoded as a bitcode binary blob inside
 /// each WebSocket frame.
 #[derive(Clone, Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
@@ -581,6 +591,12 @@ pub enum NetMsg {
     Chat { nickname: String, text: String },
     /// Host-authored acknowledgement progress; never dismisses a modal.
     ModalProgress(ModalProgress),
+    /// Either direction: a presentation-only teammate cursor sample. The host
+    /// overwrites `seat` with the authenticated sender before relaying.
+    Cursor {
+        seat: PlayerId,
+        state: CursorWireState,
+    },
 }
 
 /// Typed payload of [`NetEvent::Fatal`].
@@ -686,6 +702,12 @@ pub enum NetEvent {
     CommitSnapshotTransition {
         id: SnapshotTransitionId,
     },
+    /// A teammate's presentation-only cursor sample, ready for the overlay.
+    /// Never applied to the simulation.
+    TeammateCursor {
+        seat: PlayerId,
+        state: CursorWireState,
+    },
 }
 
 /// What the game loop pushes into the outgoing channel.
@@ -741,6 +763,11 @@ pub enum NetOutbound {
     },
     SnapshotTransitionReady {
         id: SnapshotTransitionId,
+    },
+    /// Local cursor sample to broadcast to teammates; never a simulation input.
+    Cursor {
+        seat: PlayerId,
+        state: CursorWireState,
     },
 }
 
@@ -1211,6 +1238,11 @@ pub fn decode_msg(bytes: &[u8]) -> Result<NetMsg, String> {
                 );
             }
         }
+        NetMsg::Cursor { state, .. } => {
+            if !state.map_x.is_finite() || !state.map_y.is_finite() {
+                return Err("cursor coordinates must be finite".to_string());
+            }
+        }
         _ => {}
     }
     Ok(message)
@@ -1312,6 +1344,49 @@ mod tests {
                 r#"{{"ContentRequest":{{"full_mod_sha256":{hash_json},"resume_offset":1108152157446}}}}"#
             )
         );
+    }
+
+    #[test]
+    fn cursor_wire_state_roundtrips_through_bitcode() {
+        let msg = NetMsg::Cursor {
+            seat: PlayerId(3),
+            state: CursorWireState {
+                map_x: 512.25,
+                map_y: -7.5,
+                sprite_id: 168,
+            },
+        };
+        let decoded = decode_msg(&encode_msg(&msg)).unwrap();
+        assert!(
+            matches!(
+                &decoded,
+                NetMsg::Cursor {
+                    seat: PlayerId(3),
+                    ..
+                }
+            ),
+            "unexpected decoded message: {decoded:?}"
+        );
+        let NetMsg::Cursor { seat, state } = &decoded else {
+            panic!("expected a cursor message: {decoded:?}");
+        };
+        assert_eq!(seat.0, 3);
+        assert_eq!(state.map_x, 512.25);
+        assert_eq!(state.map_y, -7.5);
+        assert_eq!(state.sprite_id, 168);
+    }
+
+    #[test]
+    fn non_finite_cursor_coordinates_are_rejected() {
+        let msg = NetMsg::Cursor {
+            seat: PlayerId(1),
+            state: CursorWireState {
+                map_x: f32::NAN,
+                map_y: 0.0,
+                sprite_id: 1,
+            },
+        };
+        assert!(decode_msg(&encode_msg(&msg)).is_err());
     }
 
     #[test]

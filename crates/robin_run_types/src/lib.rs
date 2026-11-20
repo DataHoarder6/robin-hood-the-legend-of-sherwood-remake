@@ -175,7 +175,8 @@ pub const REPLAY_SCHEMA_VERSION: u32 = 77;
 /// Protocol 70 carries the purchased-perk flags on campaign PC status.
 /// Protocol 71 carries the per-PC "no friendly-fire damage" flag.
 /// Protocol 72 carries the per-PC "no friendly-fire knockback" flag.
-pub const NET_PROTOCOL_VERSION: u32 = 72;
+/// Protocol 73 carries presentation-only teammate cursor state.
+pub const NET_PROTOCOL_VERSION: u32 = 73;
 
 pub use artifact::ArtifactRefV1;
 pub use canonical::{
