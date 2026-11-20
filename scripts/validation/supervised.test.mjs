@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { command, requireSupervisor, stop, SupervisionUnavailable, unitName } from './supervised.mjs';
+import { command, requireSupervisor, spawnSupervised, stop, SupervisionUnavailable, unitName } from './supervised.mjs';
 
 test('a unit name identifies one child and is systemd-safe', () => {
     const first = unitName('browser/H35/1');
@@ -35,4 +35,19 @@ test('stop escalates only when needed and reports both failures', () => {
     assert.deepEqual(seen[1], ['systemctl', '--user', 'kill', '-s', 'SIGKILL', 'rh-e2e-browser']);
     const once = stop('rh-e2e-browser', () => ({ ok: true, error: '' }));
     assert.deepEqual(once, []);
+});
+
+test('spawnSupervised uses Node\'s command/args/options form', () => {
+    const seen = [];
+    const fakeSpawn = (...args) => { seen.push(args); return { pid: 1 }; };
+    const wrapped = ['systemd-run', '--user', '--unit', 'rh-e2e-x', '--', 'chrome', '--headless'];
+    const child = spawnSupervised(['chrome', '--headless'], {
+        unit: 'rh-e2e-x', budgetS: 10, env: {},
+        spawnOptions: { detached: true },
+    }, wrapped, fakeSpawn);
+    assert.equal(child.pid, 1);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0][0], 'systemd-run');
+    assert.deepEqual(seen[0][1], ['--user', '--unit', 'rh-e2e-x', '--', 'chrome', '--headless']);
+    assert.deepEqual(seen[0][2], { detached: true });
 });

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { hostShortFromVersion, verifyPublishedArtifact } from './browser-boot.mjs';
-import { command as supervisedCommand, requireSupervisor, stop as stopSupervised, unitName } from './supervised.mjs';
+import { requireSupervisor, spawnSupervised, stop as stopSupervised, unitName } from './supervised.mjs';
 
 const { values } = parseArgs({ options: {
     data: { type: 'string' }, pkg: { type: 'string', default: 'wasm-www/pkg' },
@@ -479,9 +479,10 @@ try {
         ...(joinMode ? [] : [`--host-resolver-rules=MAP * 127.0.0.1:${port}`]),
         '--window-size=1280,900', 'about:blank'];
     chromeUnit = unitName(`chrome-${evidence}-${process.pid}`);
-    chrome = spawn(...supervisedCommand(chromeArgv, {
+    chrome = spawnSupervised(chromeArgv, {
         unit: chromeUnit, budgetS: Math.ceil(Number(values.timeout) / 1000) + 30,
-    }), { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        spawnOptions: { detached: true, stdio: ['ignore', 'ignore', 'pipe'] },
+    });
     const ws = await new Promise((resolve, reject) => {
         let stderr = ''; const startup = setTimeout(() => reject(new Error('Chrome debugging endpoint unavailable')), 20000);
         chrome.stderr.on('data', chunk => {

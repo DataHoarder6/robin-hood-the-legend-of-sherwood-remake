@@ -172,6 +172,9 @@ case "$1" in
         # at the host when its artifact was never staged.
         node --test scripts/validation/supervised.test.mjs
         node --test scripts/validation/browser-boot.test.mjs
+        # A published manifest must be same-origin to the page that serves it,
+        # not to a hard-coded upstream hostname.
+        node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts
         python3 -m unittest discover -s scripts/validation -p supervised_test.py
 
         test -f scripts/test_portable_linker.py

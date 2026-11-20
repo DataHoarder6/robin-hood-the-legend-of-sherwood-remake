@@ -7,7 +7,7 @@
 // itself is cancelled.
 
 import { createHash } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 
 export class SupervisionUnavailable extends Error {}
 
@@ -38,6 +38,16 @@ export function command(argv, { unit, budgetS, env = process.env }) {
         if (value !== undefined) wrapped.push(`--setenv=${key}=${value}`);
     }
     return [...wrapped, '--', ...argv];
+}
+
+/** Spawn a supervised child with Node's three-argument form.
+ *
+ * `spawn(...command(...), opts)` passes the second argv element as the options
+ * object and throws `ERR_INVALID_ARG_TYPE`. Keeping the conversion here makes
+ * the shape one test can prove for every future caller.
+ */
+export function spawnSupervised(argv, options, wrapped = command(argv, options), spawnImpl = spawn) {
+    return spawnImpl(wrapped[0], wrapped.slice(1), options.spawnOptions ?? {});
 }
 
 export function stop(unit, run = (argv) => {

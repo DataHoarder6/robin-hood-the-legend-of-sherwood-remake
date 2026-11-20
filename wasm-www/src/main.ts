@@ -4,6 +4,7 @@ import { installDiagnostics } from './diagnostics.js';
 import { requestFullContentFolder } from './content-picker.js';
 import { fetchWithProgress, fetchJson, fetchRuntimeWasm } from './boot-transport.js';
 import { withAbort } from './cancellation.js';
+import { resolvePublishedDemoDatadir, type DemoDatadirIdentity } from './demo_datadir.ts';
 import { installCanvasBackingStore } from './canvas-lifecycle.js';
 import { preloadRuntimeAssets } from './asset-preload.js';
 import { bootGame, loadRuntimeInParallel, onFirstRuntimeFrame, type BuildSelection, type BrowserJoinContext, type RobinWasmModule } from './boot-lifecycle.js';
@@ -318,9 +319,6 @@ function preloadLocalShippingFiles(
 // loading the retained older datadir. `?wasm-base=` development builds have no
 // manifest and use the current generation.
 const CURRENT_DEMO_DATADIR_PATH = '/datadirs/demo-leicester/v18/v18-web-opus-q80.rhdata.zst';
-const PUBLISHED_DEMO_ORIGIN = 'https://robinhood.phiresky.xyz';
-
-type DemoDatadirIdentity = { readonly sha256: string; readonly byteLength: number };
 
 async function selectedDemoDatadir(
     base: string,
@@ -332,15 +330,12 @@ async function selectedDemoDatadir(
         `${base}/manifest.json`, signal,
     );
     const demo = manifest.multiplayerContent?.demo;
-    const url = demo?.url;
-    const sha256 = demo?.sha256;
-    const byteLength = demo?.byteLength;
-    if (typeof url !== 'string' || !url.startsWith(`${PUBLISHED_DEMO_ORIGIN}/datadirs/`)
-        || typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)
-        || typeof byteLength !== 'number' || !Number.isSafeInteger(byteLength)) {
-        throw new Error(`build ${build.short} manifest does not pin a same-origin Demo datadir`);
-    }
-    return { url: `${BINARIES_BASE}${url.slice(PUBLISHED_DEMO_ORIGIN.length)}`, identity: { sha256, byteLength } };
+    const resolved = resolvePublishedDemoDatadir(demo, {
+        pageOrigin: window.location.origin,
+        binariesBase: BINARIES_BASE,
+        buildShort: build.short,
+    });
+    return { url: resolved.url, identity: resolved.identity };
 }
 
 async function selectedFullReplayDatadir(
