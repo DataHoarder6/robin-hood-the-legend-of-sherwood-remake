@@ -17,3 +17,7 @@ check suite="tooling":
 # Build this worktree's dev game on the build host and copy it to the laptop.
 ship-dev:
     scripts/ship-dev.sh
+
+# One-shot read-only report of build-host state and the local checkout.
+build-status:
+    scripts/build-status.sh
