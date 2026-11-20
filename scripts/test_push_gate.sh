@@ -81,6 +81,7 @@ printf '[package]\nname = "example"\nversion = "0.0.0"\n' >crates/example/Cargo.
 cat >scripts/remote-check.sh <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >"$GATE_SUITES"
+printf '%s\n' "${ROBIN_DOCS_CHECK_PATHS:-}" >"${GATE_DOCS_PATHS:-$GATE_SUITES.paths}"
 STUB
 chmod +x scripts/remote-check.sh
 git add crates/example/Cargo.toml scripts/remote-check.sh
@@ -143,6 +144,12 @@ if [ "$selected" = '--suites docs' ]; then
     pass 'the docs-only change selects the deterministic docs gate'
 else
     fail "the docs-only change selects docs (selected '$selected')"
+fi
+checked=$(cat "$work/suites.paths" 2>/dev/null || true)
+if [ "$checked" = 'docs/only.md' ]; then
+    pass 'the docs gate receives only the Markdown this change touches'
+else
+    fail "the docs gate receives the changed Markdown (got '$checked')"
 fi
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
