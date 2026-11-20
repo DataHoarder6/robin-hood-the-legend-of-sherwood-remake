@@ -207,6 +207,44 @@ fn admit_external_actions(
     Ok(output.external_action_results)
 }
 
+/// One authoritative mission end, shared by `/mission-result` and the console
+/// cheats that end a mission. Ending is the session authority's decision: a
+/// client that latched one locally would end a mission its host is still
+/// running, and the next host snapshot would contradict it.
+fn end_mission(
+    result: robin_engine::game_operation::MissionResult,
+    net: Option<&crate::multiplayer::NetChannels>,
+    local_seat: Option<robin_engine::player_command::PlayerId>,
+    frame_commands: &mut FrameCommands,
+) -> Reply {
+    if net.is_some()
+        && !matches!(
+            local_seat,
+            Some(robin_engine::player_command::PlayerId::HOST)
+        )
+    {
+        return Err(RpcError::unavailable_capability(
+            "only the multiplayer host can end the session's mission".to_owned(),
+        ));
+    }
+    // The decision is a command, not a host-local mutation: every seat applies
+    // the same flag at the same frame, and the tick's own mission phase turns it
+    // into the code, the debriefing and the campaign handoff a script-driven end
+    // reaches.
+    let command = robin_engine::player_command::PlayerCommand::ForceMissionEnd { result };
+    if let Some(net) = net {
+        net.send_input(command)
+            .map_err(RpcError::unavailable_capability)?;
+    } else {
+        frame_commands.push(command);
+    }
+    Ok(ReplyBody::Json(serde_json::json!({
+        "ok": true,
+        "result": result,
+        "operation": result.game_code().wire_name(),
+    })))
+}
+
 fn dispatch_command(
     payload: CommandRequest,
     engine: &mut Engine,
@@ -270,6 +308,13 @@ fn dispatch_command(
                     engine_api::FrameConsoleResponse::Unknown,
                 )));
             };
+            // A console mission end is the same decision as `/mission-result`.
+            // Route it through the authoritative command so every seat applies
+            // it in one frame; the local cheat path would leave the host ahead
+            // of its peers and finalize achievements inside a rollback.
+            if let Some(result) = command.mission_result() {
+                return end_mission(result, net, local_seat, frame_commands);
+            }
             if command.is_host_only() {
                 return Ok(ReplyBody::Json(frame_console_response_to_json(
                     engine_api::FrameConsoleResponse::NotImplemented(
@@ -300,35 +345,7 @@ fn dispatch_command(
             }
         }
         CommandRequest::MissionResult(result) => {
-            // Ending the mission is the session authority's decision. A client
-            // that latched one locally would end a mission its host is still
-            // running, and the next host snapshot would contradict it.
-            if net.is_some()
-                && !matches!(
-                    local_seat,
-                    Some(robin_engine::player_command::PlayerId::HOST)
-                )
-            {
-                return Err(RpcError::unavailable_capability(
-                    "only the multiplayer host can end the session's mission".to_owned(),
-                ));
-            }
-            // The decision is a command, not a host-local mutation: every seat
-            // applies the same flag at the same frame, and the tick's own
-            // mission phase turns it into the code, the debriefing and the
-            // campaign handoff a script-driven end reaches.
-            let command = robin_engine::player_command::PlayerCommand::ForceMissionEnd { result };
-            if let Some(net) = net {
-                net.send_input(command)
-                    .map_err(RpcError::unavailable_capability)?;
-            } else {
-                frame_commands.push(command);
-            }
-            Ok(ReplyBody::Json(serde_json::json!({
-                "ok": true,
-                "result": result,
-                "operation": result.game_code().wire_name(),
-            })))
+            end_mission(result, net, local_seat, frame_commands)
         }
         CommandRequest::Player(cmd) => {
             // In multiplayer, route the command over the wire so every

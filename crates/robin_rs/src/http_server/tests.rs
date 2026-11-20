@@ -658,7 +658,7 @@ mod dispatch_tests {
         use robin_engine::player_command::{PlayerCommand, PlayerId};
         for (command, result, code) in [
             ("WIN", MissionResult::Won, GameCode::LevelSucceeded),
-            ("LOSE", MissionResult::Lost, GameCode::LevelFailed),
+            ("LOOSE", MissionResult::Lost, GameCode::LevelFailed),
         ] {
             let (mut engine, assets) =
                 robin_engine::test_support::fresh_engine_sized(1024.0, 768.0);
