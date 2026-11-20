@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "id": "H01",
   "proves": { "layer": "core", "tests": [
       "robin_rs::game_session::multiplayer::story_regression::startup_without_periodic_hash_allows_client_progress",

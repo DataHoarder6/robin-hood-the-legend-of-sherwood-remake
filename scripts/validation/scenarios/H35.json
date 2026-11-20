@@ -1,0 +1,63 @@
+{
+  "schema": 4,
+  "id": "H35",
+  "proves": {
+    "layer": "process",
+    "runner": "scripts/validation/multiplayer_e2e.py"
+  },
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
+  ],
+  "faults": [
+    {
+      "at": {
+        "frame": 40
+      },
+      "peer": 1,
+      "fault": "restart",
+      "identity": "same"
+    }
+  ],
+  "expect": [
+    {
+      "assert": "log",
+      "absent": "giving up on reconnection",
+      "count": 0
+    },
+    {
+      "assert": "barrier",
+      "barrier": "begin-sim",
+      "state": "released"
+    },
+    {
+      "assert": "hash-equal",
+      "peers": [
+        1
+      ],
+      "every": 25
+    },
+    {
+      "assert": "mission",
+      "peers": [
+        0,
+        1
+      ],
+      "count": 1
+    },
+    {
+      "assert": "exit",
+      "peers": [
+        0,
+        1
+      ],
+      "status": "running"
+    }
+  ]
+}

@@ -59,7 +59,7 @@ SCENARIO_DIRECTORY = ROOT / "scripts/validation/scenarios"
 HARNESS = ROOT / "docs/multiplayer/HARNESS.md"
 GAME_OPERATION = ROOT / "crates/robin_engine/src/game_operation.rs"
 
-SCHEMA = 3
+SCHEMA = 4
 
 # Section 1: the three layers and the five barriers a scenario may name.
 LAYERS = ("core", "transport", "process")
@@ -90,6 +90,7 @@ FAULT_VERBS = {
     # (`POST /mission-result`); a key is the only way to reach the save surface,
     # which is a window, so it is the process layer's alone.
     "mission-result": frozenset({"process"}),
+    "console": frozenset({"process"}),
     "key": frozenset({"process"}),
     "command": frozenset({"core", "process"}),
     "native": frozenset({"core", "process"}),
@@ -98,6 +99,7 @@ FAULT_VERBS = {
 # verb does not own is an unknown field, so a `command` cannot carry a `result`.
 FAULT_EXTRAS = {
     "mission-result": frozenset({"result"}),
+    "console": frozenset({"command"}),
     "command": frozenset({"command"}),
     "native": frozenset({"op", "args"}),
     "key": frozenset({"key"}),

@@ -130,7 +130,7 @@ PROCESS_LAYER = "process"
 # signals and relaunches only, so selection refuses them by name instead of
 # letting `apply` read a harness gap as a game failure.
 PROCESS_FAULTS = frozenset({"kill", "stop", "continue", "restart",
-                            "mission-result", "command", "native", "key"})
+                            "mission-result", "console", "command", "native", "key"})
 NETEM_FAULTS = frozenset({"duplicate", "drop", "reorder", "delay"})
 NETEM_GAP = ("section 2 names `netem {verb}` for the process layer and this suite has no "
              "netem driver, so the row is a harness gap")
@@ -1171,6 +1171,9 @@ class ScenarioRun:
             self.restart(peer, fault)
         elif verb == "mission-result":
             self.end_mission(peer, fault)
+        elif verb == "console":
+            self.post(peer, "console", "/console",
+                      {"command": fault["command"]}, f"console {fault['command']}")
         elif verb == "command":
             self.post(peer, "command", "/command", fault["command"], "player_command")
         elif verb == "native":

@@ -114,8 +114,11 @@ case; `invariant` and `vocabulary` are not cells.
 | H30 | process | baseline | a campaign host opens a session a second seat joins from its own install with no local save, and both run the same campaign mission at equal hashes. asserts: `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../main_menu/multiplayer_menu.rs` campaign launch + `crates/robin_rs/src/game_session/mod.rs` session loop |
 | H31 | process | baseline | the client presses quick-load under two seats: only the host may load a session, so the press is refused in the UI and nothing moves — no page, no mission end, and the 25-frame agreement holds. asserts: `hash-equal(peers=1,every=25)`; `final-operation(operation=level_in_progress)`; `exit(peers=0,1,status=running)` | `.../game_session/live_gameplay.rs` |
 | H32 | process | fault | the host answers Completed and the client answers Restart: the host's decision ends the page on every seat, so the client's late Restart reaches a seat with no terminal page and is refused there — the session leaves on the campaign-exit snapshot the host's answer chose, and no restart snapshot is ever prepared. asserts: `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelInterrupted,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `log(absent=snapshot transition prepared (Save),count=0)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
+| H33 | process | fault | the host ends a running mission with the legacy `WIN` console cheat: the cheat is staged as the same one replicated command `/mission-result` sends, so no seat finalizes achievements inside a rollback. Both seats show one debriefing page, acknowledge it, and the session publishes and commits exactly one campaign-exit snapshot. asserts: `log(absent=achievement effect after finalization,count=0)`; `log(absent=fatal runtime error,count=0)`; `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../http_server/dispatch.rs` + `.../console_overlay.rs` |
+| H34 | process | fault | the same with the host's `LOOSE` console cheat: both seats reach the debriefing, both acknowledge it, the campaign-exit snapshot commits, and neither seat is left reconnecting behind a host that waits. asserts: `log(absent=achievement effect after finalization,count=0)`; `presentation(peers=0,1,state=gone)`; `log(contains=opening debriefing exit_code=LevelFailed,at_least=1)`; `log(contains=snapshot transition prepared (CampaignExit),at_least=1)`; `log(contains=snapshot transition committed,at_least=1)`; `exit(peers=0,1,status=zero)` | `.../game_session/terminal_debriefing.rs` |
+| H35 | process | fault | a client is killed and relaunched on the same install mid-mission: its joining key is the durable, domain-separated install identity, so the host reclaims the same seat and the client returns to `running` with hash agreement instead of exhausting its reconnect budget. asserts: `log(absent=giving up on reconnection,count=0)`; `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../multiplayer/identity.rs` + `.../multiplayer/native/peer_sessions.rs` |
 
-The mission-end rows are H22–H29 and H32: H21 is a core row about the same
+The mission-end rows are H22–H29, H32–H34; H35 is the same-identity reclaim: H21 is a core row about the same
 page, and H30 opens a campaign session a second seat joins. The sketch in
 `docs/slop/multiplayer-terminal-matrix.md` numbers the six terminal rows
 H21–H26, one lower. Its H22 (host answers Completed, client answers Restart)
@@ -149,7 +152,8 @@ One file per scenario in a corpus directory that #16 creates, plus
 `defaults.json` (mission, seed, `expected_players`, peer count). A scenario is
 deltas and fixed verbs: a new verb bumps `schema` and changes the runner, never a
 scenario. Schema 2 added the campaign dimension (`campaign`) and one assertion
-(`mission`); every schema 1 row is unchanged in meaning.
+(`mission`); schema 4 added the `console` fault verb for the legacy mission-end
+cheats; every earlier row is unchanged in meaning.
 
 The corpus file `H13.json` is the worked example: a transport row, its prover,
 one fault and two assertions.
@@ -241,13 +245,14 @@ each one played two missions.
 | `restart` | rebuild the peer from its `PeerOwner` | restart the client runtime with a fresh state | `SIGKILL` then relaunch as a new process |
 | `stall-surface` | hold the modal surface open past its deadline | same | same |
 | `mission-result` | unsupported | unsupported | `POST /mission-result` on the host |
+| `console` | unsupported | unsupported | `POST /console {"command": "..."}` on that peer |
 | `command` | deliver the `PlayerCommand` to the peer | unsupported | `POST /command` on that peer |
 | `native` | call the native on the peer | unsupported | `POST /native` on that peer |
 | `key` | unsupported | unsupported | that keysym on the peer's own window |
 
 A scenario may also end the mission and answer the page it opens, which is the
-schema-3 half of the vocabulary (`campaign` and `mission` came with schema 2).
-`mission-result` posts the decision on the host and
+schema-4 half of the vocabulary (`campaign` and `mission` came with schema 2;
+`console` came with schema 4). `mission-result` posts the decision on the host and
 nothing else: the command it queues is replicated, so both seats end the same
 mission at the same frame. A `resolve` list — not a fault — names a seat and a
 `DialogResult`; the runner reads that seat's own `/state.presentation.kind` and
