@@ -17,6 +17,7 @@ use robin_engine::coordinates as engine_coordinates;
 use robin_engine::sprite::BBox;
 
 use crate::gfx_types::{GameEvent, Keycode};
+use crate::native_font::Font;
 use crate::renderer::Renderer;
 use crate::ui::UiKeyboard;
 use crate::widget::{FrameWnd, WidgetInputField};
@@ -24,20 +25,24 @@ use crate::widget::{FrameWnd, WidgetInputField};
 use super::layout::{
     FALLBACK_PANEL_EDGE, FALLBACK_PANEL_FILL, MenuRect, MenuTransform, TextAlign, TooltipState,
     VAlign, dim_screen, draw_background, enter_modal_gpu_phase, render_clipped_text_in_box_font,
+    render_text_virt_font, wrap_text_for_box_font,
 };
 use super::resources::{IngameMenuResources, MT_INFOBULLE_BUTTON_NO, SealButton};
 use super::widget_bridge::{self, ModalCursor, ModalInputState, ModalScreenIo, ScreenFrame};
 
-/// Virtual window geometry.
+/// Virtual window geometry. The field is tall enough to show many wrapped
+/// lines and the status has room for a multi-line error: a status the modal
+/// dismisses in the same frame is not a visible error.
 const WIN_W: i32 = 540;
-const WIN_H: i32 = 260;
+const WIN_H: i32 = 460;
 const PAD: i32 = 20;
-const PROMPT_Y: i32 = 20;
-const FIELD_Y: i32 = 48;
-const FIELD_H: i32 = 92;
-const STATUS_Y: i32 = 148;
-const HINT_Y: i32 = 176;
-const BUTTON_Y: i32 = 204;
+const PROMPT_Y: i32 = 14;
+const FIELD_Y: i32 = 40;
+const FIELD_H: i32 = 250;
+const STATUS_Y: i32 = 298;
+const STATUS_H: i32 = 70;
+const HINT_Y: i32 = 372;
+const BUTTON_Y: i32 = 394;
 const BUTTON_GAP: i32 = 18;
 
 const ID_SUBMIT: u32 = 0;
@@ -52,6 +57,110 @@ pub enum BugReportOutcome {
     Queued { directory: String },
     /// The player dismissed the screen without reporting.
     Cancelled,
+}
+
+/// What the submit path actually did, before any policy is applied. The I/O
+/// lives in `submit`; this is the only input the decision needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SubmitAttempt {
+    /// A bundle was reserved and the request queued at this path.
+    Queued(String),
+    /// Reserve or enqueue failed with this message.
+    QueueFailed(String),
+    /// This build has no bundle mechanism at all (browser).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Unsupported,
+}
+
+/// The visible result of a submission. A queued report closes the modal; a
+/// failure keeps it open so the error stays on screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SubmitDecision {
+    Queued {
+        directory: String,
+        status: String,
+    },
+    Failed {
+        error: String,
+        /// A bundle was saved even though filing failed: remember it so a
+        /// second Enter cannot file a duplicate.
+        directory: Option<String>,
+    },
+}
+
+/// Pure policy for a submission. It does no I/O: `submit` gathers the facts
+/// and applies the result. Missing configuration and an unsupported build are
+/// failures that must be read, not a success that quietly closes the screen.
+pub(crate) fn decide_submit(
+    attempt: SubmitAttempt,
+    endpoint_configured: bool,
+    multiplayer: bool,
+) -> SubmitDecision {
+    match attempt {
+        SubmitAttempt::Unsupported => SubmitDecision::Failed {
+            error: "Reporting is not supported in this browser build: there is no local \
+                    bundle. Use the report link on the website instead."
+                .to_owned(),
+            directory: None,
+        },
+        SubmitAttempt::QueueFailed(error) => SubmitDecision::Failed {
+            error: format!("Could not queue the report: {error}"),
+            directory: None,
+        },
+        SubmitAttempt::Queued(path) if !endpoint_configured => SubmitDecision::Failed {
+            error: format!(
+                "Report evidence was saved to {path}, but {} is not set: nothing was uploaded. \
+                 The bundle stays on disk; set the endpoint and file again to send it.",
+                "ROBIN_BUG_ENDPOINT"
+            ),
+            directory: Some(path),
+        },
+        SubmitAttempt::Queued(path) => SubmitDecision::Queued {
+            status: if multiplayer {
+                format!("Report queued for this seat. Evidence goes to {path}.")
+            } else {
+                format!("Report queued. Evidence goes to {path}.")
+            },
+            directory: path,
+        },
+    }
+}
+
+/// The font the typed report text uses. The edit-field face is the readable
+/// one every other menu text field uses; the popup face is only a fallback
+/// for the surrounding labels.
+pub(crate) fn report_field_font(resources: &IngameMenuResources) -> Option<&Font> {
+    resources
+        .edit_field_font_any()
+        .or_else(|| resources.popup_font_any())
+}
+
+/// How many wrapped lines fit in a box of `box_h` at `line_height` pixels.
+pub(crate) fn visible_line_count(box_h: i32, line_height: i32) -> usize {
+    (box_h / line_height.max(1)).max(1) as usize
+}
+
+/// Pure scroll window for the report field: the first wrapped line to draw.
+/// The caret line is always kept inside the window; wheel scrolling may move
+/// it elsewhere, clamped to the content that exists.
+pub(crate) fn scroll_window(
+    total_lines: usize,
+    visible_lines: usize,
+    caret_line: usize,
+    current: usize,
+) -> usize {
+    if visible_lines == 0 {
+        return 0;
+    }
+    let max_start = total_lines.saturating_sub(visible_lines);
+    let mut start = current.min(max_start);
+    if caret_line < start {
+        start = caret_line;
+    } else if caret_line >= start + visible_lines {
+        // Caret is on or past the last visible line; scroll it into view.
+        start = caret_line + 1 - visible_lines;
+    }
+    start.min(max_start)
 }
 
 /// One-frame state for the bug-report screen.
@@ -72,6 +181,11 @@ pub struct BugReportModalState {
     queued_directory: Option<String>,
     outcome: BugReportOutcome,
     close_next_frame: bool,
+    /// First wrapped line shown in the field.
+    scroll_lines: usize,
+    /// `true` while typing moves the caret and the view follows it; the wheel
+    /// turns this off so the player can read earlier lines.
+    follow_caret: bool,
 }
 
 impl BugReportModalState {
@@ -147,6 +261,8 @@ impl BugReportModalState {
             queued_directory: None,
             outcome: BugReportOutcome::Pending,
             close_next_frame: false,
+            scroll_lines: 0,
+            follow_caret: true,
         }
     }
 
@@ -191,9 +307,32 @@ impl BugReportModalState {
                     Keycode::Escape => self.cancel(),
                     Keycode::Return | Keycode::KpEnter => self.submit(),
                     _ => {
+                        if matches!(
+                            keycode,
+                            Keycode::Backspace
+                                | Keycode::Delete
+                                | Keycode::Left
+                                | Keycode::Right
+                                | Keycode::Home
+                                | Keycode::End
+                        ) {
+                            self.follow_caret = true;
+                        }
                         Self::edit_field(&mut self.field, event);
                     }
                 },
+                GameEvent::TextInput { .. } => self.follow_caret = true,
+                GameEvent::MouseWheel(delta) => {
+                    // The wheel is the player's own view, not caret movement.
+                    self.follow_caret = false;
+                    if *delta > 0 {
+                        self.scroll_lines = self.scroll_lines.saturating_add(*delta as usize);
+                    } else {
+                        self.scroll_lines = self
+                            .scroll_lines
+                            .saturating_sub(delta.unsigned_abs() as usize);
+                    }
+                }
                 _ => {}
             }
         }
@@ -270,36 +409,57 @@ impl BugReportModalState {
             self.status = "A report needs a description.".to_owned();
             return;
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        match crate::bug_bundle::reserve(crate::bug_bundle::Origin::Menu).and_then(|directory| {
-            let path = directory.display().to_string();
-            crate::bug_bundle::enqueue(directory, &description, "", crate::bug_bundle::Origin::Menu)
-                .map(|()| path)
-        }) {
-            Ok(path) => {
-                self.status = if self.multiplayer {
-                    format!("Report queued for this seat. Evidence goes to {path}.")
-                } else {
-                    format!("Report queued. Evidence goes to {path}.")
-                };
-                self.queued_directory = Some(path);
-                self.close_next_frame = true;
-            }
-            Err(error) => {
-                self.status = format!("Could not queue the report: {error:#}");
-            }
+        if self.queued_directory.is_some() {
+            // A bundle is already on disk (possibly without an upload). One
+            // screen files one report; another Enter must not duplicate it.
+            return;
         }
         #[cfg(target_arch = "wasm32")]
-        {
-            self.status = "Browser builds have no local bundle; use the report link.".to_owned();
+        let attempt = SubmitAttempt::Unsupported;
+        #[cfg(not(target_arch = "wasm32"))]
+        let attempt = match crate::bug_bundle::reserve(crate::bug_bundle::Origin::Menu).and_then(
+            |directory| {
+                let path = directory.display().to_string();
+                crate::bug_bundle::enqueue(
+                    directory,
+                    &description,
+                    "",
+                    crate::bug_bundle::Origin::Menu,
+                )
+                .map(|()| path)
+            },
+        ) {
+            Ok(path) => SubmitAttempt::Queued(path),
+            Err(error) => SubmitAttempt::QueueFailed(format!("{error:#}")),
+        };
+        #[cfg(target_arch = "wasm32")]
+        let endpoint_configured = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        let endpoint_configured = crate::bug_bundle::endpoint_configured();
+        let decision = decide_submit(attempt, endpoint_configured, self.multiplayer);
+        self.apply_decision(decision);
+    }
+
+    fn apply_decision(&mut self, decision: SubmitDecision) {
+        match decision {
+            SubmitDecision::Queued { directory, status } => {
+                self.status = status;
+                self.queued_directory = Some(directory);
+                self.close_next_frame = true;
+            }
+            SubmitDecision::Failed { error, directory } => {
+                // No `close_next_frame`: the error has to stay on screen.
+                self.status = error;
+                if let Some(directory) = directory {
+                    self.queued_directory = Some(directory);
+                }
+            }
         }
     }
 
     fn cancel(&mut self) {
-        if self.queued_directory.is_none() {
-            self.stop_text_input();
-            self.outcome = BugReportOutcome::Cancelled;
-        }
+        self.stop_text_input();
+        self.outcome = BugReportOutcome::Cancelled;
     }
 
     fn stop_text_input(&mut self) {
@@ -366,30 +526,65 @@ impl BugReportModalState {
             FALLBACK_PANEL_FILL,
         );
         renderer.draw_rect_outline_screen(fx, fy, fx2, fy2, FALLBACK_PANEL_EDGE);
-        let mut text = self.field.edit_text.clone();
-        // One visible caret position: while editing, typed characters land at
-        // the end of the buffer, which is where the caret is drawn.
-        text.push('|');
-        render_clipped_text_in_box_font(
-            renderer,
-            font,
-            self.transform,
-            &text,
-            MenuRect {
-                x: field_box.x + 6,
-                y: field_box.y + 6,
-                w: field_box.w - 12,
-                h: field_box.h - 12,
-            },
-            TextAlign::Left,
-            VAlign::Top,
-        );
+        // Typed text uses the same readable EditField face as every other menu
+        // input; only the surrounding labels use the popup face.
+        let field_font = report_field_font(resources).unwrap_or(font);
+        let inner = MenuRect {
+            x: field_box.x + 6,
+            y: field_box.y + 6,
+            w: field_box.w - 12,
+            h: field_box.h - 12,
+        };
+        let line_h = field_font.height().max(1) as i32;
+        let visible_lines = visible_line_count(inner.h, line_h);
+        let wrap_w = (inner.w - 4).max(1);
+        let text = &self.field.edit_text;
+        let caret_byte = text
+            .char_indices()
+            .nth(self.field.caret_offset)
+            .map_or(text.len(), |(byte, _)| byte);
+        // Show the caret where the edit buffer actually has it, not always at
+        // the end of the text.
+        let mut display = String::with_capacity(text.len() + 1);
+        display.push_str(&text[..caret_byte]);
+        display.push('|');
+        display.push_str(&text[caret_byte..]);
+        let wrapped = wrap_text_for_box_font(field_font, &display, wrap_w, usize::MAX);
+        let total_lines = wrapped.lines.len();
+        let caret_line =
+            wrap_text_for_box_font(field_font, &display[..caret_byte + 1], wrap_w, usize::MAX)
+                .lines
+                .len()
+                .saturating_sub(1);
+        let first_line = if self.follow_caret {
+            scroll_window(total_lines, visible_lines, caret_line, self.scroll_lines)
+        } else {
+            self.scroll_lines
+                .min(total_lines.saturating_sub(visible_lines))
+        };
+        self.scroll_lines = first_line;
+        for (index, line) in wrapped
+            .lines
+            .iter()
+            .skip(first_line)
+            .take(visible_lines)
+            .enumerate()
+        {
+            render_text_virt_font(
+                renderer,
+                field_font,
+                self.transform,
+                &line.text,
+                inner.x + 2,
+                inner.y + index as i32 * line_h,
+            );
+        }
         render_clipped_text_in_box_font(
             renderer,
             font,
             self.transform,
             &self.status,
-            box_at(STATUS_Y, 24),
+            box_at(STATUS_Y, STATUS_H),
             TextAlign::Center,
             VAlign::Top,
         );
@@ -440,7 +635,60 @@ impl Drop for BugReportModalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::TrueTypeFont;
     use winit::keyboard::KeyCode;
+
+    /// Hold the process-global environment lock and restore both variables on
+    /// drop, so a submission test cannot leak its configuration into a neighbour.
+    struct EnvGuard {
+        _home: tempfile::TempDir,
+        old_home: Option<std::ffi::OsString>,
+        old_endpoint: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn with_endpoint(endpoint: Option<&str>) -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let lock = crate::install_home::ENV_LOCK
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let old_home = std::env::var_os("ROBINHOOD_INSTALL_HOME");
+            let old_endpoint = std::env::var_os(crate::bug_bundle::ENDPOINT_ENV);
+            // Safety: the lock above serializes every reader and writer of these.
+            unsafe {
+                std::env::set_var("ROBINHOOD_INSTALL_HOME", home.path());
+                match endpoint {
+                    Some(value) => {
+                        std::env::set_var(crate::bug_bundle::ENDPOINT_ENV, value);
+                    }
+                    None => std::env::remove_var(crate::bug_bundle::ENDPOINT_ENV),
+                }
+            }
+            Self {
+                _home: home,
+                old_home,
+                old_endpoint,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // Safety: the guard owns the lock for its whole lifetime.
+            unsafe {
+                match &self.old_home {
+                    Some(value) => std::env::set_var("ROBINHOOD_INSTALL_HOME", value),
+                    None => std::env::remove_var("ROBINHOOD_INSTALL_HOME"),
+                }
+                match &self.old_endpoint {
+                    Some(value) => std::env::set_var(crate::bug_bundle::ENDPOINT_ENV, value),
+                    None => std::env::remove_var(crate::bug_bundle::ENDPOINT_ENV),
+                }
+            }
+        }
+    }
 
     fn state(resources: &IngameMenuResources) -> BugReportModalState {
         let mut field = WidgetInputField::new(ID_CANCEL + 1);
@@ -469,6 +717,8 @@ mod tests {
             queued_directory: None,
             outcome: BugReportOutcome::Pending,
             close_next_frame: false,
+            scroll_lines: 0,
+            follow_caret: true,
         }
     }
 
@@ -548,5 +798,117 @@ mod tests {
             queued[0].directory.is_dir(),
             "the bundle dir exists already"
         );
+    }
+
+    /// The player must see why a report did not get filed: a status line that
+    /// is rendered for one frame and then dismissed is not a visible error.
+    #[test]
+    fn a_missing_endpoint_keeps_the_modal_open_and_surfaces_the_error() {
+        let _guard = EnvGuard::with_endpoint(None);
+        let resources = IngameMenuResources::stub();
+        let mut state = state(&resources);
+        state.handle_events(
+            &[GameEvent::TextInput {
+                text: "stuck on the sign".into(),
+            }],
+            MenuTransform::centered(640, 480),
+        );
+        state.submit();
+        assert_eq!(
+            state.outcome(),
+            &BugReportOutcome::Pending,
+            "a failed submission must not dismiss the modal"
+        );
+        assert!(
+            !state.close_next_frame,
+            "the modal must stay open so the player can read the error"
+        );
+        assert!(
+            state.status.contains(crate::bug_bundle::ENDPOINT_ENV),
+            "the status must name the missing configuration, got {:?}",
+            state.status
+        );
+    }
+
+    /// The old 92px box dropped overflow with no scroll, so a longer report
+    /// could not be read at all. The field needs real height before scrolling
+    /// can show the text it wraps to.
+    #[test]
+    fn the_report_field_is_tall_enough_to_scroll_long_text() {
+        assert!(
+            visible_line_count(FIELD_H, 15) >= 10,
+            "the field must show many wrapped lines"
+        );
+        assert!(
+            visible_line_count(STATUS_H, 15) >= 4,
+            "a multi-line error must fit where the status was shown"
+        );
+    }
+
+    #[test]
+    fn report_field_font_prefers_the_edit_field_face() {
+        let make_font = |height| {
+            Font::TrueType(TrueTypeFont::from_parts(
+                &[0; 32],
+                height,
+                0,
+                0,
+                &[0; 32],
+                0x00FF_FFFF,
+                &[],
+            ))
+        };
+        let mut resources = IngameMenuResources::stub();
+        resources.fonts.popup_scroll_any = Some(make_font(12));
+        assert_eq!(
+            report_field_font(&resources).unwrap().height(),
+            12,
+            "the popup face is the last fallback"
+        );
+        resources.fonts.edit_field_any = Some(make_font(18));
+        assert_eq!(
+            report_field_font(&resources).unwrap().height(),
+            18,
+            "typed text uses the readable edit-field face"
+        );
+    }
+
+    #[test]
+    fn report_field_scroll_keeps_the_caret_in_view() {
+        // Ten wrapped lines, four visible: a caret on line seven starts the
+        // window at line four, with the caret on its last visible line.
+        assert_eq!(scroll_window(10, 4, 7, 0), 4);
+        // A caret already inside the window leaves the player's scroll alone.
+        assert_eq!(scroll_window(10, 4, 5, 4), 4);
+        // Caret above the window scrolls back to it.
+        assert_eq!(scroll_window(10, 4, 1, 6), 1);
+        // Scroll is clamped to the content that exists.
+        assert_eq!(scroll_window(3, 4, 2, 9), 0);
+    }
+
+    #[test]
+    fn an_unsupported_build_surfaces_an_error_instead_of_closing() {
+        let decision = decide_submit(SubmitAttempt::Unsupported, false, false);
+        assert!(matches!(decision, SubmitDecision::Failed { .. }));
+        let resources = IngameMenuResources::stub();
+        let mut state = state(&resources);
+        state.apply_decision(decision);
+        assert_eq!(state.outcome(), &BugReportOutcome::Pending);
+        assert!(!state.close_next_frame);
+        assert!(state.status.contains("not supported"));
+    }
+
+    #[test]
+    fn a_queued_report_is_distinguishable_from_a_failure() {
+        let failed = decide_submit(SubmitAttempt::Queued("dir".into()), false, false);
+        assert!(matches!(
+            failed,
+            SubmitDecision::Failed {
+                directory: Some(_),
+                ..
+            }
+        ));
+        let queued = decide_submit(SubmitAttempt::Queued("dir".into()), true, false);
+        assert!(matches!(queued, SubmitDecision::Queued { .. }));
     }
 }

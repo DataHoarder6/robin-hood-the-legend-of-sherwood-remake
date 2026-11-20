@@ -29,6 +29,14 @@ on a worker thread, never on the frame.
 immediately, so the answer to any entrance can name where the evidence goes and
 two reports cannot collide. The origin is `ingame-menu`, `console` or `http`.
 
+The pause-menu screen keeps a failure on screen: an empty description, a failed
+reserve/queue, a missing `ROBIN_BUG_ENDPOINT`, and a browser build with no bundle
+all leave the modal open with the reason in its status area. Only a queued
+bundle dismisses it. The browser build says reporting is unsupported, not that
+a report was filed. The description field wraps in a taller box and scrolls
+vertically, following the caret while typing and allowing the wheel to move the
+view; typed text uses the `EditField` font, not the popup label font.
+
 ## What the bundle carries
 
 `bundle.json` is one pretty-printed JSON object. Every section is present or
