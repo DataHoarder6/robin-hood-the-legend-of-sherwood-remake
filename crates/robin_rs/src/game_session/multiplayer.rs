@@ -583,6 +583,7 @@ impl NetDrain<'_> {
                         .record();
                     }
                     PlayerCommand::DisconnectSeat { player_id } => {
+                        self.host.frontend.remote_cursors.forget(*player_id);
                         let name = self
                             .manager
                             .engine
@@ -805,6 +806,14 @@ impl NetDrain<'_> {
                     .transport
                     .commit_snapshot_transition(id)
                     .map_err(SessionProtocolFailure::TransitionCommit)?;
+            }
+            NetEvent::TeammateCursor { seat, state } => {
+                // Presentation-only: never touch simulation, input, or rollback.
+                self.host.frontend.remote_cursors.ingest(
+                    u64::from(crate::window::process_uptime_ms()),
+                    seat,
+                    state,
+                );
             }
             event @ (NetEvent::ModalProposal { .. }
             | NetEvent::ModalDecision { .. }

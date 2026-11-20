@@ -1560,6 +1560,10 @@ pub(super) fn apply_authenticated_peer_message(
             let nickname = context.peers.lock().sessions.nickname(seat).to_owned();
             super::server_dispatch::broadcast_chat(context, nickname, text)?;
         }
+        NetMsg::Cursor { state, .. } => {
+            // The authenticated seat wins: a client cannot claim another seat.
+            super::server_dispatch::broadcast_teammate_cursor(context, seat, state)?;
+        }
         NetMsg::Input {
             origin_frame,
             command,
@@ -1648,6 +1652,7 @@ pub(super) fn validate_server_gameplay_wire_msg(message: &NetMsg) -> Result<(), 
     match message {
         NetMsg::Latency { .. }
         | NetMsg::ChatSend { .. }
+        | NetMsg::Cursor { .. }
         | NetMsg::Input { .. }
         | NetMsg::Note(_)
         | NetMsg::ModalProposal { .. }

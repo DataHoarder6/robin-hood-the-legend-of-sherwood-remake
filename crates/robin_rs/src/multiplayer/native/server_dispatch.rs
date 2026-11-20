@@ -20,7 +20,10 @@ enum Delivery {
 impl Delivery {
     fn for_message(message: &NetMsg) -> Self {
         match message {
-            NetMsg::StateHash { .. } | NetMsg::Note(_) | NetMsg::Chat { .. } => Self::Diagnostic,
+            NetMsg::StateHash { .. }
+            | NetMsg::Note(_)
+            | NetMsg::Chat { .. }
+            | NetMsg::Cursor { .. } => Self::Diagnostic,
             NetMsg::InitialSnapshot { .. }
             | NetMsg::BeginSim { .. }
             | NetMsg::BroadcastInput { .. } => Self::ReconnectRecoverable,
@@ -96,6 +99,9 @@ pub(super) async fn run_server_outgoing_pump(
         match msg {
             NetOutbound::Latency { to, nonce, reply } => {
                 route_latency(&context, PlayerId::HOST, to, nonce, reply)?
+            }
+            NetOutbound::Cursor { seat, state } => {
+                broadcast_teammate_cursor(&context, seat, state)?
             }
             NetOutbound::Chat { text } => {
                 if let Err(error) = robin_engine::multiplayer::validate_safe_display_text(
@@ -354,6 +360,7 @@ pub(super) fn validate_server_gameplay_outbound(
     match outgoing {
         NetOutbound::Latency { .. }
         | NetOutbound::Chat { .. }
+        | NetOutbound::Cursor { .. }
         | NetOutbound::Input { .. }
         | NetOutbound::StateHash { .. }
         | NetOutbound::InitialSnapshot { .. }
@@ -517,6 +524,26 @@ pub(super) fn broadcast_chat(
     Ok(())
 }
 
+/// Relay a cursor under the seat the host authenticated for this connection.
+fn teammate_cursor_msg(
+    seat: PlayerId,
+    state: robin_engine::multiplayer::CursorWireState,
+) -> NetMsg {
+    NetMsg::Cursor { seat, state }
+}
+
+pub(super) fn broadcast_teammate_cursor(
+    context: &ServerContext,
+    seat: PlayerId,
+    state: robin_engine::multiplayer::CursorWireState,
+) -> Result<(), MultiplayerError> {
+    broadcast_with_delivery(
+        context,
+        teammate_cursor_msg(seat, state),
+        Delivery::Diagnostic,
+    )
+}
+
 pub(super) fn route_latency(
     context: &ServerContext,
     from: PlayerId,
@@ -582,6 +609,34 @@ mod tests {
             }),
             Delivery::Required
         );
+    }
+
+    #[test]
+    fn client_cursor_relay_stamps_authenticated_seat() {
+        let seat = PlayerId(4);
+        let state = robin_engine::multiplayer::CursorWireState {
+            map_x: 3.0,
+            map_y: 5.0,
+            sprite_id: 7,
+        };
+        let message = teammate_cursor_msg(seat, state);
+        assert!(
+            matches!(message, NetMsg::Cursor { seat: stamped, state: relayed }
+                if stamped == seat && relayed.map_x == 3.0 && relayed.sprite_id == 7)
+        );
+    }
+
+    #[test]
+    fn cursor_is_diagnostic_delivery() {
+        let message = NetMsg::Cursor {
+            seat: PlayerId(3),
+            state: robin_engine::multiplayer::CursorWireState {
+                map_x: 1.0,
+                map_y: 2.0,
+                sprite_id: 4,
+            },
+        };
+        assert_eq!(Delivery::for_message(&message), Delivery::Diagnostic);
     }
 
     #[test]

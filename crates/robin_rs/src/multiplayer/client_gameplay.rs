@@ -71,6 +71,7 @@ pub(super) fn decode(message: NetMsg) -> Result<NetEvent, NetMsg> {
             NetEvent::PrepareSnapshotTransition { id, payload }
         }
         NetMsg::CommitSnapshotTransition { id } => NetEvent::CommitSnapshotTransition { id },
+        NetMsg::Cursor { seat, state } => NetEvent::TeammateCursor { seat, state },
         other => return Err(other),
     })
 }
@@ -175,6 +176,27 @@ mod tests {
                     ms_until_next_frame: None
                 }
             ))
+        ));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn cursor_wire_msg_decodes_to_presentation_event() {
+        let seat = robin_engine::player_command::PlayerId(2);
+        let state = robin_engine::multiplayer::CursorWireState {
+            map_x: 12.5,
+            map_y: -4.0,
+            sprite_id: 52,
+        };
+        assert!(matches!(
+            decode(NetMsg::Cursor { seat, state }),
+            Ok(NetEvent::TeammateCursor {
+                seat: decoded_seat,
+                state: decoded_state,
+            }) if decoded_seat == seat
+                && decoded_state.map_x == 12.5
+                && decoded_state.map_y == -4.0
+                && decoded_state.sprite_id == 52
         ));
     }
 

@@ -24,6 +24,7 @@ pub(super) fn prepare(outgoing: NetOutbound) -> Result<NetMsg, ClientProtocolErr
             reply,
         },
         NetOutbound::Chat { text } => NetMsg::ChatSend { text },
+        NetOutbound::Cursor { seat, state } => NetMsg::Cursor { seat, state },
         NetOutbound::Input {
             origin_frame,
             command,

@@ -140,6 +140,7 @@ pub(crate) const fn net_frame_class(message: &NetMsg) -> NetFrameClass {
         | NetMsg::ModalProposal { .. }
         | NetMsg::ModalDecision { .. }
         | NetMsg::ModalProgress(_)
+        | NetMsg::Cursor { .. }
         | NetMsg::ReconnectRequired { .. }
         | NetMsg::SnapshotTransitionReady { .. }
         | NetMsg::CommitSnapshotTransition { .. } => NetFrameClass::Control,
@@ -180,4 +181,22 @@ pub(super) async fn read_frame(
         .await
         .map_err(|e| MultiplayerError::transport("read frame body", e))?;
     Ok(Some(super::client_protocol::decode_body(class, &buf)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_frame_is_classified_as_control() {
+        let msg = NetMsg::Cursor {
+            seat: robin_engine::player_command::PlayerId(2),
+            state: robin_engine::multiplayer::CursorWireState {
+                map_x: 1.0,
+                map_y: 2.0,
+                sprite_id: 3,
+            },
+        };
+        assert_eq!(net_frame_class(&msg), NetFrameClass::Control);
+    }
 }
