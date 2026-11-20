@@ -1044,7 +1044,7 @@ A list of which additional features we have added, which ones we might still wan
   authored occlusion bitmaps as lossless grayscale PNGs with map placement,
   global/per-layer identities and obstacle references. Existing hackable datadirs
   can add these sidecars using `convert_datadir --mask-pngs-only` without rewriting
-  level JSON or converting other assets; see [modding tools](MODDING_TOOLS.md).
+  level JSON or converting other assets; see [modding tools](slop/MODDING_TOOLS.md).
 
 - **3D editor mission previews and perspective.** Load a mission from the connected
   hackable datadir to display its initial characters with all 16 camera-relative
@@ -1186,13 +1186,13 @@ A list of which additional features we have added, which ones we might still wan
 - **Bundled modding tools.** Native release packages include `cpf_to_json`,
   `encode_mod_sprites`, `disasm_scb`, and `dump_res` from the new
   `robin_modding_tools` crate. Rust command-line tools use Clap derive for
-  consistent help and argument validation. See [Modding tools](MODDING_TOOLS.md).
+  consistent help and argument validation. See [Modding tools](slop/MODDING_TOOLS.md).
 
 - **Generic JSON Patch mods.** RFC 6902 operations edit decoded profiles,
   levels and resource descriptors. Profile filenames provide named keys while
   existing numeric slots are preserved. Patches compose across directory and
   ZIP overlays, with atomic installation and typed error reporting. Legacy
-  mod patch formats have been removed. See [JSON Patch mods](JSON_PATCH_MODS.md)
+  mod patch formats have been removed. See [JSON Patch mods](slop/JSON_PATCH_MODS.md)
   for filenames, examples, the profile exporter and current limits.
   Profile patches now target the on-disk canonical profile.cpf.json directly;
   named maps and explicit order lists preserve numeric IDs without a separate
@@ -1260,7 +1260,7 @@ A list of which additional features we have added, which ones we might still wan
   Watch Replay opens an available recording in a separate desktop viewer while
   preserving the current session. New terminal recordings are linked by exact
   attempt identity; older compatible local recordings are indexed in the
-  background. See [campaign history](CAMPAIGN_HISTORY.md#campaign-manager-ui-and-offscreen-captures)
+  background. See [campaign history](slop/CAMPAIGN_HISTORY.md#campaign-manager-ui-and-offscreen-captures)
   for controls and browser limitations.
 
 - **Campaign story navigation:** the main prerequisite route stays visible above
@@ -1282,7 +1282,7 @@ A list of which additional features we have added, which ones we might still wan
   the tree and last in the gallery, without changing mission unlock rules.
   Both menu entry points and Sherwood share the layout. An opt-in offscreen GPU capture
   test produces PNGs for visual iteration without a game window; see
-  [campaign history](CAMPAIGN_HISTORY.md#campaign-manager-ui-and-offscreen-captures).
+  [campaign history](slop/CAMPAIGN_HISTORY.md#campaign-manager-ui-and-offscreen-captures).
 
 
 - **Campaign manager from menus:** Campaign Manager on the main menu or
@@ -1310,7 +1310,6 @@ A list of which additional features we have added, which ones we might still wan
   mission selection once and start a bounded batch of required files before the
   normal mission loader, which reuses those requests. Five 16 Mbit/s pairs saved
   a median 172 ms with unchanged payload bytes; loopback showed no gain.
-  See [measurements and validation](perf/replay-plan-earlier.md).
 
 - **Recoverable save-store admission.** Damaged or inaccessible save indexes
   offer Retry and safe cancellation/exit without creating an empty replacement
@@ -1366,7 +1365,7 @@ A list of which additional features we have added, which ones we might still wan
   serialized tick/cue/crossfade state is shared by saves, replay, rollback and
   multiplayer. `mods/timed-ambience-demo/` is a launchable example; authoring
   rules are documented in
-  [Timed missions and runtime ambience](TIMED_MISSIONS_AND_AMBIENCE.md). This state
+  [Timed missions and runtime ambience](slop/TIMED_MISSIONS_AND_AMBIENCE.md). This state
   advances the combined native save, replay, and network schemas to
   **65 / 23 / 32** respectively.
 
@@ -1424,8 +1423,8 @@ A list of which additional features we have added, which ones we might still wan
 - **Mission badges and campaign achievements.** The accepted catalogue now has
   24 achievements: 10 mission badge types and 16 campaign achievement types,
   with **Clean Hands** and **Ghost** available at both scopes. The complete
-  conditions and scope decisions are in [Achievement proposals](ACHIEVEMENT_PROPOSALS.md).
-  [Gameplay validation](ACHIEVEMENT_VALIDATION.md) records live observations,
+  conditions and scope decisions are in [Achievement proposals](slop/ACHIEVEMENT_PROPOSALS.md).
+  [Gameplay validation](slop/ACHIEVEMENT_VALIDATION.md) records live observations,
   original-data checks, and remaining proof routes. Mission metadata now filters
   the campaign badge catalogue as well as simulation results; the ransom feat
   requires the authored dispatch flag, and pursuit escape requires the party
@@ -1565,7 +1564,7 @@ A list of which additional features we have added, which ones we might still wan
   rollback, multiplayer, saves, and Original-parity policy carry or reject the
   same typed command and configuration.
   Controls, prices, production rationale, and integrity rules are documented
-  in [Sherwood item trading](SHERWOOD_TRADING.md).
+  in [Sherwood item trading](slop/SHERWOOD_TRADING.md).
 
 - **Data-driven mission allegiances.** Hackable JSON missions may assign a
   numeric `allegiance` to each soldier and rescue PC. IDs `0` and `1` preserve
@@ -1903,7 +1902,7 @@ A list of which additional features we have added, which ones we might still wan
     falls back. Browser builds hide this unavailable choice while retaining
     all portable WGSL profiles on WebGPU and WebGL2.
   - Algorithm provenance, exactness, licensing, platform support, and shader
-    restrictions are documented in [Upscalers](UPSCALERS.md).
+    restrictions are documented in [Upscalers](slop/UPSCALERS.md).
 
 - **Deterministic replay and rollback checking**. Sessions can be recorded to
   JSONL locally and exported as binary `.rhrec` files: `RHREC` plus byte `1`,
