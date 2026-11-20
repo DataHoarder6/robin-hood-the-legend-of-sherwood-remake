@@ -27,6 +27,10 @@ fn staged_garrison_engine() -> (EngineInner, crate::element::EntityId) {
     use crate::gate::DoorIndex;
 
     let mut engine = EngineInner::new();
+    let mut bbox = crate::coordinates::MapBBox::new();
+    bbox.expand_point(MapPoint::new(0.0, 0.0));
+    bbox.expand_point(MapPoint::new(1000.0, 1000.0));
+    engine.world.fast_grid_mut().level_mut().map_bbox = bbox;
     engine.ai.global.offmap_budget = crate::ai::OffmapReinforcementBudget {
         total: 4,
         concurrent: 2,
@@ -1621,9 +1625,10 @@ fn summon_uses_an_edge_entry_without_a_door() {
     assert_eq!(summoned, body);
     let entity = engine.get_entity(body).expect("summoned body");
     assert!(entity.element_data().active);
-    assert_eq!(
-        entity.element_data().position_map(),
-        MapPoint::new(-25.0, 300.0)
+    let outside = entity.element_data().position_map();
+    assert!(
+        outside.x < 0.0 || outside.y < 0.0 || outside.x > 1000.0 || outside.y > 1000.0,
+        "an edge entry places the body beyond the map border"
     );
 }
 
@@ -1867,7 +1872,7 @@ fn the_native_host_command_summons_a_body() {
             faction: Camp::LACKLANDIST_ID,
             min_tier: 0,
             count: 1,
-            door: None,
+            entry: crate::engine::reinforcement::SummonEntry::Any,
         }],
     );
     assert!(

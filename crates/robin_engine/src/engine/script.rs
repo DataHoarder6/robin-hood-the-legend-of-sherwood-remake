@@ -3713,13 +3713,9 @@ impl EngineInner {
                     faction,
                     min_tier,
                     count,
-                    door,
+                    entry,
                 } => {
                     let faction = crate::element::Camp::from_allegiance_id(faction);
-                    let entry = match door {
-                        Some(index) => crate::engine::reinforcement::SummonEntry::Door(index),
-                        None => crate::engine::reinforcement::SummonEntry::Any,
-                    };
                     for _ in 0..count {
                         if self
                             .summon_garrison(

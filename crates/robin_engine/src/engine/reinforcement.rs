@@ -38,7 +38,7 @@ pub(crate) struct SummonRequest {
 }
 
 /// Which authored entry a summon uses.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SummonEntry {
     Any,
     Door(crate::gate::DoorIndex),
@@ -546,20 +546,12 @@ impl EngineInner {
             }
             Entry::Offmap(index) => {
                 let offmap = &self.ai.global.offmap_entries[index];
-                let (point_out, layer, sector, direction) = (
-                    offmap.point_out,
-                    offmap.layer,
-                    offmap.sector,
-                    offmap.direction,
-                );
+                let (layer, sector, target, direction) =
+                    (offmap.layer, offmap.sector, offmap.target, offmap.direction);
+                self.enter_from_outside(body, target, layer, sector, direction);
                 let Some(Entity::Soldier(actor)) = self.get_entity_mut(body) else {
                     return None;
                 };
-                actor.element.set_position_map(point_out);
-                actor.element.set_layer(layer);
-                actor.element.set_sector(sector);
-                actor.element.set_direction_instantly(direction);
-                actor.element.update_grid_cell();
                 let alert = actor
                     .npc
                     .ai
