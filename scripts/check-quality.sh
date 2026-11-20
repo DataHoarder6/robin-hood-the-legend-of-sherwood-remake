@@ -7,7 +7,7 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
+    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux\n' >&2
     exit 2
 fi
 
@@ -24,6 +24,18 @@ case "$1" in
         cargo clippy --locked --workspace --all-targets -- -D warnings
         cargo clippy --locked -p robin_rs --all-targets \
             --no-default-features --features release -- -D warnings
+        ;;
+    check)
+        # Compile the non-test cfg of the whole workspace with warnings denied.
+        # Cargo test and `clippy --all-targets` compile with cfg(test), which
+        # hides unused imports and dead code that only the shipped build sees.
+        # `--lib --bins` selects those targets and no test harnesses.
+        # `cargo check` has no trailing-`--` rustc-argument form, so add -D
+        # warnings through a cfg(all()) rustflag: Cargo joins every matching
+        # target rustflag source (including .cargo/config.toml's target-cpu
+        # baseline) rather than replacing them as a bare RUSTFLAGS would.
+        cargo check --locked --workspace --lib --bins \
+            --config 'target."cfg(all())".rustflags=["-D","warnings"]'
         ;;
     core)
         cargo test --locked -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
