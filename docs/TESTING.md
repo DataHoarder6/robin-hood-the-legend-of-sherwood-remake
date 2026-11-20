@@ -89,20 +89,49 @@ copy, then run the whole suite once:
 
 ```sh
 copy=$(scripts/remote-check.sh --sync)   # prints the build host's copy path
-ssh -n build-host "cd $copy && nix develop --command cargo test --locked -p robin_rs \
+ssh -n minipc "cd $copy && nix develop --command cargo test --locked -p robin_rs \
   --lib --no-default-features --features release -- <test-name>"
 scripts/remote-check.sh client-release
 ```
 
-Every copy keeps its own `target/`, so a **new** copy starts from nothing: about
-5 minutes of dependencies on the build host, against 3-30 s for a rebuild in a
-warm one (12 cores, 2026-11-17). Keep one copy per branch and reuse it; a second
-name is for two agents building the same branch concurrently, not for a new
-branch. `scripts/remote-check.sh --sync <existing-name>` syncs into a copy
-instead of making one. A compiler cache is not the answer: `sccache` as a
-machine-local `rustc-wrapper` measured 310 s -> 222 s for a from-scratch rebuild,
-and an out-of-tree shared `CARGO_TARGET_DIR` reused nothing across copies (511
-crates recompiled). The copy is the thing to keep warm.
+There is **one** build copy: `~/build/robin-gate/gate-shared` on `minipc`, held
+under a lock from the first sync until the last suite finishes, outside the
+pruned root. Cargo incremental is on (`CARGO_INCREMENTAL=1`,
+`SCCACHE_ALLOW_INCREMENTAL=1`), so unchanged crates are reused by Cargo's own
+freshness check and `sccache` only sees genuinely new inputs. A per-tree copy
+was tried and removed: a fresh cwd gives `sccache` new working-dir and out-dir
+keys, and measured 0.36 % Rust hits. The evidence and the rejected alternatives
+are [`2026-11-20-build-reduction-research.md`](slop/2026-11-20-build-reduction-research.md)
+and [`docs/slop/build-freshness-and-profiling-research.md`](slop/2026-11-20-build-freshness-and-profiling-research.md).
+
+### Measuring a build before changing it
+
+Run these on the gate copy, in this order, and keep the outputs as evidence.
+Report the effect (report path, hit-rate delta, top self-time rows), not an exit
+code.
+
+```sh
+# 1. Why a unit is dirty — no rebuild needed. Use `trace` for the .json reason.
+CARGO_LOG=cargo::compiler::fingerprint=info cargo build -p robin_rs --bin robin
+
+# 2. Cold vs warm cost and the critical path; open target/cargo-timings/cargo-timing.html
+cargo build --timings -p robin_rs --bin robin
+
+# 3. Attribute the slowest crate from step 2 to a compiler phase.
+cargo rustc -p robin_rs --lib -- -Zself-profile -Zself-profile-events=default,llvm
+summarize summarize *.mm_profdata
+
+# 4. Isolate the link from codegen.
+cargo rustc -p robin_rs --bin robin -- --print link-args
+
+# 5. Audit key inputs before blaming the compiler, then record the hit rate.
+env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_INCREMENTAL|CARGO_TARGET_[A-Z0-9_]+_RUSTFLAGS)='
+sccache --show-stats
+```
+
+To decide whether a heavy suite is still owed by a path, `cargo tree -i
+--workspace <crate>` lists reverse dependencies. Treat it as a hint only: the
+tree is not exactly what a build compiles.
 
 The push that updates the integration branch is gated. The suites a landing owes
 are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
