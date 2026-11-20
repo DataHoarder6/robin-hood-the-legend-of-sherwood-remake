@@ -795,8 +795,12 @@ TypeScript checking, top-level browser tests, leaderboard/signer tests,
 deployment script tests, shared JavaScript identity tests, and site/signer-shell
 builds. See platform runbooks for the additional publication checks.
 
-JavaScript workspaces pin pnpm 12.3.4. For local CI parity, select Node with
-`pnpm runtime set node 24.19.0 -g` and ensure pnpm’s bin directory is on PATH.
+JavaScript workspaces pin pnpm 12.3.4. The Nix devShell provides the Rust and
+Python toolchains but **not** pnpm; `tooling`, `web` and `editor` are therefore
+build-host suites, run there by `scripts/remote-check.sh`. A local invocation of
+those suites needs pnpm on PATH from outside the devShell. For local CI parity,
+select Node with `pnpm runtime set node 24.19.0 -g` and ensure pnpm’s bin
+directory is on PATH.
 Editor and pipeline TypeScript scripts run directly with Node; relative source
 imports include `.ts`, and TypeScript checks enforce erasable syntax.
 
