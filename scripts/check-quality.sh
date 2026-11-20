@@ -163,6 +163,12 @@ case "$1" in
         # The browser runtime plan the stable site publishes. A plan without
         # multiplayer exports ticket schema 0 and refuses every invitation.
         node --test wasm-www/scripts/build-runtime.test.mjs
+        # Child processes must be OS-supervised, and a browser join must fail
+        # at the host when its artifact was never staged.
+        node --test scripts/validation/supervised.test.mjs
+        node --test scripts/validation/browser-boot.test.mjs
+        python3 -m unittest discover -s scripts/validation -p supervised_test.py
+
         test -f scripts/test_portable_linker.py
         python3 -m unittest discover -s scripts -p test_portable_linker.py
         python3 -m unittest discover -s scripts -p test_triage_bug_bundle.py

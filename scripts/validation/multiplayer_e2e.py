@@ -71,6 +71,7 @@ from runtime_evidence import (
     stop_process_group,
     verify_client,
 )
+import supervised
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "scripts/validation/scenarios"
@@ -718,6 +719,10 @@ def require_prerequisites(binary, data, overlay=OVERLAY, which=shutil.which,
         if which(tool) is None:
             missing.append(f"executable: {tool} is not on PATH")
     try:
+        supervised.require_supervisor()
+    except supervised.SupervisionUnavailable as error:
+        missing.append(str(error))
+    try:
         xlib()
     except RuntimeError as error:
         missing.append(f"python-xlib: {error}")
@@ -807,7 +812,7 @@ class Peer:
         self.role = spec["role"]
         # One X server per peer: a window is how a seat presses a key, and two
         # windows on one display cannot say whose key it was.
-        self.xvfb, self.display = start_display(scenario.run)
+        self.xvfb, self.display = start_display(scenario.run, scenario.id)
         self.start = spec.get("start", "launch")
         self.name = name
         self.scenario = scenario
@@ -860,14 +865,24 @@ class Peer:
         )
         self.launches += 1
         argv = self.argv()
+        # A cancelled agent kills its own process group, not a detached child's
+        # new session. The transient unit is the real owner: its TTL bounds the
+        # host even when nobody remains to call `signal()` or the run's finally.
+        unit = supervised.unit_name(f"{self.scenario.id}-{self.name}-{self.launches}")
+        budget = int(self.scenario.expanded.get("budget_s", DEFAULT_BUDGET_S)) + 30
+        wrapped = supervised.command(argv, unit=unit, budget_s=budget, env=env)
         with self.log.open("a") as handle:
-            self.process = subprocess.Popen(argv, cwd=self.cwd, env=env,
+            self.process = subprocess.Popen(wrapped, cwd=self.cwd, env=env,
                                             start_new_session=True, stdout=handle,
                                             stderr=subprocess.STDOUT)
+        # `argv` in the evidence is the game's argv; the unit is recorded beside
+        # it so a stopped host names the run it belonged to.
+        self.process.unit = unit
+        self.process.name = self.name
         self.scenario.events.event("launch", peer=self.name, seat=self.seat,
                                    pid=self.process.pid, port=self.port, argv=argv,
                                    install=str(self.install), display=self.display,
-                                   launch=self.launches)
+                                   launch=self.launches, unit=unit, budget_s=budget)
 
     def alive(self):
         return self.process is not None and self.process.poll() is None
@@ -892,9 +907,13 @@ class Peer:
             self.scenario.events.event("signal_skipped", peer=self.name, signal=signum,
                                        why=why, returncode=self.exit_status())
             return
+        # Stop the unit first: killing only the wrapper's process group leaves
+        # the service running until its TTL, which is a hang on a healthy run.
+        unit = getattr(self.process, "unit", None)
+        failures = supervised.stop(unit) if unit else []
         os.killpg(self.process.pid, signum)
         self.scenario.events.event("signal", peer=self.name, signal=signum, why=why,
-                                   pid=self.process.pid)
+                                   pid=self.process.pid, unit=unit, cleanup_failures=failures)
 
 
 class ScenarioRun:
@@ -1377,19 +1396,45 @@ def confine(argv):
                           sys.executable, str(Path(__file__).resolve()), *argv])
 
 
-def start_display(run):
-    read_fd, write_fd = os.pipe()
+def start_display(run, scope):
+    # Xvfb used to publish its display over an inherited `-displayfd` pipe. A
+    # systemd service cannot inherit that pipe, so allocate a display number
+    # under a lock and wait for the socket instead. The lock is held only while
+    # choosing a number — never while starting or running the server — so two
+    # agents cannot pick the same display and cannot deadlock on each other.
+    display_lock = Path(tempfile.gettempdir()) / "robin-xvfb-display.lock"
+    with display_lock.open("a+") as lock:
+        import fcntl
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        used = {p.name[1:] for p in Path("/tmp/.X11-unix").glob("X*")} if Path("/tmp/.X11-unix").exists() else set()
+        number = next((n for n in range(100, 300) if str(n) not in used), None)
+        if number is None:
+            raise PrerequisiteMissing("X server: no display number left between 100 and 299")
+        lock.write(f"{number} {os.getpid()}\n")
+        lock.flush()
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    display = f":{number}"
+    unit = supervised.unit_name(f"{scope}-xvfb-{number}")
+    env = os.environ.copy()
+    argv = supervised.command(
+        ["Xvfb", display, "-screen", "0", "1280x1024x24", "-nolisten", "tcp", "-ac"],
+        unit=unit, budget_s=1800, env=env,
+    )
     with (run / "xvfb.log").open("w") as log:
-        xvfb = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0",
-                                 "1280x1024x24", "-nolisten", "tcp", "-ac"],
-                                start_new_session=True, pass_fds=(write_fd,),
+        xvfb = subprocess.Popen(argv, cwd=run, env=env, start_new_session=True,
                                 stdout=log, stderr=subprocess.STDOUT)
-    os.close(write_fd)
-    with os.fdopen(read_fd) as handle:
-        display = ":" + handle.readline().strip()
-    if not display[1:]:
-        raise PrerequisiteMissing("X server: Xvfb published no display")
-    return xvfb, display
+    xvfb.unit = unit
+    xvfb.name = "xvfb"
+    deadline = time.monotonic() + 15
+    socket_path = Path("/tmp/.X11-unix") / f"X{number}"
+    while time.monotonic() < deadline:
+        if socket_path.exists():
+            return xvfb, display
+        if xvfb.poll() is not None:
+            break
+        time.sleep(0.1)
+    supervised.stop(unit)
+    raise PrerequisiteMissing(f"X server: {display} never became ready; see {run / 'xvfb.log'}")
 
 
 def run_scenario(identifier, expanded, options, evidence):
@@ -1467,7 +1512,7 @@ def run_scenario(identifier, expanded, options, evidence):
         (run / "hashes.json").write_text(json.dumps(hash_manifest(scenario), indent=2) + "\n")
         summary["elapsed_s"] = round(time.monotonic() - events.started, 3)
         servers = [peer.xvfb for peer in scenario.peers] if scenario is not None else []
-        finish_children(children + servers, summary)
+        supervised.cleanup(children + servers, summary, event=events.event)
         (run / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         events.event("summary", id=identifier, verdict=summary["verdict"],
                      failures=summary["failures"])

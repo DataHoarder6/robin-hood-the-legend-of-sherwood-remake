@@ -1,5 +1,5 @@
 // Diagnostic acceptance only: production bundles + current local wasm + read-only Demo data.
-// Uses installed Chrome/CDP, not a mocked engine. All hostname resolution is loopback.
+// Uses installed Chrome/CDP, not a mocked engine. Join mode drives the published origin; the rest maps loopback.
 import { createServer } from 'node:https';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, appendFileSync, mkdtempSync, mkdirSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
@@ -7,6 +7,8 @@ import { resolve, join, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
+import { hostShortFromVersion, verifyPublishedArtifact } from './browser-boot.mjs';
+import { command as supervisedCommand, requireSupervisor, stop as stopSupervised, unitName } from './supervised.mjs';
 
 const { values } = parseArgs({ options: {
     data: { type: 'string' }, pkg: { type: 'string', default: 'wasm-www/pkg' },
@@ -17,8 +19,9 @@ const { values } = parseArgs({ options: {
     'replay-file': { type: 'string' },
     'bind-fetch-diagnostic': { type: 'boolean' }, 'runtime-source': { type: 'string', default: 'HEAD' },
     'join-ticket': { type: 'string' }, 'host-http': { type: 'string', default: 'http://127.0.0.1:18641' },
-    'join-content': { type: 'string' }, 'join-datadir': { type: 'string' }, 'join-modules': { type: 'string' },
     'host-display': { type: 'string' },
+    'host-binary': { type: 'string' },
+    'browser-url': { type: 'string' },
     // Every wait here must outlive the game's own deadlines: a shared story page
     // holds the simulation until each seat answers it, and a seat that never
     // answers releases only when the host's acknowledgement budget expires
@@ -35,32 +38,38 @@ const source = execFileSync('git', ['rev-parse', values['runtime-source']], { en
 const short = source.slice(0, 12);
 const cdpTimeout = Number(values['cdp-timeout']);
 if (!Number.isFinite(cdpTimeout) || cdpTimeout <= 0) throw new Error('--cdp-timeout must be a positive number of milliseconds');
-const gameHost = 'robinhood.phiresky.xyz', signerHost = 'identity.robinhood.phiresky.xyz';
-const gameOrigin = `https://${gameHost}`, signerOrigin = `https://${signerHost}`;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 // `--data` holds the published layout of the current Demo generation directory.
 const demoPrefix = '/datadirs/demo-leicester/v18/';
 const demoDatadirName = 'v18-web-opus-q80.rhdata.zst';
 // Join mode drives a native host's signed `rhmp3` invitation through the real
-// stable shell: the page origin is still the production hostname (mapped to a
-// loopback HTTPS server), but only the game and signer hostnames are redirected.
-// The ticket's relay host must resolve and reach the internet normally.
+// stable shell on its published origin. No loopback fixture or hostname
+// mapping: the host's invitation URL and the artifact it selects must both be
+// the ones a real browser would fetch. The relay host resolves normally.
 const joinMode = values['join-ticket'] !== undefined;
-if (joinMode && values['host-display'] === undefined) {
-    throw new Error('join mode needs --host-display: the host seat has nobody at its window to answer a shared story page');
+if (joinMode) {
+    if (values['host-display'] === undefined) {
+        throw new Error('join mode needs --host-display: the host seat has nobody at its window to answer a shared story page');
+    }
+    if (values['host-binary'] === undefined) {
+        throw new Error('join mode needs --host-binary: the host --version decides which browser artifact the shell fetches');
+    }
+    if (values['browser-url'] === undefined) {
+        throw new Error('join mode needs --browser-url: the published HTTPS origin the browser boots from');
+    }
 }
+// The host binary, not the checkout or the ticket, is the authority on which
+// artifact the shell will request. Its --version carries the 12-hex identity
+// used in /wasm/<short>/ and in every replay and invitation.
+const hostVersion = joinMode ? execFileSync(values['host-binary'], ['--version'], { encoding: 'utf8' }).trim() : null;
+const hostShort = joinMode ? hostShortFromVersion(hostVersion) : null;
+const gameHost = joinMode ? new URL(values['browser-url']).hostname : 'robinhood.phiresky.xyz';
+const gameOrigin = joinMode ? new URL(values['browser-url']).origin : `https://${gameHost}`;
+const signerHost = joinMode ? null : 'identity.robinhood.phiresky.xyz';
+const signerOrigin = joinMode ? null : `https://${signerHost}`;
 const hostHttp = values['host-http'];
 const joinLogTimeout = Number(values['join-log-timeout']);
-const joinContent = values['join-content'] ? resolve(values['join-content']) : null;
-const joinDatadir = values['join-datadir'] ? resolve(values['join-datadir']) : null;
-// A Demo generation converted here is served from this acceptance origin; the
-// published deployment serves its own generation from `/datadirs/demo-leicester/`.
-const joinDemoPrefix = '/datadirs/demo-local/';
-const joinModules = resolve(values['join-modules'] ?? join(pkg, 'js-modules.json'));
-const runtimeContract = JSON.parse(readFileSync('wasm-www/runtime-contract.json', 'utf8'));
-// The manifest this run serves, built from the artifact and the converter's own
-// content manifest before navigation (see buildJoinManifest).
-let joinManifest = null, joinTicket = null, relayHost = null;
+let joinTicket = null, relayHost = null;
 if (joinMode) {
     const code = values['join-ticket'];
     const parts = code.slice('rhmp3-'.length).split('.');
@@ -75,95 +84,73 @@ const result = { source, chrome: execFileSync('google-chrome', ['--version'], { 
     diagnosticBoundFetch: !!values['bind-fetch-diagnostic'], cdpTimeoutMs: cdpTimeout, checks: {}, failures: [] };
 function record(name, value) { result.checks[name] = value; console.log(name, JSON.stringify(value).slice(0, 1800)); }
 function log(name, value) { appendFileSync(join(evidence, name), JSON.stringify(value) + '\n'); }
-const cert = join(evidence, 'localhost-cert.pem'), key = join(evidence, 'localhost-key.pem');
-execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', key,
-    '-out', cert, '-subj', '/CN=robinhood.phiresky.xyz', '-addext', `subjectAltName=DNS:${gameHost},DNS:${signerHost}`], { stdio: 'ignore' });
-const preload = ['Data/AudioDurations.json', 'Data/Interface/Fonts/arial.ttf', ...readdirSync('assets/core-datadir/Data/Interface/UI')
-    .filter(name => name.endsWith('.png')).map(name => `Data/Interface/UI/${name}`)];
-function headers(kind, path) {
-    const output = {}; let active = false;
-    for (const line of readFileSync(`wasm-www/deploy/${kind}-headers.txt`, 'utf8').split('\n')) {
-        if (line.startsWith('/')) active = path.startsWith(line.trim().replace(/\*$/u, ''));
-        else if (active && line.trim().startsWith('!')) delete output[line.trim().slice(2)];
-        else if (active && line.includes(':')) {
-            const index = line.indexOf(':'); output[line.slice(0, index).trim()] = line.slice(index + 1).trim();
+// Join mode drives the published HTTPS origin directly: there is no fixture
+// server, no generated certificate and no hostname mapping to hide a missing
+// artifact behind. Non-join acceptance still uses the loopback shell.
+let server = null, port = null, key = null;
+if (!joinMode) {
+    const cert = join(evidence, 'localhost-cert.pem');
+    key = join(evidence, 'localhost-key.pem');
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', key,
+        '-out', cert, '-subj', `/CN=${gameHost}`, '-addext', `subjectAltName=DNS:${gameHost},DNS:${signerHost}`], { stdio: 'ignore' });
+    const preload = ['Data/AudioDurations.json', 'Data/Interface/Fonts/arial.ttf', ...readdirSync('assets/core-datadir/Data/Interface/UI')
+        .filter(name => name.endsWith('.png')).map(name => `Data/Interface/UI/${name}`)];
+    function headers(kind, path) {
+        const output = {}; let active = false;
+        for (const line of readFileSync(`wasm-www/deploy/${kind}-headers.txt`, 'utf8').split('\n')) {
+            if (line.startsWith('/')) active = path.startsWith(line.trim().replace(/\*$/u, ''));
+            else if (active && line.trim().startsWith('!')) delete output[line.trim().slice(2)];
+            else if (active && line.includes(':')) {
+                const index = line.indexOf(':'); output[line.slice(0, index).trim()] = line.slice(index + 1).trim();
+            }
         }
+        if (values.isolated) {
+            output['Cross-Origin-Opener-Policy'] = 'same-origin';
+            output['Cross-Origin-Embedder-Policy'] = 'require-corp';
+            output['Cross-Origin-Resource-Policy'] = 'cross-origin';
+        }
+        return output;
     }
-    if (values.isolated || joinMode) {
-        output['Cross-Origin-Opener-Policy'] = 'same-origin';
-        output['Cross-Origin-Embedder-Policy'] = 'require-corp';
-        output['Cross-Origin-Resource-Policy'] = 'cross-origin';
-    }
-    return output;
-}
-const mime = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json',
-    '.css': 'text/css', '.png': 'image/png', '.ttf': 'font/ttf', '.opus': 'audio/ogg', '.zst': 'application/zstd' };
-const server = createServer({ cert: readFileSync(cert), key: readFileSync(key) }, (req, res) => {
-    const host = req.headers.host?.split(':')[0];
-    const url = new URL(req.url, gameOrigin);
-    log('requests.jsonl', { host, method: req.method, path: url.pathname });
-    if (req.method !== 'GET' || ![gameHost, signerHost].includes(host)) { res.writeHead(403); res.end('local acceptance: denied'); return; }
-    const kind = host === signerHost ? 'signer' : 'public';
-    for (const [name, value] of Object.entries(headers(kind, url.pathname))) res.setHeader(name, value);
-    if (url.pathname === '/acceptance-away') { res.setHeader('Content-Type', 'text/html'); res.end('<title>Local BFCache destination</title>'); return; }
-    if (joinMode) {
-        // The manifest is this run's statement of which engine bytes and which
-        // content generation the ticket's invitation selects, derived from the
-        // staged artifact and from `convert_datadir --web-content-manifest`.
-        // It is served from memory so it can never disagree with the files the
-        // handler below hands out.
-        if (url.pathname === `/wasm/${short}/manifest.json`) {
-            const bytes = Buffer.from(`${JSON.stringify(joinManifest, null, 2)}\n`);
+    const mime = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json',
+        '.css': 'text/css', '.png': 'image/png', '.ttf': 'font/ttf', '.opus': 'audio/ogg', '.zst': 'application/zstd' };
+    server = createServer({ cert: readFileSync(cert), key: readFileSync(key) }, (req, res) => {
+        const host = req.headers.host?.split(':')[0];
+        const url = new URL(req.url, gameOrigin);
+        log('requests.jsonl', { host, method: req.method, path: url.pathname });
+        if (req.method !== 'GET' || ![gameHost, signerHost].includes(host)) { res.writeHead(403); res.end('local acceptance: denied'); return; }
+        const kind = host === signerHost ? 'signer' : 'public';
+        for (const [name, value] of Object.entries(headers(kind, url.pathname))) res.setHeader(name, value);
+        if (url.pathname === '/acceptance-away') { res.setHeader('Content-Type', 'text/html'); res.end('<title>Local BFCache destination</title>'); return; }
+        if (url.pathname === '/wasm/latest.json') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ commit: source, short })); return; }
+        if (url.pathname === `/wasm/${short}/manifest.json` && data) {
+            // The shell loads the Demo datadir generation pinned by the build manifest.
+            const demo = readFileSync(join(data, demoDatadirName));
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Content-Length', bytes.length);
-            res.end(bytes);
-            return;
+            res.end(JSON.stringify({ commit: source, short, multiplayerContent: { demo: {
+                url: `${gameOrigin}${demoPrefix}${demoDatadirName}`, sha256: digest(demo), byteLength: demo.length,
+            } } })); return;
         }
-        // Staged runtime addition: `<root>/wasm/<short>/…` plus
-        // `<root>/wasm/latest.json`, so the ticket-selected path is served by
-        // the same layout production uses. The signer origin serves its own
-        // shell, exactly as the two deployed origins do.
+        if (url.pathname === `/wasm/${short}/preload-assets.json`) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(preload.map(path => ({ path, url: `/acceptance-core/${path}` })))); return;
+        }
         let root = resolve(kind === 'signer' ? 'wasm-www/signer-dist' : 'wasm-www/dist');
         let path = decodeURIComponent(url.pathname);
-        if (path.startsWith('/wasm/')) root = pkg;
-        else if (path.startsWith(joinDemoPrefix) && joinContent) {
-            root = joinContent; path = path.slice(joinDemoPrefix.length - 1);
-        }
+        if (path.startsWith('/acceptance-core/')) { root = resolve('assets/core-datadir'); path = path.slice('/acceptance-core'.length); }
+        else if (path.startsWith(`/wasm/${short}/`)) { root = pkg; path = path.slice(`/wasm/${short}`.length); }
+        else if (path.startsWith(demoPrefix) && data) { root = data; path = path.slice(demoPrefix.length - 1); }
         if (path.endsWith('/')) path += 'index.html';
         const file = resolve(root, `.${path}`);
-        if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404); res.end('not found'); return; }
-        res.setHeader('Content-Type', mime[extname(file)] ?? (/\.zst$/u.test(file) ? 'application/zstd' : 'application/octet-stream'));
-        const bytes = readFileSync(file); res.setHeader('Content-Length', bytes.length); res.end(bytes); return;
-    }
-    if (url.pathname === '/wasm/latest.json') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ commit: source, short })); return; }
-    if (url.pathname === `/wasm/${short}/manifest.json` && data) {
-        // The shell loads the Demo datadir generation pinned by the build manifest.
-        const demo = readFileSync(join(data, demoDatadirName));
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ commit: source, short, multiplayerContent: { demo: {
-            url: `${gameOrigin}${demoPrefix}${demoDatadirName}`, sha256: digest(demo), byteLength: demo.length,
-        } } })); return;
-    }
-    if (url.pathname === `/wasm/${short}/preload-assets.json`) {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(preload.map(path => ({ path, url: `/acceptance-core/${path}` })))); return;
-    }
-    let root = resolve(kind === 'signer' ? 'wasm-www/signer-dist' : 'wasm-www/dist');
-    let path = decodeURIComponent(url.pathname);
-    if (path.startsWith('/acceptance-core/')) { root = resolve('assets/core-datadir'); path = path.slice('/acceptance-core'.length); }
-    else if (path.startsWith(`/wasm/${short}/`)) { root = pkg; path = path.slice(`/wasm/${short}`.length); }
-    else if (path.startsWith(demoPrefix) && data) { root = data; path = path.slice(demoPrefix.length - 1); }
-    if (path.endsWith('/')) path += 'index.html';
-    const file = resolve(root, `.${path}`);
-    if (!file.startsWith(root + sep) || path.includes('browser_identity_vault') && kind !== 'signer'
-        || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404); res.end('not found'); return; }
-    res.setHeader('Content-Type', mime[extname(file)] ?? 'application/octet-stream');
-    const bytes = readFileSync(file); res.setHeader('Content-Length', bytes.length); res.end(bytes);
-});
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const port = server.address().port;
+        if (!file.startsWith(root + sep) || path.includes('browser_identity_vault') && kind !== 'signer'
+            || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404); res.end('not found'); return; }
+        res.setHeader('Content-Type', mime[extname(file)] ?? 'application/octet-stream');
+        const bytes = readFileSync(file); res.setHeader('Content-Length', bytes.length); res.end(bytes);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    port = server.address().port;
+}
 const profile = mkdtempSync(join(evidence, 'chrome-profile-'));
-let chrome, socket, runtimeException, target; let id = 0; const pending = new Map(); const events = [];
+let chrome, chromeUnit, socket, runtimeException, target; let id = 0; const pending = new Map(); const events = [];
 function cdp(method, params = {}, sessionId) {
     const requestId = ++id;
     return new Promise((resolve, reject) => {
@@ -186,6 +173,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 // started rather than racing the last profile flush.
 async function stopChrome() {
     if (!chrome || chrome.exitCode !== null) return;
+    // The unit owns Chrome's whole cgroup; killing only the wrapper's group
+    // leaves renderers behind when the driver itself is killed. Stop the unit
+    // first, then reap the wrapper for a clean exit event.
+    if (chromeUnit) stopSupervised(chromeUnit);
     const exited = new Promise(resolve => chrome.once('exit', resolve));
     const stopped = ms => Promise.race([exited.then(() => true), pause(ms).then(() => false)]);
     for (const signal of ['SIGTERM', 'SIGKILL']) {
@@ -375,83 +366,27 @@ async function waitForHostEvent(kind, predicate = () => true, timeoutMs = 60_000
         await pause(500);
     }
 }
-// The manifest a production stage publishes (`stageRuntimeAddition`) binds the
-// published Demo generation, which a checkout here cannot reproduce. Join mode
-// therefore authors the same document for the generation it actually serves,
-// from that generation's own `robinhood-web-content.json` — the converter's
-// statement of identity, datadir digest and every shipping file — and every
-// digest in it is re-measured from the bytes this server hands out.
-function buildJoinManifest() {
-    if (joinContent === null || joinDatadir === null) {
-        throw new Error('join mode needs --join-content and --join-datadir');
-    }
-    const webPath = join(joinContent, 'robinhood-web-content.json');
-    const web = JSON.parse(readFileSync(webPath, 'utf8'));
-    if (web.schema !== runtimeContract.contentSchema) {
-        throw new Error(`Demo content manifest schema ${web.schema} is not the runtime contract's ${runtimeContract.contentSchema}`);
-    }
-    if (web.edition !== joinTicket.content_edition) {
-        throw new Error(`Demo content edition ${web.edition} is not the invitation's ${joinTicket.content_edition}`);
-    }
-    if (web.engine_version !== joinTicket.engine_version) {
-        throw new Error(`Demo content generation was converted by engine ${web.engine_version}, not the invitation's ${joinTicket.engine_version}`);
-    }
-    if (web.native_content_sha256 !== joinTicket.content_identity_sha256) {
-        throw new Error('Demo content identity does not match the host-signed invitation');
-    }
-    const datadir = readFileSync(joinDatadir);
-    if (digest(datadir) !== web.datadir.sha256 || datadir.length !== web.datadir.byte_length) {
-        throw new Error(`served Demo datadir is not the object ${webPath} names`);
-    }
-    if (joinDatadir !== resolve(joinContent, web.datadir.path)) {
-        throw new Error(`--join-datadir is not ${web.datadir.path} under --join-content`);
-    }
-    for (const file of web.files) {
-        const bytes = readFileSync(resolve(joinContent, file.path));
-        if (digest(bytes) !== file.sha256 || bytes.length !== file.byte_length) {
-            throw new Error(`served Demo shipping file ${file.path} is not the object ${webPath} names`);
-        }
-    }
-    const claims = JSON.parse(readFileSync(joinModules, 'utf8'));
-    const artifactRoot = resolve(pkg, 'wasm', joinTicket.engine_version.slice(0, 12));
-    for (const claim of claims) {
-        const bytes = readFileSync(resolve(artifactRoot, claim.path));
-        if (digest(bytes) !== claim.sha256 || bytes.length !== claim.byteLength) {
-            throw new Error(`staged runtime module ${claim.path} is not the module ${joinModules} claims`);
-        }
-    }
-    const manifest = {
-        commit: joinTicket.engine_version, short: joinTicket.engine_version.slice(0, 12),
-        netProtocol: joinTicket.net_protocol, ticketSchema: joinTicket.schema,
-        multiplayerContent: {
-            schema: runtimeContract.contentSchema,
-            demo: {
-                url: `${gameOrigin}${joinDemoPrefix}${web.datadir.path}`,
-                sha256: web.datadir.sha256, byteLength: web.datadir.byte_length,
-                nativeContentSha256: web.native_content_sha256,
-            },
-            full: null,
-        },
-        javascriptModules: claims,
-    };
-    if (!existsSync(resolve(pkg, 'wasm', manifest.short, 'robin.js'))) {
-        throw new Error(`--pkg must be the staging root whose wasm/${manifest.short}/ holds the engine`);
-    }
-    return manifest;
-}
 async function runJoinFlow() {
+    // The host's --version, not the ticket and not this checkout, decides which
+    // artifact the shell will fetch. Check the published document on the real
+    // origin before the page is given a ticket to install.
+    const published = await verifyPublishedArtifact({ short: hostShort, origin: gameOrigin });
+    record('hostVersion', { version: hostVersion, short: hostShort });
+    record('publishedArtifact', {
+        url: published.url, commit: published.manifest.commit, short: published.manifest.short,
+        netProtocol: published.manifest.netProtocol, ticketSchema: published.manifest.ticketSchema,
+        demo: published.manifest.multiplayerContent?.demo ?? null,
+        javascriptModules: published.manifest.javascriptModules?.length ?? null,
+    });
     record('joinTicket', {
         engineVersion: joinTicket.engine_version, artifactShort: joinTicket.engine_version.slice(0, 12),
         schema: joinTicket.schema, netProtocol: joinTicket.net_protocol, missionId: joinTicket.mission_id,
         expectedPlayers: joinTicket.expected_players, contentEdition: joinTicket.content_edition,
         relayHost, contentIdentity: joinTicket.content_identity_sha256,
     });
-    joinManifest = buildJoinManifest();
-    const demo = joinManifest.multiplayerContent.demo;
-    record('joinManifest', {
-        commit: joinManifest.commit, short: joinManifest.short, ticketSchema: joinManifest.ticketSchema,
-        demo, javascriptModules: joinManifest.javascriptModules.length,
-    });
+    if (joinTicket.engine_version.slice(0, 12) !== hostShort) {
+        throw new Error(`host ${hostShort} signed a ticket for engine ${joinTicket.engine_version.slice(0, 12)}`);
+    }
     const joinUrl = `${gameOrigin}/?wasm-log=debug#join=${values['join-ticket']}`;
     console.log('NAVIGATE', `${gameOrigin}/?wasm-log=debug#join=<redacted-ticket>`);
     // From the session's own first event: the host records the peer's seat
@@ -535,12 +470,18 @@ async function runJoinFlow() {
 
 const deadline = Date.now() + Number(values.timeout);const timer = setTimeout(() => { void stopChrome(); }, Number(values.timeout) + 10000);
 try {
-    chrome = spawn('google-chrome', ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
+    requireSupervisor();
+    const chromeArgv = ['google-chrome', '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
         '--no-proxy-server', '--ignore-certificate-errors', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
         '--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-angle=swiftshader',
-        `--host-resolver-rules=${joinMode
-            ? `MAP ${gameHost} 127.0.0.1:${port}, MAP ${signerHost} 127.0.0.1:${port}`
-            : `MAP * 127.0.0.1:${port}`}`, '--window-size=1280,900', 'about:blank'], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        // Join mode resolves the published origin and the host's relay exactly
+        // as a browser on the internet would; only the fixture needs a mapping.
+        ...(joinMode ? [] : [`--host-resolver-rules=MAP * 127.0.0.1:${port}`]),
+        '--window-size=1280,900', 'about:blank'];
+    chromeUnit = unitName(`chrome-${evidence}-${process.pid}`);
+    chrome = spawn(...supervisedCommand(chromeArgv, {
+        unit: chromeUnit, budgetS: Math.ceil(Number(values.timeout) / 1000) + 30,
+    }), { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     const ws = await new Promise((resolve, reject) => {
         let stderr = ''; const startup = setTimeout(() => reject(new Error('Chrome debugging endpoint unavailable')), 20000);
         chrome.stderr.on('data', chunk => {
@@ -580,7 +521,7 @@ try {
     target = await cdp('Target.createTarget', { url: 'about:blank' });
     session = (await cdp('Target.attachToTarget', { targetId: target.targetId, flatten: true })).sessionId;
     for (const domain of ['Page', 'Runtime', 'Network']) await cdp(`${domain}.enable`, {}, session);
-    await cdp('Fetch.enable', { patterns: [{ urlPattern: '*' }] }, session);
+    if (!joinMode) await cdp('Fetch.enable', { patterns: [{ urlPattern: '*' }] }, session);
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `
         window.__acceptanceOriginalFetch = window.fetch;
         ${values['bind-fetch-diagnostic'] ? 'window.fetch = window.fetch.bind(window);' : ''}
@@ -829,7 +770,7 @@ try {
 }
 finally {
     clearTimeout(timer); socket?.close(); await stopChrome();
-    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     for (const waiter of pending.values()) waiter.reject(new Error('harness closed')); pending.clear();
     writeFileSync(join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     if (result.failures.length > 0) process.exitCode = 1;
@@ -837,6 +778,6 @@ finally {
     // process exits; stopChrome reaps the whole group, and the retry absorbs the
     // last flush instead of failing the run on a non-empty directory.
     rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-    rmSync(key, { force: true });
+    if (key) rmSync(key, { force: true });
     console.log(`Evidence: ${evidence}`);
 }
