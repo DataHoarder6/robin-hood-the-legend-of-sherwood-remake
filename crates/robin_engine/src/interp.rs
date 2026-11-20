@@ -61,7 +61,8 @@ pub struct Frame {
 /// Malformed bytecode must stop the VM, not index out of bounds or overflow.
 fn valid_param_offset(offset: i32, parameter_bytes: usize) -> Option<usize> {
     let offset = usize::try_from(offset).ok()?;
-    offset.checked_add(4).filter(|&end| end <= parameter_bytes)
+    let end = offset.checked_add(4)?;
+    (end <= parameter_bytes).then_some(offset)
 }
 
 /// Execution result when the interpreter stops.
@@ -1727,5 +1728,12 @@ mod tests {
         }];
         let mut vm = Vm::new();
         assert_eq!(vm.run(&program), StopReason::HitEmpty);
+    }
+
+    #[test]
+    fn parameter_offset_guard_returns_the_offset_not_the_end() {
+        assert_eq!(valid_param_offset(0, 4), Some(0));
+        assert_eq!(valid_param_offset(4, 8), Some(4));
+        assert_eq!(valid_param_offset(0, 3), None);
     }
 }
