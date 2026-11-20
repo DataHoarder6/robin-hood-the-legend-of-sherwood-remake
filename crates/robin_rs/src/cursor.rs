@@ -437,6 +437,12 @@ impl CursorRenderer {
             return;
         }
 
+        // The software cursor is the last thing on screen. Mark it as the
+        // final layer so the renderer keeps it out of the logical target that
+        // modal backdrops snapshot — otherwise the OS-cursor replacement would
+        // be frozen into the backdrop while the modal draws its own live cursor.
+        renderer.begin_cursor_layer();
+
         let dst_x = mouse_x - self.hotspot_x;
         let dst_y = mouse_y - self.hotspot_y;
 

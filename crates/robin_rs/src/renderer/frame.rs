@@ -147,6 +147,11 @@ pub(super) struct FrameState {
     vertex_scratch: Vec<QuadVertex>,
     pub(super) queued: Vec<QueuedDraw>,
     ui_layer_start: Option<usize>,
+    /// Start of the final on-screen cursor/presentation layer. Draws from here
+    /// to the end of the queue are composited to the swapchain but deliberately
+    /// excluded from the logical render target that modal backdrops snapshot,
+    /// so the software cursor is never baked into a frozen scene.
+    cursor_layer_start: Option<usize>,
     pub(super) frame_texture_bgs: Vec<wgpu::BindGroup>,
     /// Atlas layer → its index in `frame_texture_bgs` for this frame.
     /// Small and dense (a mission uses a handful of layers), so a Vec
@@ -783,6 +788,16 @@ impl FrameState {
         }
     }
 
+    /// Mark the start of the final on-screen cursor layer. Idempotent: the
+    /// first cursor drawn in a frame fixes the boundary. Everything from here
+    /// to the end is composited to the swapchain but kept out of the logical
+    /// target that freezes into a modal backdrop.
+    pub(super) fn begin_cursor_layer(&mut self) {
+        if self.cursor_layer_start.is_none() {
+            self.cursor_layer_start = Some(self.queued.len());
+        }
+    }
+
     pub(super) fn begin_ui_only_frame(&mut self) {
         self.ui_only_frame = true;
     }
@@ -916,6 +931,7 @@ impl FrameState {
             vertex_scratch: Vec::new(),
             queued: Vec::new(),
             ui_layer_start: None,
+            cursor_layer_start: None,
             frame_texture_bgs: Vec::new(),
             atlas_bg_slots: Vec::new(),
             blit_vbo: None,
@@ -948,6 +964,9 @@ impl FrameState {
                 },
             );
             if let Some(start) = &mut self.ui_layer_start {
+                *start += 1;
+            }
+            if let Some(start) = &mut self.cursor_layer_start {
                 *start += 1;
             }
         }
@@ -1057,6 +1076,7 @@ impl FrameState {
         self.atlas_bg_slots.clear();
         self.gpu_phase_active = false;
         self.ui_layer_start = None;
+        self.cursor_layer_start = None;
         self.ui_only_frame = false;
     }
 
@@ -1264,6 +1284,9 @@ impl FrameState {
     /// and presented-frame captures need the complete logical framebuffer,
     /// matching RHMenuScreen::CreateBkgndColorized copying the full surface.
     /// Append the HUD only after the world has been sampled for presentation.
+    /// The final on-screen cursor layer is deliberately left out: it is drawn
+    /// to the swapchain but must not be frozen into a modal backdrop, which
+    /// renders its own live cursor.
     pub(super) fn encode_ui_to_logical_frame(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1271,12 +1294,20 @@ impl FrameState {
         resources: &GpuResources,
     ) {
         if let Some(start) = self.ui_layer_start {
+            // Stop before the final cursor layer. The software cursor is shown
+            // on the swapchain through the UI target, but must stay out of the
+            // logical render target so a frozen modal backdrop never bakes in
+            // a second, stationary copy of the pointer.
+            let end = self
+                .cursor_layer_start
+                .unwrap_or(self.queued.len())
+                .max(start);
             self.encode_pass_range_to_target(
                 encoder,
                 pipelines,
                 resources,
                 start,
-                self.queued.len(),
+                end,
                 &self.render_target_view,
                 &self.sprite_stencil_view,
                 wgpu::LoadOp::Load,

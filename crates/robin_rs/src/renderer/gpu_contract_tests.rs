@@ -570,6 +570,7 @@ pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
     );
     crate::ingame_menu::resources::verify_menu_gpu_ownership(&mut menu_renderer, &mut menu_peer);
     verify_deferred_menu_surfaces(&mut renderer);
+    verify_modal_backdrop_excludes_cursor(&mut renderer);
     verify_managed_surface_rectangles(&mut renderer);
 }
 
@@ -1329,6 +1330,61 @@ fn verify_deferred_menu_surfaces(renderer: &mut Renderer) {
         );
         assert_eq!(pixel[3], 255);
     }
+    renderer.clear_frozen_scene();
+}
+
+/// The software cursor must not be frozen into a modal backdrop. The game
+/// hides the OS cursor and draws its own, so a modal draws a live cursor on
+/// top of the snapshot; if the snapshot also contains the gameplay cursor the
+/// player sees two (one frozen at the icon that opened the menu). Regression:
+/// Sherwood map icon and declining a mission via the red button.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn verify_modal_backdrop_excludes_cursor(renderer: &mut Renderer) {
+    // 3x2 logical frame. World = green, HUD = blue, cursor = white at (0,0).
+    // After the split world/UI composite and freeze, only green/blue may be
+    // present in the backdrop; white would be the leaked, frozen cursor.
+    renderer.render_gpu_rect(0, 0, 3, 2, [0, 255, 0, 255]);
+    renderer.begin_ui_layer();
+    renderer.render_gpu_rect(2, 0, 1, 2, [0, 0, 255, 255]);
+    renderer.begin_cursor_layer();
+    renderer.render_gpu_rect(0, 0, 1, 1, [255, 255, 255, 255]);
+
+    // Compose exactly the way a gameplay frame builds the logical target for
+    // a subsequent modal freeze: world first, then UI without the cursor layer.
+    renderer.frame.upload_queue_geometry(&renderer.gpu);
+    let mut encoder = renderer
+        .gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("modal backdrop cursor regression"),
+        });
+    renderer
+        .frame
+        .encode_scene_to_rt(&mut encoder, &renderer.pipelines, &renderer.resources);
+    renderer.frame.encode_ui_to_logical_frame(
+        &mut encoder,
+        &renderer.pipelines,
+        &renderer.resources,
+    );
+    renderer.gpu.queue.submit(Some(encoder.finish()));
+    renderer.frame.clear_recording();
+
+    renderer.freeze_scene_for_modal();
+
+    // Reading back with an empty queue blits the frozen scene as the implicit
+    // base quad. The cursor's old pixel must now show world green, while the
+    // HUD stripe survives — the frozen backdrop is world+HUD, not world+HUD+cursor.
+    let backdrop = renderer.try_capture_frame_rgba().unwrap().2;
+    assert_eq!(
+        &backdrop[0..4],
+        &[0, 255, 0, 255],
+        "software cursor was baked into the frozen modal backdrop"
+    );
+    assert_eq!(
+        &backdrop[8..12],
+        &[0, 0, 255, 255],
+        "HUD lost from backdrop"
+    );
     renderer.clear_frozen_scene();
 }
 

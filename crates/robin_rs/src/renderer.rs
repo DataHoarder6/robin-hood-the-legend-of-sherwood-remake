@@ -832,6 +832,13 @@ impl Renderer {
         self.frame.begin_ui_layer();
     }
 
+    /// Mark the software cursor as the final on-screen layer. Draws from here
+    /// are shown on the swapchain but excluded from the logical target that a
+    /// modal snapshots, so the cursor is never baked into the frozen backdrop.
+    pub fn begin_cursor_layer(&mut self) {
+        self.frame.begin_cursor_layer();
+    }
+
     /// Present this whole logical frame with the sharp UI scaler, bypassing
     /// gameplay upscalers and post-effects. Top-level menus use this instead
     /// of splitting a transparent UI layer so their rendered frame remains
