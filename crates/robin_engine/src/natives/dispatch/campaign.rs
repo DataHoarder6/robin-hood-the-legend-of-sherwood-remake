@@ -528,28 +528,15 @@ impl NativeContext<'_, '_> {
                 let count = stack.pop_i32();
                 let min_tier = stack.pop_i32();
                 let faction = stack.pop_i32();
-                // -1 = any entry, 0..1000 = a gate, >=1000 = an off-map
-                // entry (index minus 1000).
-                let entry = if door < 0 {
-                    crate::engine::reinforcement::SummonEntry::Any
-                } else if door >= 1000 {
-                    crate::engine::reinforcement::SummonEntry::Offmap(
-                        usize::try_from(door - 1000).expect("non-negative offmap entry"),
-                    )
-                } else {
-                    match crate::gate::DoorIndex::new(door as u32) {
-                        Some(index) => crate::engine::reinforcement::SummonEntry::Door(index),
-                        None => {
-                            script_error!(native, "invalid reinforcement door {door}");
-                            return 0;
-                        }
-                    }
-                };
+                if (0..1000).contains(&door) && crate::gate::DoorIndex::new(door as u32).is_none() {
+                    script_error!(native, "invalid reinforcement door {door}");
+                    return 0;
+                }
                 self.yield_engine_command(crate::natives::EngineCommand::SummonReinforcements {
                     faction: faction as u16,
                     min_tier: min_tier.clamp(0, u8::MAX as i32) as u8,
                     count: count.clamp(0, u16::MAX as i32) as u16,
-                    entry,
+                    entry: door,
                 });
                 1
             }

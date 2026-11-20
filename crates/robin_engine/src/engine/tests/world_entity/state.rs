@@ -1872,7 +1872,7 @@ fn the_native_host_command_summons_a_body() {
             faction: Camp::LACKLANDIST_ID,
             min_tier: 0,
             count: 1,
-            entry: crate::engine::reinforcement::SummonEntry::Any,
+            entry: -1,
         }],
     );
     assert!(
