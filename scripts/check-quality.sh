@@ -82,6 +82,11 @@ case "$1" in
         # Build, not check: only a link exercises the threaded link arguments.
         cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features --features audio,multiplayer
         cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_rs --bin robin --no-default-features --features audio,multiplayer,wasm-threads
+        # wasm-dev links prove compilation; this builds the shipped wasm-release
+        # artifact with the repo's plan and checks the optimized bytes' shared
+        # memory, compatibility export and schema. A release-only break cannot
+        # hide behind a green compile gate.
+        bash scripts/check-wasm-release-artifact.sh
         ;;
     browser-audio|native-lifecycle)
         # This delegated gate is the entire suite. Do not retain a suspended

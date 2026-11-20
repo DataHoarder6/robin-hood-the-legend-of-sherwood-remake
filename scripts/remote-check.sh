@@ -3,7 +3,7 @@
 #
 # The runtime is the wrong place to compile this workspace, and the laptop is
 # the owner's machine: builds happen on the build host (ROBIN_BUILD_HOST,
-# default `build-host`). Every worktree gets its own copy there, because a second
+# default `minipc`). Every worktree gets its own copy there, because a second
 # agent's rsync into a shared copy would swap the source out from under a
 # running compile.
 #
@@ -29,7 +29,7 @@ set -euo pipefail
 # caller has not executed yet, and the script still exits 0.
 exec </dev/null
 
-host=${ROBIN_BUILD_HOST:-build-host}
+host=${ROBIN_BUILD_HOST:-minipc}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
 slots=${ROBIN_BUILD_SLOTS:-3}
@@ -50,17 +50,32 @@ copy_name() {
     fi
 }
 
+# The copy is shared by every worktree that names it. Hold its lock from
+# before the first rsync until the last suite finishes: the lock used to be
+# taken only around the suites, so a second invocation could sync a different
+# tree into the copy while the first suite was compiling it — one gate, two
+# verdicts, and a push of a tree the gate never saw. All agents run on this
+# host, so the lock lives here, keyed by the copy's identity; the build host's
+# own flock still serialises the suites against writers from other machines.
+lock_copy() {
+    local lock_dir=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
+    local safe="${host//[^A-Za-z0-9._-]/_}-${name//[^A-Za-z0-9._-]/_}"
+    mkdir -p -- "$lock_dir"
+    exec 9>"$lock_dir/$safe.lock"
+    flock -w 7200 9
+}
+
 require_host() {
     if ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$host" true 2>/dev/null; then
         return 0
     fi
-    if [ "$host" = build-host ]; then
+    if [ "$host" = minipc ]; then
         if ! command -v wake-host >/dev/null; then
             printf 'remote-check: %s is unreachable and wake-host is not on PATH.\n' "$host" >&2
             exit 1
         fi
-        printf 'remote-check: %s is off; waking it with `wake-host build-host`.\n' "$host" >&2
-        wake-host build-host || true
+        printf 'remote-check: %s is off; waking it with `wake-host minipc`.\n' "$host" >&2
+        wake-host minipc || true
         # WOL is fire-and-forget, so poll the ssh port for the boot budget.
         for _ in $(seq 60); do
             if ssh -n -o BatchMode=yes -o ConnectTimeout=3 "$host" true 2>/dev/null; then
@@ -218,6 +233,7 @@ EOF
     --sync)
         name=$(copy_name "${2:-}")
         require_host
+        lock_copy
         sync_worktree
         printf '%s\n' "$remote_dir"
         exit 0
@@ -254,6 +270,37 @@ for suite in "${requested[@]}"; do
 done
 
 require_host
+
+# sccache normalizes absolute paths before hashing. One basedir per live copy
+# is required: a single parent leaves `<copy>` in the key, so two identical
+# trees still miss. The server reads this list at startup, so restart it when
+# the set changes. The cache lock is taken before any copy lock and released
+# immediately: no path ever takes them in the other order.
+prepare_cache() {
+    local state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
+    local list_file=$state_dir/sccache-basedirs
+    local lock_file=$state_dir/sccache-basedirs.lock
+    mkdir -p -- "$state_dir"
+    exec 8>"$lock_file"
+    flock -w 300 8
+    local list
+    list=$(ssh "$host" "find \$HOME/$remote_root -mindepth 1 -maxdepth 1 -type d -printf '%p:' 2>/dev/null | sed 's/:\$//'")
+    case ":$list:" in
+        *":$HOME/$remote_root/$name:"*) ;;
+        *) list="${list:+$list:}$HOME/$remote_root/$name" ;;
+    esac
+    if [ ! -f "$list_file" ] || [ "$(cat "$list_file")" != "$list" ]; then
+        printf '%s\n' "$list" >"$list_file"
+        # Stopping is enough: the next cargo invocation starts a server with
+        # the list below. A stopped server cannot keep an old key space alive.
+        ssh "$host" 'sccache --stop-server >/dev/null 2>&1 || true' || true
+    fi
+    export ROBIN_SCCACHE_BASEDIRS=$list
+    flock -u 8
+}
+
+lock_copy
+prepare_cache
 sync_worktree
 lock="$remote_dir.lock"
 if ((multi)); then
@@ -266,7 +313,12 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\$(pwd) \\
+    env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
+    CARGO_INCREMENTAL=0 \
+    SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
+    SCCACHE_IDLE_TIMEOUT=0 \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
@@ -277,7 +329,12 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\$(pwd) \\
+    env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
+    CARGO_INCREMENTAL=0 \
+    SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
+    SCCACHE_IDLE_TIMEOUT=0 \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='--remap-path-prefix=\$(pwd)=/robin' \
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash scripts/check-quality.sh ${requested[0]}
 EOF

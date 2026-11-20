@@ -103,6 +103,14 @@
               pkgs.python3Packages.python-xlib
               pkgs.xvfb
               pkgs.ffmpeg
+              # The wasm gate builds the published wasm-release artifact with
+              # the repo's build plan and proves its contract on the optimized
+              # bytes: wasm-opt/wasm-strip come from binaryen, and wasm-objdump
+              # (wabt) reads the shared-memory import the browser decode pool
+              # instantiates against. Without them the check is a machine-local
+              # accident rather than something `nix develop` reproduces.
+              pkgs.binaryen
+              pkgs.wabt
             ]
             ++ runtimeLibs;
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;

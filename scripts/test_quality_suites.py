@@ -50,6 +50,47 @@ class QualitySuitesTests(unittest.TestCase):
             'exec "$@"\n'
         )
         xvfb.chmod(0o755)
+
+        # The wasm suite also builds the published wasm-release artifact through
+        # the browser plan and verifies it. Stub those tools so the suite can be
+        # dispatched here without a wasm toolchain, and record their calls.
+        self.node_log = self.directory / "node-calls.jsonl"
+        self.environment["QUALITY_TEST_NODE_CALLS"] = str(self.node_log)
+        node = self.directory / "node"
+        node.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "with open(os.environ['QUALITY_TEST_NODE_CALLS'], 'a') as output:\n"
+            "    output.write(json.dumps(args) + '\\n')\n"
+            "if any('build-runtime.mjs' in a for a in args):\n"
+            "    out = pathlib.Path(args[args.index('--out-dir') + 1])\n"
+            "    (out / 'robin_bg.wasm').write_bytes(b'\\0asm')\n"
+            "    (out / 'robin.js').write_text('// fixture glue')\n",
+            encoding="utf-8",
+        )
+        node.chmod(0o755)
+        objdump = self.directory / "wasm-objdump"
+        objdump.write_text(
+            '#!/bin/sh\n'
+            'case " $* " in\n'
+            '  *" -j Import "*)\n'
+            '    echo " - memory[0] pages: initial=1 max=65536 shared <- ./robin_bg.js.memory"\n'
+            '    ;;\n'
+            '  *" -j Export "*)\n'
+            '    echo \' - func[1] <wasm_multiplayer_compatibility> -> "wasm_multiplayer_compatibility"\'\n'
+            '    ;;\n'
+            'esac\n'
+        )
+        objdump.chmod(0o755)
+        for name in ("wasm-opt", "wasm-strip"):
+            tool = self.directory / name
+            tool.write_text("#!/bin/sh\nexit 0\n")
+            tool.chmod(0o755)
+        bindgen = self.directory / "wasm-bindgen"
+        bindgen.write_text('#!/bin/sh\n[ "$1" = --version ] && echo "wasm-bindgen 0.2.129"\n')
+        bindgen.chmod(0o755)
+        self.environment["ROBINHOOD_WASM_BINDGEN"] = str(bindgen)
         self.environment.pop("ROBINHOOD_DATA_DIR", None)
 
     def run_suite(self, suite, expected=0):
@@ -90,6 +131,21 @@ class QualitySuitesTests(unittest.TestCase):
         # runs no doctests), and the build is its own command so a running game
         # cannot hang a build.
         self.assertEqual([call[0] for call in self.calls()], ["nextest", "test", "build"])
+
+    def test_wasm_gate_builds_and_verifies_the_published_release_artifact(self):
+        self.run_suite("wasm")
+        calls = [json.loads(line) for line in self.node_log.read_text().splitlines()]
+        self.assertTrue(any(
+            any("build-runtime.mjs" in arg for arg in call)
+            and "wasm-release" in call
+            and "--threads" in call
+            for call in calls
+        ), f"wasm suite did not build the shipped plan: {calls}")
+        self.assertTrue(any(
+            any("verify-runtime-multiplayer.mjs" in arg for arg in call)
+            and call[call.index("--expect-ticket-schema") + 1] == "3"
+            for call in calls
+        ), f"wasm suite did not verify the artifact schema: {calls}")
 
     def test_replay_format_boundary_rejects_client_packages(self):
         for package in ("robin_rs", "wgpu", "winit", "kira", "cpal", "ffmpeg-next"):

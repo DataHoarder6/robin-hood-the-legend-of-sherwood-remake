@@ -96,5 +96,38 @@ else
     fail "the crates change selects wasm (selected '$selected')"
 fi
 
+# A change to the browser build plan, the devShell that supplies wasm-opt and
+# wasm-objdump, or the release-artifact check itself must select `wasm` even
+# with no crate change. Otherwise a release-only break ships ungated.
+mkdir -p wasm-www/scripts
+printf 'export const RUNTIME_FEATURES = [];\n' >wasm-www/scripts/build-runtime.mjs
+git add wasm-www/scripts/build-runtime.mjs
+git commit --quiet -m wasm-plan
+plan_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$crates_head" "$plan_head" 2>&1) || status=$?
+expect_status 0 'a wasm build-plan change gates the wasm suite'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites wasm' ]; then
+    pass 'the build-plan change selects wasm, the suite that builds the release artifact'
+else
+    fail "the build-plan change selects wasm (selected '$selected')"
+fi
+
+printf '{}' >flake.nix
+printf '#!/usr/bin/env bash\n' >scripts/check-wasm-release-artifact.sh
+git add flake.nix scripts/check-wasm-release-artifact.sh
+git commit --quiet -m wasm-tools
+tools_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$plan_head" "$tools_head" 2>&1) || status=$?
+expect_status 0 'a devShell and release-check change gates wasm and tooling'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites wasm tooling' ]; then
+    pass 'the tool change selects wasm and tooling together'
+else
+    fail "the tool change selects wasm and tooling (selected '$selected')"
+fi
+
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
