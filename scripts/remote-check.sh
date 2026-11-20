@@ -266,7 +266,10 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\$(pwd) \\
+    env SCCACHE_BASEDIRS=\"\$(bash scripts/sccache-basedirs.sh)\" \\
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
+    CARGO_INCREMENTAL=0 \\
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash -c 'set -e; for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
@@ -277,7 +280,10 @@ set -euo pipefail
 cd $remote_dir
 exec systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=\$(pwd) \\
+    env SCCACHE_BASEDIRS=\"\$(bash scripts/sccache-basedirs.sh)\" \\
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="\$(bash scripts/sccache-basedirs.sh --remap)" \\
+    CARGO_INCREMENTAL=0 \\
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash scripts/check-quality.sh ${requested[0]}
 EOF

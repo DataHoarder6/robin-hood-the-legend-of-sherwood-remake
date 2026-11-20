@@ -84,5 +84,33 @@ else
     fail "live-worktrees printed: $live"
 fi
 
+# --- sccache basedirs name every copy root ------------------------------------
+mkdir -p "$HOME/build/robin/a" "$HOME/build/robin/b"
+: > "$HOME/build/robin/not-a-copy"
+basedirs=$(bash "$source_root/scripts/sccache-basedirs.sh")
+expected="$HOME/build/robin/a:$HOME/build/robin/b"
+if [ "$basedirs" = "$expected" ]; then
+    pass "sccache basedirs list only existing copy roots"
+else
+    fail "sccache basedirs printed '$basedirs', expected '$expected'"
+fi
+if grep -F 'SCCACHE_BASEDIRS=$(pwd)' "$source_root/scripts/remote-check.sh" >/dev/null; then
+    fail "remote-check still overrides SCCACHE_BASEDIRS per invocation"
+else
+    pass "remote-check does not override SCCACHE_BASEDIRS per invocation"
+fi
+if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -eq 2 ]; then
+    pass "both remote commands disable incremental compilation"
+else
+    fail "remote-check does not set CARGO_INCREMENTAL=0 in both commands"
+fi
+
+remap=$(bash "$source_root/scripts/sccache-basedirs.sh" --remap)
+if [ "$remap" = "--remap-path-prefix=$HOME/build/robin/a=/robin --remap-path-prefix=$HOME/build/robin/b=/robin" ]; then
+    pass "remap flags name every copy root"
+else
+    fail "remap flags were '$remap'"
+fi
+
 printf '\n%s passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

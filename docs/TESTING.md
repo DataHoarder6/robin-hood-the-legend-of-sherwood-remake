@@ -99,10 +99,18 @@ Every copy keeps its own `target/`, so a **new** copy starts from nothing: about
 warm one (12 cores, 2026-11-17). Keep one copy per branch and reuse it; a second
 name is for two agents building the same branch concurrently, not for a new
 branch. `scripts/remote-check.sh --sync <existing-name>` syncs into a copy
-instead of making one. A compiler cache is not the answer: `sccache` as a
-machine-local `rustc-wrapper` measured 310 s -> 222 s for a from-scratch rebuild,
-and an out-of-tree shared `CARGO_TARGET_DIR` reused nothing across copies (511
-crates recompiled). The copy is the thing to keep warm.
+instead of making one.
+
+A shared `CARGO_TARGET_DIR` is not the answer: an out-of-tree target dir reused
+nothing across copies (511 crates recompiled), and the repo forbids redirecting
+target. A correctly basedired `sccache` is different. A machine-local wrapper
+measured 310 s -> 222 s for a from-scratch rebuild; with the single-basedir
+`SCCACHE_BASEDIRS=$(pwd)` it shared nothing between copies (5 Rust hits against
+1,959 misses, 0.25%, 2026-11-20). `scripts/sccache-basedirs.sh` lists every live
+copy root and supplies the matching per-root `--remap-path-prefix` flags, so
+unchanged crates can hit across copies. The crate being edited and the final
+links are never cached, so the copy is still the thing to keep warm. Evidence
+and the rejected options are in [docs/slop/rust-build-throughput.md](slop/rust-build-throughput.md).
 
 The push that updates the integration branch is gated. The suites a landing owes
 are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
