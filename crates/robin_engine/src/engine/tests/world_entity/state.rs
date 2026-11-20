@@ -1774,6 +1774,19 @@ fn summon_picks_the_lowest_ranked_staged_body_first() {
         )
         .expect("a staged body answers the call");
     assert_eq!(picked, rookie, "the weakest garrison body arrives first");
+    assert!(
+        engine
+            .summon_garrison(
+                TickCtx::new(&sim, &assets),
+                SummonRequest {
+                    faction: Camp::Lacklandists,
+                    entry: crate::engine::reinforcement::SummonEntry::Any,
+                    min_tier: 3,
+                },
+            )
+            .is_none(),
+        "a tier no staged body reaches must not summon anything"
+    );
 }
 
 #[test]

@@ -834,9 +834,19 @@ impl AiOwnerCtx<'_> {
         if !self.engine.control.sim_config.enable_offmap_reinforcements {
             return;
         }
-        if self.enemy().base.current_music_alert_status == crate::ai::AlertLevel::Green {
+        let alert = self.enemy().base.current_music_alert_status;
+        if alert == crate::ai::AlertLevel::Green {
             return;
         }
+        // The alert sets the floor, earlier arrivals escalate within the
+        // alarm, and the caller's own rank is the ceiling.
+        let floor = u8::from(alert == crate::ai::AlertLevel::Red);
+        let budget = &self.engine.ai.global.offmap_budget;
+        let prior_arrivals = budget.total.saturating_sub(budget.remaining);
+        let caller_rank = self.enemy().profile(&self.tcx.assets.profile_manager).rank as u8;
+        let min_tier = floor
+            .saturating_add(prior_arrivals.min(2) as u8)
+            .min(caller_rank);
         let faction = self
             .engine
             .expect_entity(self.owner, "offmap summon officer")
@@ -848,7 +858,7 @@ impl AiOwnerCtx<'_> {
             crate::engine::reinforcement::SummonRequest {
                 faction,
                 entry: crate::engine::reinforcement::SummonEntry::Any,
-                min_tier: 0,
+                min_tier,
             },
         ) {
             self.engine

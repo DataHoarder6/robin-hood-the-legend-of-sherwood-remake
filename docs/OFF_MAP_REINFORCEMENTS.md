@@ -63,11 +63,15 @@ Emitters:
 - The mission script, through one extension native
   `SummonReinforcements(faction, tier, count, entry)` registered beside the
   existing eight.
-- The player command, by generalising `MSG_SEND_REINFORCEMENT` from
-  `dead_pc: Option<EntityId>` to `(faction, tier, entry)`.
+- The player's trumpet stays on its original path: it draws a replacement
+  from `campaign.characters` through `create_reinforcement`. The agreed
+  generalisation of `MSG_SEND_REINFORCEMENT` is deliberately **not** done.
+  Routing it to the garrison summon would break the trumpet in every mission,
+  because no mission authors staged bodies for the player's camp. The generic
+  player/script surface is the `SummonReinforcements` native instead.
 
-The player's call is their own gang. There is no UI path that summons soldiers;
-the faction field exists so both sides share one implementation.
+There is no UI path that summons soldiers; the faction field on a summon
+exists so script and AI callers share one implementation.
 
 ## Entry
 
