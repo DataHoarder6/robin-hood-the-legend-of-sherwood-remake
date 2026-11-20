@@ -124,9 +124,16 @@ fn find_specialist<'a>(
 ) -> Option<&'a str> {
     let expected = specialist_name_for_type(sector.prod_type)?;
     for occ in &sector.occupants {
-        let ch = characters.get(occ.pc_description_idx)?;
-        let profile_idx = ch.character_profile_idx?;
-        let profile = profiles.get_character(profile_idx)?;
+        // One stale occupant must not hide a later valid specialist.
+        let Some(ch) = characters.get(occ.pc_description_idx) else {
+            continue;
+        };
+        let Some(profile_idx) = ch.character_profile_idx else {
+            continue;
+        };
+        let Some(profile) = profiles.get_character(profile_idx) else {
+            continue;
+        };
         if profile.profile_name.eq_ignore_ascii_case(expected) {
             return Some(&profile.profile_name);
         }
@@ -755,6 +762,17 @@ mod tests {
         let (chars, profiles) = make_party(&["Nobody"]);
         let s = make_sector(Type::MakeArrow, 10, vec![0]);
         assert_eq!(find_specialist(&s, &chars, &profiles), None);
+    }
+
+    #[test]
+    fn find_specialist_skips_invalid_occupants() {
+        let (chars, profiles) = make_party(&["Nobody", "Robin des bois"]);
+        // A stale description index must not hide a later valid specialist.
+        let s = make_sector(Type::MakeArrow, 10, vec![99, 1]);
+        assert_eq!(
+            find_specialist(&s, &chars, &profiles),
+            Some("Robin des bois")
+        );
     }
 
     #[test]
