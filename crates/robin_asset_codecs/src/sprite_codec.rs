@@ -1719,6 +1719,7 @@ pub fn decode_grids_auxref(
     aux: &[Option<AuxRef>],
     blob: &[u8],
 ) -> Result<Vec<Vec<u16>>> {
+    ensure_alphabet(alphabet)?;
     if aux.len() != dims.len() {
         return Err(anyhow!(
             "aux list length {} != grid count {}",
@@ -1853,6 +1854,7 @@ pub fn decode_grids_shipping(
     selfref: &[Option<SelfRef>],
     blob: &[u8],
 ) -> Result<Vec<Vec<u16>>> {
+    ensure_alphabet(alphabet)?;
     if selfref.len() != dims.len() {
         return Err(anyhow!(
             "selfref list length {} != grid count {}",
@@ -2076,6 +2078,15 @@ fn aux_tile_at(aux: &Option<AuxRef>, col: usize, row: usize) -> u16 {
 
 /// Decoder for [`encode_grids_multi`]; `base`/`base2` must match the
 /// encoding call exactly.
+/// An empty dictionary has no symbols to decode into; every uniform fallback
+/// would divide by `alphabet` in `RangeDecoder::decode_target`.
+fn ensure_alphabet(alphabet: u16) -> Result<()> {
+    if alphabet == 0 {
+        return Err(anyhow!("VQ alphabet must be at least 1"));
+    }
+    Ok(())
+}
+
 pub fn decode_grids_multi(
     alphabet: u16,
     dims: &[(u16, u16)],
@@ -2083,6 +2094,7 @@ pub fn decode_grids_multi(
     base2: Option<&[Option<&[u16]>]>,
     blob: &[u8],
 ) -> Result<Vec<Vec<u16>>> {
+    ensure_alphabet(alphabet)?;
     for (label, list) in [("base", base), ("base2", base2)] {
         if let Some(list) = list
             && list.len() != dims.len()
@@ -2791,5 +2803,14 @@ mod tests {
             indices: &[4096],
         }];
         assert!(encode_grids(4096, &g, None).is_err());
+    }
+
+    #[test]
+    fn zero_alphabet_is_rejected_without_panicking() {
+        let result = decode_grids(0, &[(1, 1)], None, &[0, 0, 0, 0, 0]);
+        assert!(
+            result.is_err(),
+            "zero alphabet must be rejected, not divide by zero"
+        );
     }
 }

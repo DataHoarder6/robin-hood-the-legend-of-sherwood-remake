@@ -88,7 +88,7 @@ pub fn validate_vq(
         .iter()
         .find(|&&index| usize::from(index) >= dictionary_entries)
     {
-        bail!("VQ dictionary index {index} exceeds {dictionary_entries} entries");
+        bail!("VQ dictionary index {index} is out of range for {dictionary_entries} entries");
     }
     Ok(())
 }
@@ -114,5 +114,14 @@ mod tests {
         assert!(validate_vq(&[1], 4, 1, 1).is_err());
         assert!(validate_vq(&[0], 3, 1, 1).is_err());
         validate_vq(&[0], 4, 1, 1).unwrap();
+    }
+
+    #[test]
+    fn vq_index_bound_message_is_accurate() {
+        let err = validate_vq(&[1], 4, 1, 1).unwrap_err().to_string();
+        assert!(
+            err.contains(">= 1") || err.contains("out of range"),
+            "{err}"
+        );
     }
 }
