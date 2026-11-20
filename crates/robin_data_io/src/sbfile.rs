@@ -889,7 +889,14 @@ impl SbFileSystem {
                 }
             }
             OverlayRoot::Zip(zip) => {
-                let prefix = format!("{}/", path.trim_end_matches('/').to_ascii_lowercase());
+                // A normalized root path is empty; it must match every ZIP
+                // entry, not entries under a spurious "/" prefix.
+                let trimmed = path.trim_end_matches('/');
+                let prefix = if trimmed.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}/", trimmed.to_ascii_lowercase())
+                };
                 for (key, spelling) in &zip.names {
                     if key.starts_with(&prefix) {
                         let rest = &spelling[prefix.len()..];
@@ -3248,6 +3255,28 @@ mod tests {
             assert!(files.list_overlay_dir(source, "/Data").is_err());
         }
         assert!(files.read_overlay("unmounted", "details.json").is_err());
+    }
+
+    #[test]
+    fn zip_overlay_lists_root_for_dot_path() {
+        let entries: &[(&str, &[u8])] = &[
+            ("details.json", b"{}"),
+            ("Data/Characters/Knight.rhs.d/manifest.json", b"manifest"),
+        ];
+        let files = SbFileSystem::new(Arc::new(robin_util::asset_fs::AssetVfs::new()));
+        assert_eq!(
+            files.add_overlay_zip_bytes_for_mission("memory", in_memory_zip(entries), None),
+            Ok(())
+        );
+        let root = files.list_overlay_dir("memory", ".").unwrap();
+        assert!(
+            root.iter().any(|e| e.name == "details.json" && !e.is_dir),
+            "root listing must include top-level files: {root:?}"
+        );
+        assert!(
+            root.iter().any(|e| e.name == "Data" && e.is_dir),
+            "root listing must include top-level directories: {root:?}"
+        );
     }
 
     #[test]
