@@ -7,7 +7,7 @@ cd -- "$repository"
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -72,6 +72,12 @@ case "$1" in
         cargo nextest run --locked -p robin_rs
         cargo test --locked -p robin_rs --doc
         cargo build --locked -p robin_rs --bin robin
+        ;;
+    client-check)
+        # Compile-only local iteration on the client: no nextest, no release
+        # build. The push gate stays authoritative; this is not substituted
+        # for `client-release` when landing.
+        cargo check --locked -p robin_rs --lib --bins
         ;;
     client-release)
         cargo nextest run --locked -p robin_rs --lib --no-default-features --features release
