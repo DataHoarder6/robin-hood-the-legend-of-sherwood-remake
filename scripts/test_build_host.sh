@@ -266,7 +266,7 @@ fi
 # --- the gate copy lives outside the root that every prune scans -------------
 if grep -Fq 'gate_root=build/robin-gate' "$source_root/scripts/remote-check.sh" &&
    grep -Fq 'remote_dir="~/$copy_root/$name"' "$source_root/scripts/remote-check.sh" &&
-   grep -Fq '"$d" = gate-shared' "$source_root/scripts/remote-check.sh"; then
+   grep -Fq '"\$d" = gate-shared' "$source_root/scripts/remote-check.sh"; then
     pass "gate copy has its own root and prune skips the shared copy"
 else
     fail "gate copy can be deleted by a prune mid-build"
