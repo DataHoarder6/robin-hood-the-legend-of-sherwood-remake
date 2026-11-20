@@ -848,6 +848,7 @@ impl AiOwnerCtx<'_> {
             crate::engine::reinforcement::SummonRequest {
                 faction,
                 entry: crate::engine::reinforcement::SummonEntry::Any,
+                min_tier: 0,
             },
         ) {
             self.engine

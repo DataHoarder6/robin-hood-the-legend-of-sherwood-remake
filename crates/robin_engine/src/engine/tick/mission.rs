@@ -280,8 +280,75 @@ impl EngineInner {
 
         // ── Send reinforcement messages ──────────────────────────
         self.tick_pc_reinforcement_arrivals(tcx);
+        self.tick_offmap_withdrawals(tcx);
 
         None
+    }
+
+    /// Once the level is calm, summoned bodies walk back out through the
+    /// nearest reinforcement door. When one actually leaves, its budget slot
+    /// is released. This uses the same leave-map AI state as a merry man
+    /// retreating through a reinforcement door.
+    pub(crate) fn tick_offmap_withdrawals(&mut self, tcx: TickCtx<'_>) {
+        let summoned: Vec<crate::element::EntityId> = self
+            .world
+            .npc_registry_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.get_entity(*id)
+                    .and_then(|entity| entity.soldier_data())
+                    .is_some_and(|soldier| soldier.summoned)
+            })
+            .collect();
+        // A body that has actually left frees its slot regardless of the
+        // current alert: entering the leave-map state raises Yellow.
+        for id in &summoned {
+            let active = self
+                .get_entity(*id)
+                .is_some_and(|entity| entity.element_data().active);
+            if !active {
+                self.ai.global.offmap_budget.release();
+                if let Some(crate::element::Entity::Soldier(soldier)) = self.get_entity_mut(*id) {
+                    soldier.soldier.summoned = false;
+                }
+            }
+        }
+        if self.ai.global.overall_villain_alert() != crate::ai::AlertLevel::Green {
+            return;
+        }
+        for id in summoned {
+            let active = self
+                .get_entity(id)
+                .is_some_and(|entity| entity.element_data().active);
+            if !active {
+                continue;
+            }
+            let position = self.live_ai_position(id);
+            let mut best: Option<(u32, f32)> = None;
+            for (index, door) in self.script_domains.interactables.doors.iter().enumerate() {
+                if door.door_type != crate::gate::DoorType::Reinforcement {
+                    continue;
+                }
+                let distance = (position.x - door.point_in.x)
+                    .abs()
+                    .max((position.y - door.point_in.y).abs());
+                if best.is_none_or(|(_, prior)| distance < prior) {
+                    best = Some((index as u32, distance));
+                }
+            }
+            if let Some((index, _)) = best {
+                self.enemy_ai_mut(id, "offmap withdrawal door")
+                    .base
+                    .my_door_index = crate::gate::DoorIndex::new(index);
+                self.duty_set_state(
+                    tcx,
+                    id,
+                    crate::ai::AiState::Fleeing,
+                    crate::ai::Substate::FleeingMerryManRunToLeaveMap,
+                );
+            }
+        }
     }
 
     /// Advance each reinforcement timer and create its replacement at expiry.

@@ -631,6 +631,10 @@ pub struct SoldierData {
     /// Authored off-map garrison body: inactive until a summon wakes it.
     #[serde(default)]
     pub staged: bool,
+    /// This body was woken by a summon and owes the budget a slot until it
+    /// leaves the level again.
+    #[serde(default)]
+    pub summoned: bool,
 }
 
 /// Civilian-specific data.
