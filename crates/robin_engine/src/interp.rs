@@ -569,6 +569,10 @@ impl Vm {
                 return stop;
             }
         }
+        // The last allowed step may have advanced the IP past the stream.
+        if program.get(self.ip as usize).is_none() {
+            return StopReason::RanOff;
+        }
         StopReason::StepLimit
     }
 
@@ -587,6 +591,9 @@ impl Vm {
             if let Some(stop) = self.step_with_host(*ins, Some(host)) {
                 return stop;
             }
+        }
+        if program.get(self.ip as usize).is_none() {
+            return StopReason::RanOff;
         }
         StopReason::StepLimit
     }
@@ -1688,5 +1695,12 @@ mod tests {
         ];
         let mut vm = Vm::new();
         assert_eq!(vm.run(&program), StopReason::ReturnedValue(308));
+    }
+
+    #[test]
+    fn run_up_to_reports_ran_off_when_last_step_reaches_end() {
+        let program = [Nop];
+        let mut vm = Vm::new();
+        assert_eq!(vm.run_up_to(&program, 1), StopReason::RanOff);
     }
 }

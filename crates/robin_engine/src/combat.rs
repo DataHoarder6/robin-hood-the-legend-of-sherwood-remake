@@ -394,8 +394,10 @@ pub fn add_concussion(
     let new_value = if amount > 0 {
         compute_concussion_effect(human.concussion_of_the_brain, amount as u16, life_points)
     } else {
-        let subtract = (-amount) as u16;
-        human.concussion_of_the_brain.saturating_sub(subtract)
+        // `unsigned_abs` also handles i16::MIN, whose negation overflows.
+        human
+            .concussion_of_the_brain
+            .saturating_sub(amount.unsigned_abs())
     };
 
     set_concussion(human, new_value, ctx)
@@ -1781,7 +1783,8 @@ pub(crate) fn propose_good_sword_strike_with_debug(
 
         // Increment boredom for the selected strike.
         if let Some(strike) = best_strike {
-            sword_strike_boredom[strike as usize] += SWORD_STRIKE_BOREDOM_INCREMENTATION;
+            let boredom = &mut sword_strike_boredom[strike as usize];
+            *boredom = boredom.saturating_add(SWORD_STRIKE_BOREDOM_INCREMENTATION);
         }
     } // if !only_parade
 
@@ -3175,5 +3178,82 @@ mod tests {
         let died = get_wounded(&mut life_points, 40_000, false, 100, false);
         assert!(died, "a 40,000-point hit must be lethal");
         assert_eq!(life_points, 0, "damage must never increase life points");
+    }
+
+    #[test]
+    fn add_concussion_handles_i16_min_without_overflow() {
+        let mut human = make_human();
+        human.concussion_of_the_brain = 300;
+        add_concussion(&mut human, i16::MIN, 100, &default_ctx());
+        assert_eq!(
+            human.concussion_of_the_brain, 0,
+            "i16::MIN represents a subtraction of 32768"
+        );
+    }
+
+    #[test]
+    fn sword_strike_boredom_increment_saturates() {
+        let mut profile = make_hth_profile();
+        // Drunken circular strikes skip the boredom malus; give H and I a
+        // usable arc so one of them is actually selected.
+        for strike in [SwordStrike::H, SwordStrike::I] {
+            profile.thrusts[strike as usize] = ThrustProfile {
+                kind: WeaponThrustKind::TrueCircle,
+                minimal_distance: 0,
+                maximal_distance: 100,
+                cutting: 25,
+                ..Default::default()
+            };
+        }
+        let ctx = StrikeSelectionContext {
+            attacker_profile: &profile,
+            fighting_ability: 100,
+            blood_alcohol: 50,
+            is_rank_soldier: false,
+            attacker_direction: 0,
+            attacker_elevation: 0.0,
+            attacker_camp: Camp::Royalists,
+            diplomacy: &crate::diplomacy::DiplomacyState::default(),
+            is_swordfighting: true,
+            opponent_time_limit: Some(1000),
+            strike_startup_frames: None,
+            parry_startup_frames: None,
+            is_npc: true,
+        };
+        let victim = NearbyVictim {
+            is_active: true,
+            eligible_for_regular_strikes: true,
+            dx: 20.0,
+            dy_stretched: 0.0,
+            distance: 20.0,
+            direction_sector: 0,
+            camp: Camp::Lacklandists,
+            facing_direction: 7,
+            elevation: 0.0,
+            life_points: 35,
+            defender_profile: None,
+            is_primary_target: true,
+            is_walking_with_sword: false,
+        };
+        let second = NearbyVictim {
+            is_primary_target: false,
+            dx: -20.0,
+            direction_sector: 8,
+            ..victim
+        };
+        let mut boredom = vec![u16::MAX - 10; NUM_NORMAL_SWORD_STRIKES];
+        let result = propose_good_sword_strike(
+            &crate::sim_rng::test_context(),
+            &ctx,
+            &[victim, second],
+            &mut boredom,
+            false,
+        );
+        assert!(matches!(result, Some(ProposedCombatAction::Strike(_))));
+        assert_eq!(
+            boredom.iter().max().copied(),
+            Some(u16::MAX),
+            "increment must saturate, not overflow"
+        );
     }
 }

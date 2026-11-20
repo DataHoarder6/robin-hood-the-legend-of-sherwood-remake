@@ -389,7 +389,7 @@ pub fn heal(life_points: &mut i16, amount: i16, invulnerable: bool) {
         return;
     }
     let summed = (*life_points as i32).saturating_add(amount as i32);
-    let capped = summed.min(LIFEPOINTS_PC as i32) as i16;
+    let capped = summed.clamp(0, LIFEPOINTS_PC as i32) as i16;
     *life_points = if invulnerable { LIFEPOINTS_PC } else { capped };
 }
 
@@ -871,5 +871,15 @@ mod tests {
         assert_eq!(ps2.name, "Little John");
         assert_eq!(ps2.get_ammo(Action::Bow), 15);
         assert_eq!(ps2.human_status.hand_to_hand.capacity, 80);
+    }
+
+    #[test]
+    fn heal_never_drives_life_points_negative() {
+        let mut life_points = 10i16;
+        heal(&mut life_points, -25, false);
+        assert_eq!(
+            life_points, 0,
+            "a heal cannot reduce life points below zero"
+        );
     }
 }
