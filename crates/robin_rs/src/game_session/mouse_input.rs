@@ -1947,6 +1947,22 @@ fn sherwood_rail_press(
     SherwoodRailPress::Missed
 }
 
+/// Whether a mouse release belongs to the Sherwood HUD rather than the world.
+///
+/// The rail's press is consumed on MouseDown (`sherwood_rail_press`); the paired
+/// MouseUp normally arrives in a later frame with no press to claim it. Without
+/// this check it falls through `on_left_mouse_up` to `on_world_click` and walks
+/// the selection to the pixel under the button instead of the deployment zone.
+fn sherwood_release_is_hud_owned(
+    events: &[GameEvent],
+    layout: &SherwoodHudLayout,
+    rail: SherwoodRail,
+) -> bool {
+    events.iter().any(
+        |event| matches!(event, GameEvent::MouseUp(x, y, 1) if layout.claims_point(rail, *x, *y)),
+    )
+}
+
 /// Commands one press on the Sherwood `GoToExit` control issues.
 ///
 /// A single press walks the selection: the script records one walking order
@@ -2147,7 +2163,16 @@ pub(super) fn handle_sherwood_hud_buttons(
             match sherwood_rail_press(events, sherwood_layout, *sherwood_rail, *sherwood_enable) {
                 SherwoodRailPress::Button(click) => click,
                 SherwoodRailPress::Claimed => return HandlerAction::Continue,
-                SherwoodRailPress::Missed => return HandlerAction::Proceed,
+                SherwoodRailPress::Missed => {
+                    // The paired MouseUp carries no press to claim it. The rail
+                    // owns those pixels, so swallow the release before the
+                    // world-click resolver can walk the selection to the
+                    // button's pixel instead of the deployment zone.
+                    if sherwood_release_is_hud_owned(events, sherwood_layout, *sherwood_rail) {
+                        return HandlerAction::Continue;
+                    }
+                    return HandlerAction::Proceed;
+                }
             };
         match click.button {
             SherwoodButton::DisplayCampaignMap => {
@@ -3248,6 +3273,34 @@ mod tests {
             SherwoodRailPress::Claimed => panic!("the GoToExit gate is open in this fixture"),
             SherwoodRailPress::Missed => panic!("the press missed the GoToExit rect"),
         }
+    }
+
+    /// The GoToExit press is consumed on MouseDown; its paired MouseUp lands
+    /// in a later frame with no press to claim it.  That release must still be
+    /// recognised as HUD-owned, otherwise `on_left_mouse_up` falls through to
+    /// `on_world_click` and walks the selection to the pixel under the button
+    /// instead of the deployment zone.
+    #[test]
+    fn mouse_release_over_sherwood_rail_is_hud_owned() {
+        let (layout, _enable) = post_commit_rail();
+        let rail = SherwoodRail::PostCommit;
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        let over = [GameEvent::MouseUp(rect.x() + 2, rect.y() + 2, 1)];
+        let away = [GameEvent::MouseUp(0, 0, 1)];
+        let right_button = [GameEvent::MouseUp(rect.x() + 2, rect.y() + 2, 3)];
+
+        assert!(
+            sherwood_release_is_hud_owned(&over, &layout, rail),
+            "a left release over the rail belongs to the HUD"
+        );
+        assert!(
+            !sherwood_release_is_hud_owned(&away, &layout, rail),
+            "a release on the world must reach the world resolver"
+        );
+        assert!(
+            !sherwood_release_is_hud_owned(&right_button, &layout, rail),
+            "only the left release is the paired world click"
+        );
     }
 
     /// Same input pair, two outcomes: the single press dispatches the walk
