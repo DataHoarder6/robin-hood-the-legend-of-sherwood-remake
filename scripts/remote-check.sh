@@ -186,6 +186,10 @@ cd $remote_dir
 git update-ref refs/heads/main refs/robin/check
 git symbolic-ref HEAD refs/heads/main
 git read-tree HEAD
+# rsync -a preserved the source tree's old mtime. --prune retires gate copies by
+# directory age, so a copy synced today must look born today or a concurrent
+# prune deletes it mid-build (observed 2026-11-20).
+touch .
 # stdout is the copy path alone, so callers can capture it.
 git rev-parse HEAD >&2
 EOF

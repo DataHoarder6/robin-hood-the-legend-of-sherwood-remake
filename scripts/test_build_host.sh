@@ -256,5 +256,12 @@ else
     fail "prune left old=$(test -e "$work/prune-root/gate-old" && echo yes || echo no) new=$(test -e "$work/prune-root/gate-new" && echo yes || echo no) live=$(test -e "$work/prune-root/live" && echo yes || echo no)"
 fi
 
+# --- a fresh sync keeps a fresh mtime so prune cannot delete it mid-build -----
+if grep -Fq 'touch .' "$source_root/scripts/remote-check.sh"; then
+    pass "sync refreshes the gate copy mtime"
+else
+    fail "rsync -a leaves the source mtime; a fresh gate copy looks expired to prune"
+fi
+
 printf '\n%s passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
