@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
 
-use super::{ResourceId, ResourceManager};
+use super::ResourceId;
 
 /// Rewrite the payloads of the named `TEXT` nodes in `bytes`, leaving every
 /// other byte of the archive untouched. Node count, node order and all
@@ -111,6 +111,7 @@ fn encode_text_payload(strings: &[String]) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::picture::{Picture, PixelFormat, SixteenPacking};
+    use crate::resource_manager::ResourceManager;
 
     fn resource_file(tag: &[u8; 4], id: i32, payload: &[u8]) -> Vec<u8> {
         let mut out = tag.to_vec();
