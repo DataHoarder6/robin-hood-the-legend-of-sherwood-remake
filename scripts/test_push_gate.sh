@@ -108,10 +108,10 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$crates_head" "$plan_head" 2>&1) || status=$?
 expect_status 0 'a wasm build-plan change gates the wasm suite'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites wasm' ]; then
-    pass 'the build-plan change selects wasm, the suite that builds the release artifact'
+if [ "$selected" = '--suites wasm web' ]; then
+    pass 'the build-plan change selects wasm and web, the suites that build the release artifact and gate its JS'
 else
-    fail "the build-plan change selects wasm (selected '$selected')"
+    fail "the build-plan change selects wasm and web (selected '$selected')"
 fi
 
 printf '{}' >flake.nix

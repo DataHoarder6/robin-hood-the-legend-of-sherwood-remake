@@ -8,12 +8,19 @@
   "scripts": {
     "test": "node --test *.test.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint *.ts",
+    "lint:fix": "oxlint --fix *.ts",
+    "fmt": "oxfmt '*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
+    "fmt:check": "oxfmt --check '*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
     "verify": "pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
     "@types/node": "^26.5.1",
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2003",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.3.4"

@@ -111,6 +111,11 @@ fi
 if printf '%s\n' "$paths" | grep -qE '(^docs/|\.md$)'; then
     suites+=(docs)
 fi
+# wasm-www JS/TS and its configs run the `web` suite. The release scripts'
+# JS/TS is already gated by `tooling` (pnpm --dir scripts/release verify).
+if printf '%s\n' "$paths" | grep -qE '^wasm-www/.*\.(js|jsx|mjs|cjs|ts|tsx|json|ya?ml)$'; then
+    suites+=(web)
+fi
 
 # The scenario corpus keeps its own cheap gate beside `tooling`: this runs the
 # real corpus against docs/multiplayer/HARNESS.md, where the suite's unit tests
