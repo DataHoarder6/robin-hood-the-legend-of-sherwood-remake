@@ -92,9 +92,31 @@ require_host() {
     exit 1
 }
 
+# Each worktree's copy keeps its own target/ tree. On a 12-core host a dozen
+# copies fill the disk, and Nix then fails with an opaque SQLite I/O error.
+# Refuse a sync below the floor instead: the runner says what to prune, and the
+# daily timer on the runtime keeps the floor from being reached again.
+min_free_gb=${ROBIN_MIN_FREE_GB:-40}
+require_disk() {
+    local available
+    available=$(ssh "$host" "df -B1 --output=avail / 2>/dev/null | tail -1")
+    case $available in
+        ''|*[!0-9]*) printf 'remote-check: cannot read free space on %s\n' "$host" >&2; return 1 ;;
+    esac
+    local min_bytes=$((min_free_gb * 1024 * 1024 * 1024))
+    if (( available < min_bytes )); then
+        printf 'remote-check: %s has %d GB free, below the %d GB floor; sync refused\n' \
+            "$host" "$((available / 1024 / 1024 / 1024))" "$min_free_gb" >&2
+        printf 'remote-check: run `%s --prune` on the runtime to remove copies whose worktree is gone, then retry\n' \
+            "$repository/scripts/remote-check.sh" >&2
+        return 1
+    fi
+}
+
 sync_worktree() {
     remote_dir="~/$remote_root/$name"
     printf 'remote-check: sync %s -> %s:%s\n' "$repository" "$host" "$remote_dir" >&2
+    require_disk
 
     # --delete keeps a copy faithful to this worktree; the Cargo target directory
     # is excluded so the copy keeps its build cache across runs. The `.git` on the

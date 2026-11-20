@@ -85,7 +85,13 @@ while [[ ${1:-} == --* ]]; do shift; done
 exec "$@"
 STUB
 
-for stub in ssh rsync git nix systemd-inhibit; do chmod +x "$stubs/$stub"; done
+cat >"$stubs/df" <<'STUB'
+#!/usr/bin/env bash
+free=${FIXTURE_FREE_GB:-9999}
+printf '%s\n' "$((free * 1024 * 1024 * 1024))"
+STUB
+
+for stub in ssh rsync git nix systemd-inhibit df; do chmod +x "$stubs/$stub"; done
 export PATH="$stubs:$PATH"
 export REAL_GIT=$real_git
 
@@ -148,6 +154,19 @@ for expected in 'STABLE format AAA' 'STABLE wasm BBB'; do
         failures=$((failures + 1))
     fi
 done
+
+# A full build host must refuse before rsync touches the copy.
+set +e
+(cd "$work/repoA" && FIXTURE_FREE_GB=1 bash scripts/remote-check.sh format disk-floor) \
+    >"$work/disk.out" 2>&1
+disk_status=$?
+set -e
+if [[ $disk_status -ne 0 ]] && grep -q 'below the .* GB floor' "$work/disk.out"; then
+    printf 'ok   full disk refuses the sync\n'
+else
+    printf 'FAIL full disk did not refuse the sync (status %s)\n' "$disk_status"
+    failures=$((failures + 1))
+fi
 
 printf '\n%s checks failed\n' "$failures"
 (( failures == 0 ))
