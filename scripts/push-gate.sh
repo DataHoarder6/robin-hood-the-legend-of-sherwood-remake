@@ -126,6 +126,9 @@ fi
 # built. remote-check pushes this checkout to the build host, and that push would
 # enter the pre-push hook again; the copy is a build cache, not an integration.
 printf 'push-gate: %s\n' "${suites[*]}" >&2
+# Gate copies are keyed by the tree being proved, so two pushes of one tree
+# share a build instead of paying for it twice.
+export ROBIN_GATE_TREE=$(git rev-parse "${head}^{tree}")
 SKIP_PUSH_GATE=1 bash scripts/remote-check.sh --suites "${suites[@]}" || {
     printf 'push-gate: %s failed; the integration branch stays where it is.\n' "${suites[*]}" >&2
     printf 'push-gate: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2

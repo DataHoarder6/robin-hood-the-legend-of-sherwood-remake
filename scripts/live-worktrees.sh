@@ -12,4 +12,5 @@ repository=$(git rev-parse --show-toplevel)
 git -C "$repository" worktree list --porcelain |
     sed -n 's/^worktree //p' |
     while IFS= read -r path; do basename -- "$path"; done |
+    grep -v '^gate-' |
     sort -u
