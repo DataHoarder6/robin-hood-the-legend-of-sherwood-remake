@@ -1,7 +1,7 @@
 # Working in parallel: symptoms, rules, commands
 
-Last verified 2026-11-17 against `5a15890c3` on the runtime's checkout; the
-sizes and commit counts below are that day's measurements.
+Last verified 2026-11-20. The sizes and commit counts below are 2026-11-17
+measurements; the gate section records the current mechanism.
 
 Every trap here has cost a session real work. Each section starts with what you
 see, then the rule that avoids it and the command that applies the rule.
@@ -80,6 +80,28 @@ scripts/remote-check.sh engine
 scripts/remote-check.sh --list     # copies and sizes on the build host
 scripts/remote-check.sh --prune    # drop every copy but this one
 ```
+
+## "Every agent's gate takes an hour"
+
+Symptom: 3–5 agents each compile the same wasm/LLVM graph; the build host runs
+16 compilers on 12 cores and every gate gets slower.
+
+Rule: gate on the build host with one copy per pushed tree, not per worktree.
+`sccache` shares rustc results across copies; gate copies are keyed by the
+pushed tree and expire after `GATE_COPY_TTL_DAYS` (default 7), while interactive
+copies keep their worktree names. Each remote gate runs in a bounded user
+scope, so a killed harness leaves no build behind. Keep **one gate in flight**
+across agents: queue behind the other agent's `runbg` unit instead of starting
+a competing gate.
+
+```sh
+ROBIN_BUILD_HOST=minipc scripts/remote-check.sh --suites format lint  # one sync, one lock
+ROBIN_BUILD_HOST=minipc scripts/land.sh                                # rebase, gate, push, read-back
+```
+
+The default `build-host` alias is stale; set the override. Mechanics, primary
+sources and the measurement checklist are in
+[`docs/slop/BUILD_CACHE_AND_QUEUE.md`](slop/BUILD_CACHE_AND_QUEUE.md).
 
 ## "Connection refused when joining after an update"
 

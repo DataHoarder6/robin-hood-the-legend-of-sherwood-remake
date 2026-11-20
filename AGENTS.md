@@ -24,6 +24,9 @@
 - This workspace does not compile on every host: `scripts/remote-check.sh SUITE`
   copies this worktree to the build host, wakes `build-host`, runs the suite in the
   pinned devShell under a per-copy lock, and prunes copies with `--prune`.
+- Gate on the build host one at a time; `docs/PARALLEL_AGENTS.md` ("Every
+  agent's gate takes an hour") owns the shared-cache, tree-keyed copy and scope
+  rules, including the `ROBIN_BUILD_HOST=minipc` override.
 - `nix develop` gives the same shell locally, with the clang + wild that
   `.cargo/config.toml` expects; without them links are slow and warn.
 - `scripts/check-quality.sh SUITE` is the only test entry point; `docs/TESTING.md`
