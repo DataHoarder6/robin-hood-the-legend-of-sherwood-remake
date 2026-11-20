@@ -647,6 +647,62 @@ mod dispatch_tests {
         }
     }
 
+    /// A console mission-end cheat is the same decision as `/mission-result`:
+    /// it must be a replicated command every seat applies in one frame, not a
+    /// local engine mutation that leaves the host ahead of its peers. Applying
+    /// it locally is what made a joining seat finalize achievements inside a
+    /// rollback and panic at `achievement effect after finalization`.
+    #[test]
+    fn a_console_mission_end_queues_the_authoritative_command_instead_of_a_local_cheat() {
+        use robin_engine::game_operation::{GameCode, MissionResult};
+        use robin_engine::player_command::{PlayerCommand, PlayerId};
+        for (command, result, code) in [
+            ("WIN", MissionResult::Won, GameCode::LevelSucceeded),
+            ("LOSE", MissionResult::Lost, GameCode::LevelFailed),
+        ] {
+            let (mut engine, assets) =
+                robin_engine::test_support::fresh_engine_sized(1024.0, 768.0);
+            let mut ingress = SessionIngress::detached_for_test();
+            let reply = ingress.enqueue_for_test(HttpPayload::Console(command.into()));
+            let mut selected = None;
+            let queued = ingress.drain_headless(&mut engine, &assets, &mut selected);
+            let Ok(ReplyBody::Json(document)) = reply.try_recv().unwrap() else {
+                panic!("{command}: the request answers with its admission document");
+            };
+            assert_eq!(
+                document["operation"],
+                code.wire_name(),
+                "{command}: the reply names the code the tick will return"
+            );
+            assert_eq!(
+                queued.commands.len(),
+                1,
+                "{command}: a mission end is one authoritative command, not a local cheat"
+            );
+            assert_eq!(queued.commands[0].player_id, PlayerId::HOST);
+            assert!(
+                matches!(
+                    queued.commands[0].command,
+                    PlayerCommand::ForceMissionEnd { result: queued } if queued == result
+                ),
+                "{command}: the queued command carries the decision"
+            );
+            let tick = engine
+                .advance_frame(
+                    &assets,
+                    engine_api::SimulationFrameInput::new(
+                        queued.commands.into_iter().map(Into::into).collect(),
+                    ),
+                )
+                .expect("apply the mission-end command");
+            assert_eq!(
+                tick.game_code(),
+                code,
+                "{command}: the tick returns the code"
+            );
+        }
+    }
+
     /// No mission is a refusal with a reason, never a silent no-op that leaves
     /// a driver believing it ended something.
     #[test]
