@@ -129,5 +129,21 @@ else
     fail "the tool change selects wasm and tooling (selected '$selected')"
 fi
 
+# A docs-only landing must select the docs link check rather than nothing.
+mkdir -p docs
+printf '# A doc\n' >docs/only.md
+git add docs/only.md
+git commit --quiet -m docs-only
+docs_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$tools_head" "$docs_head" 2>&1) || status=$?
+expect_status 0 'a docs-only change runs a suite'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites docs' ]; then
+    pass 'the docs-only change selects the deterministic docs gate'
+else
+    fail "the docs-only change selects docs (selected '$selected')"
+fi
+
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

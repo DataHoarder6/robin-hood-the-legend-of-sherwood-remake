@@ -107,6 +107,10 @@ fi
 if [ "$tools_changed" = 1 ]; then
     suites+=(tooling)
 fi
+# A docs-only landing would otherwise select nothing and run zero checks.
+if printf '%s\n' "$paths" | grep -qE '(^docs/|\.md$)'; then
+    suites+=(docs)
+fi
 
 # The scenario corpus keeps its own cheap gate beside `tooling`: this runs the
 # real corpus against docs/multiplayer/HARNESS.md, where the suite's unit tests
