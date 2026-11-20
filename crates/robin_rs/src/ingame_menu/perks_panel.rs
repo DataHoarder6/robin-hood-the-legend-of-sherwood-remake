@@ -22,7 +22,7 @@ use super::resources::{
     MT_STR_PERK_AUTO_LOOT, MT_STR_PERK_HINT, MT_STR_PERK_KEEP_MOVING_IN_COMBAT,
     MT_STR_PERK_LAST_CLOVER, MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
     MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK, MT_STR_PERK_OWNED, MT_STR_PERK_ROW,
-    MT_STR_PERK_UNAFFORDABLE, MT_TTL_SHERWOOD_PERKS,
+    MT_STR_PERK_UNAFFORDABLE, MT_TTL_SHERWOOD_PERKS, substitute_integer,
 };
 use super::trading::substitute;
 use super::widget_bridge::{self, ModalInputState, ModalScreenIo, ScreenFrame, ScreenKey};
@@ -331,10 +331,7 @@ impl PerksPanelModalState {
             );
         }
         if let Some(font) = resources.label_font_any() {
-            let balance = substitute(
-                &resources.menu_text.get(MT_STR_AMULETS),
-                &[&self.clovers.to_string()],
-            );
+            let balance = balance_text(&resources.menu_text.get(MT_STR_AMULETS), self.clovers);
             render_text_virt_font(renderer, font, transform, &balance, ROW_X, 57);
             for index in self.visible_range() {
                 let row = &self.rows[index];
@@ -354,18 +351,12 @@ impl PerksPanelModalState {
                 // The row's cost is priced in the same vocabulary the HUD's
                 // clover counter uses, so the panel and the HUD agree on the
                 // unit without a second word for it.
-                let cost = substitute(
-                    &resources.menu_text.get(MT_STR_AMULETS),
-                    &[&row.cost.to_string()],
-                );
-                let line = substitute(
+                let line = perk_row_text(
                     &resources.menu_text.get(MT_STR_PERK_ROW),
-                    &[
-                        &row.character_name,
-                        &resources.menu_text.get(perk_label_key(row.perk)),
-                        &cost,
-                        &resources.menu_text.get(perk_state_key(row.state)),
-                    ],
+                    &resources.menu_text.get(MT_STR_AMULETS),
+                    row,
+                    &resources.menu_text.get(perk_label_key(row.perk)),
+                    &resources.menu_text.get(perk_state_key(row.state)),
                 );
                 render_text_virt_font(renderer, font, transform, &line, ROW_X, y);
             }
@@ -401,6 +392,36 @@ fn perk_state_key(state: PerkPurchaseState) -> usize {
         PerkPurchaseState::Unaffordable => MT_STR_PERK_UNAFFORDABLE,
         PerkPurchaseState::WouldSpendLastClover => MT_STR_PERK_LAST_CLOVER,
     }
+}
+
+/// Render the clover balance line from the `MT_STR_AMULETS` template.
+///
+/// Pure so the price token can be asserted without a renderer or a window.
+/// The loaded Level.res string is `"Amulets: %i"` and the Rust fallback is
+/// `"Amulets: %d"`, so expansion uses `substitute_integer`, which handles
+/// both — unlike the trading `substitute`, which knows only `%u/%d/%s`.
+fn balance_text(amulets_template: &str, clovers: i32) -> String {
+    substitute_integer(amulets_template, i64::from(clovers))
+}
+
+/// Render one perk row from the localized row and amulets templates.
+///
+/// `row_template` (`MT_STR_PERK_ROW`) carries only `%s` placeholders, so it
+/// still expands with the trading `substitute`; the amulets template carries
+/// one numeric price token and expands with `substitute_integer`.  Pure so
+/// the rendered cost can be asserted without a renderer.
+fn perk_row_text(
+    row_template: &str,
+    amulets_template: &str,
+    row: &PerkPurchaseRow,
+    perk_label: &str,
+    perk_state: &str,
+) -> String {
+    let cost = substitute_integer(amulets_template, i64::from(row.cost));
+    substitute(
+        row_template,
+        &[&row.character_name, perk_label, &cost, perk_state],
+    )
 }
 
 #[cfg(test)]
@@ -617,6 +638,43 @@ mod tests {
             outcome
                 .and_then(PerksPanelOutcome::player_command)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn perk_row_renders_numeric_cost_from_the_loaded_i_template() {
+        // Level.res ships "Amulets: %i"; the Rust fallback ships
+        // "Amulets: %d".  Both must render the numeric cost, never the
+        // literal printf token.
+        let rows = perk_purchase_rows(&[character("Robin", &[])], &["Robin".to_owned()], PURSE);
+        let row = &rows[0];
+        let line = super::perk_row_text(
+            "%s — %s — %s — %s",
+            "Amulets: %i",
+            row,
+            "Keep moving in combat",
+            "Affordable",
+        );
+        assert!(
+            line.contains(&row.cost.to_string()),
+            "the row must show the numeric cost: {line:?}"
+        );
+        assert!(
+            !line.contains("%i"),
+            "the row must not leak the loaded %i token: {line:?}"
+        );
+    }
+
+    #[test]
+    fn balance_renders_numeric_clovers_from_the_loaded_i_template() {
+        let text = super::balance_text("Amulets: %i", PURSE);
+        assert!(
+            text.contains(&PURSE.to_string()),
+            "the balance must show the numeric clover count: {text:?}"
+        );
+        assert!(
+            !text.contains("%i"),
+            "the balance must not leak the loaded %i token: {text:?}"
         );
     }
 

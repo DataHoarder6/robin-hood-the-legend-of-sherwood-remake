@@ -38,6 +38,7 @@ issue. `out-of-scope` — the behaviour is the original's, or the platform's.
 | D01 | release | the shipped Windows exe exits `0xc0000005` before `main`, even for `--version`; MinGW wrote TLS `SECREL32` offsets as `.text` base relocations | ship a `windows-gnu` release and run it on Windows | `native-release.yml`: the built exe starts and carries no `.text` base relocations (`docs/WINDOWS.md`) | fixed |
 | D02 | identity | a client reconnecting across a mission start was refused as an incompatible seat, so every session died at the first win or loss | finish a mission while a client is reconnecting | `reconnect_rejects_identity_change_and_adopts_host_context` (`docs/HANDOVER.md` §5) | fixed |
 | D03 | generation | a snapshot-transition prepare was applied to the transport generation that did not receive it, so a lost commit suppressed the replacement mission's `begin-sim` and the restart deadlocked | drop a client's `CommitSnapshotTransition` at the `transition-commit` barrier, then restart the mission (#43) | `H20` | fixed |
+| D04 | presentation | the Sherwood perks panel showed the literal `%i` as the clover price when game data was loaded, because the row and balance lines used the `%u/%d/%s`-only trading substitute on `"Amulets: %i"` | launch with full-game data (`Level.res` ships `"Amulets: %i"`; the Rust fallback ships `%d`) and open the Sherwood perks panel | `perk_row_renders_numeric_cost_from_the_loaded_i_template` and `balance_renders_numeric_clovers_from_the_loaded_i_template` (`client`) | fixed |
 
 ## How a row gets here
 
