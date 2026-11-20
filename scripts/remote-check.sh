@@ -219,21 +219,7 @@ EOF
         # someone keeps beside the copies is not this script's to delete.
         ssh "$host" bash -s <<EOF
 set -euo pipefail
-cd ~/$remote_root 2>/dev/null || exit 0
-keep=($keep)
-for d in */; do
-    d=\${d%/}
-    [ -f "\$d/Cargo.toml" ] || continue
-    kept=0
-    for k in "\${keep[@]}"; do [ "\$d" = "\$k" ] && kept=1; done
-    [ "\$kept" = 1 ] && continue
-    case "\$d" in
-        gate-*)
-            [ -n "\$(find "\$d" -maxdepth 0 -mtime +$gate_ttl)" ] || continue
-            ;;
-    esac
-    rm -rf -- "\$d" "\$d.lock"
-done
+bash scripts/prune-copies.sh ~/$remote_root $gate_ttl $keep
 du -sh ~/$remote_root 2>/dev/null || true
 EOF
         exit 0
@@ -320,7 +306,7 @@ if ((multi)); then
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 cd $remote_dir
-systemd-run --user --scope --unit=build-${name} \
+systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
     systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
@@ -339,7 +325,7 @@ else
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 cd $remote_dir
-systemd-run --user --scope --unit=build-${name} \
+systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
     systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\

@@ -84,6 +84,36 @@ else
     fail "live-worktrees printed: $live"
 fi
 
+# --- basedir changes restart sccache and remap each copy root ------------------
+mkdir -p "$HOME/bin" "$HOME/.cache"
+cat > "$HOME/bin/sccache" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = --stop-server ] && touch "$HOME/sccache-stopped"
+exit 0
+STUB
+chmod +x "$HOME/bin/sccache"
+mkdir -p "$HOME/build/robin/a" "$HOME/build/robin/b"
+rm -f "$HOME/.cache/sccache-basedirs.set" "$HOME/sccache-stopped"
+PATH="$HOME/bin:$PATH" bash "$source_root/scripts/sccache-basedirs.sh" >/dev/null
+if [ -e "$HOME/sccache-stopped" ]; then
+    pass "a changed basedir set restarts the sccache daemon"
+else
+    fail "sccache was not restarted when the basedir set changed"
+fi
+rm -f "$HOME/sccache-stopped"
+PATH="$HOME/bin:$PATH" bash "$source_root/scripts/sccache-basedirs.sh" >/dev/null
+if [ -e "$HOME/sccache-stopped" ]; then
+    fail "an unchanged basedir set restarted sccache again"
+else
+    pass "an unchanged basedir set leaves the daemon running"
+fi
+remap=$(bash "$source_root/scripts/sccache-basedirs.sh" --remap)
+case "$remap" in
+    *"--remap-path-prefix=$HOME/build/robin/a=/robin"*"--remap-path-prefix=$HOME/build/robin/b=/robin"*)
+        pass "remap flags use each copy root, not the shared parent" ;;
+    *) fail "remap flags were: $remap" ;;
+esac
+
 # --- sccache basedirs name every copy root ------------------------------------
 mkdir -p "$HOME/build/robin/a" "$HOME/build/robin/b"
 : > "$HOME/build/robin/not-a-copy"
@@ -104,6 +134,14 @@ if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -
 else
     fail "remote-check does not set CARGO_INCREMENTAL=0 in both commands"
 fi
+for flag in CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS; do
+    if grep -F "$flag" "$source_root/scripts/remote-check.sh" >/dev/null && \
+       grep -F 'remap-path-prefix=' "$source_root/scripts/remote-check.sh" >/dev/null; then
+        pass "remote gates inject per-root remap flags for $flag"
+    else
+        fail "remote gates do not inject remap flags for $flag"
+    fi
+done
 if grep -F 'SCCACHE_BASEDIRS=\"' "$source_root/scripts/remote-check.sh" >/dev/null; then
     fail "the remote heredoc has literal backslashes before quotes"
 else
@@ -112,7 +150,7 @@ fi
 
 # --- every remote gate runs in a bounded transient scope ----------------------
 rc=0
-for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=build-' 'RuntimeMaxSec=7200' 'TimeoutStopSec=30'; do
+for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=build-${name}-$$' 'RuntimeMaxSec=7200' 'TimeoutStopSec=30'; do
     count=$(grep -F -c -- "$needle" "$source_root/scripts/remote-check.sh" || true)
     if [ "$count" -ge 2 ]; then
         pass "remote-check has two scoped commands with $needle"
@@ -202,6 +240,19 @@ if [ "$timeout_rc" -ne 0 ] && grep -F 'timed out' "$work/timeout.err" >/dev/null
     pass "a blocked waiter exits with a named timeout"
 else
     fail "timeout rc=$timeout_rc, stderr: $(cat "$work/timeout.err")"
+fi
+
+# --- prune removes only expired gate copies -----------------------------------
+mkdir -p "$work/prune-root/gate-old" "$work/prune-root/gate-new" "$work/prune-root/live"
+for d in gate-old gate-new live; do : > "$work/prune-root/$d/Cargo.toml"; done
+touch -d '30 days ago' "$work/prune-root/gate-old"
+bash "$source_root/scripts/prune-copies.sh" "$work/prune-root" 7 'live' >/dev/null 2>&1 || true
+if [ ! -e "$work/prune-root/gate-old" ] && \
+   [ -e "$work/prune-root/gate-new" ] && \
+   [ -e "$work/prune-root/live" ]; then
+    pass "prune removes an expired gate copy and keeps fresh and owned copies"
+else
+    fail "prune left old=$(test -e "$work/prune-root/gate-old" && echo yes || echo no) new=$(test -e "$work/prune-root/gate-new" && echo yes || echo no) live=$(test -e "$work/prune-root/live" && echo yes || echo no)"
 fi
 
 printf '\n%s passed, %s failed\n' "$pass_count" "$failures"
