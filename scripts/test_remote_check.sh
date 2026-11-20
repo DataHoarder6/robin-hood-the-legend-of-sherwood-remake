@@ -101,7 +101,16 @@ free=${FIXTURE_FREE_GB:-9999}
 printf '%s\n' "$((free * 1024 * 1024 * 1024))"
 STUB
 
-for stub in ssh rsync git nix systemd-inhibit df; do chmod +x "$stubs/$stub"; done
+# The devShell toolchain preflight runs cargo/rustc through the nix stub, so
+# stub the versions too: the fixture overrides HOME and has no rustup toolchain.
+for tool in cargo rustc; do
+    cat >"$stubs/$tool" <<STUB
+#!/usr/bin/env bash
+printf '%s 1.0.0-fixture\n' '$tool'
+STUB
+done
+
+for stub in ssh rsync git nix systemd-inhibit df cargo rustc; do chmod +x "$stubs/$stub"; done
 export PATH="$stubs:$PATH"
 export REAL_GIT=$real_git
 
