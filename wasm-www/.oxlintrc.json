@@ -1,0 +1,10 @@
+{
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  }
+}
