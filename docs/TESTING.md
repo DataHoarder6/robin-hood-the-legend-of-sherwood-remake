@@ -115,6 +115,11 @@ copy, and the first failure stops the landing. `wasm` joins them when anything
 under `crates/` changed: the browser client is a shipped artifact and no other
 suite compiles it.
 
+`check`, `docs`, `web` and `editor` are also gate suites; `client-check` is
+local-only (`bash scripts/check-quality.sh client-check`). `scripts/build-status.sh`
+reports build and gate state. Run `bash scripts/check-quality.sh` for the live
+suite list; the scripts own selection and contents.
+
 Two entry points run that gate. `scripts/land.sh` is the loop's landing command:
 it fetches `fork/main`, rebases `HEAD` onto it when the branch is not already
 ahead of it, gates the tree that will land, pushes, and reads the remote back. A
@@ -134,9 +139,9 @@ gated. Review branches are not gated; the push that lands them is.
 `scripts/test_land.sh` proves the landing flow's decisions against a bare
 repository and a stub gate: the no-op, the one-gate landing, the remote that
 moves during the gate, the conflict, and the bounded retry.
-GitHub Actions is not part of this: no push in this repository has ever
-produced a run (#26), so a workflow gate would be decoration. Editing
-`docs/multiplayer/HARNESS.md` also re-validates the corpus, because that file's
+GitHub Actions runs on pushes but is not a landing gate (`gh run list`); the
+pre-push script above is. Editing `docs/multiplayer/HARNESS.md` also re-validates
+the corpus, because that file's
 matrix, its `asserts:` clauses and each row's `proves` binding are what the corpus
 must match.
 
@@ -789,10 +794,9 @@ missing browser is an error, not a skipped test.
 
 ## Provisioned lifecycle acceptance
 
-See [the lifecycle gate runbook](validation/lifecycle-gates.md) for exact inputs,
-isolation, retained evidence and limitations. Both explicit gates fail when
-prerequisites are missing; neither silently skips, installs system tools, edits
-goldens, publishes artifacts remotely, or uses the real player profile.
+Run both explicit gates through `scripts/check-quality.sh`; they fail when
+prerequisites are missing, never silently skipping, installing system tools,
+editing goldens, publishing artifacts remotely, or using the real player profile.
 
 ```sh
 CHROME=/absolute/path/to/chrome \
