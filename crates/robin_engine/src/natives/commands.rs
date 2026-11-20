@@ -12,7 +12,8 @@ pub enum EngineCommand {
         faction: u16,
         min_tier: u8,
         count: u16,
-        entry: crate::engine::reinforcement::SummonEntry,
+        /// -1 = any, 0..1000 = door index, >=1000 = off-map entry.
+        entry: i32,
     },
     /// Smooth-scroll camera to a location's position.
     ///

@@ -3716,6 +3716,18 @@ impl EngineInner {
                     entry,
                 } => {
                     let faction = crate::element::Camp::from_allegiance_id(faction);
+                    let entry = if entry < 0 {
+                        crate::engine::reinforcement::SummonEntry::Any
+                    } else if entry >= 1000 {
+                        crate::engine::reinforcement::SummonEntry::Offmap(
+                            usize::try_from(entry - 1000).expect("non-negative offmap entry"),
+                        )
+                    } else {
+                        crate::engine::reinforcement::SummonEntry::Door(
+                            crate::gate::DoorIndex::new(entry as u32)
+                                .expect("dispatch validated the door index"),
+                        )
+                    };
                     for _ in 0..count {
                         if self
                             .summon_garrison(

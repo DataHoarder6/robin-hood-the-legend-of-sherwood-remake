@@ -209,6 +209,8 @@ impl TraceSimConfig {
             fix_hard_reaction_times: false,
             // Untying is a post-port extension and stays off in Original traces.
             enable_unbinding: false,
+            // Off-map reinforcements are a post-port extension as well.
+            enable_offmap_reinforcements: false,
             clean_hands_npc_kills_invalidate: false,
             // Retain the original saved-lives behavior in original traces.
             exclude_starting_dead_soldiers_from_preserved_lives: false,
