@@ -1,11 +1,8 @@
 {
   "name": "robin-hood-wasm-www",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
-  "engines": {
-    "node": "24.19.0"
-  },
   "scripts": {
     "dev": "vite",
     "build": "pnpm build:site",
@@ -27,7 +24,7 @@
     "lint:fix": "oxlint --fix src scripts",
     "fmt": "oxfmt 'src/**/*.{js,mjs,cjs,ts,tsx}' 'scripts/**/*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
     "fmt:check": "oxfmt --check 'src/**/*.{js,mjs,cjs,ts,tsx}' 'scripts/**/*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
-    "verify:web": "pnpm typecheck && pnpm test:all && pnpm build:site && pnpm build:signer-shell",
+    "verify:web": "pnpm fmt:check && pnpm lint && pnpm typecheck && pnpm test:all && pnpm build:site && pnpm build:signer-shell",
     "verify:deployment-config": "node scripts/verify-cloudflare-deployment.mjs",
     "verify:public": "node scripts/verify-static-build.mjs dist",
     "verify:runtime": "node scripts/verify-runtime-corpus.mjs runtime-dist",
@@ -40,21 +37,24 @@
     "verify:datadir-wrangler": "wrangler deploy --dry-run --config deploy/wrangler-datadir.json",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.5.1",
     "es-module-lexer": "3.0.2",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.1",
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003",
-    "fake-indexeddb": "^6.2.5",
-    "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
     "wrangler": "4.142.0"
   },
-  "packageManager": "pnpm@12.3.4",
-  "dependencies": {
-    "@noble/hashes": "2.4.0"
-  }
+  "engines": {
+    "node": "24.19.0"
+  },
+  "packageManager": "pnpm@12.3.4"
 }
