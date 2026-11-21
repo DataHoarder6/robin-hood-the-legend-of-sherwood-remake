@@ -137,6 +137,19 @@ scripts/land.sh                               # rebase, gate, push, read-back
 sources and the measurement checklist are in
 [`docs/slop/BUILD_CACHE_AND_QUEUE.md`](slop/BUILD_CACHE_AND_QUEUE.md).
 
+## "A landing from another host replaced `gate-shared` mid-gate"
+
+Symptom: a docs suite fails on files that were present in the source checkout.
+`gate-shared` lives on `minipc`, but `remote-check.sh` takes its lock on the
+calling host; two callers on different hosts never serialize on the one shared
+copy, so the later tree swaps it under the earlier gate.
+
+Rule: run every robin landing from `oci-vm`. Agents there share one lock
+namespace, so the queue and the copy lock actually serialize. From any other
+host, transfer the commits into an `oci-vm` worktree and call `scripts/land.sh`
+there. This routes landings to one host; it adds no lock and leaves the gate
+unchanged.
+
 ## "A suite failed once — I'll rerun it until it's green"
 
 Symptom: a red suite is rerun until it happens to pass, which hides a real
