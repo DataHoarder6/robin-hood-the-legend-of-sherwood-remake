@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { cspDirectives } from "../csp-test-utils.js";
+import { DEPLOYMENT } from "../../scripts/verify-cloudflare-deployment.mjs";
 import { element, link, replace } from "./dom.js";
 import { appendAchievements, playerTables, uploaderView } from "./public-components.js";
 import { parseBoardMetadata, parsePlayerRunHistoryPage } from "./public-response.js";
@@ -102,7 +103,7 @@ test("leaderboard CSP pins the dedicated signer and has no executable blob excep
   assert.deepEqual(policy.get("script-src"), new Set(["'self'"]));
   assert.deepEqual(
     policy.get("frame-src"),
-    new Set(["'self'", "https://identity.robinhood.phiresky.xyz"]),
+    new Set(["'self'", DEPLOYMENT.signerOrigin]),
   );
   assert.deepEqual(policy.get("connect-src"), new Set(["'self'"]));
   assert.deepEqual(policy.get("style-src"), new Set(["'self'"]));
@@ -117,7 +118,7 @@ test("game-shell CSP confines executable sources and permits verified blob modul
     policy.get("connect-src"),
     new Set(["'self'", "https:", "wss:", "http://127.0.0.1:*", "http://localhost:*"]),
   );
-  assert.deepEqual(policy.get("frame-src"), new Set(["https://identity.robinhood.phiresky.xyz"]));
+  assert.deepEqual(policy.get("frame-src"), new Set([DEPLOYMENT.signerOrigin]));
   assert.deepEqual(policy.get("object-src"), new Set(["'none'"]));
 });
 
