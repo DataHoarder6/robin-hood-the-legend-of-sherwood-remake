@@ -1,206 +1,217 @@
-import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
-    existsSync,
-    mkdtempSync,
-    mkdirSync,
-    readdirSync,
-    readFileSync,
-    rmSync,
-    writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import test from 'node:test';
-import { stageBrowserIdentityOrigin } from './stage-browser-identity-origin.mjs';
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+import { stageBrowserIdentityOrigin } from "./stage-browser-identity-origin.mjs";
 
-const clientSource = readFileSync(new URL('../../crates/robin_rs/js/browser_identity_client.js', import.meta.url));
-const vaultSource = readFileSync(new URL('../../crates/robin_identity_signer/js/browser_identity_vault.js', import.meta.url));
-const snippetDirectory = 'snippets/robin_rs-build/js';
+const clientSource = readFileSync(
+  new URL("../../crates/robin_rs/js/browser_identity_client.js", import.meta.url),
+);
+const vaultSource = readFileSync(
+  new URL("../../crates/robin_identity_signer/js/browser_identity_vault.js", import.meta.url),
+);
+const snippetDirectory = "snippets/robin_rs-build/js";
 
 function digest(bytes) {
-    return createHash('sha256').update(bytes).digest('hex');
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function writeGeneratedOrigin(root, entryName, liveModule) {
-    const snippets = join(root, snippetDirectory);
-    mkdirSync(snippets, { recursive: true });
-    writeFileSync(join(snippets, 'browser_identity_client.js'), clientSource);
-    writeFileSync(join(snippets, 'browser_identity_vault.js'), vaultSource);
-    writeFileSync(join(root, entryName), `import './${snippetDirectory}/${liveModule}';\n`);
+  const snippets = join(root, snippetDirectory);
+  mkdirSync(snippets, { recursive: true });
+  writeFileSync(join(snippets, "browser_identity_client.js"), clientSource);
+  writeFileSync(join(snippets, "browser_identity_vault.js"), vaultSource);
+  writeFileSync(join(root, entryName), `import './${snippetDirectory}/${liveModule}';\n`);
 }
 
-test('signer staging retains only the byte-exact vault closure', () => {
-    const root = mkdtempSync(join(tmpdir(), 'identity-signer-closure.'));
-    writeGeneratedOrigin(root, 'leaderboard_identity_bridge.js', 'browser_identity_vault.js');
+test("signer staging retains only the byte-exact vault closure", () => {
+  const root = mkdtempSync(join(tmpdir(), "identity-signer-closure."));
+  writeGeneratedOrigin(root, "leaderboard_identity_bridge.js", "browser_identity_vault.js");
 
-    const result = stageBrowserIdentityOrigin(
-        'identity_signer',
-        root,
-        'leaderboard_identity_bridge.js',
-    );
-    const vault = join(root, snippetDirectory, 'browser_identity_vault.js');
-    const client = join(root, snippetDirectory, 'browser_identity_client.js');
-    assert.equal(result.retained, `${snippetDirectory}/browser_identity_vault.js`);
-    assert.equal(existsSync(client), false);
-    assert.equal(digest(readFileSync(vault)), digest(vaultSource));
-    assert.notEqual(digest(vaultSource), digest(clientSource));
+  const result = stageBrowserIdentityOrigin(
+    "identity_signer",
+    root,
+    "leaderboard_identity_bridge.js",
+  );
+  const vault = join(root, snippetDirectory, "browser_identity_vault.js");
+  const client = join(root, snippetDirectory, "browser_identity_client.js");
+  assert.equal(result.retained, `${snippetDirectory}/browser_identity_vault.js`);
+  assert.equal(existsSync(client), false);
+  assert.equal(digest(readFileSync(vault)), digest(vaultSource));
+  assert.notEqual(digest(vaultSource), digest(clientSource));
 });
 
-test('engine staging retains only the byte-exact public client closure', () => {
-    const root = mkdtempSync(join(tmpdir(), 'identity-engine-closure.'));
-    writeGeneratedOrigin(root, 'robin.js', 'browser_identity_client.js');
+test("engine staging retains only the byte-exact public client closure", () => {
+  const root = mkdtempSync(join(tmpdir(), "identity-engine-closure."));
+  writeGeneratedOrigin(root, "robin.js", "browser_identity_client.js");
 
-    const result = stageBrowserIdentityOrigin('engine', root, 'robin.js');
-    const vault = join(root, snippetDirectory, 'browser_identity_vault.js');
-    const client = join(root, snippetDirectory, 'browser_identity_client.js');
-    assert.equal(result.retained, `${snippetDirectory}/browser_identity_client.js`);
-    assert.equal(existsSync(vault), false);
-    assert.equal(digest(readFileSync(client)), digest(clientSource));
-    assert.notEqual(digest(clientSource), digest(vaultSource));
+  const result = stageBrowserIdentityOrigin("engine", root, "robin.js");
+  const vault = join(root, snippetDirectory, "browser_identity_vault.js");
+  const client = join(root, snippetDirectory, "browser_identity_client.js");
+  assert.equal(result.retained, `${snippetDirectory}/browser_identity_client.js`);
+  assert.equal(existsSync(vault), false);
+  assert.equal(digest(readFileSync(client)), digest(clientSource));
+  assert.notEqual(digest(clientSource), digest(vaultSource));
 });
 
-test('staging fails before pruning on referenced, missing, or duplicate snippets', () => {
-    const referenced = mkdtempSync(join(tmpdir(), 'identity-signer-reference.'));
-    writeGeneratedOrigin(referenced, 'leaderboard_identity_bridge.js', 'browser_identity_vault.js');
-    writeFileSync(
-        join(referenced, 'unexpected.js'),
-        `import './${snippetDirectory}/browser_identity_client.js';\n`,
-    );
+test("staging fails before pruning on referenced, missing, or duplicate snippets", () => {
+  const referenced = mkdtempSync(join(tmpdir(), "identity-signer-reference."));
+  writeGeneratedOrigin(referenced, "leaderboard_identity_bridge.js", "browser_identity_vault.js");
+  writeFileSync(
+    join(referenced, "unexpected.js"),
+    `import './${snippetDirectory}/browser_identity_client.js';\n`,
+  );
+  assert.throws(
+    () =>
+      stageBrowserIdentityOrigin("identity_signer", referenced, "leaderboard_identity_bridge.js"),
+    /refusing to discard referenced browser_identity_client\.js/u,
+  );
+  assert.equal(existsSync(join(referenced, snippetDirectory, "browser_identity_client.js")), true);
+
+  for (const [label, mutate, expected] of [
+    [
+      "missing vault",
+      (root) => rmSync(join(root, snippetDirectory, "browser_identity_vault.js")),
+      /exactly one generated browser_identity_vault\.js; found 0/u,
+    ],
+    [
+      "duplicate vault",
+      (root) => {
+        const duplicate = join(root, "other", "browser_identity_vault.js");
+        mkdirSync(dirname(duplicate), { recursive: true });
+        writeFileSync(duplicate, vaultSource);
+      },
+      /exactly one generated browser_identity_vault\.js; found 2/u,
+    ],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), `identity-signer-${label.replaceAll(" ", "-")}.`));
+    writeGeneratedOrigin(root, "leaderboard_identity_bridge.js", "browser_identity_vault.js");
+    mutate(root);
     assert.throws(
-        () => stageBrowserIdentityOrigin(
-            'identity_signer',
-            referenced,
-            'leaderboard_identity_bridge.js',
-        ),
-        /refusing to discard referenced browser_identity_client\.js/u,
+      () => stageBrowserIdentityOrigin("identity_signer", root, "leaderboard_identity_bridge.js"),
+      expected,
     );
-    assert.equal(existsSync(join(referenced, snippetDirectory, 'browser_identity_client.js')), true);
-
-    for (const [label, mutate, expected] of [
-        [
-            'missing vault',
-            root => rmSync(join(root, snippetDirectory, 'browser_identity_vault.js')),
-            /exactly one generated browser_identity_vault\.js; found 0/u,
-        ],
-        [
-            'duplicate vault',
-            root => {
-                const duplicate = join(root, 'other', 'browser_identity_vault.js');
-                mkdirSync(dirname(duplicate), { recursive: true });
-                writeFileSync(duplicate, vaultSource);
-            },
-            /exactly one generated browser_identity_vault\.js; found 2/u,
-        ],
-    ]) {
-        const root = mkdtempSync(join(tmpdir(), `identity-signer-${label.replaceAll(' ', '-')}.`));
-        writeGeneratedOrigin(root, 'leaderboard_identity_bridge.js', 'browser_identity_vault.js');
-        mutate(root);
-        assert.throws(
-            () => stageBrowserIdentityOrigin(
-                'identity_signer',
-                root,
-                'leaderboard_identity_bridge.js',
-            ),
-            expected,
-        );
-    }
+  }
 });
 
-test('isolated crates need only their owned byte-exact, reachable transport', t => {
-    for (const [role, owned, opposite] of [
-        ['engine', 'browser_identity_client.js', 'browser_identity_vault.js'],
-        ['identity_signer', 'browser_identity_vault.js', 'browser_identity_client.js'],
-    ]) {
-        const root = mkdtempSync(join(tmpdir(), `identity-isolated-${role}.`));
-        t.after(() => rmSync(root, { recursive: true }));
-        writeGeneratedOrigin(root, 'entry.js', owned);
-        rmSync(join(root, snippetDirectory, opposite));
-        assert.equal(stageBrowserIdentityOrigin(role, root, 'entry.js').removed, null);
+test("isolated crates need only their owned byte-exact, reachable transport", (t) => {
+  for (const [role, owned, opposite] of [
+    ["engine", "browser_identity_client.js", "browser_identity_vault.js"],
+    ["identity_signer", "browser_identity_vault.js", "browser_identity_client.js"],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), `identity-isolated-${role}.`));
+    t.after(() => rmSync(root, { recursive: true }));
+    writeGeneratedOrigin(root, "entry.js", owned);
+    rmSync(join(root, snippetDirectory, opposite));
+    assert.equal(stageBrowserIdentityOrigin(role, root, "entry.js").removed, null);
 
-        writeFileSync(join(root, 'unexpected.js'), `import './${snippetDirectory}/${opposite}';\n`);
-        assert.throws(() => stageBrowserIdentityOrigin(role, root, 'entry.js'), /imports undeclared JavaScript/u);
-        rmSync(join(root, 'unexpected.js'));
+    writeFileSync(join(root, "unexpected.js"), `import './${snippetDirectory}/${opposite}';\n`);
+    assert.throws(
+      () => stageBrowserIdentityOrigin(role, root, "entry.js"),
+      /imports undeclared JavaScript/u,
+    );
+    rmSync(join(root, "unexpected.js"));
 
-        writeFileSync(join(root, snippetDirectory, owned), 'export const corrupted = true;\n');
-        assert.throws(() => stageBrowserIdentityOrigin(role, root, 'entry.js'), /differs from its checked-in source authority/u);
-    }
+    writeFileSync(join(root, snippetDirectory, owned), "export const corrupted = true;\n");
+    assert.throws(
+      () => stageBrowserIdentityOrigin(role, root, "entry.js"),
+      /differs from its checked-in source authority/u,
+    );
+  }
 });
 
 function pinnedWorkerHelperSource() {
-    // The exemption is bound to the exact published crate bytes.
-    const home = process.env.CARGO_HOME ?? join(process.env.HOME ?? '', '.cargo');
-    const registry = join(home, 'registry/src');
-    if (!existsSync(registry)) return undefined;
-    for (const index of readdirSync(registry)) {
-        const path = join(registry, index, 'wasm-bindgen-rayon-1.3.0/src/workerHelpers.no-bundler.js');
-        if (existsSync(path)) return readFileSync(path);
-    }
-    return undefined;
+  // The exemption is bound to the exact published crate bytes.
+  const home = process.env.CARGO_HOME ?? join(process.env.HOME ?? "", ".cargo");
+  const registry = join(home, "registry/src");
+  if (!existsSync(registry)) return undefined;
+  for (const index of readdirSync(registry)) {
+    const path = join(registry, index, "wasm-bindgen-rayon-1.3.0/src/workerHelpers.no-bundler.js");
+    if (existsSync(path)) return readFileSync(path);
+  }
+  return undefined;
 }
 
-test('only the engine origin admits the pinned worker-pool helper re-import', t => {
-    const helper = pinnedWorkerHelperSource();
-    if (helper === undefined) {
-        t.skip('wasm-bindgen-rayon 1.3.0 is not in the local Cargo registry');
-        return;
-    }
-    const helperPath = 'snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src/workerHelpers.no-bundler.js';
-    const threaded = (role, entryName, owned, helperBytes) => {
-        const root = mkdtempSync(join(tmpdir(), `identity-threaded-${role}.`));
-        t.after(() => rmSync(root, { recursive: true, force: true }));
-        writeGeneratedOrigin(root, entryName, owned);
-        mkdirSync(dirname(join(root, helperPath)), { recursive: true });
-        writeFileSync(join(root, helperPath), helperBytes);
-        writeFileSync(
-            join(root, entryName),
-            `import './${snippetDirectory}/${owned}';\nimport './${helperPath}';\n`,
-        );
-        return root;
-    };
-
-    const engine = threaded('engine', 'robin.js', 'browser_identity_client.js', helper);
-    assert.equal(stageBrowserIdentityOrigin('engine', engine, 'robin.js').retained,
-        `${snippetDirectory}/browser_identity_client.js`);
-
-    const reshaped = threaded('engine-reshaped', 'robin.js', 'browser_identity_client.js',
-        Buffer.concat([helper, Buffer.from('\n// reshaped\n')]));
-    assert.throws(() => stageBrowserIdentityOrigin('engine', reshaped, 'robin.js'),
-        /not the pinned wasm-bindgen-rayon helper/u);
-
-    const signer = threaded('identity_signer', 'leaderboard_identity_bridge.js', 'browser_identity_vault.js', helper);
-    assert.throws(
-        () => stageBrowserIdentityOrigin('identity_signer', signer, 'leaderboard_identity_bridge.js'),
-        /unsupported dynamic, phased, or attributed import/u,
+test("only the engine origin admits the pinned worker-pool helper re-import", (t) => {
+  const helper = pinnedWorkerHelperSource();
+  if (helper === undefined) {
+    t.skip("wasm-bindgen-rayon 1.3.0 is not in the local Cargo registry");
+    return;
+  }
+  const helperPath = "snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src/workerHelpers.no-bundler.js";
+  const threaded = (role, entryName, owned, helperBytes) => {
+    const root = mkdtempSync(join(tmpdir(), `identity-threaded-${role}.`));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    writeGeneratedOrigin(root, entryName, owned);
+    mkdirSync(dirname(join(root, helperPath)), { recursive: true });
+    writeFileSync(join(root, helperPath), helperBytes);
+    writeFileSync(
+      join(root, entryName),
+      `import './${snippetDirectory}/${owned}';\nimport './${helperPath}';\n`,
     );
+    return root;
+  };
+
+  const engine = threaded("engine", "robin.js", "browser_identity_client.js", helper);
+  assert.equal(
+    stageBrowserIdentityOrigin("engine", engine, "robin.js").retained,
+    `${snippetDirectory}/browser_identity_client.js`,
+  );
+
+  const reshaped = threaded(
+    "engine-reshaped",
+    "robin.js",
+    "browser_identity_client.js",
+    Buffer.concat([helper, Buffer.from("\n// reshaped\n")]),
+  );
+  assert.throws(
+    () => stageBrowserIdentityOrigin("engine", reshaped, "robin.js"),
+    /not the pinned wasm-bindgen-rayon helper/u,
+  );
+
+  const signer = threaded(
+    "identity_signer",
+    "leaderboard_identity_bridge.js",
+    "browser_identity_vault.js",
+    helper,
+  );
+  assert.throws(
+    () => stageBrowserIdentityOrigin("identity_signer", signer, "leaderboard_identity_bridge.js"),
+    /unsupported dynamic, phased, or attributed import/u,
+  );
 });
 
-test('staging requires the retained snippet in a closed static import graph', () => {
-    const root = mkdtempSync(join(tmpdir(), 'identity-signer-graph.'));
-    writeGeneratedOrigin(root, 'leaderboard_identity_bridge.js', 'browser_identity_vault.js');
-    writeFileSync(join(root, 'leaderboard_identity_bridge.js'), 'export const noVault = true;\n');
-    assert.throws(
-        () => stageBrowserIdentityOrigin(
-            'identity_signer',
-            root,
-            'leaderboard_identity_bridge.js',
-        ),
-        /cannot reach its required browser_identity_vault\.js/u,
-    );
+test("staging requires the retained snippet in a closed static import graph", () => {
+  const root = mkdtempSync(join(tmpdir(), "identity-signer-graph."));
+  writeGeneratedOrigin(root, "leaderboard_identity_bridge.js", "browser_identity_vault.js");
+  writeFileSync(join(root, "leaderboard_identity_bridge.js"), "export const noVault = true;\n");
+  assert.throws(
+    () => stageBrowserIdentityOrigin("identity_signer", root, "leaderboard_identity_bridge.js"),
+    /cannot reach its required browser_identity_vault\.js/u,
+  );
 });
 
-test('staging hash-checks both generated snippets before removing either one', () => {
-    const root = mkdtempSync(join(tmpdir(), 'identity-signer-snippet-drift.'));
-    writeGeneratedOrigin(root, 'leaderboard_identity_bridge.js', 'browser_identity_vault.js');
-    writeFileSync(join(root, snippetDirectory, 'browser_identity_client.js'), 'export const drift = true;\n');
-    assert.throws(
-        () => stageBrowserIdentityOrigin(
-            'identity_signer',
-            root,
-            'leaderboard_identity_bridge.js',
-        ),
-        /generated browser_identity_client\.js differs from its checked-in source authority/u,
-    );
-    assert.equal(existsSync(join(root, snippetDirectory, 'browser_identity_vault.js')), true);
-    assert.equal(existsSync(join(root, snippetDirectory, 'browser_identity_client.js')), true);
+test("staging hash-checks both generated snippets before removing either one", () => {
+  const root = mkdtempSync(join(tmpdir(), "identity-signer-snippet-drift."));
+  writeGeneratedOrigin(root, "leaderboard_identity_bridge.js", "browser_identity_vault.js");
+  writeFileSync(
+    join(root, snippetDirectory, "browser_identity_client.js"),
+    "export const drift = true;\n",
+  );
+  assert.throws(
+    () => stageBrowserIdentityOrigin("identity_signer", root, "leaderboard_identity_bridge.js"),
+    /generated browser_identity_client\.js differs from its checked-in source authority/u,
+  );
+  assert.equal(existsSync(join(root, snippetDirectory, "browser_identity_vault.js")), true);
+  assert.equal(existsSync(join(root, snippetDirectory, "browser_identity_client.js")), true);
 });

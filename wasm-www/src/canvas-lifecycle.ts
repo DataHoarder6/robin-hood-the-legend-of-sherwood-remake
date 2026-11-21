@@ -1,34 +1,43 @@
 export type CanvasEnvironment = {
-    viewport: () => { readonly fullscreen: boolean; readonly innerWidth: number; readonly innerHeight: number; readonly devicePixelRatio: number };
-    subscribe: (sync: () => void) => () => void;
+  viewport: () => {
+    readonly fullscreen: boolean;
+    readonly innerWidth: number;
+    readonly innerHeight: number;
+    readonly devicePixelRatio: number;
+  };
+  subscribe: (sync: () => void) => () => void;
 };
 
 function browserEnvironment(canvas: HTMLCanvasElement): CanvasEnvironment {
-    return {
-        viewport: () => ({ fullscreen: document.fullscreenElement === canvas, innerWidth: window.innerWidth,
-            innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio }),
-        subscribe: sync => {
-            // Changing layout during ResizeObserver delivery starts another
-            // delivery cycle. Coalesce size changes into the next frame.
-            let frame: number | undefined;
-            const schedule = (): void => {
-                frame ??= window.requestAnimationFrame(() => {
-                    frame = undefined;
-                    sync();
-                });
-            };
-            const observer = new ResizeObserver(schedule);
-            observer.observe(canvas);
-            window.addEventListener('resize', schedule, { passive: true });
-            document.addEventListener('fullscreenchange', schedule);
-            return () => {
-                observer.disconnect();
-                if (frame !== undefined) window.cancelAnimationFrame(frame);
-                window.removeEventListener('resize', schedule);
-                document.removeEventListener('fullscreenchange', schedule);
-            };
-        },
-    };
+  return {
+    viewport: () => ({
+      fullscreen: document.fullscreenElement === canvas,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    }),
+    subscribe: (sync) => {
+      // Changing layout during ResizeObserver delivery starts another
+      // delivery cycle. Coalesce size changes into the next frame.
+      let frame: number | undefined;
+      const schedule = (): void => {
+        frame ??= window.requestAnimationFrame(() => {
+          frame = undefined;
+          sync();
+        });
+      };
+      const observer = new ResizeObserver(schedule);
+      observer.observe(canvas);
+      window.addEventListener("resize", schedule, { passive: true });
+      document.addEventListener("fullscreenchange", schedule);
+      return () => {
+        observer.disconnect();
+        if (frame !== undefined) window.cancelAnimationFrame(frame);
+        window.removeEventListener("resize", schedule);
+        document.removeEventListener("fullscreenchange", schedule);
+      };
+    },
+  };
 }
 
 /**
@@ -38,38 +47,42 @@ function browserEnvironment(canvas: HTMLCanvasElement): CanvasEnvironment {
  * and fullscreen displays.
  */
 export function installCanvasBackingStore(
-    canvas: HTMLCanvasElement, environment: CanvasEnvironment = browserEnvironment(canvas),
+  canvas: HTMLCanvasElement,
+  environment: CanvasEnvironment = browserEnvironment(canvas),
 ): { readonly sync: () => void; readonly dispose: () => void } {
-    let disposed = false;
-    const sync = (): void => {
-        if (disposed) return;
-        const { fullscreen, innerWidth, innerHeight, devicePixelRatio } = environment.viewport();
-        const availableWidth = Math.max(1, innerWidth - (fullscreen ? 0 : 16));
-        const availableHeight = Math.max(1, innerHeight - (fullscreen ? 0 : 16));
-        const availableAspect = availableWidth / availableHeight;
-        const targetAspect = fullscreen
-            ? availableAspect
-            : Math.min(16 / 9, Math.max(4 / 3, availableAspect));
-        const cssWidth = availableAspect >= targetAspect
-            ? availableHeight * targetAspect
-            : availableWidth;
-        const cssHeight = availableAspect >= targetAspect
-            ? availableHeight
-            : availableWidth / targetAspect;
-        canvas.style.width = `${Math.round(cssWidth)}px`;
-        canvas.style.height = `${Math.round(cssHeight)}px`;
+  let disposed = false;
+  const sync = (): void => {
+    if (disposed) return;
+    const { fullscreen, innerWidth, innerHeight, devicePixelRatio } = environment.viewport();
+    const availableWidth = Math.max(1, innerWidth - (fullscreen ? 0 : 16));
+    const availableHeight = Math.max(1, innerHeight - (fullscreen ? 0 : 16));
+    const availableAspect = availableWidth / availableHeight;
+    const targetAspect = fullscreen
+      ? availableAspect
+      : Math.min(16 / 9, Math.max(4 / 3, availableAspect));
+    const cssWidth =
+      availableAspect >= targetAspect ? availableHeight * targetAspect : availableWidth;
+    const cssHeight =
+      availableAspect >= targetAspect ? availableHeight : availableWidth / targetAspect;
+    canvas.style.width = `${Math.round(cssWidth)}px`;
+    canvas.style.height = `${Math.round(cssHeight)}px`;
 
-        const bounds = canvas.getBoundingClientRect();
-        const scale = devicePixelRatio || 1;
-        const width = Math.max(1, Math.round(bounds.width * scale));
-        const height = Math.max(1, Math.round(bounds.height * scale));
-        if (canvas.width !== width) canvas.width = width;
-        if (canvas.height !== height) canvas.height = height;
-    };
-    const unsubscribe = environment.subscribe(sync);
-    sync();
-    return {
-        sync,
-        dispose: () => { if (!disposed) { disposed = true; unsubscribe(); } },
-    };
+    const bounds = canvas.getBoundingClientRect();
+    const scale = devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(bounds.width * scale));
+    const height = Math.max(1, Math.round(bounds.height * scale));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+  };
+  const unsubscribe = environment.subscribe(sync);
+  sync();
+  return {
+    sync,
+    dispose: () => {
+      if (!disposed) {
+        disposed = true;
+        unsubscribe();
+      }
+    },
+  };
 }

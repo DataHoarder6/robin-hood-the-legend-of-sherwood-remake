@@ -1,123 +1,249 @@
-import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import test from 'node:test';
-import { fetchRunReplay, fetchRunCheckpoints, parseHostedReplayContent, parseRunLaunch, runFromQuery, runPlaybackBuild, RANKED_REPLAY_MEDIA_TYPE } from './run-replay.ts';
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import test from "node:test";
+import {
+  fetchRunReplay,
+  fetchRunCheckpoints,
+  parseHostedReplayContent,
+  parseRunLaunch,
+  runFromQuery,
+  runPlaybackBuild,
+  RANKED_REPLAY_MEDIA_TYPE,
+} from "./run-replay.ts";
 
-test('recorded builds select compatible viewer fixes', () => {
-    assert.equal(runPlaybackBuild('e7557179eb05'), 'f5c6e859973f');
-    assert.equal(runPlaybackBuild('1699bc12ffb8'), '1f546fbb6547');
-    assert.equal(runPlaybackBuild('0123456789ab'), '0123456789ab');
+test("recorded builds select compatible viewer fixes", () => {
+  assert.equal(runPlaybackBuild("e7557179eb05"), "f5c6e859973f");
+  assert.equal(runPlaybackBuild("1699bc12ffb8"), "1f546fbb6547");
+  assert.equal(runPlaybackBuild("0123456789ab"), "0123456789ab");
 });
 
-const build = '0123456789ab';
+const build = "0123456789ab";
 const replay = new TextEncoder().encode(`RHREC\x01${build}\x28\xb5\x2f\xfd`);
 
 function runDocument(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-        schema_version: 2,
-        run_id: 'run-1',
-        recorded_engine_version: build,
-        replay: {
-            artifact: {
-                sha256: createHash('sha256').update(replay).digest('hex'),
-                byte_length: replay.byteLength,
-                media_type: RANKED_REPLAY_MEDIA_TYPE,
-            },
-            replay_schema_version: 44,
-        },
-        viewer: { availability: { status: 'available' }, content_requirement: 'bundled_demo', runtime_build: build },
-        ...overrides,
-    };
+  return {
+    schema_version: 2,
+    run_id: "run-1",
+    recorded_engine_version: build,
+    replay: {
+      artifact: {
+        sha256: createHash("sha256").update(replay).digest("hex"),
+        byte_length: replay.byteLength,
+        media_type: RANKED_REPLAY_MEDIA_TYPE,
+      },
+      replay_schema_version: 44,
+    },
+    viewer: {
+      availability: { status: "available" },
+      content_requirement: "bundled_demo",
+      runtime_build: build,
+    },
+    ...overrides,
+  };
 }
 
-function api(document: unknown, replayBytes: Uint8Array = replay, replayType = RANKED_REPLAY_MEDIA_TYPE) {
-    const urls: string[] = [];
-    const fetchImpl = (async (input: RequestInfo | URL) => {
-        const url = String(input);
-        urls.push(url);
-        if (url.endsWith('/checkpoints')) return new Response(null, { status: 404 });
-        if (url.endsWith('/replay')) {
-            return new Response(replayBytes.slice(), { headers: { 'content-type': replayType } });
-        }
-        return new Response(JSON.stringify(document), { headers: { 'content-type': 'application/json' } });
-    }) as typeof fetch;
-    return { fetchImpl, urls };
-}
-
-test('run query ids are bounded opaque text', () => {
-    assert.equal(runFromQuery(new URLSearchParams('run=run-1')), 'run-1');
-    assert.equal(runFromQuery(new URLSearchParams('')), null);
-    assert.throws(() => runFromQuery(new URLSearchParams('run=%20bad')), /valid run id/u);
-});
-
-test('published compact runs retain their authenticated archived viewer route', async () => {
-    const bytes = new TextEncoder().encode(`rhrec-${build}-fixture`);
-    const mediaType = `${RANKED_REPLAY_MEDIA_TYPE}+compact`;
-    const { fetchImpl, urls } = api(runDocument({ replay: { artifact: {
-        sha256: createHash('sha256').update(bytes).digest('hex'), byte_length: bytes.length, media_type: mediaType,
-    } } }), bytes, mediaType);
-    const result = await fetchRunReplay('run-1', 'https://example.test/api/v1', fetchImpl, new AbortController().signal);
-    assert.equal(result.legacyViewer, true);
-    assert.deepEqual(result.content, bytes);
-    assert.equal(urls.length, 2);
-});
-
-test('a run launches its recorded engine build with the exact published replay', async () => {
-    const { fetchImpl, urls } = api(runDocument());
-    const result = await fetchRunReplay('run-1', 'https://robinhood.example/api/v1/', fetchImpl, new AbortController().signal);
-    assert.deepEqual(result, { runId: 'run-1', runtimeBuild: build, edition: 'demo', content: replay });
-    assert.deepEqual(urls, ['https://robinhood.example/api/v1/runs/run-1', 'https://robinhood.example/api/v1/runs/run-1/replay']);
-});
-
-test('run playback refuses unavailable, mismatched and tampered runs', async () => {
-    const signal = new AbortController().signal;
-    assert.throws(() => parseRunLaunch(runDocument({ run_id: 'other' }), 'run-1'), /different or unsupported/u);
-    assert.throws(() => parseRunLaunch(runDocument({ viewer: {
-        availability: { status: 'unavailable', safe_reason: 'Build retired.' }, content_requirement: 'bundled_demo', runtime_build: build,
-    } }), 'run-1'), /Build retired/u);
-    assert.equal( parseRunLaunch(runDocument({ viewer: {
-        availability: { status: 'available' }, content_requirement: 'user_local_retail', runtime_build: build,
-    } }), 'run-1').edition, 'full');
-    assert.throws(() => parseRunLaunch(runDocument({ recorded_engine_version: 'ffffffffffff' }), 'run-1'), /published engine build/u);
-    assert.throws(() => parseRunLaunch(runDocument({ viewer: {
-        availability: { status: 'available' }, content_requirement: 'bundled_demo', runtime_build: '../latest',
-    }, recorded_engine_version: '../latest' }), 'run-1'), /published engine build/u);
-
-    const tampered = replay.slice();
-    tampered[tampered.length - 1] = 0x42;
-    await assert.rejects(fetchRunReplay('run-1', '/api/v1', api(runDocument(), tampered).fetchImpl, signal), /published identity/u);
-    await assert.rejects(fetchRunReplay('run-1', '/api/v1', api(runDocument(), replay, 'application/jsonl').fetchImpl, signal), /did not return/u);
-    const otherBuild = new TextEncoder().encode('RHREC\x01ffffffffffff\x28\xb5\x2f\xfd');
-    const otherDocument = runDocument();
-    ((otherDocument.replay as Record<string, unknown>).artifact as Record<string, unknown>).sha256 = createHash('sha256').update(otherBuild).digest('hex');
-    await assert.rejects(fetchRunReplay('run-1', '/api/v1', api(otherDocument, otherBuild).fetchImpl, signal), /not recorded by engine build/u);
-});
-
-test('run downloads an optional checkpoint sidecar without changing the replay', async () => {
-    const base = api(runDocument()).fetchImpl;
-    const sidecar = new Uint8Array([1, 2, 3]);
-    const fetchImpl = (async (url, init) => String(url).endsWith('/checkpoints')
-        ? new Response(sidecar, { headers: { 'content-type': 'application/x-robin-rhseek' } })
-        : base(url, init)) as typeof fetch;
-    const result = await fetchRunReplay('run-1', '/api/v1', fetchImpl, new AbortController().signal);
-    assert.deepEqual(result.content, replay);
-    assert.deepEqual(await fetchRunCheckpoints('run-1', '/api/v1', fetchImpl, new AbortController().signal), sidecar);
-});
-
-
-test('hosted Full replay bindings stay content-addressed and on the game origin', () => {
-    const binding = { url: `/datadirs/full/${'a'.repeat(64)}/datadir.bin`, sha256: 'b'.repeat(64), byteLength: 512 };
-    assert.equal(parseHostedReplayContent(binding, 'https://game.example').url, `https://game.example${binding.url}`);
-    for (const url of ['https://other.example/datadir.bin', '//other.example/x', '/datadirs/full/../demo/datadir.bin', `${binding.url}?x=1`]) {
-        assert.throws(() => parseHostedReplayContent({ ...binding, url }, 'https://game.example'));
+function api(
+  document: unknown,
+  replayBytes: Uint8Array = replay,
+  replayType = RANKED_REPLAY_MEDIA_TYPE,
+) {
+  const urls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.endsWith("/checkpoints")) return new Response(null, { status: 404 });
+    if (url.endsWith("/replay")) {
+      return new Response(replayBytes.slice(), { headers: { "content-type": replayType } });
     }
-    assert.throws(() => parseHostedReplayContent({ ...binding, byteLength: 0 }, 'https://game.example'));
+    return new Response(JSON.stringify(document), {
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  return { fetchImpl, urls };
+}
+
+test("run query ids are bounded opaque text", () => {
+  assert.equal(runFromQuery(new URLSearchParams("run=run-1")), "run-1");
+  assert.equal(runFromQuery(new URLSearchParams("")), null);
+  assert.throws(() => runFromQuery(new URLSearchParams("run=%20bad")), /valid run id/u);
 });
 
-test('large Full replay data downloads in ordered static-asset parts', () => {
-    const binding = { url: `/datadirs/full/${'a'.repeat(64)}/datadir.bin`, sha256: 'b'.repeat(64), byteLength: 50_669_539 };
-    const content = parseHostedReplayContent(binding, 'https://game.example');
-    assert.deepEqual(content.parts, [0, 1, 2].map(index => `https://game.example${binding.url}.part${index}`));
-    assert.equal(content.byteLength, binding.byteLength);
-    assert.throws(() => parseHostedReplayContent({ ...binding, byteLength: 257 * 1024 * 1024 }, 'https://game.example'));
+test("published compact runs retain their authenticated archived viewer route", async () => {
+  const bytes = new TextEncoder().encode(`rhrec-${build}-fixture`);
+  const mediaType = `${RANKED_REPLAY_MEDIA_TYPE}+compact`;
+  const { fetchImpl, urls } = api(
+    runDocument({
+      replay: {
+        artifact: {
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          byte_length: bytes.length,
+          media_type: mediaType,
+        },
+      },
+    }),
+    bytes,
+    mediaType,
+  );
+  const result = await fetchRunReplay(
+    "run-1",
+    "https://example.test/api/v1",
+    fetchImpl,
+    new AbortController().signal,
+  );
+  assert.equal(result.legacyViewer, true);
+  assert.deepEqual(result.content, bytes);
+  assert.equal(urls.length, 2);
+});
+
+test("a run launches its recorded engine build with the exact published replay", async () => {
+  const { fetchImpl, urls } = api(runDocument());
+  const result = await fetchRunReplay(
+    "run-1",
+    "https://robinhood.example/api/v1/",
+    fetchImpl,
+    new AbortController().signal,
+  );
+  assert.deepEqual(result, {
+    runId: "run-1",
+    runtimeBuild: build,
+    edition: "demo",
+    content: replay,
+  });
+  assert.deepEqual(urls, [
+    "https://robinhood.example/api/v1/runs/run-1",
+    "https://robinhood.example/api/v1/runs/run-1/replay",
+  ]);
+});
+
+test("run playback refuses unavailable, mismatched and tampered runs", async () => {
+  const signal = new AbortController().signal;
+  assert.throws(
+    () => parseRunLaunch(runDocument({ run_id: "other" }), "run-1"),
+    /different or unsupported/u,
+  );
+  assert.throws(
+    () =>
+      parseRunLaunch(
+        runDocument({
+          viewer: {
+            availability: { status: "unavailable", safe_reason: "Build retired." },
+            content_requirement: "bundled_demo",
+            runtime_build: build,
+          },
+        }),
+        "run-1",
+      ),
+    /Build retired/u,
+  );
+  assert.equal(
+    parseRunLaunch(
+      runDocument({
+        viewer: {
+          availability: { status: "available" },
+          content_requirement: "user_local_retail",
+          runtime_build: build,
+        },
+      }),
+      "run-1",
+    ).edition,
+    "full",
+  );
+  assert.throws(
+    () => parseRunLaunch(runDocument({ recorded_engine_version: "ffffffffffff" }), "run-1"),
+    /published engine build/u,
+  );
+  assert.throws(
+    () =>
+      parseRunLaunch(
+        runDocument({
+          viewer: {
+            availability: { status: "available" },
+            content_requirement: "bundled_demo",
+            runtime_build: "../latest",
+          },
+          recorded_engine_version: "../latest",
+        }),
+        "run-1",
+      ),
+    /published engine build/u,
+  );
+
+  const tampered = replay.slice();
+  tampered[tampered.length - 1] = 0x42;
+  await assert.rejects(
+    fetchRunReplay("run-1", "/api/v1", api(runDocument(), tampered).fetchImpl, signal),
+    /published identity/u,
+  );
+  await assert.rejects(
+    fetchRunReplay(
+      "run-1",
+      "/api/v1",
+      api(runDocument(), replay, "application/jsonl").fetchImpl,
+      signal,
+    ),
+    /did not return/u,
+  );
+  const otherBuild = new TextEncoder().encode("RHREC\x01ffffffffffff\x28\xb5\x2f\xfd");
+  const otherDocument = runDocument();
+  ((otherDocument.replay as Record<string, unknown>).artifact as Record<string, unknown>).sha256 =
+    createHash("sha256").update(otherBuild).digest("hex");
+  await assert.rejects(
+    fetchRunReplay("run-1", "/api/v1", api(otherDocument, otherBuild).fetchImpl, signal),
+    /not recorded by engine build/u,
+  );
+});
+
+test("run downloads an optional checkpoint sidecar without changing the replay", async () => {
+  const base = api(runDocument()).fetchImpl;
+  const sidecar = new Uint8Array([1, 2, 3]);
+  const fetchImpl = (async (url, init) =>
+    String(url).endsWith("/checkpoints")
+      ? new Response(sidecar, { headers: { "content-type": "application/x-robin-rhseek" } })
+      : base(url, init)) as typeof fetch;
+  const result = await fetchRunReplay("run-1", "/api/v1", fetchImpl, new AbortController().signal);
+  assert.deepEqual(result.content, replay);
+  assert.deepEqual(
+    await fetchRunCheckpoints("run-1", "/api/v1", fetchImpl, new AbortController().signal),
+    sidecar,
+  );
+});
+
+test("hosted Full replay bindings stay content-addressed and on the game origin", () => {
+  const binding = {
+    url: `/datadirs/full/${"a".repeat(64)}/datadir.bin`,
+    sha256: "b".repeat(64),
+    byteLength: 512,
+  };
+  assert.equal(
+    parseHostedReplayContent(binding, "https://game.example").url,
+    `https://game.example${binding.url}`,
+  );
+  for (const url of [
+    "https://other.example/datadir.bin",
+    "//other.example/x",
+    "/datadirs/full/../demo/datadir.bin",
+    `${binding.url}?x=1`,
+  ]) {
+    assert.throws(() => parseHostedReplayContent({ ...binding, url }, "https://game.example"));
+  }
+  assert.throws(() =>
+    parseHostedReplayContent({ ...binding, byteLength: 0 }, "https://game.example"),
+  );
+});
+
+test("large Full replay data downloads in ordered static-asset parts", () => {
+  const binding = {
+    url: `/datadirs/full/${"a".repeat(64)}/datadir.bin`,
+    sha256: "b".repeat(64),
+    byteLength: 50_669_539,
+  };
+  const content = parseHostedReplayContent(binding, "https://game.example");
+  assert.deepEqual(
+    content.parts,
+    [0, 1, 2].map((index) => `https://game.example${binding.url}.part${index}`),
+  );
+  assert.equal(content.byteLength, binding.byteLength);
+  assert.throws(() =>
+    parseHostedReplayContent({ ...binding, byteLength: 257 * 1024 * 1024 }, "https://game.example"),
+  );
 });
