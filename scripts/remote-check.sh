@@ -404,7 +404,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
-    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS:-} \
+    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
@@ -430,7 +430,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
-    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS:-} \
+    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
