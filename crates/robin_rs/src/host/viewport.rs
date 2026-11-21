@@ -148,7 +148,7 @@ impl ViewportState {
             .last_rotation_ms
             .map_or(0, |last| now_ms.saturating_sub(last));
         self.last_rotation_ms = Some(now_ms);
-        let factor = 1.0 - (-(dt as f32) / 50.0).exp();
+        let factor = 1.0 - (-(dt as f32) / 150.0).exp();
         self.display_angle += (self.camera_angle - self.display_angle) * factor;
         if (self.camera_angle - self.display_angle).abs() < 0.001 {
             self.display_angle = self.camera_angle;
@@ -157,11 +157,9 @@ impl ViewportState {
     }
 
     fn apply_rotation_constraints(&mut self) {
-        if self.level_size.x > 0.0 && self.level_size.y > 0.0 {
-            let needed = minimum_zoom(self.screen_size, self.level_size, self.camera_angle);
-            if needed > self.zoom_factor {
-                self.zoom_factor = needed;
-            }
+        let needed = self.rotation_min_zoom();
+        if needed > self.zoom_factor {
+            self.zoom_factor = needed;
         }
         self.clip_view();
     }
@@ -359,8 +357,25 @@ impl ViewportState {
         self.clip_view();
     }
 
+    /// Zoom floor imposed by the current rotation, or zero at angle zero.
+    fn rotation_min_zoom(&self) -> f32 {
+        if self.camera_angle == 0.0 || self.level_size.x <= 0.0 || self.level_size.y <= 0.0 {
+            return 0.0;
+        }
+        minimum_zoom(self.screen_size, self.level_size, self.camera_angle)
+    }
+
     pub fn zoom_by(&mut self, factor: f32, mouse_screen: Option<ScreenPoint>) {
-        let next = (self.zoom_factor * factor).clamp(0.5, 2.0);
+        // Angle zero keeps the legacy 0.5..=2.0 range. A rotated view may
+        // need more than 2.0 on a small level, and must not zoom back below
+        // what keeps its corners covered.
+        let needed = self.rotation_min_zoom();
+        let (lower, upper) = if needed == 0.0 {
+            (0.5, 2.0)
+        } else {
+            (0.5_f32.max(needed), 2.0_f32.max(needed))
+        };
+        let next = (self.zoom_factor * factor).clamp(lower, upper);
         if (next - self.zoom_factor).abs() < f32::EPSILON {
             return;
         }
@@ -656,6 +671,26 @@ mod viewport_touch_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn small_level_rotation_zooms_past_the_usual_cap() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(200.0, 200.0);
+        viewport.rotate_by(2);
+        assert!(
+            viewport.zoom_factor > 2.0,
+            "rotation must widen the view beyond 2.0, got {}",
+            viewport.zoom_factor
+        );
+        viewport.advance_rotation(0);
+        viewport.advance_rotation(u32::MAX);
+        viewport.zoom_by(0.5, None);
+        assert!(
+            viewport.zoom_factor > 2.0,
+            "zoom-out must not uncover rotated corners, got {}",
+            viewport.zoom_factor
+        );
     }
 
     #[test]

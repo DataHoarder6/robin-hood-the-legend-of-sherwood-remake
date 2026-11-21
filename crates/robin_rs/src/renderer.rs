@@ -371,8 +371,8 @@ fn map_camera_tint(view: robin_engine::coordinates::MapPoint, zoom: f32, angle: 
     [view.x, view.y, zoom, angle]
 }
 
-pub(crate) fn playfield_uniform_size(width: f32, height: f32) -> [f32; 2] {
-    [width, height - PANNEL_HEIGHT]
+pub(crate) fn playfield_uniform_size(width: f32, height: f32, panel_height: f32) -> [f32; 2] {
+    [width, height - panel_height]
 }
 
 // ---------------------------------------------------------------------
@@ -657,7 +657,7 @@ impl Renderer {
         });
         let initial_screen = ScreenUniform {
             screen_size: [width as f32, height as f32],
-            playfield_size: playfield_uniform_size(width as f32, height as f32),
+            playfield_size: playfield_uniform_size(width as f32, height as f32, PANNEL_HEIGHT),
         };
         gpu.queue
             .write_buffer(&screen_uniform, 0, bytemuck::bytes_of(&initial_screen));
@@ -688,7 +688,11 @@ impl Renderer {
         let white_bg = make_tex_bg(&gpu.device, &bgl_tex, &white_view, &sampler, "white bg");
         let resources = GpuResources::new(sampler, linear_sampler, bgl_tex, white_view, white_bg);
         let pipelines = PipelineStore::new(&gpu, &bgl_screen, &resources.bgl_tex, scale_mode);
-        let panel_height = if surface.is_some() { PANNEL_HEIGHT } else { 0.0 };
+        let panel_height = if surface.is_some() {
+            PANNEL_HEIGHT
+        } else {
+            0.0
+        };
         let frame = FrameState::new(
             &gpu,
             &resources,
@@ -1522,7 +1526,10 @@ mod tests {
         let angle = std::f32::consts::FRAC_PI_4;
         let tint = map_camera_tint(view, 1.5, angle);
         assert_eq!(tint, [12.0, 34.0, 1.5, angle]);
-        assert_eq!(playfield_uniform_size(800.0, 680.0), [800.0, 600.0]);
+        assert_eq!(
+            playfield_uniform_size(800.0, 680.0, PANNEL_HEIGHT),
+            [800.0, 600.0]
+        );
     }
 
     #[test]

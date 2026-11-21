@@ -3,6 +3,7 @@
 use crate::gfx_types::Rect;
 use crate::gpu_upscale::GpuUpscale;
 use crate::window::{GpuContext, PresentationRect, SharedSurface};
+use robin_engine::engine::PANNEL_HEIGHT;
 use robin_engine::graphic_config::{TextureEffect, TextureScaleMode};
 
 use super::pipelines::{PipelineStore, SPRITE_STENCIL_FORMAT, blend_index};
@@ -240,17 +241,7 @@ impl FrameState {
         let (screen, screen_bg) = uniforms();
         let (swap, swap_bg) = uniforms();
         Self::new(
-            gpu,
-            resources,
-            screen,
-            screen_bg,
-            swap,
-            swap_bg,
-            None,
-            None,
-            width,
-            height,
-            0.0,
+            gpu, resources, screen, screen_bg, swap, swap_bg, None, None, width, height, 0.0,
         )
     }
 
@@ -529,7 +520,7 @@ impl FrameState {
         // share).
         let screen_swap = ScreenUniform {
             screen_size: [swap_w as f32, swap_h as f32],
-            playfield_size: playfield_uniform_size(swap_w as f32, swap_h as f32),
+            playfield_size: playfield_uniform_size(swap_w as f32, swap_h as f32, PANNEL_HEIGHT),
         };
         gpu.queue.write_buffer(
             &self.swap_screen_uniform,
@@ -1063,7 +1054,11 @@ impl FrameState {
         }
         let uniform = ScreenUniform {
             screen_size: [self.width as f32, self.height as f32],
-            playfield_size: [self.width as f32, self.height as f32 - self.panel_height],
+            playfield_size: playfield_uniform_size(
+                self.width as f32,
+                self.height as f32,
+                self.panel_height,
+            ),
         };
         gpu.queue
             .write_buffer(&self.screen_uniform, 0, bytemuck::bytes_of(&uniform));

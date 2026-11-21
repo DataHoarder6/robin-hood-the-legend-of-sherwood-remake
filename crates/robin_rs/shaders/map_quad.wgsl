@@ -31,14 +31,19 @@ fn vs_main(v: VsIn) -> VsOut {
 }
 @fragment
 fn fs_main(v: VsOut) -> @location(0) vec4<f32> {
-    let center = screen.playfield_size * 0.5;
-    let offset = v.position.xy - center;
-    let s = sin(-v.camera.w);
-    let c = cos(-v.camera.w);
-    let unrotated = vec2<f32>(
-        offset.x * c - offset.y * s,
-        offset.x * s + offset.y * c,
-    ) + center;
+    // Angle zero must take the legacy path bit-for-bit: rotating by zero and
+    // translating back is not exact in floating point.
+    var unrotated: vec2<f32> = v.position.xy;
+    if v.camera.w != 0.0 {
+        let center = screen.playfield_size * 0.5;
+        let offset = v.position.xy - center;
+        let s = sin(-v.camera.w);
+        let c = cos(-v.camera.w);
+        unrotated = vec2<f32>(
+            offset.x * c - offset.y * s,
+            offset.x * s + offset.y * c,
+        ) + center;
+    }
     let map_pixel = floor(unrotated / v.camera.z + v.camera.xy);
     let texel = vec2<i32>(map_pixel + v.texture_offset);
     let dimensions = vec2<i32>(textureDimensions(sampled_tex));
@@ -48,9 +53,13 @@ fn fs_main(v: VsOut) -> @location(0) vec4<f32> {
     // against the bound texture, not a level extent: the atlas bind group keeps
     // in-range decals byte-identical.
     if any(texel < vec2<i32>(0)) || any(texel >= dimensions) {
-        // Leave the framebuffer clear colour (black) for uncovered terrain;
-        // rotated map-sprite quads need transparency here so their empty
-        // corner triangles do not paint opaque black into the scene.
+        // Angle zero keeps the legacy opaque black for uncovered terrain.
+        // Rotated map-sprite quads need transparency here so their empty
+        // corner triangles do not paint opaque black into the scene; their
+        // clear colour is black too, so rendering is unchanged at zero.
+        if v.camera.w == 0.0 {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
         return vec4<f32>(0.0);
     }
     return textureLoad(sampled_tex, texel, 0);

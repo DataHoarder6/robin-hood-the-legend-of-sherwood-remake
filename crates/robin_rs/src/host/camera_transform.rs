@@ -29,6 +29,11 @@ impl CameraRotation {
 
     /// Undo the screen rotation about the playfield centre.
     pub(crate) fn screen_inverse(&self, point: ScreenPoint) -> ScreenPoint {
+        // Angle zero must preserve the legacy arithmetic exactly: a rotate
+        // followed by its inverse is not bit-identical in IEEE-754.
+        if self.angle == 0.0 {
+            return point;
+        }
         rotate_screen_point(point, -self.angle, self.center)
     }
 }
@@ -54,6 +59,9 @@ pub(crate) fn map_to_screen(
     rotation: CameraRotation,
 ) -> ScreenPoint {
     let pixel = ((point.x - view.x) * zoom, (point.y - view.y) * zoom);
+    if rotation.angle == 0.0 {
+        return ScreenPoint::new(pixel.0, pixel.1);
+    }
     let (x, y) = rotate(
         (pixel.0 - rotation.center.x, pixel.1 - rotation.center.y),
         rotation.angle,
@@ -67,6 +75,9 @@ pub(crate) fn screen_to_map(
     zoom: f32,
     rotation: CameraRotation,
 ) -> MapPoint {
+    if rotation.angle == 0.0 {
+        return MapPoint::new(view.x + point.x / zoom, view.y + point.y / zoom);
+    }
     let (x, y) = rotate(
         (point.x - rotation.center.x, point.y - rotation.center.y),
         -rotation.angle,
@@ -75,6 +86,21 @@ pub(crate) fn screen_to_map(
         view.x + (x + rotation.center.x) / zoom,
         view.y + (y + rotation.center.y) / zoom,
     )
+}
+
+/// Axis-aligned bound of a set of screen points, as `(min_x, min_y, max_x, max_y)`.
+pub(crate) fn aabb_of_points(points: impl IntoIterator<Item = (f32, f32)>) -> (f32, f32, f32, f32) {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for (x, y) in points {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    (min_x, min_y, max_x, max_y)
 }
 
 /// Size of the playfield's axis-aligned bound after rotation, in map units.
@@ -133,9 +159,12 @@ pub(crate) fn minimum_zoom(screen: ScreenSize, level: MapSize, angle: f32) -> f3
     let need_y = (screen.x * sin.abs() + (screen.y - PANNEL_HEIGHT) * cos.abs()) / level.y;
     let needed = need_x.max(need_y);
     if needed > 2.0 {
-        tracing::warn!(needed, "rotation exceeds zoom cap; map edges may show");
+        tracing::warn!(
+            needed,
+            "rotation needs zoom beyond the usual cap; view will widen"
+        );
     }
-    needed.clamp(0.5, 2.0)
+    needed.max(0.5)
 }
 
 #[cfg(test)]
@@ -163,6 +192,26 @@ mod tests {
             if angle == 0.0 {
                 assert!(near(screen_point.x, (point.x - view.x) * zoom));
                 assert!(near(screen_point.y, (point.y - view.y) * zoom));
+            }
+        }
+    }
+
+    #[test]
+    fn angle_zero_is_bit_identical_to_the_legacy_transform() {
+        let view = MapPoint::new(12.5, 40.0);
+        let zoom = 1.5;
+        let rotation = CameraRotation::new(0.0, ScreenSize::new(800.0, 680.0));
+        for x in [0.0_f32, 0.1, 123.25, 8000.0] {
+            for y in [0.0_f32, -0.1, 267.75, 8000.0] {
+                let point = MapPoint::new(x, y);
+                let screen = map_to_screen(point, view, zoom, rotation);
+                assert_eq!(screen.x, (point.x - view.x) * zoom);
+                assert_eq!(screen.y, (point.y - view.y) * zoom);
+                let screen_point = ScreenPoint::new(x, y);
+                let map = screen_to_map(screen_point, view, zoom, rotation);
+                assert_eq!(map.x, view.x + screen_point.x / zoom);
+                assert_eq!(map.y, view.y + screen_point.y / zoom);
+                assert_eq!(rotation.screen_inverse(screen_point), screen_point);
             }
         }
     }
