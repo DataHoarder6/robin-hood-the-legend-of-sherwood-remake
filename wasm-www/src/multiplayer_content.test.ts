@@ -13,7 +13,7 @@ function ticket(contentIdentity = HOST_CONTENT): VerifiedBrowserJoinTicket {
     canonicalPayload: new Uint8Array(),
     signature: new Uint8Array(),
     payload: {
-      schema: 3,
+      schema: 4,
       transport: "iroh-relay-websocket",
       net_protocol: browserJoinTicketConstants.netProtocolVersion,
       engine_version: COMMIT,
@@ -23,6 +23,7 @@ function ticket(contentIdentity = HOST_CONTENT): VerifiedBrowserJoinTicket {
       session_id: "A".repeat(43),
       issued_at_epoch_s: 1,
       expires_at_epoch_s: 1801,
+      expires_never: false,
       content_edition: "demo",
       content_identity_sha256: contentIdentity,
       mission_id: "Dem_Lei_MP",
@@ -40,7 +41,7 @@ function manifest(
     commit: COMMIT,
     short: COMMIT.slice(0, 12),
     netProtocol: browserJoinTicketConstants.netProtocolVersion,
-    ticketSchema: 3,
+    ticketSchema: 4,
     javascriptModules: [
       {
         path: javascriptModulePath,

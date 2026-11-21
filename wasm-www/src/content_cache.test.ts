@@ -41,8 +41,8 @@ function fakeStorage(entries = new Map<string, Response>()) {
 
 const deleted: string[] = [];
 
-async function file(bytes: Uint8Array): Promise<[CachedFile, Uint8Array<ArrayBuffer>]> {
-  const copy = new Uint8Array(bytes) as Uint8Array<ArrayBuffer>;
+async function file(bytes: Uint8Array): Promise<[CachedFile, Uint8Array]> {
+  const copy = new Uint8Array(bytes);
   return [
     {
       url: "https://robin.jautis.lt/datadirs/demo/datadir.bin",
@@ -86,7 +86,7 @@ test("refuses to cache bytes that disagree with the manifest", async () => {
   const [descriptor] = await file(new Uint8Array([1, 2, 3]));
   const { storage } = fakeStorage();
   await assert.rejects(
-    writeCachedContent(descriptor, new Uint8Array([9]) as Uint8Array<ArrayBuffer>, storage),
+    writeCachedContent(descriptor, new Uint8Array([9]), storage),
     /does not match its manifest digest/,
   );
 });
