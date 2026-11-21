@@ -283,10 +283,10 @@ pub(super) fn take_committed_snapshot_transition(
     peers: &mut ServerPeers,
 ) -> Option<(
     robin_engine::multiplayer::SnapshotTransitionId,
-    Vec<UnboundedSender<NetMsg>>,
+    Vec<(u8, UnboundedSender<NetMsg>)>,
 )> {
     let id = peers.transitions.take_completed()?;
-    let senders = peers.sessions.detach_all_writers();
+    let senders = peers.sessions.detach_all_writers_with_seats();
     Some((id, senders))
 }
 
@@ -298,7 +298,7 @@ pub(super) fn commit_snapshot_transition(
     context: &ServerContext,
     committed: Option<(
         robin_engine::multiplayer::SnapshotTransitionId,
-        Vec<UnboundedSender<NetMsg>>,
+        Vec<(u8, UnboundedSender<NetMsg>)>,
     )>,
 ) {
     let Some((id, senders)) = committed else {
@@ -310,7 +310,17 @@ pub(super) fn commit_snapshot_transition(
         "multiplayer: snapshot transition committed"
     );
     publish_context_continuation(context);
-    for sender in &senders {
+    let mut written = HashMap::new();
+    for (seat, _) in &senders {
+        written.insert(*seat, Arc::new(tokio::sync::Notify::new()));
+    }
+    // Install the drain before queueing any frame so a writer that signals
+    // immediately is never lost to a not-yet-installed drain.
+    *context.commit_drain.lock() = Some(CommitDrain {
+        senders: senders.clone(),
+        written,
+    });
+    for (_, sender) in &senders {
         sender
             .send(NetMsg::CommitSnapshotTransition { id })
             .unwrap_or_else(|_| {
@@ -321,13 +331,70 @@ pub(super) fn commit_snapshot_transition(
         .incoming_tx
         .send(NetEvent::CommitSnapshotTransition { id })
         .unwrap_or_else(|_| panic!("snapshot transition host event channel is closed"));
-    // Dropping the last queue handles closes every old mission stream after
-    // the commit frame has drained. All participants rebuild the transport
-    // against the replacement mission and re-enter through its ready barrier.
-    drop(senders);
+    // The detached writer queues are kept open by the drain above until the
+    // runtime has seen every seat's commit frame. Dropping them here races the
+    // writer and lets the client read `connection lost` instead of the commit
+    // (D07 / H36).
     // Every writer is detached until the replacement mission admits its seats
     // again, so no shared page may await one in the meantime.
     publish_session_seats(context);
+}
+
+/// Bounded host-side drain state for one committed snapshot transition.
+pub(super) struct CommitDrain {
+    /// Detached writer queues held open so each peer can finish writing its
+    /// commit frame. Released by the runtime after the bounded drain.
+    pub(super) senders: Vec<(u8, UnboundedSender<NetMsg>)>,
+    /// One signal per seat, fired once its commit frame is on the wire (or the
+    /// writer ends). `Notify` stores a permit, so a signal arriving before the
+    /// runtime starts awaiting is still observed.
+    pub(super) written: HashMap<u8, Arc<tokio::sync::Notify>>,
+}
+
+/// Record that a seat can no longer produce a commit frame — either it wrote
+/// one, or its connection/writer ended. Wakes the host's bounded drain so a
+/// disconnected peer never stalls shutdown.
+pub(super) fn notify_commit_frame_written(context: &ServerContext, seat: u8) {
+    let guard = context.commit_drain.lock();
+    if let Some(drain) = guard.as_ref()
+        && let Some(written) = drain.written.get(&seat)
+    {
+        written.notify_one();
+    }
+}
+
+/// Wait up to `budget` for every detached writer to report its commit frame
+/// written, then release the retained queues. A peer that never writes is
+/// released by the deadline — never an unbounded wait.
+pub(super) async fn await_commit_frame_drains(context: &ServerContext, budget: Duration) {
+    let notifies: Vec<(u8, Arc<tokio::sync::Notify>)> = {
+        let guard = context.commit_drain.lock();
+        match guard.as_ref() {
+            Some(drain) => drain
+                .written
+                .iter()
+                .map(|(seat, written)| (*seat, Arc::clone(written)))
+                .collect(),
+            None => return,
+        }
+    };
+    for (seat, written) in notifies {
+        if tokio::time::timeout(budget, written.notified())
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                seat,
+                budget_ms = budget.as_millis(),
+                "multiplayer: commit frame was not written before the drain deadline; closing endpoint anyway"
+            );
+        }
+    }
+    // Closing the retained queues ends the peer writers. Every commit frame
+    // is on the wire by now, or the deadline released a dead peer.
+    if let Some(drain) = context.commit_drain.lock().take() {
+        drop(drain.senders);
+    }
 }
 
 /// Host monotonic milliseconds. Every barrier deadline is expressed in this
@@ -408,6 +475,9 @@ pub(super) struct ServerContext {
     pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
     pub(super) host_left: AtomicBool,
     pub(super) connections: Mutex<std::collections::HashMap<u8, iroh::endpoint::Connection>>,
+    /// Writers detached at commit, held open until every commit frame is
+    /// written (or the bounded drain deadline fires) before endpoint close.
+    pub(super) commit_drain: Mutex<Option<CommitDrain>>,
     /// Monotonic anchor for barrier deadlines. Never serialized; deadlines
     /// stored in peer state are elapsed milliseconds from this instant.
     pub(super) started: std::time::Instant,
@@ -588,6 +658,7 @@ pub(super) fn start_server_inner(
         continued_session: continuation.is_some(),
         host_left: AtomicBool::new(false),
         connections: Mutex::new(std::collections::HashMap::new()),
+        commit_drain: Mutex::new(None),
         relay_url: Mutex::new(
             continuation
                 .as_ref()
@@ -782,6 +853,10 @@ pub(super) async fn run_server(
             );
         }
     }
+    // Keep the endpoint alive until every seat's snapshot commit frame is on
+    // the wire. Closing first races the peer writer and the client reads a
+    // reader-side `connection lost` instead of the commit (D07 / H36).
+    await_commit_frame_drains(&context, COMMIT_FRAME_DRAIN_TIMEOUT).await;
     endpoint.close().await;
     accept.abort();
     let _ = accept.await;
@@ -1077,7 +1152,11 @@ pub(super) async fn handle_incoming_peer(
     let result = {
         let writer = async {
             while let Some(msg) = write_rx.recv().await {
+                let is_commit = matches!(&msg, NetMsg::CommitSnapshotTransition { .. });
                 write_frame(&mut send, &msg).await?;
+                if is_commit {
+                    notify_commit_frame_written(&context, assigned_seat.0);
+                }
             }
             // Queue closed: seat was dropped (shutdown or cleanup).
             Ok::<(), MultiplayerError>(())
@@ -1086,6 +1165,9 @@ pub(super) async fn handle_incoming_peer(
         drive_server_peer_io(reader, writer, TERMINAL_WRITER_DRAIN_TIMEOUT).await
     };
 
+    // A writer that ended without a commit frame still releases the host's
+    // bounded drain: nothing more can be delivered on this connection.
+    notify_commit_frame_written(&context, assigned_seat.0);
     release_peer_session(&context, assigned_seat, owner, session_generation);
     conn.close(CLOSE_GRACEFUL.into(), b"session over");
 

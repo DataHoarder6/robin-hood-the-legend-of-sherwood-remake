@@ -984,18 +984,11 @@ async fn run_session<T: ClientTransport>(
         }
     };
     let cancel = pin!(wait_for_cancel::<T::Timer>(transport.cancellation()));
-    let mut reader = pin!(reader);
-    let mut writer = pin!(writer);
-    // `select` polls its first future first, so the reader wins a tie. When the
-    // writer still finishes first, give it one more chance to hand a commit
-    // that is already buffered on the wire to the reader before honouring a
-    // send failure (see `prefer_buffered_commit`).
-    let end = match select(cancel, select(reader.as_mut(), writer.as_mut())).await {
+    let reader = pin!(reader);
+    let writer = pin!(writer);
+    let end = match select(cancel, select(reader, writer)).await {
         Either::Left(((), _)) => SessionEnd::OutgoingClosed,
-        Either::Right((Either::Left((end, _)), _)) => end,
-        Either::Right((Either::Right((writer_end, _)), _)) => {
-            prefer_buffered_commit(writer_end, reader.as_mut()).await
-        }
+        Either::Right((Either::Left((end, _)) | Either::Right((end, _)), _)) => end,
     };
     if matches!(end, SessionEnd::Drop(_))
         && matches!(_conn.close_reason(), Some(iroh::endpoint::ConnectionError::ApplicationClosed(ref close))
@@ -1007,32 +1000,6 @@ async fn run_session<T: ClientTransport>(
         });
     }
     end
-}
-
-/// Resolve a writer that ended before the reader.
-///
-/// On a campaign handoff the host queues `CommitSnapshotTransition` on the
-/// mission streams *before* it closes them (`server.rs` commit then drops the
-/// senders), so a peer's last outbound write can fail while the commit frame is
-/// still buffered for the reader. Treating that race as a transport drop makes
-/// the client abandon its prepared transition on a generation the host has
-/// already retired and never reach the replacement mission (D07 / H36).
-///
-/// The reader is polled exactly once: a frame already on the wire decodes on
-/// that poll and its commit wins; a reader still awaiting bytes loses to the
-/// writer's end. This is an explicit priority rule — no sleep, retry or extra
-/// wait, so a local send error on an otherwise live connection ends promptly.
-async fn prefer_buffered_commit(
-    writer_end: SessionEnd,
-    buffered_reader: impl Future<Output = SessionEnd> + Unpin,
-) -> SessionEnd {
-    if !matches!(writer_end, SessionEnd::Drop(_)) {
-        return writer_end;
-    }
-    match select(buffered_reader, std::future::ready(())).await {
-        Either::Left((SessionEnd::TransitionCommitted, _)) => SessionEnd::TransitionCommitted,
-        Either::Left((_, _)) | Either::Right(_) => writer_end,
-    }
 }
 
 // ─── In-session messages ─────────────────────────────────────────
@@ -1206,46 +1173,6 @@ pub(super) mod tests {
         };
         assert!(fatal.to_string().contains("host-under-test"), "{fatal}");
         assert!(rx.try_recv().is_err(), "one outcome, one event");
-    }
-
-    /// D07 / H36: the host commits the campaign exit before closing the
-    /// mission streams, so a peer's last outbound write can fail while the
-    /// commit frame is already buffered for the reader. The commit must win;
-    /// otherwise the client abandons its prepared transition on the dead
-    /// generation and never reaches the replacement mission.
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    fn a_buffered_commit_outweighs_a_writer_send_failure() {
-        let send_failure = || {
-            SessionEnd::Drop(MultiplayerError::transport(
-                "write frame body",
-                std::io::Error::from(std::io::ErrorKind::BrokenPipe),
-            ))
-        };
-        // A commit ready on the reader beats a concurrent writer send failure.
-        assert!(matches!(
-            pollster::block_on(prefer_buffered_commit(
-                send_failure(),
-                std::future::ready(SessionEnd::TransitionCommitted),
-            )),
-            SessionEnd::TransitionCommitted
-        ));
-        // A reader still awaiting bytes cannot hold the writer's outcome.
-        assert!(matches!(
-            pollster::block_on(prefer_buffered_commit(
-                send_failure(),
-                std::future::pending(),
-            )),
-            SessionEnd::Drop(_)
-        ));
-        // A reader that hit EOF (no commit) leaves the drop in force.
-        assert!(matches!(
-            pollster::block_on(prefer_buffered_commit(
-                send_failure(),
-                std::future::ready(send_failure()),
-            )),
-            SessionEnd::Drop(_)
-        ));
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
