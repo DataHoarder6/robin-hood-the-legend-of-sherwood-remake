@@ -245,10 +245,23 @@ impl MissionLeaderboardRuntime {
             }),
         }
     }
-    pub(super) fn after_state_restore(&mut self, _campaign: &Campaign) {
+    fn rearm_if_exhausted(&mut self) {
         if self.preparation.is_none() {
             *self = Self::new();
         }
+    }
+    pub(super) fn after_state_restore(&mut self, _campaign: &Campaign) {
+        self.rearm_if_exhausted();
+    }
+    /// Install a fresh one-shot preparation for a new terminal debriefing.
+    ///
+    /// The runtime outlives a single mission attempt: an authoritative restart
+    /// snapshot can be dropped mid-transition, leaving the same runtime to
+    /// settle another terminal debriefing without a new bootstrap. Each such
+    /// debriefing owns its own preparation, so re-arm the exhausted one here
+    /// instead of panicking in `capture_terminal`.
+    pub(super) fn rearm_for_new_attempt(&mut self) {
+        self.rearm_if_exhausted();
     }
     pub(super) fn capture_terminal(
         &mut self,
@@ -342,6 +355,63 @@ impl MissionEndPreparation {
 mod tests {
     use super::*;
     use robin_engine::replay::{ReplayData, ReplayFile, ReplayLoadBack, ReplaySaveSnapshot};
+
+    /// D06: the leaderboard runtime outlives a single mission attempt. When an
+    /// authoritative restart snapshot is dropped mid-transition, the same
+    /// runtime can settle a second terminal debriefing (`attempt_sequence` has
+    /// not advanced), so the one-shot preparation must be re-armed or the
+    /// second `capture_terminal` panics and aborts the client.
+    #[test]
+    fn each_terminal_transition_after_a_snapshot_restart_gets_a_fresh_preparation() {
+        use crate::leaderboard::test_fixtures::MISSION_ID;
+        use robin_engine::player_command::PlayerId;
+
+        let mission = robin_engine::profiles::MissionProfile {
+            mission_filename: MISSION_ID.into(),
+            ..Default::default()
+        };
+        let config = robin_engine::engine::SimConfig::default();
+        let mut runtime = MissionLeaderboardRuntime {
+            preparation: Some(MissionEndPreparation {
+                preferences: LeaderboardPreferences::default(),
+                browse: None,
+                upload: None,
+            }),
+        };
+
+        // First terminal transition consumes the one-shot preparation.
+        let first = runtime
+            .capture_terminal(MissionEndOutcome::Won, PlayerId(1), &mission, config)
+            .expect("first terminal transition captures its preparation");
+        assert!(first.browse.is_some());
+        assert!(
+            runtime.preparation.is_none(),
+            "the first capture must consume the one-shot preparation"
+        );
+
+        // The replacement mission begins after the snapshot restart; the
+        // runtime must hand the new attempt its own fresh preparation.
+        runtime.rearm_for_new_attempt();
+        let fresh = runtime
+            .preparation
+            .as_ref()
+            .expect("a new attempt must get a fresh preparation");
+        assert!(
+            fresh.browse.is_none(),
+            "the fresh preparation must not carry the prior attempt's browse state"
+        );
+
+        // Second terminal transition must get its own preparation, not panic.
+        let second = runtime
+            .capture_terminal(MissionEndOutcome::Lost, PlayerId(1), &mission, config)
+            .expect("second terminal transition must not reuse a captured preparation");
+        assert_eq!(
+            second.browse.as_ref().unwrap().outcome,
+            MissionEndOutcome::Lost,
+            "the second capture must carry its own attempt's outcome"
+        );
+        assert!(runtime.preparation.is_none());
+    }
 
     #[test]
     fn host_coop_results_browse_all_team_sizes() {

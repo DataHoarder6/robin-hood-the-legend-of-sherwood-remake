@@ -1080,10 +1080,15 @@ fn settle_terminal_debriefing(
     let outcome = leaderboard_outcome(exit_code).unwrap_or_else(|| {
         panic!("terminal debriefing received non-attempt operation {exit_code:?}")
     });
-    let leaderboard_preparation = context
+    let leaderboard = context
         .leaderboard
         .as_mut()
-        .unwrap_or_else(|| panic!("interactive mission has no leaderboard runtime"))
+        .unwrap_or_else(|| panic!("interactive mission has no leaderboard runtime"));
+    // A terminal debriefing owns one leaderboard preparation. When a restart
+    // snapshot is dropped mid-transition the same runtime can settle a second
+    // debriefing, so re-arm the exhausted preparation before capturing it.
+    leaderboard.rearm_for_new_attempt();
+    let leaderboard_preparation = leaderboard
         .capture_terminal(
             outcome,
             context.host.transport.local_seat(),
