@@ -20,7 +20,7 @@ itself, not a tilted bitmap.
 
 - No true 3D camera orbit. The terrain is one baked bitmap with a fixed
   projection; rotation cannot reveal new faces of buildings.
-- No new map art or new level. The demo mission is the test level.
+- No new map art or new level. Use the shipped `mods/multi-team-demos` hackable mission as the test level.
 - No rotation of the HUD, menus, or split-screen divider.
 - No rotation state in the engine, save games, replays or state hashes.
 
@@ -43,8 +43,10 @@ itself, not a tilted bitmap.
 - Build/test only through `scripts/check-quality.sh` suites, via
   `scripts/remote-check.sh` as required by `AGENTS.md`. Never set
   `CARGO_TARGET_DIR`.
-- Original game data is required for a real playthrough; `ROBINHOOD_DATA_DIR`
-  must be supplied by the owner for that step.
+- Test level: `mods/multi-team-demos/Data/Levels/MultiTeamThreeWay.level.json`
+  with `Data/Levels/Day/OpenBattlefield.map`. No licensed game data is
+  required; launch with `--mission MultiTeamThreeWay`. Use
+  `MultiTeamFourArmies` for a patrol stress check.
 
 ## Approaches considered
 
@@ -80,6 +82,18 @@ itself, not a tilted bitmap.
   the frame offset by the camera steps.
 - Shadows baked into the map rotate with it; any separately drawn shadow
   sprite goes through the same placement helper.
+- Split screen: all views share the same angle; each view rotates about its
+  own viewport centre. The divider and HUD do not rotate.
+- Rotation centre is the playfield rect (screen minus the bottom panel), used
+  consistently by shader, picking, zoom anchoring and culling — not the full
+  swap-chain centre.
+- Director/cutscene camera: angle resets to 0 while the director owns the
+  camera and is restored on release, so authored framing is unchanged.
+- `rotate_by` raises zoom to the minimum that keeps the rotated playfield
+  covered by map pixels; it never lowers zoom. No black corners at ±45°.
+- Every directional sprite row is remapped: PCs, NPCs, projectiles and
+  animals. The override is host-side only; engine sprite state and hashes are
+  unchanged.
 
 ## Acceptance
 
@@ -88,11 +102,10 @@ itself, not a tilted bitmap.
   anchored under the cursor at non-zero angles; rotated culling keeps a
   corner sprite visible; view-frame remap matches the camera step count;
   replay state hashes are unchanged with angle 0.
-- Manual playthrough of the Leicester demo mission with a real
-  `ROBINHOOD_DATA_DIR`: rotate in both directions, reset, click-move a
-  character, watch a patrol and a sight cone, check shadows stay attached.
-  If game data is unavailable, report that verification as blocked — do not
-  claim the feature is verified.
+- Manual playthrough of `MultiTeamThreeWay` (and a `MultiTeamFourArmies`
+  patrol stress run): rotate in both directions, reset, click-move a
+  character, watch patrols and sight cones, check shadows stay attached and
+  no black corners appear. Report anything unverified as blocked, not passed.
 
 ## Left to the builder
 
