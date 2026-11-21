@@ -28,7 +28,8 @@ type CacheStorageLike = {
 };
 
 export async function digestHex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const source = new Uint8Array(bytes).slice();
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", source));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

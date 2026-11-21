@@ -230,7 +230,7 @@ async function fetchExactDemo(
   if (cached !== undefined) {
     return {
       edition: "demo",
-      datadir: cached,
+      datadir: new Uint8Array(cached).slice(),
       dataBaseUrl: content.url.slice(0, content.url.lastIndexOf("/")),
       assets: [],
       shippingFiles: [],
