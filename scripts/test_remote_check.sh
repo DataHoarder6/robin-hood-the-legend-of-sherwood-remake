@@ -10,6 +10,12 @@ source_root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 work=$(mktemp -d "${TMPDIR:-/tmp}/robin-remote-check.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
+# ssh is stubbed to run locally, so the idle-poweroff scope marker must land in
+# a writable fixture dir rather than the production /var/lib path.
+export ROBIN_BUILD_SCOPE_DIR=$work/scope.d
+export FIXTURE_SSH_LOG=$work/ssh-calls
+: >"$FIXTURE_SSH_LOG"
+
 export HOME=$work/home
 export GIT_CONFIG_GLOBAL=$work/gitconfig
 export GIT_CONFIG_NOSYSTEM=1
@@ -34,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 host=$1; shift
+printf '%s\n' "$*" >>"$FIXTURE_SSH_LOG"
 if [[ $* == 'bash -s' ]]; then
     # Keep the exact heredoc body the outer remote-check rendered (variables
     # expanded, remote-side `\$` escaped) so the fixture can syntax-check the
@@ -224,6 +231,23 @@ for script in "$FIXTURE_RENDERED"/rendered-*.sh; do
 done
 if (( rendered_count == 0 )); then
     printf 'FAIL no remote heredocs were captured for the syntax check\n'
+    failures=$((failures + 1))
+fi
+
+# The idle-poweroff scope marker is dropped before the first pre-gate ssh and
+# retired on exit. A missing producer reopens the mid-rsync power-off window;
+# a leaked marker pins the build host awake forever.
+if grep -q 'scope.d/' "$FIXTURE_SSH_LOG"; then
+    printf 'ok   idle-poweroff scope marker is created on the build host\n'
+else
+    printf 'FAIL remote-check never created an idle-poweroff scope marker\n'
+    failures=$((failures + 1))
+fi
+scope_left=$(find "$ROBIN_BUILD_SCOPE_DIR" -type f 2>/dev/null | wc -l)
+if (( scope_left == 0 )); then
+    printf 'ok   idle-poweroff scope marker retired on exit\n'
+else
+    printf 'FAIL %s idle-poweroff scope markers left behind\n' "$scope_left"
     failures=$((failures + 1))
 fi
 

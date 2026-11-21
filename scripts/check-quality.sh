@@ -5,13 +5,16 @@ set -euo pipefail
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
 
+# shellcheck source=runtime-hosts.sh
+source "$repository/scripts/runtime-hosts.sh"
+
 # The runtime is not a build host: compiling the workspace there competes with
 # the agents that live on it. Every suite goes through the build host via
 # scripts/remote-check.sh SUITE. The no-argument call below is the suite listing
 # remote-check.sh reads locally to validate names, so it is not guarded.
 assert_build_host() {
     local host=${ROBIN_TEST_HOSTNAME:-$(hostname)}
-    if [ "$host" = oci-vm ]; then
+    if is_non_build_runtime "$host"; then
         printf 'check-quality: %s is not a build host; run `scripts/remote-check.sh SUITE` instead (build host: minipc by default)\n' \
             "$host" >&2
         exit 1

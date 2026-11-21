@@ -32,6 +32,22 @@ else
     fail "oci-vm: rc=$rc, output: $out"
 fi
 
+# --- the second runtime is refused too, including its FQDN --------------------
+# ADR 0036 added oci-g-services as a second runtime with its own sessions and
+# repos. It is no more a build host than oci-vm; the guard matches short names
+# so an FQDN cannot slip past it.
+for denied_host in oci-g-services oci_g_services oci-vm.example.com oci-g-services.example.com; do
+    set +e
+    out=$(run "$denied_host" --help)
+    rc=$?
+    set -e
+    if (( rc != 0 )) && [[ "$out" == *'scripts/remote-check.sh SUITE'* ]]; then
+        pass "a quality entry point on $denied_host refuses and names remote-check.sh"
+    else
+        fail "$denied_host: rc=$rc, output: $out"
+    fi
+done
+
 # --- the build host proceeds to suite dispatch --------------------------------
 set +e
 out=$(run minipc --help)

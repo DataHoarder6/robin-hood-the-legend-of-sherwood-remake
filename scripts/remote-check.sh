@@ -50,6 +50,38 @@ slot_dir="~/$remote_root/.slots"
 # fails with a named cause instead of deep in a compile.
 gate_toolchain_guard='set -e; if ! cargo --version >/dev/null || ! rustc --version >/dev/null; then printf "remote-check: gate toolchain cannot exec; a Nix GC may have removed a devShell input.\n" >&2; exit 1; fi; '
 
+# minipc powers itself off when idle (nixos-config services.build-host-idle-
+# poweroff). Before the remote heredoc registers systemd-inhibit, a build has no
+# cargo/rustc process and no logind session on the host, so with aged
+# last-activity the timer could power it off mid-rsync into gate-shared. The
+# host's scope-marker directory is the only signal that covers that gap: every
+# caller drops one per-invocation marker from the moment it owns a copy slot
+# until it exits, and the idle predicate treats a non-empty directory as active.
+# The name carries the epoch so a marker left by a killed caller can be retired.
+# The override is a test seam (see scripts/test_remote_check.sh): fixtures stub
+# ssh locally and cannot write /var/lib, so they point this at a temp dir. The
+# idle predicate reads the same path in production, configured by NixOS.
+scope_dir=${ROBIN_BUILD_SCOPE_DIR:-/var/lib/build-host-idle-poweroff/build-active.d}
+scope_marker=
+
+# EXIT cleanup: drop the local queue ticket and the host's scope marker. Both
+# are globals — Bash evaluates EXIT traps after a function's locals are gone.
+cleanup_remote_check() {
+    [ -z "${ticket:-}" ] || rm -f -- "$ticket" 2>/dev/null || true
+    if [ -n "$scope_marker" ]; then
+        ssh -n "$host" "rm -f -- '$scope_marker'" 2>/dev/null || true
+    fi
+}
+trap cleanup_remote_check EXIT
+
+# Called once the copy slot is held: every ssh/rsync before the gate now runs
+# inside the host's idle-poweroff scope. Fail early if the marker cannot be
+# written — an unprotected sync is worse than an aborted one.
+begin_build_scope() {
+    scope_marker="$scope_dir/$(date +%s)-$(hostname)-$$-$RANDOM"
+    ssh "$host" "mkdir -p '$scope_dir' && : > '$scope_marker'"
+}
+
 usage() {
     awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
     exit 2
@@ -91,11 +123,10 @@ lock_copy() {
     fi
     mkdir -p -- "$lock_dir" "$queue_dir"
     local deadline=$(( $(date +%s) + wait ))
-    # The trap is evaluated at exit, after this function's locals are gone: keep
-    # the ticket global so a finished or killed gate cannot hold the queue.
+    # The ticket is global so the EXIT cleanup (set up at the top of this script)
+    # retires it after a finish or a kill; a dead caller must not hold the queue.
     ticket="$queue_dir/$(printf '%020d' "$deadline")-$(date +%s%N)-$$-$RANDOM"
     : >"$ticket"
-    trap 'rm -f -- "$ticket"' EXIT
     exec 9>"$lock_dir/$safe.lock"
 
     while :; do
@@ -123,6 +154,9 @@ lock_copy() {
         if [ "$first" = "${ticket##*/}" ]; then
             if flock -n 9; then
                 printf 'remote-check: gate copy slot acquired for %s\n' "$name" >&2
+                # Cover the pre-gate ssh/rsync work (prepare_cache, toolchain
+                # check, sync_worktree) with the host's idle-poweroff scope.
+                begin_build_scope
                 return 0
             fi
         fi
