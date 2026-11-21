@@ -9,7 +9,8 @@ live in `docs/TESTING.md`.
 
 ## Build and quality gates
 
-- `check-quality.sh`: named CI/local quality suites and explicit fixture gates, including the advisory `unreferenced-items` suite (never fails the run).
+- `check-quality.sh`: named CI/local quality suites and explicit fixture gates, including the advisory `unreferenced-items` suite (never fails the run). Every suite refuses to run on the runtime (`oci-vm`) and names `scripts/remote-check.sh SUITE`; run gates there, not locally. The no-argument suite listing stays available locally because `remote-check.sh` uses it to validate names. `ROBIN_TEST_HOSTNAME` overrides host detection for tests.
+- `tests/no-local-build.sh`: fixture regression for that refusal and for the suite listing; `just test-no-local-build`. It uses no ssh or cargo.
 - `check_asset_boundary.py`: engine/assets ownership boundary checks.
 - `build-native.sh`: build the native client and matching replay admission helper.
 - `build-wasm-threads.sh`: supported threaded browser build wrapper; not obsolete.
