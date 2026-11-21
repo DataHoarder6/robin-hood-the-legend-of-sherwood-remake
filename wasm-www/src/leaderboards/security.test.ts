@@ -118,7 +118,8 @@ test("game-shell CSP confines executable sources and permits verified blob modul
     policy.get("connect-src"),
     new Set(["'self'", "https:", "wss:", "http://127.0.0.1:*", "http://localhost:*"]),
   );
-  assert.deepEqual(policy.get("frame-src"), new Set([DEPLOYMENT.signerOrigin]));
+  // The estate shell's inline CSP pins the estate signer origin (see index.html).
+  assert.deepEqual(policy.get("frame-src"), new Set(["https://robin-id.jautis.lt"]));
   assert.deepEqual(policy.get("object-src"), new Set(["'none'"]));
 });
 
