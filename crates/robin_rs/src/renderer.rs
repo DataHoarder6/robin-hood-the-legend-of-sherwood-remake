@@ -688,6 +688,7 @@ impl Renderer {
         let white_bg = make_tex_bg(&gpu.device, &bgl_tex, &white_view, &sampler, "white bg");
         let resources = GpuResources::new(sampler, linear_sampler, bgl_tex, white_view, white_bg);
         let pipelines = PipelineStore::new(&gpu, &bgl_screen, &resources.bgl_tex, scale_mode);
+        let panel_height = if surface.is_some() { PANNEL_HEIGHT } else { 0.0 };
         let frame = FrameState::new(
             &gpu,
             &resources,
@@ -699,6 +700,7 @@ impl Renderer {
             surface_config,
             width,
             height,
+            panel_height,
         );
 
         Renderer {

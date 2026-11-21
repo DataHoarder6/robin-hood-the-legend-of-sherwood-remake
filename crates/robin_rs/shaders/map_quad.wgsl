@@ -48,7 +48,10 @@ fn fs_main(v: VsOut) -> @location(0) vec4<f32> {
     // against the bound texture, not a level extent: the atlas bind group keeps
     // in-range decals byte-identical.
     if any(texel < vec2<i32>(0)) || any(texel >= dimensions) {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        // Leave the framebuffer clear colour (black) for uncovered terrain;
+        // rotated map-sprite quads need transparency here so their empty
+        // corner triangles do not paint opaque black into the scene.
+        return vec4<f32>(0.0);
     }
     return textureLoad(sampled_tex, texel, 0);
 }

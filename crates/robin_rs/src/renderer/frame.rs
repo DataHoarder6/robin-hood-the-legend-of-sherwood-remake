@@ -140,6 +140,8 @@ pub(super) struct FrameState {
     pub(super) diagnostics: super::diagnostics::FrameCounters,
     pub(super) width: u16,
     pub(super) height: u16,
+    /// Panel height excluded from the playfield; zero for offscreen targets.
+    panel_height: f32,
     gpu_phase_active: bool,
     /// Counts frames that actually reach the presentation queue. Temporal
     /// display effects deliberately advance here rather than on simulation
@@ -238,7 +240,17 @@ impl FrameState {
         let (screen, screen_bg) = uniforms();
         let (swap, swap_bg) = uniforms();
         Self::new(
-            gpu, resources, screen, screen_bg, swap, swap_bg, None, None, width, height,
+            gpu,
+            resources,
+            screen,
+            screen_bg,
+            swap,
+            swap_bg,
+            None,
+            None,
+            width,
+            height,
+            0.0,
         )
     }
 
@@ -923,6 +935,7 @@ impl FrameState {
         surface_config: Option<wgpu::SurfaceConfiguration>,
         width: u16,
         height: u16,
+        panel_height: f32,
     ) -> Self {
         let render_target_texture = create_render_target(&gpu.device, width, height);
         let render_target_view =
@@ -955,6 +968,7 @@ impl FrameState {
             diagnostics: Default::default(),
             width,
             height,
+            panel_height,
             gpu_phase_active: false,
             presentation_frame_count: 0,
             ui_only_frame: false,
@@ -1049,7 +1063,7 @@ impl FrameState {
         }
         let uniform = ScreenUniform {
             screen_size: [self.width as f32, self.height as f32],
-            playfield_size: playfield_uniform_size(self.width as f32, self.height as f32),
+            playfield_size: [self.width as f32, self.height as f32 - self.panel_height],
         };
         gpu.queue
             .write_buffer(&self.screen_uniform, 0, bytemuck::bytes_of(&uniform));
