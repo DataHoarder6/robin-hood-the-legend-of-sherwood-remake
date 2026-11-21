@@ -29,6 +29,13 @@ pub struct ViewportState {
     display_angle: f32,
     saved_camera_angle: Option<f32>,
     last_rotation_ms: Option<u32>,
+    /// Uptime at which the angle readout stops showing. Host-only.
+    readout_until_ms: Option<u32>,
+}
+
+/// Whether the transient angle readout should be drawn at `now_ms`.
+pub(crate) fn rotation_readout_visible(now_ms: u32, until_ms: Option<u32>) -> bool {
+    until_ms.is_some_and(|until| now_ms < until)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,6 +89,7 @@ impl ViewportState {
             display_angle: 0.0,
             saved_camera_angle: None,
             last_rotation_ms: None,
+            readout_until_ms: None,
         }
     }
 
@@ -145,7 +153,17 @@ impl ViewportState {
         self.display_angle = 0.0;
         self.saved_camera_angle = None;
         self.last_rotation_ms = None;
+        self.readout_until_ms = None;
         self.apply_rotation_constraints();
+    }
+
+    /// Show the angle readout for a short time after a rotation input.
+    pub fn set_rotation_readout(&mut self, now_ms: u32) {
+        self.readout_until_ms = Some(now_ms.saturating_add(1200));
+    }
+
+    pub fn rotation_readout_until(&self) -> Option<u32> {
+        self.readout_until_ms
     }
 
     /// Ease the rendered angle towards the requested one.
@@ -677,6 +695,23 @@ mod viewport_touch_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn readout_expires() {
+        assert!(!rotation_readout_visible(999, None));
+        assert!(rotation_readout_visible(999, Some(1000)));
+        assert!(!rotation_readout_visible(1000, Some(1000)));
+        assert!(rotation_readout_visible(0, Some(u32::MAX)));
+    }
+
+    #[test]
+    fn set_rotation_readout_sets_deadline() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_rotation_readout(1000);
+        assert_eq!(viewport.rotation_readout_until(), Some(2200));
+        viewport.reset_rotation();
+        assert_eq!(viewport.rotation_readout_until(), None);
     }
 
     #[test]

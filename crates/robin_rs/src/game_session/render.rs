@@ -2574,6 +2574,20 @@ impl OverlayHudInputs<'_> {
         if game.message_delay > 0 && !game.message_text.is_empty() {
             crate::hud_text::render_transient_message(renderer, fonts, &game.message_text);
         }
+
+        // Host-only camera angle, shown briefly after a rotation input.
+        let now_ms = crate::window::process_uptime_ms();
+        if crate::host::rotation_readout_visible(now_ms, host.viewport().rotation_readout_until()) {
+            let degrees = host.viewport().camera_angle().to_degrees().round() as i32;
+            crate::hud_text::render_text_with_shadow_gpu(
+                renderer,
+                &fonts.tooltip_font,
+                fonts.shadow_font.as_ref(),
+                &format!("{degrees}°"),
+                20,
+                20,
+            );
+        }
     }
 }
 

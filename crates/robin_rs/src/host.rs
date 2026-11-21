@@ -60,6 +60,7 @@ pub use transport::{
     PendingSnapshotTransitionPayload, SnapshotSave,
 };
 pub use viewport::ViewportState;
+pub(crate) use viewport::rotation_readout_visible;
 
 const PANNEL_HEIGHT: f32 = engine_api::PANNEL_HEIGHT;
 
