@@ -72,12 +72,76 @@ copy_name() {
 # verdicts, and a push of a tree the gate never saw. All agents run on this
 # host, so the lock lives here, keyed by the copy's identity; the build host's
 # own flock still serialises the suites against writers from other machines.
+#
+# Admission is FIFO: a ticket per caller, ordered by arrival under the copy's
+# identity. The local flock is only tried when this ticket is first, so twenty
+# gates queue in order instead of racing for the lock and timing out at 2 h.
+# ROBIN_GATE_QUEUE_WAIT_SECS (default 7200) bounds the wait; a killed caller's
+# ticket is reaped by deadline or owner PID.
 lock_copy() {
     local lock_dir=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
     local safe="${host//[^A-Za-z0-9._-]/_}-${name//[^A-Za-z0-9._-]/_}"
-    mkdir -p -- "$lock_dir"
+    local queue_dir="$lock_dir/queue/$safe"
+    local wait=${ROBIN_GATE_QUEUE_WAIT_SECS:-7200}
+    local first position count now old old_name old_deadline old_pid announced=
+    if [[ ! $wait =~ ^[1-9][0-9]*$ ]]; then
+        printf 'remote-check: ROBIN_GATE_QUEUE_WAIT_SECS must be a positive integer, got %s\n' \
+            "$wait" >&2
+        exit 2
+    fi
+    mkdir -p -- "$lock_dir" "$queue_dir"
+    local deadline=$(( $(date +%s) + wait ))
+    # The trap is evaluated at exit, after this function's locals are gone: keep
+    # the ticket global so a finished or killed gate cannot hold the queue.
+    ticket="$queue_dir/$(printf '%020d' "$deadline")-$(date +%s%N)-$$-$RANDOM"
+    : >"$ticket"
+    trap 'rm -f -- "$ticket"' EXIT
     exec 9>"$lock_dir/$safe.lock"
-    flock -w 7200 9
+
+    while :; do
+        now=$(date +%s)
+
+        # A killed harness leaves its ticket behind; its deadline or its dead
+        # owner retires it, the same way land.sh reaps landing tickets.
+        for old in "$queue_dir"/*; do
+            [ -f "$old" ] || continue
+            old_name=${old##*/}
+            old_deadline=${old_name%%-*}
+            case $old_deadline in
+                *[!0-9]*) continue ;;
+            esac
+            old_pid=${old_name#*-}
+            old_pid=${old_pid#*-}
+            old_pid=${old_pid%%-*}
+            if (( 10#$old_deadline < now )) ||
+               { [[ $old_pid =~ ^[0-9]+$ ]] && ! kill -0 "$old_pid" 2>/dev/null; }; then
+                rm -f -- "$old"
+            fi
+        done
+
+        first=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort | head -1)
+        if [ "$first" = "${ticket##*/}" ]; then
+            if flock -n 9; then
+                printf 'remote-check: gate copy slot acquired for %s\n' "$name" >&2
+                return 0
+            fi
+        fi
+
+        count=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | wc -l)
+        position=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort |
+            awk -v t="${ticket##*/}" '$0 == t { print NR }')
+        if [ "${position:-?}" != "$announced" ]; then
+            printf 'remote-check: waiting in gate copy queue (%s/%s) for %s\n' \
+                "${position:-?}" "$count" "$name" >&2
+            announced=${position:-?}
+        fi
+        if (( now >= deadline )); then
+            printf 'remote-check: timed out waiting for a gate copy slot after %s seconds\n' \
+                "$wait" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
 }
 
 # Gate copies have no worktree owner, so --prune keeps them only until this old.
