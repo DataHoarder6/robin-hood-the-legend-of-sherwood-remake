@@ -130,6 +130,12 @@ impl ViewportState {
         if (next - self.camera_angle).abs() < f32::EPSILON {
             return;
         }
+        if self.level_size.x <= 0.0
+            || self.level_size.y <= 0.0
+            || !rotation_step_allowed(self.screen_size, self.level_size, next)
+        {
+            return;
+        }
         self.camera_angle = next;
         self.apply_rotation_constraints();
     }
@@ -674,23 +680,40 @@ mod viewport_touch_tests {
     }
 
     #[test]
-    fn small_level_rotation_zooms_past_the_usual_cap() {
+    fn small_level_rotation_refuses_steps_beyond_crisp_zoom() {
         let mut viewport = ViewportState::new(800.0, 680.0);
         viewport.set_level_size(200.0, 200.0);
         viewport.rotate_by(2);
+        assert_eq!(viewport.camera_angle(), 0.0);
         assert!(
-            viewport.zoom_factor > 2.0,
-            "rotation must widen the view beyond 2.0, got {}",
+            viewport.zoom_factor <= 2.0,
+            "zoom must stay crisp, got {}",
             viewport.zoom_factor
         );
         viewport.advance_rotation(0);
         viewport.advance_rotation(u32::MAX);
         viewport.zoom_by(0.5, None);
         assert!(
-            viewport.zoom_factor > 2.0,
-            "zoom-out must not uncover rotated corners, got {}",
+            viewport.zoom_factor <= 2.0,
+            "zoom-out must stay crisp, got {}",
             viewport.zoom_factor
         );
+    }
+
+    #[test]
+    fn rotation_cap_recomputed_after_resize() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(1000.0, 1000.0);
+        viewport.rotate_by(1);
+        assert_eq!(viewport.camera_steps(), 1);
+        viewport.set_screen_size(2400.0, 1800.0);
+        viewport.rotate_by(1);
+        assert_eq!(
+            viewport.camera_steps(),
+            1,
+            "a wider screen must cap the step"
+        );
+        assert!(viewport.zoom_factor <= 2.0);
     }
 
     #[test]

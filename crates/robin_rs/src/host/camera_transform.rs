@@ -88,6 +88,11 @@ pub(crate) fn screen_to_map(
     )
 }
 
+/// Whether a rotation step keeps the baked map inside the crisp zoom range.
+pub(crate) fn rotation_step_allowed(screen: ScreenSize, level: MapSize, angle: f32) -> bool {
+    minimum_zoom(screen, level, angle) <= 2.0
+}
+
 /// Axis-aligned bound of a set of screen points, as `(min_x, min_y, max_x, max_y)`.
 pub(crate) fn aabb_of_points(points: impl IntoIterator<Item = (f32, f32)>) -> (f32, f32, f32, f32) {
     let mut min_x = f32::INFINITY;
@@ -194,6 +199,17 @@ mod tests {
                 assert!(near(screen_point.y, (point.y - view.y) * zoom));
             }
         }
+    }
+
+    #[test]
+    fn rotation_step_allowed_tracks_the_crisp_zoom_cap() {
+        let screen = ScreenSize::new(800.0, 680.0);
+        let small = MapSize::new(200.0, 200.0);
+        let normal = MapSize::new(1000.0, 1000.0);
+        assert!(rotation_step_allowed(screen, small, 0.0));
+        assert!(!rotation_step_allowed(screen, small, FRAC_PI_4));
+        assert!(rotation_step_allowed(screen, normal, 0.0));
+        assert!(rotation_step_allowed(screen, normal, FRAC_PI_4));
     }
 
     #[test]
