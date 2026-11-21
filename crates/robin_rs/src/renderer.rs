@@ -641,8 +641,13 @@ impl Renderer {
         );
         let white_view = white_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let bgl_screen =
-            pipelines::uniform_bgl(&gpu.device, "quad screen bgl", wgpu::ShaderStages::VERTEX);
+        // The map shader reads the playfield size in the fragment stage;
+        // every other pipeline that shares this layout stays vertex-only.
+        let bgl_screen = pipelines::uniform_bgl(
+            &gpu.device,
+            "quad screen bgl",
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+        );
         let bgl_tex = pipelines::tex_sampler_bgl(&gpu.device, "quad tex bgl");
         let screen_uniform = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("quad screen uniform"),

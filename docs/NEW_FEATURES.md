@@ -1,5 +1,14 @@
 # Post-port Features
 
+- **Map rotation.** `[` and `]` turn the camera in 22.5° steps up to ±45°;
+  `\` resets it. Terrain, sprites, decals, overlays and mouse picking share one
+  transform, and directional sprites select the matching view row so characters
+  keep facing their world direction. Split-screen views rotate about their own
+  centres; the HUD and divider stay fixed, and a director camera suppresses the
+  angle while it owns the view. Rotation is host presentation only: engine
+  state, saves, replays and state hashes are unchanged. Test level:
+  `MultiTeamThreeWay` from the `multi-team-demos` mod.
+
 - **Opt-in teammate cursors.** In co-op, a profile preference under Options →
   Multiplayer / Privacy ("Show Teammate Cursors") shows other seats' cursors in
   real time, smaller and tinted in that seat's colour, and broadcasts your own

@@ -299,9 +299,12 @@ impl SplitView {
         // Each group's center must stay inside its cell even at map edges.
         // Clamping to the map bounds can otherwise hide a hero behind another
         // camera's polygon. The renderer supplies empty space outside the map.
+        let rotation = viewport.camera_rotation();
+        let site = robin_engine::coordinates::ScreenPoint::new(self.site[0], self.site[1]);
+        let unrotated = rotation.screen_inverse(site);
         viewport.view_position = robin_engine::coordinates::MapPoint::new(
-            self.center[0] - self.site[0] / viewport.zoom_factor,
-            self.center[1] - self.site[1] / viewport.zoom_factor,
+            self.center[0] - unrotated.x / viewport.zoom_factor,
+            self.center[1] - unrotated.y / viewport.zoom_factor,
         );
         viewport
     }
@@ -310,6 +313,34 @@ impl SplitView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn split_view_centre_stays_at_site_when_rotated() {
+        let mut base = crate::host::ViewportState::new(1000.0, 800.0);
+        base.set_level_size(5000.0, 5000.0);
+        base.rotate_by(2);
+        base.advance_rotation(0);
+        base.advance_rotation(1000);
+        let mut layout = SplitScreen::default();
+        layout.update(
+            &[(0, [1100.0, 1000.0]), (1, [3000.0, 1000.0])],
+            1000.0,
+            800.0,
+            1.0,
+        );
+        for view in &layout.views {
+            let viewport = view.viewport(&base);
+            let point = viewport.map_to_screen_unclamped(robin_engine::coordinates::MapPoint::new(
+                view.center[0],
+                view.center[1],
+            ));
+            assert!(
+                (point.x - view.site[0]).abs() < 0.01 && (point.y - view.site[1]).abs() < 0.01,
+                "rotated centre must land at site: {point:?} vs {:?}",
+                view.site
+            );
+        }
+    }
+
     #[test]
     fn cameras_keep_border_players_in_their_own_cells() {
         let mut layout = SplitScreen::default();
