@@ -324,6 +324,22 @@ enum AudioFormat {
     Opus,
 }
 
+/// A browser package's Web Audio catalog is built only for transcoded Opus
+/// assets. Source audio stays embedded in the boot manifest with no catalog
+/// entry, so every browser playback request is rejected while the game looks
+/// otherwise healthy (#54). Refuse to publish such a package.
+fn validate_web_content_audio_format(
+    web_content_manifest: bool,
+    audio_format: AudioFormat,
+) -> Result<()> {
+    if web_content_manifest && audio_format != AudioFormat::Opus {
+        bail!(
+            "--web-content-manifest requires --audio-format opus: source audio has no browser catalog"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum InterfaceImageFormat {
     /// Keep interface resource pictures as raw RGB565.
@@ -367,6 +383,7 @@ fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    validate_web_content_audio_format(args.web_content_manifest, args.audio_format)?;
 
     if !args.input.is_dir() {
         bail!("input is not a directory: {}", args.input.display());
@@ -2074,4 +2091,19 @@ fn transcode_res_drop_bzip(path: &Path) -> Result<Vec<u8>> {
     let mut rm = ResourceManager::legacy_tool();
     rm.attach_resource_file(&path.to_string_lossy())?;
     rm.write_to_res_bytes(SixteenPacking::None)
+}
+
+#[cfg(test)]
+mod web_audio_contract_tests {
+    use super::*;
+
+    #[test]
+    fn web_content_manifest_refuses_source_audio() {
+        assert!(
+            validate_web_content_audio_format(true, AudioFormat::Source).is_err(),
+            "a browser package with source audio has no Web Audio catalog"
+        );
+        assert!(validate_web_content_audio_format(true, AudioFormat::Opus).is_ok());
+        assert!(validate_web_content_audio_format(false, AudioFormat::Source).is_ok());
+    }
 }
