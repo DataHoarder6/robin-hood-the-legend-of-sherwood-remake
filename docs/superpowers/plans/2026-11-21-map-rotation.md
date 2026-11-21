@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-21-map-rotation-design.md`
 
+**Landing:** rebase conflicts with the director-camera pan; see
+[`docs/slop/map-rotation-rebase-conflict.md`](../../slop/map-rotation-rebase-conflict.md).
+
 ## Global Constraints
 
 - Angle ∈ ±45°, steps of 22.5°; default 0 keeps the current render path bit-identical.
