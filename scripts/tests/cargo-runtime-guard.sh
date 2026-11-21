@@ -78,6 +78,12 @@ done
 expect_refused oci-vm +nightly build
 expect_refused oci-vm --color always build
 
+# --- the second runtime and FQDNs are refused too (ADR 0036) ----------------
+expect_refused oci-g-services build
+expect_refused oci_g_services clippy
+expect_refused oci-vm.example.com test
+expect_refused oci-g-services.example.com check
+
 # --- developer commands and a normal host still reach cargo -----------------
 expect_pass oci-vm run --example ferris_overlay
 expect_pass oci-vm metadata

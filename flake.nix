@@ -71,10 +71,15 @@
           # The runtime is not a build host. check-quality.sh alone cannot stop
           # a raw `nix develop --command cargo build`, so the devShell installs
           # a `cargo` ahead of the pinned toolchain: build-like subcommands are
-          # refused on oci-vm, everything else execs the real cargo unchanged.
+          # refused on either runtime, everything else execs the real cargo.
+          # Install the guard and its host-list helper as siblings: the guard
+          # resolves its own path through the symlink and sources the helper
+          # beside it (a single-file store path would leave no sibling).
           cargoGuard = pkgs.runCommand "robin-cargo-runtime-guard" { } ''
-            mkdir -p "$out/bin"
-            ln -s "${./scripts/cargo-runtime-guard.sh}" "$out/bin/cargo"
+            mkdir -p "$out/bin" "$out/lib"
+            install -m 755 "${./scripts/cargo-runtime-guard.sh}" "$out/lib/cargo-runtime-guard.sh"
+            install -m 644 "${./scripts/runtime-hosts.sh}" "$out/lib/runtime-hosts.sh"
+            ln -s "$out/lib/cargo-runtime-guard.sh" "$out/bin/cargo"
           '';
         in
         {
