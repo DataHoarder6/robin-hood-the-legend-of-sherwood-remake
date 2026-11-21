@@ -29,6 +29,11 @@ set -euo pipefail
 # caller has not executed yet, and the script still exits 0.
 exec </dev/null
 
+# push-gate exports this for doc-only landings; a direct remote-check has no
+# such variable. Default it here: `${var@Q}` on an unset name aborts under
+# set -u while the heredoc renders.
+docs_paths=${ROBIN_DOCS_CHECK_PATHS:-}
+
 host=${ROBIN_BUILD_HOST:-minipc}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 remote_root=build/robin
@@ -404,7 +409,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
-    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS@Q} \
+    ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
@@ -430,7 +435,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
-    ROBIN_DOCS_CHECK_PATHS=${ROBIN_DOCS_CHECK_PATHS@Q} \
+    ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\

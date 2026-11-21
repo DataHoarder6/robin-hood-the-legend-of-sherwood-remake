@@ -189,6 +189,20 @@ else
     failures=$((failures + 1))
 fi
 
+# A gate invoked directly (not through push-gate) has no ROBIN_DOCS_CHECK_PATHS.
+# `${var@Q}` on an unset variable aborts under set -u while the heredoc renders.
+set +e
+(cd "$work/repoA" && env -u ROBIN_DOCS_CHECK_PATHS \
+    bash scripts/remote-check.sh wasm docs-unset) >"$work/unset.out" 2>&1
+unset_status=$?
+set -e
+if (( unset_status == 0 )) && ! grep -q 'unbound variable' "$work/unset.out"; then
+    printf 'ok   a gate with no docs-path variable still runs\n'
+else
+    printf 'FAIL direct gate aborts when ROBIN_DOCS_CHECK_PATHS is unset (status %s)\n' "$unset_status"
+    failures=$((failures + 1))
+fi
+
 # The copy root must have been touched after sync even though rsync copied
 # files with --no-times and left the directory with an old mtime.
 copy_dir="$HOME/build/robin/race-copy"
