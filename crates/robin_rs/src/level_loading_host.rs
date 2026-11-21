@@ -1028,6 +1028,7 @@ pub fn draw_background(viewport: &crate::host::ViewportState, renderer: &mut Ren
         zoom,
         screen.x as u32,
         (screen.y - PANNEL_HEIGHT) as u32,
+        viewport.display_angle(),
     );
 }
 

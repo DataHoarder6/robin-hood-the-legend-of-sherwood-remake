@@ -12,6 +12,7 @@
 //!   runtime drawing is queued as GPU quads and submitted in `present()`.
 //! - Upscale shaders run as native WGSL pipelines (see [`crate::gpu_upscale`]).
 
+use robin_engine::engine::PANNEL_HEIGHT;
 use robin_engine::graphic_config::TextureScaleMode;
 use robin_engine::sprite::BBox;
 use std::collections::HashMap;
@@ -363,7 +364,15 @@ struct QuadVertex {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ScreenUniform {
     screen_size: [f32; 2],
-    _pad: [f32; 2],
+    playfield_size: [f32; 2],
+}
+
+fn map_camera_tint(view: robin_engine::coordinates::MapPoint, zoom: f32, angle: f32) -> [f32; 4] {
+    [view.x, view.y, zoom, angle]
+}
+
+pub(crate) fn playfield_uniform_size(width: f32, height: f32) -> [f32; 2] {
+    [width, height - PANNEL_HEIGHT]
 }
 
 // ---------------------------------------------------------------------
@@ -643,7 +652,7 @@ impl Renderer {
         });
         let initial_screen = ScreenUniform {
             screen_size: [width as f32, height as f32],
-            _pad: [0.0; 2],
+            playfield_size: playfield_uniform_size(width as f32, height as f32),
         };
         gpu.queue
             .write_buffer(&screen_uniform, 0, bytemuck::bytes_of(&initial_screen));
@@ -1016,6 +1025,7 @@ impl Renderer {
         zoom: f32,
         width: u32,
         height: u32,
+        angle: f32,
     ) -> bool {
         let Some(bg) = self.resources.background_texture.as_ref() else {
             return false;
@@ -1026,7 +1036,7 @@ impl Renderer {
             corners: None,
             uv_corners: None,
             uv: [0.0; 4],
-            tint: [view.x, view.y, zoom, 0.0],
+            tint: map_camera_tint(view, zoom, angle),
             operation: DrawOperation::Map(texture),
         });
         true
@@ -1498,6 +1508,15 @@ pub(crate) use gpu_contract_tests::verify_offscreen_gpu_contract;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_draw_packs_angle_and_playfield_size() {
+        let view = robin_engine::coordinates::MapPoint::new(12.0, 34.0);
+        let angle = std::f32::consts::FRAC_PI_4;
+        let tint = map_camera_tint(view, 1.5, angle);
+        assert_eq!(tint, [12.0, 34.0, 1.5, angle]);
+        assert_eq!(playfield_uniform_size(800.0, 680.0), [800.0, 600.0]);
+    }
 
     #[test]
     fn capture_target_diagnostics_cannot_restore_gpu_authority() {

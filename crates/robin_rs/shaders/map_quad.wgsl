@@ -3,7 +3,7 @@
 // choose opposite sides of a texel boundary during camera motion or zoom.
 struct ScreenUniform {
     screen_size: vec2<f32>,
-    _pad: vec2<f32>,
+    playfield_size: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> screen: ScreenUniform;
 @group(1) @binding(0) var sampled_tex: texture_2d<f32>;
@@ -31,7 +31,15 @@ fn vs_main(v: VsIn) -> VsOut {
 }
 @fragment
 fn fs_main(v: VsOut) -> @location(0) vec4<f32> {
-    let map_pixel = floor(v.position.xy / v.camera.z + v.camera.xy);
+    let center = screen.playfield_size * 0.5;
+    let offset = v.position.xy - center;
+    let s = sin(-v.camera.w);
+    let c = cos(-v.camera.w);
+    let unrotated = vec2<f32>(
+        offset.x * c - offset.y * s,
+        offset.x * s + offset.y * c,
+    ) + center;
+    let map_pixel = floor(unrotated / v.camera.z + v.camera.xy);
     let texel = vec2<i32>(map_pixel + v.texture_offset);
     let dimensions = vec2<i32>(textureDimensions(sampled_tex));
     // Outside the sampled texture is not map content. Clamping the lookup there

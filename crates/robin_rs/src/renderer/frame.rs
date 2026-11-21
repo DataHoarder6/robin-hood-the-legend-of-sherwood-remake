@@ -9,7 +9,7 @@ use super::pipelines::{PipelineStore, SPRITE_STENCIL_FORMAT, blend_index};
 use super::resources::GpuResources;
 use super::{
     DrawOperation, QuadTexture, QuadVertex, QueuedDraw, ScreenUniform, TextureSource,
-    make_alpha_source, make_tex_bg,
+    make_alpha_source, make_tex_bg, playfield_uniform_size,
 };
 
 fn expand_queue_geometry(draws: &[QueuedDraw], verts: &mut Vec<QuadVertex>) {
@@ -517,7 +517,7 @@ impl FrameState {
         // share).
         let screen_swap = ScreenUniform {
             screen_size: [swap_w as f32, swap_h as f32],
-            _pad: [0.0; 2],
+            playfield_size: playfield_uniform_size(swap_w as f32, swap_h as f32),
         };
         gpu.queue.write_buffer(
             &self.swap_screen_uniform,
@@ -1049,7 +1049,7 @@ impl FrameState {
         }
         let uniform = ScreenUniform {
             screen_size: [self.width as f32, self.height as f32],
-            _pad: [0.0; 2],
+            playfield_size: playfield_uniform_size(self.width as f32, self.height as f32),
         };
         gpu.queue
             .write_buffer(&self.screen_uniform, 0, bytemuck::bytes_of(&uniform));
