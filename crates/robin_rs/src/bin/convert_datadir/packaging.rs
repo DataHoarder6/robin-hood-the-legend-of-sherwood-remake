@@ -4,6 +4,63 @@ use super::*;
 // Recognize stages left by converter versions preceding shared publication.
 const MANIFEST_STAGING_PREFIX: &str = ".robin-web-manifest-";
 
+/// Diagnostic catalog of the shipped files one mission needs. It is not part
+/// of the web content closure: a guest must not be able to select a subset by
+/// claiming a different manifest, and the native content identity must stay
+/// the whole-installation hash. Phase 1 only exposes the closure; the schema
+/// that lets a guest prove a bundle comes later.
+pub(super) const MISSION_BUNDLE_CATALOG_NAME: &str = "mission-bundles.json";
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct MissionBundleFile {
+    pub path: String,
+    pub byte_length: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct MissionBundleCatalog {
+    pub schema: u32,
+    /// Engine source commit this catalog was generated from.
+    pub engine_version: String,
+    /// Mission basename to the exact shipped files it loads.
+    pub missions: std::collections::BTreeMap<String, Vec<MissionBundleFile>>,
+}
+
+pub(super) fn mission_bundle_catalog(
+    plan: &super::dependency_plan::DependencyPlan,
+    data_out: &Path,
+) -> Result<MissionBundleCatalog> {
+    let mut missions = std::collections::BTreeMap::new();
+    for (mission, planned) in &plan.missions {
+        let mut files = Vec::new();
+        let mut paths = planned.destination_payloads.clone();
+        paths.sort();
+        paths.dedup();
+        for path in paths {
+            let (byte_length, sha256) = digest_file(&data_out.join(&path))?;
+            files.push(MissionBundleFile {
+                path,
+                byte_length,
+                sha256,
+            });
+        }
+        missions.insert(mission.clone(), files);
+    }
+    Ok(MissionBundleCatalog {
+        schema: 1,
+        engine_version: robin_rs::replay_format::ENGINE_SOURCE_COMMIT.to_string(),
+        missions,
+    })
+}
+
+pub(super) fn write_mission_bundle_catalog(
+    data_out: &Path,
+    catalog: &MissionBundleCatalog,
+) -> Result<()> {
+    super::write_json_pretty(&data_out.join(MISSION_BUNDLE_CATALOG_NAME), catalog)
+}
+
 pub(super) fn write_web_content_manifest(
     data_out: &Path,
     edition: robin_rs::multiplayer::content_identity::WebContentEdition,
@@ -72,7 +129,7 @@ pub(super) fn write_web_content_manifest(
     let mut files = Vec::new();
     let mut seen = BTreeSet::from([WEB_CONTENT_MANIFEST_NAME.to_owned()]);
     for (relative, path) in paths {
-        if relative == "conversion-plan.json" {
+        if relative == "conversion-plan.json" || relative == MISSION_BUNDLE_CATALOG_NAME {
             // Inspectable converter diagnostics are not runtime content.
             continue;
         }
@@ -488,6 +545,31 @@ mod tests {
         assert_eq!(
             shipping_payload_filename("My Mission", 17, b"abc"),
             "my_mission-w17-ba7816bf8f01.rhmission.zst"
+        );
+    }
+
+    #[test]
+    fn mission_bundle_catalog_does_not_change_web_manifest_bytes() {
+        use robin_rs::multiplayer::content_identity::{
+            WEB_CONTENT_MANIFEST_NAME, WebContentEdition,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("datadir.bin"), b"boot fixture").unwrap();
+        fs::create_dir(temp.path().join("missions")).unwrap();
+        fs::write(
+            temp.path().join("missions/test.rhmission.zst"),
+            b"mission fixture",
+        )
+        .unwrap();
+        write_web_content_manifest(temp.path(), WebContentEdition::Demo, "a".repeat(64)).unwrap();
+        let before = fs::read(temp.path().join(WEB_CONTENT_MANIFEST_NAME)).unwrap();
+        let plan = super::super::dependency_plan::DependencyPlan::default();
+        let bundles = super::mission_bundle_catalog(&plan, temp.path()).unwrap();
+        super::write_mission_bundle_catalog(temp.path(), &bundles).unwrap();
+        write_web_content_manifest(temp.path(), WebContentEdition::Demo, "a".repeat(64)).unwrap();
+        assert_eq!(
+            fs::read(temp.path().join(WEB_CONTENT_MANIFEST_NAME)).unwrap(),
+            before
         );
     }
 

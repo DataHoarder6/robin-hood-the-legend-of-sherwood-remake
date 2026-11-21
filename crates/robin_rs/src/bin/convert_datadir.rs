@@ -1687,7 +1687,11 @@ fn convert_shipping(data_in: PathBuf, data_out: &Path, opts: ShippingOpts) -> Re
     // Diagnostic plan is separate from the encoded datadir and web manifest.
     publication::publish_shipping(&dd, data_out, &opts)?;
     dependency_plan.completed = true;
-    write_json_pretty(&data_out.join("conversion-plan.json"), &dependency_plan)
+    write_json_pretty(&data_out.join("conversion-plan.json"), &dependency_plan)?;
+    // Expose the per-mission closure once every payload exists. This catalog is
+    // diagnostic in phase 1 and is excluded from the web content manifest.
+    let bundles = packaging::mission_bundle_catalog(&dependency_plan, data_out)?;
+    packaging::write_mission_bundle_catalog(data_out, &bundles)
 }
 
 fn optional_directory(path: &Path) -> Result<bool> {
