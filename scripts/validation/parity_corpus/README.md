@@ -18,7 +18,7 @@ client resolves through the chronology beside it (the same path a player's
 
 ### `sherwood-hq-entry/`
 
-- Mission: `Sherwood` (HQ), 240 simulation frames, replay schema 77.
+- Mission: `Sherwood` (HQ), 240 simulation frames, replay schema 78.
 - Covers: the entry popup `PostInitialize` queues after its own frame's modal
   drain (dismissed on frame 1) and the crouch tutorial popup opened at frame
   151. Playback must reopen both and consume their recorded dismissals in those

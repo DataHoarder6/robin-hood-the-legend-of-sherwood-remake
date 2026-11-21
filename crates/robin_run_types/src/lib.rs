@@ -119,7 +119,10 @@ pub const FRAME_TIME_MS: u32 = 40;
 /// Version 76 adds the per-PC "no friendly-fire knockback" flag.
 /// Version 77 removes the mission-end title-card acknowledgement: the debriefing
 /// is the only terminal summary a seat dismisses.
-pub const REPLAY_SCHEMA_VERSION: u32 = 77;
+/// Version 78 re-binds the campaign bitcode layout after prepared off-map
+/// reinforcements; schema-77 recordings are rejected by the version check
+/// instead of being misdecoded by the new campaign type.
+pub const REPLAY_SCHEMA_VERSION: u32 = 78;
 
 /// Wire-format protocol version shared by the engine and the leaderboard wire
 /// protocol. Bump on any breaking change to `NetMsg` or
