@@ -34,8 +34,8 @@ use crate::sound::SoundManager;
 
 mod camera_transform;
 pub(crate) use camera_transform::{
-    map_to_screen, minimum_zoom, rotate_screen_point, rotated_view_bounds, screen_to_map,
-    CameraRotation,
+    CameraRotation, map_to_screen, minimum_zoom, rotate_screen_point, rotated_view_bounds,
+    screen_to_map,
 };
 
 #[cfg(test)]
