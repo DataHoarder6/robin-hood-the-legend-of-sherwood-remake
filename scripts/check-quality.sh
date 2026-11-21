@@ -5,11 +5,26 @@ set -euo pipefail
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
 
+# The runtime is not a build host: compiling the workspace there competes with
+# the agents that live on it. Every suite goes through the build host via
+# scripts/remote-check.sh SUITE. The no-argument call below is the suite listing
+# remote-check.sh reads locally to validate names, so it is not guarded.
+assert_build_host() {
+    local host=${ROBIN_TEST_HOSTNAME:-$(hostname)}
+    if [ "$host" = oci-vm ]; then
+        printf 'check-quality: %s is not a build host; run `scripts/remote-check.sh SUITE` instead (build host: minipc by default)\n' \
+            "$host" >&2
+        exit 1
+    fi
+}
+
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
     printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
+
+assert_build_host
 
 case "$1" in
     format)
