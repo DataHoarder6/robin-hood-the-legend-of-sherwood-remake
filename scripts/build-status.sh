@@ -14,7 +14,7 @@ repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
 
 remote_root=build/robin
-slots=${ROBIN_BUILD_SLOTS:-3}
+slots=${ROBIN_BUILD_SLOTS:-2}
 min_free_gb=${ROBIN_MIN_FREE_GB:-40}
 hosts=("${ROBIN_BUILD_HOST:-minipc}" homelab)
 

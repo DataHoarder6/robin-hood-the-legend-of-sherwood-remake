@@ -19,7 +19,7 @@
 #
 # The suites run under flock, so two agents on one copy queue instead of
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
-# They also take one of the host's build slots (ROBIN_BUILD_SLOTS, default 3),
+# They also take one of the host's build slots (ROBIN_BUILD_SLOTS, default 2),
 # which is what keeps four copies from running forty-eight compilers on twelve
 # cores; each slot hands Cargo its share of the cores.
 set -euo pipefail
@@ -43,7 +43,7 @@ remote_root=build/robin
 gate_root=build/robin-gate
 gate_copy_name=gate-shared
 copy_root=$remote_root
-slots=${ROBIN_BUILD_SLOTS:-3}
+slots=${ROBIN_BUILD_SLOTS:-2}
 slot_dir="~/$remote_root/.slots"
 # A cold copy has no flake to check before sync, so every devShell invocation
 # also proves cargo/rustc can exec as its first command. A GC'd devShell then
