@@ -393,6 +393,14 @@ impl Renderer {
             return false;
         };
         let slot = residency.0;
+        let corners = crate::game_render::map_sprite_corners(
+            origin,
+            slot.width as u32,
+            slot.height as u32,
+            view,
+            zoom,
+            rotation,
+        );
         let bounds = crate::game_render::map_sprite_bounds(
             origin,
             slot.width as u32,
@@ -401,19 +409,17 @@ impl Renderer {
             zoom,
             rotation,
         );
-        let (x0, y0) = (bounds.min.x, bounds.min.y);
-        let (x1, y1) = (bounds.max.x, bounds.max.y);
         let (atlas_x, atlas_y) = slot.texel_origin;
         let texture = self.queue_atlas_layer(slot.layer);
         self.frame.queued.push(QueuedDraw {
             dst: Rect::new(
-                x0.floor() as i32,
-                y0.floor() as i32,
-                (x1.ceil() - x0.floor()) as u32,
-                (y1.ceil() - y0.floor()) as u32,
+                bounds.min.x.floor() as i32,
+                bounds.min.y.floor() as i32,
+                (bounds.max.x.ceil() - bounds.min.x.floor()) as u32,
+                (bounds.max.y.ceil() - bounds.min.y.floor()) as u32,
             ),
             uv_corners: None,
-            corners: Some([(x0, y0), (x1, y0), (x0, y1), (x1, y1)]),
+            corners: Some(corners),
             uv: [
                 atlas_x as f32 - origin.x,
                 atlas_y as f32 - origin.y,

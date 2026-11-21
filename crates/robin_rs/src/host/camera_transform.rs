@@ -85,6 +85,43 @@ pub(crate) fn rotated_playfield_size(screen: ScreenSize, zoom: f32, angle: f32) 
     (w * cos.abs() + h * sin.abs(), w * sin.abs() + h * cos.abs())
 }
 
+/// Allowed range for the unrotated view origin so the rotated screen corners
+/// all land inside the level.
+pub(crate) fn rotated_view_bounds(
+    screen: ScreenSize,
+    level: MapSize,
+    zoom: f32,
+    angle: f32,
+) -> (MapPoint, MapPoint) {
+    let (rotated_w, rotated_h) = rotated_playfield_size(screen, zoom, angle);
+    let centre_x = screen.x * 0.5 / zoom;
+    let centre_y = (screen.y - PANNEL_HEIGHT) * 0.5 / zoom;
+    (
+        MapPoint::new(rotated_w * 0.5 - centre_x, rotated_h * 0.5 - centre_y),
+        MapPoint::new(
+            level.x - rotated_w * 0.5 - centre_x,
+            level.y - rotated_h * 0.5 - centre_y,
+        ),
+    )
+}
+
+/// Map points sampled by the four playfield corners, for fill assertions.
+#[cfg(test)]
+pub(crate) fn screen_corners_to_map(
+    view: MapPoint,
+    screen: ScreenSize,
+    zoom: f32,
+    rotation: CameraRotation,
+) -> [MapPoint; 4] {
+    let corners = [
+        (0.0, 0.0),
+        (screen.x, 0.0),
+        (0.0, screen.y - PANNEL_HEIGHT),
+        (screen.x, screen.y - PANNEL_HEIGHT),
+    ];
+    corners.map(|(x, y)| screen_to_map(ScreenPoint::new(x, y), view, zoom, rotation))
+}
+
 /// Smallest zoom that keeps the rotated playfield inside the level bounds.
 pub(crate) fn minimum_zoom(screen: ScreenSize, level: MapSize, angle: f32) -> f32 {
     assert!(

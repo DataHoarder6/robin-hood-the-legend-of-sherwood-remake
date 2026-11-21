@@ -80,7 +80,7 @@ fn verify_loading_dissolve_pixels(gpu: GpuContext) {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
+fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool, rotation_steps: i8) {
     use robin_engine::coordinates::MapPoint;
 
     let mut renderer =
@@ -146,6 +146,11 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
     );
     let mut viewport =
         crate::host::ViewportState::new(16.0, 16.0 + robin_engine::engine::PANNEL_HEIGHT);
+    if rotation_steps != 0 {
+        viewport.rotate_by(rotation_steps);
+        viewport.advance_rotation(0);
+        viewport.advance_rotation(u32::MAX);
+    }
     for zoom in [0.5, 1.0, 1.25, 1.5, 2.0] {
         for camera in [6.125, 6.375, 6.625, 6.875, 10.125, 10.625] {
             let view = MapPoint::new(camera, camera + 0.125);
@@ -177,8 +182,13 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool) {
             crate::blit_to_map::render_background_decals(&frontend, &viewport, &mut renderer);
             let isolated = renderer.try_capture_frame_rgba().unwrap();
             for (i, pixel) in isolated.2.as_chunks::<4>().0.iter().enumerate() {
-                let x = (((i % 16) as f32 + 0.5) / zoom + view.x).floor() as i32;
-                let y = (((i / 16) as f32 + 0.5) / zoom + view.y).floor() as i32;
+                let map_point =
+                    viewport.screen_to_map_unchecked(robin_engine::coordinates::ScreenPoint::new(
+                        (i % 16) as f32 + 0.5,
+                        (i / 16) as f32 + 0.5,
+                    ));
+                let x = map_point.x.floor() as i32;
+                let y = map_point.y.floor() as i32;
                 let expected_pixel = if (8..17).contains(&x) && (8..15).contains(&y) {
                     &expected.2[i * 4..i * 4 + 4]
                 } else {
@@ -315,8 +325,10 @@ pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
     verify_map_appearance_pixels(gpu.clone());
     verify_map_background_outside_level_is_background(gpu.clone());
     verify_coop_compositing(gpu.clone());
-    verify_map_patch_camera_alignment(gpu.clone(), false);
-    verify_map_patch_camera_alignment(gpu.clone(), true);
+    verify_map_patch_camera_alignment(gpu.clone(), false, 0);
+    verify_map_patch_camera_alignment(gpu.clone(), true, 0);
+    verify_map_patch_camera_alignment(gpu.clone(), false, 1);
+    verify_map_patch_camera_alignment(gpu.clone(), true, -2);
     verify_mouse_trail_pixels(gpu.clone());
     verify_loading_dissolve_pixels(gpu.clone());
     verify_mask_atlas_pixels(gpu.clone());

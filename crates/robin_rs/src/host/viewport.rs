@@ -131,13 +131,7 @@ impl ViewportState {
             return;
         }
         self.camera_angle = next;
-        if self.level_size.x > 0.0 && self.level_size.y > 0.0 {
-            let needed = minimum_zoom(self.screen_size, self.level_size, self.camera_angle);
-            if needed > self.zoom_factor {
-                self.zoom_factor = needed;
-            }
-        }
-        self.clip_view();
+        self.apply_rotation_constraints();
     }
 
     pub fn reset_rotation(&mut self) {
@@ -145,7 +139,7 @@ impl ViewportState {
         self.display_angle = 0.0;
         self.saved_camera_angle = None;
         self.last_rotation_ms = None;
-        self.clip_view();
+        self.apply_rotation_constraints();
     }
 
     /// Ease the rendered angle towards the requested one.
@@ -159,6 +153,17 @@ impl ViewportState {
         if (self.camera_angle - self.display_angle).abs() < 0.001 {
             self.display_angle = self.camera_angle;
         }
+        self.clip_view();
+    }
+
+    fn apply_rotation_constraints(&mut self) {
+        if self.level_size.x > 0.0 && self.level_size.y > 0.0 {
+            let needed = minimum_zoom(self.screen_size, self.level_size, self.camera_angle);
+            if needed > self.zoom_factor {
+                self.zoom_factor = needed;
+            }
+        }
+        self.clip_view();
     }
 
     pub fn center_on_point(&mut self, point: MapPoint) {
@@ -231,6 +236,7 @@ impl ViewportState {
             if let Some(saved) = saved {
                 self.camera_angle = saved;
                 self.display_angle = saved;
+                self.apply_rotation_constraints();
             }
         }
         if before.zoom_factor != after.zoom_factor {
@@ -294,6 +300,7 @@ impl ViewportState {
                 self.zoom_factor = zoom;
             }
         }
+        self.apply_rotation_constraints();
     }
 
     /// Mirror the shared script/director camera for an explicit placement.
@@ -540,15 +547,28 @@ impl ViewportState {
         if self.view_position.y < 0.0 {
             self.view_position.y = 0.0;
         }
-        let (visible_w, visible_h) =
-            rotated_playfield_size(self.screen_size, self.zoom_factor, self.display_angle);
-        if self.level_size.x > 0.0 {
-            let max_x = (self.level_size.x - visible_w).max(0.0);
-            self.view_position.x = self.view_position.x.min(max_x);
-        }
-        if self.level_size.y > 0.0 {
-            let max_y = (self.level_size.y - visible_h).max(0.0);
-            self.view_position.y = self.view_position.y.min(max_y);
+        if self.level_size.x > 0.0 && self.level_size.y > 0.0 {
+            // Clamp the rotated AABB, not the unrotated playfield: its centre
+            // sits at view + playfield_centre / zoom. Cover both the target and
+            // eased angles so no corner goes dark mid-transition.
+            let (lower_target, upper_target) = rotated_view_bounds(
+                self.screen_size,
+                self.level_size,
+                self.zoom_factor,
+                self.camera_angle,
+            );
+            let (lower_display, upper_display) = rotated_view_bounds(
+                self.screen_size,
+                self.level_size,
+                self.zoom_factor,
+                self.display_angle,
+            );
+            let min_x = lower_target.x.max(lower_display.x).max(0.0);
+            let min_y = lower_target.y.max(lower_display.y).max(0.0);
+            let max_x = upper_target.x.min(upper_display.x).max(min_x);
+            let max_y = upper_target.y.min(upper_display.y).max(min_y);
+            self.view_position.x = self.view_position.x.max(min_x).min(max_x);
+            self.view_position.y = self.view_position.y.max(min_y).min(max_y);
         }
     }
 }
@@ -571,6 +591,7 @@ mod viewport_touch_tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn ensure_on_screen_leaves_the_view_unchanged_when_the_target_is_visible() {
         let mut viewport = ViewportState::new(800.0, 600.0);
         viewport.set_level_size(2000.0, 2000.0);
@@ -605,6 +626,36 @@ mod viewport_touch_tests {
 
         viewport.ensure_on_screen(MapPoint::new(before.x - 100.0, before.y));
         assert_eq!(viewport.view_position, before);
+    }
+
+    #[test]
+    fn rotated_view_corners_stay_inside_level() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(1000.0, 1000.0);
+        for steps in [-2, -1, 1, 2] {
+            viewport.reset_rotation();
+            viewport.rotate_by(steps);
+            viewport.advance_rotation(0);
+            viewport.advance_rotation(u32::MAX);
+            let corners = screen_corners_to_map(
+                viewport.view_position,
+                viewport.screen_size,
+                viewport.zoom_factor,
+                viewport.camera_rotation(),
+            );
+            for corner in corners {
+                assert!(
+                    corner.x >= -0.01 && corner.x <= 1000.01,
+                    "corner x {:.2} outside level at steps {steps}",
+                    corner.x
+                );
+                assert!(
+                    corner.y >= -0.01 && corner.y <= 1000.01,
+                    "corner y {:.2} outside level at steps {steps}",
+                    corner.y
+                );
+            }
+        }
     }
 
     #[test]

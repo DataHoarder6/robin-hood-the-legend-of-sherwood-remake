@@ -318,7 +318,17 @@ fn current_render_frame(
         sprite.current_row
     } else {
         match sprite.row_for_action(sprite.last_action) {
-            Some(base) if sprite.current_row >= base && sprite.current_row - base < 16 => {
+            Some(base)
+                if sprite.current_row >= base
+                    && sprite.current_row - base < 16
+                    && scripts.get(usize::from(base)).is_some_and(|first| {
+                        (0..16).all(|i| {
+                            scripts
+                                .get(usize::from(base) + i)
+                                .is_some_and(|script| script.action_id == first.action_id)
+                        })
+                    }) =>
+            {
                 let direction = (sprite.current_row - base) as i16;
                 base + (direction + i16::from(steps)).rem_euclid(16) as u16
             }
@@ -419,17 +429,48 @@ fn unmapped_or_out_of_range_row_keeps_current_render_frame() {
     );
 }
 
-/// Transform both map-pixel edges without independently snapping position or size.
-/// Replacement pixels must sample exactly the same world coordinates as terrain.
-pub(crate) fn map_sprite_bounds(
+#[test]
+fn non_directional_action_row_is_not_remapped() {
+    use robin_engine::order::OrderType;
+    use robin_engine::sprite::Sprite;
+    use robin_engine::sprite_script::{SpriteScript, UNMAPPED};
+    use std::sync::Arc;
+
+    let mut conversion = vec![UNMAPPED; OrderType::WaitingUpright as usize + 1];
+    conversion[OrderType::WaitingUpright as usize] = 10;
+    let scripts = (0..26)
+        .map(|row| SpriteScript {
+            frame_ids: vec![2000 + row],
+            action_id: if row == 10 { 77 } else { row as u16 + 1 },
+            ..Default::default()
+        })
+        .collect();
+    let mut sprite = Sprite::new(Arc::new(scripts), Arc::new(conversion));
+    sprite.last_action = OrderType::WaitingUpright;
+    sprite.current_row = 10;
+    assert_eq!(
+        current_render_frame(&sprite, 1).map(|(_, _, bank)| bank),
+        Some(2010)
+    );
+    assert_eq!(
+        current_render_frame(&sprite, -2).map(|(_, _, bank)| bank),
+        Some(2010)
+    );
+}
+
+/// The four rotated screen corners of a map-space sprite rectangle.
+///
+/// Map replacement quads must use these directly: their AABB would let the
+/// shader sample neighbouring atlas sprites at the empty corners.
+pub(crate) fn map_sprite_corners(
     origin: MapPoint,
     width: u32,
     height: u32,
     view: MapPoint,
     zoom: f32,
     rotation: CameraRotation,
-) -> BBox {
-    let corners = [
+) -> [(f32, f32); 4] {
+    [
         rotation.to_screen(origin, view, zoom),
         rotation.to_screen(MapPoint::new(origin.x + width as f32, origin.y), view, zoom),
         rotation.to_screen(
@@ -442,17 +483,31 @@ pub(crate) fn map_sprite_bounds(
             view,
             zoom,
         ),
-    ];
+    ]
+    .map(|point| (point.x, point.y))
+}
+
+/// Transform both map-pixel edges without independently snapping position or size.
+/// Replacement pixels must sample exactly the same world coordinates as terrain.
+pub(crate) fn map_sprite_bounds(
+    origin: MapPoint,
+    width: u32,
+    height: u32,
+    view: MapPoint,
+    zoom: f32,
+    rotation: CameraRotation,
+) -> BBox {
+    let corners = map_sprite_corners(origin, width, height, view, zoom, rotation);
     BBox::from_coords(
-        corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
-        corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
+        corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min),
+        corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min),
         corners
             .iter()
-            .map(|p| p.x)
+            .map(|p| p.0)
             .fold(f32::NEG_INFINITY, f32::max),
         corners
             .iter()
-            .map(|p| p.y)
+            .map(|p| p.1)
             .fold(f32::NEG_INFINITY, f32::max),
     )
 }
@@ -541,6 +596,24 @@ fn sprite_placement_floor_before_zoom_survives_rotation() {
         turned,
     );
     assert!(rotated.screen_position.1 > turned.center.y);
+}
+
+#[test]
+fn map_sprite_corners_match_the_rotated_rect() {
+    use robin_engine::coordinates::ScreenSize;
+    let rotation = CameraRotation::new(std::f32::consts::FRAC_PI_4, ScreenSize::new(800.0, 680.0));
+    let origin = MapPoint::new(100.0, 120.0);
+    let corners = map_sprite_corners(origin, 20, 30, MapPoint::ZERO, 1.0, rotation);
+    let expected = [
+        rotation.to_screen(origin, MapPoint::ZERO, 1.0),
+        rotation.to_screen(MapPoint::new(120.0, 120.0), MapPoint::ZERO, 1.0),
+        rotation.to_screen(MapPoint::new(100.0, 150.0), MapPoint::ZERO, 1.0),
+        rotation.to_screen(MapPoint::new(120.0, 150.0), MapPoint::ZERO, 1.0),
+    ];
+    for (actual, expected) in corners.iter().zip(expected) {
+        assert!((actual.0 - expected.x).abs() < 1e-3);
+        assert!((actual.1 - expected.y).abs() < 1e-3);
+    }
 }
 
 #[test]
