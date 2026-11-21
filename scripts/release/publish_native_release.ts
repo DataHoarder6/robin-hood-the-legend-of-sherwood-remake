@@ -1,55 +1,62 @@
 /** Publish a complete, hash-verified draft without replacing existing assets.
  * Runtime dependencies come from github-script; package dependencies are type-only.
  */
-import { verifyStagedPackageVersion } from './package_version.ts';
-import type * as actionsCore from '@actions/core';
-import type * as actionsGithub from '@actions/github';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { verifyStagedPackageVersion } from "./package_version.ts";
+import type * as actionsCore from "@actions/core";
+import type * as actionsGithub from "@actions/github";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { copyFile, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 export type GitHubScriptContext = {
   core: typeof actionsCore;
   context: typeof actionsGithub.context;
   github: ReturnType<typeof actionsGithub.getOctokit>;
 };
-type GitHub = GitHubScriptContext['github'];
+type GitHub = GitHubScriptContext["github"];
 type Repo = { owner: string; repo: string };
-type Release = Awaited<ReturnType<GitHub['rest']['repos']['getRelease']>>['data'];
+type Release = Awaited<ReturnType<GitHub["rest"]["repos"]["getRelease"]>>["data"];
 export type Assets = Map<string, { path: string; sha256: string; size: number }>;
 
 // Keep the installed application identity and update channels stable. Only the
 // published filenames change; package contents and their checksums stay intact.
-export async function stageReleaseAssets(input: string, output: string, channel: 'win' | 'linux') {
-  if (channel !== 'win' && channel !== 'linux') throw new Error(`unsupported release channel: ${channel}`);
-  const packageId = 'io.github.phiresky.robinhood';
+export async function stageReleaseAssets(input: string, output: string, channel: "win" | "linux") {
+  if (channel !== "win" && channel !== "linux")
+    throw new Error(`unsupported release channel: ${channel}`);
+  const packageId = "io.github.phiresky.robinhood";
   const indexName = `releases.${channel}.json`;
-  const index = JSON.parse(await readFile(join(input, indexName), 'utf8'));
+  const index = JSON.parse(await readFile(join(input, indexName), "utf8"));
   if (!Array.isArray(index?.Assets) || index.Assets.length === 0) {
     throw new Error(`empty/invalid Velopack index: ${indexName}`);
   }
   await mkdir(output, { recursive: true });
   for (const entry of index.Assets) {
     const original = entry?.FileName;
-    if (typeof original !== 'string' || original !== basename(original) ||
-        original.includes('\\') || !original.startsWith(`${packageId}-`) ||
-        !/-(full|delta)\.nupkg$/.test(original)) {
+    if (
+      typeof original !== "string" ||
+      original !== basename(original) ||
+      original.includes("\\") ||
+      !original.startsWith(`${packageId}-`) ||
+      !/-(full|delta)\.nupkg$/.test(original)
+    ) {
       throw new Error(`unexpected package filename: ${JSON.stringify(original)}`);
     }
-    let name = original.replace(packageId, 'robinhood-remake');
-    if (channel === 'win') name = name.replace(/-(full|delta)\.nupkg$/, '-windows-$1.nupkg');
+    let name = original.replace(packageId, "robinhood-remake");
+    if (channel === "win") name = name.replace(/-(full|delta)\.nupkg$/, "-windows-$1.nupkg");
     await copyFile(join(input, original), join(output, name));
     entry.FileName = name;
   }
-  const downloads = channel === 'win'
-    ? [
-      [`${packageId}-win-Setup.exe`, 'robinhood-remake-windows-Setup.exe'],
-      [`${packageId}-win-Portable.zip`, 'robinhood-remake-windows-Portable.zip'],
-    ]
-    : [[`${packageId}.AppImage`, 'robinhood-remake-linux.AppImage']];
-  for (const [original, name] of downloads) await copyFile(join(input, original!), join(output, name!));
-  await writeFile(join(output, indexName), JSON.stringify(index, null, 2) + '\n');
+  const downloads =
+    channel === "win"
+      ? [
+          [`${packageId}-win-Setup.exe`, "robinhood-remake-windows-Setup.exe"],
+          [`${packageId}-win-Portable.zip`, "robinhood-remake-windows-Portable.zip"],
+        ]
+      : [[`${packageId}.AppImage`, "robinhood-remake-linux.AppImage"]];
+  for (const [original, name] of downloads)
+    await copyFile(join(input, original), join(output, name));
+  await writeFile(join(output, indexName), JSON.stringify(index, null, 2) + "\n");
 }
 
 export async function inventory(root: string): Promise<Assets> {
@@ -63,30 +70,34 @@ export async function inventory(root: string): Promise<Assets> {
       const name = basename(path);
       if (assets.has(name)) throw new Error(`duplicate release asset name: ${name}`);
       if (stat.size === 0) throw new Error(`empty release asset: ${path}`);
-      const hash = createHash('sha256');
+      const hash = createHash("sha256");
       for await (const chunk of createReadStream(path)) hash.update(chunk);
-      assets.set(name, { path, sha256: hash.digest('hex'), size: stat.size });
+      assets.set(name, { path, sha256: hash.digest("hex"), size: stat.size });
     } else {
       throw new Error(`unsupported release input: ${path}`);
     }
   }
   await walk(root);
-  for (const name of ['robinhood-remake-windows-Setup.exe', 'robinhood-remake-windows-Portable.zip', 'robinhood-remake-linux.AppImage']) {
+  for (const name of [
+    "robinhood-remake-windows-Setup.exe",
+    "robinhood-remake-windows-Portable.zip",
+    "robinhood-remake-linux.AppImage",
+  ]) {
     if (!assets.has(name)) throw new Error(`missing platform artifact: ${name}`);
   }
-  for (const runtime of ['win', 'linux']) {
+  for (const runtime of ["win", "linux"]) {
     const indexName = `releases.${runtime}.json`;
     const indexAsset = assets.get(indexName);
     if (!indexAsset) throw new Error(`missing Velopack index: ${indexName}`);
-    const index = JSON.parse(await readFile(indexAsset.path, 'utf8'));
+    const index = JSON.parse(await readFile(indexAsset.path, "utf8"));
     if (!Array.isArray(index?.Assets) || index.Assets.length === 0) {
       throw new Error(`empty/invalid Velopack index: ${indexName}`);
     }
     for (const entry of index.Assets) {
       const name = entry?.FileName;
-      const asset = typeof name === 'string' ? assets.get(name) : undefined;
+      const asset = typeof name === "string" ? assets.get(name) : undefined;
       if (!asset) throw new Error(`${indexName} references missing asset ${JSON.stringify(name)}`);
-      if (entry.Size !== asset.size || String(entry.SHA256 ?? '').toLowerCase() !== asset.sha256) {
+      if (entry.Size !== asset.size || String(entry.SHA256 ?? "").toLowerCase() !== asset.sha256) {
         throw new Error(`${indexName} size/hash differs for ${name}`);
       }
     }
@@ -99,44 +110,56 @@ export function releaseTag(event: string, ref: string, timestamp: string, commit
   // not reliably reach Actions here (measured 2026-11-17: no push-triggered
   // run in the repository's history), so a dispatch against the tag ref is the
   // path that works; the tag still names the release.
-  if (ref.startsWith('v')) return { tag: ref, prerelease: false };
-  if (event === 'schedule' || event === 'workflow_dispatch') {
+  if (ref.startsWith("v")) return { tag: ref, prerelease: false };
+  if (event === "schedule" || event === "workflow_dispatch") {
     // Keep the numeric timestamp for SemVer packages; format the release tag for readability.
-    const date = timestamp.replace(/^(\d{4})(\d{2})(\d{2})(\d{4})$/, '$1-$2-$3-$4');
+    const date = timestamp.replace(/^(\d{4})(\d{2})(\d{2})(\d{4})$/, "$1-$2-$3-$4");
     return { tag: `nightly-${date}-${commit.slice(0, 12)}`, prerelease: true };
   }
-  throw new Error('stable releases require a version tag');
+  throw new Error("stable releases require a version tag");
 }
 
 export async function runTimestamp(github: GitHub, repo: Repo, runId: number): Promise<string> {
   const { data } = await github.rest.actions.getWorkflowRun({ ...repo, run_id: runId });
   if (!/(Z|[+-]\d{2}:\d{2})$/.test(data.created_at)) {
-    throw new Error('workflow created_at must include a timezone');
+    throw new Error("workflow created_at must include a timezone");
   }
   const created = new Date(data.created_at);
-  if (Number.isNaN(created.getTime())) throw new Error('invalid workflow created_at');
-  return created.toISOString().slice(0, 16).replace(/[-T:]/g, '');
+  if (Number.isNaN(created.getTime())) throw new Error("invalid workflow created_at");
+  return created.toISOString().slice(0, 16).replace(/[-T:]/g, "");
 }
 
 export async function findRelease(github: GitHub, repo: Repo, tag: string) {
   // Auth/network errors propagate; they must never mean "not found".
-  for await (const page of github.paginate.iterator(github.rest.repos.listReleases, { ...repo, per_page: 100 })) {
-    const release = page.data.find(release => release.tag_name === tag);
+  for await (const page of github.paginate.iterator(github.rest.repos.listReleases, {
+    ...repo,
+    per_page: 100,
+  })) {
+    const release = page.data.find((release) => release.tag_name === tag);
     if (release) return release;
   }
   return undefined;
 }
 
-export async function verifyRemote(github: GitHub, repo: Repo, release: Release, assets: Assets, allowMissing: boolean) {
-  const remote = new Map(release.assets.map(asset => [asset.name, asset]));
+export async function verifyRemote(
+  github: GitHub,
+  repo: Repo,
+  release: Release,
+  assets: Assets,
+  allowMissing: boolean,
+) {
+  const remote = new Map(release.assets.map((asset) => [asset.name, asset]));
   for (const name of remote.keys()) {
     if (!assets.has(name)) throw new Error(`release contains unexpected asset: ${name}`);
   }
-  const missing = [...assets.keys()].filter(name => !remote.has(name)).sort();
-  if (missing.length && !allowMissing) throw new Error(`release is missing assets: ${missing.join(', ')}`);
+  const missing = [...assets.keys()].filter((name) => !remote.has(name)).sort();
+  if (missing.length && !allowMissing)
+    throw new Error(`release is missing assets: ${missing.join(", ")}`);
   for (const [name, asset] of remote) {
     const { data } = await github.rest.repos.getReleaseAsset({
-      ...repo, asset_id: asset.id, headers: { accept: 'application/octet-stream' },
+      ...repo,
+      asset_id: asset.id,
+      headers: { accept: "application/octet-stream" },
     });
     // Octokit's endpoint types describe JSON metadata, while this Accept header
     // returns binary bytes. Reject metadata/error bodies instead of hashing them.
@@ -144,7 +167,9 @@ export async function verifyRemote(github: GitHub, repo: Repo, release: Release,
     if (!(bytes instanceof ArrayBuffer) && !Buffer.isBuffer(bytes)) {
       throw new Error(`expected binary download for release asset: ${name}`);
     }
-    const digest = createHash('sha256').update(bytes instanceof ArrayBuffer ? Buffer.from(bytes) : bytes).digest('hex');
+    const digest = createHash("sha256")
+      .update(bytes instanceof ArrayBuffer ? Buffer.from(bytes) : bytes)
+      .digest("hex");
     if (digest !== assets.get(name)!.sha256) {
       throw new Error(`immutable release asset differs: ${name}; use a new candidate tag`);
     }
@@ -153,8 +178,13 @@ export async function verifyRemote(github: GitHub, repo: Repo, release: Release,
 }
 
 export async function publish(
-  github: GitHub, core: Pick<GitHubScriptContext['core'], 'info'>,
-  root: string, repo: Repo, tag: string, commit: string, prerelease: boolean,
+  github: GitHub,
+  core: Pick<GitHubScriptContext["core"], "info">,
+  root: string,
+  repo: Repo,
+  tag: string,
+  commit: string,
+  prerelease: boolean,
 ) {
   const assets = await inventory(root);
   let release = await findRelease(github, repo, tag);
@@ -162,18 +192,24 @@ export async function publish(
     if (!prerelease) await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
     // Keep the creation response; the list may not yet contain the new draft.
     ({ data: release } = await github.rest.repos.createRelease({
-      ...repo, tag_name: tag, target_commitish: commit, name: tag,
-      body: `Automatic build of ${commit}.\n\n` +
-        'Downloads:\n' +
-        '- If you’re on Windows, you likely want to get `robinhood-remake-windows-Setup.exe`.\n' +
-        '- Linux: download `robinhood-remake-linux.AppImage`, make it executable, and run it.\n\n' +
-        'The two `.nupkg` files are automatic-update payloads (Windows and Linux); ' +
-        'you do not need to download them manually. ' +
-        'The `releases.*.json` files are required update indexes.',
-      draft: true, prerelease,
+      ...repo,
+      tag_name: tag,
+      target_commitish: commit,
+      name: tag,
+      body:
+        `Automatic build of ${commit}.\n\n` +
+        "Downloads:\n" +
+        "- If you’re on Windows, you likely want to get `robinhood-remake-windows-Setup.exe`.\n" +
+        "- Linux: download `robinhood-remake-linux.AppImage`, make it executable, and run it.\n\n" +
+        "The two `.nupkg` files are automatic-update payloads (Windows and Linux); " +
+        "you do not need to download them manually. " +
+        "The `releases.*.json` files are required update indexes.",
+      draft: true,
+      prerelease,
     }));
   }
-  if (release.target_commitish !== commit) throw new Error('release target differs from the requested commit');
+  if (release.target_commitish !== commit)
+    throw new Error("release target differs from the requested commit");
   const missing = await verifyRemote(github, repo, release, assets, release.draft);
   if (!release.draft) {
     core.info(`${tag} is already published with identical assets`);
@@ -185,12 +221,14 @@ export async function publish(
     // TODO: Stream large uploads/downloads when Octokit's endpoint typings and
     // fetch transport support it together; currently buffer one asset at a time.
     await github.rest.repos.uploadReleaseAsset({
-      ...repo, release_id: releaseId,
+      ...repo,
+      release_id: releaseId,
       // Preserve the URI template so Octokit expands the name query parameter.
       url: release.upload_url,
-      name, headers: { 'content-type': 'application/octet-stream', 'content-length': asset.size },
+      name,
+      headers: { "content-type": "application/octet-stream", "content-length": asset.size },
       // The REST schema types the binary body as string; Octokit accepts Buffer.
-      data: await readFile(asset.path) as unknown as string,
+      data: (await readFile(asset.path)) as unknown as string,
     });
   }
   ({ data: release } = await github.rest.repos.getRelease({ ...repo, release_id: releaseId }));
@@ -201,13 +239,14 @@ export async function publish(
 }
 
 export async function packageTimestamp({ core, context, github }: GitHubScriptContext) {
-  core.setOutput('timestamp', await runTimestamp(github, context.repo, context.runId));
+  core.setOutput("timestamp", await runTimestamp(github, context.repo, context.runId));
 }
 
 export async function main({ core, context, github }: GitHubScriptContext) {
-  const timestamp = ['schedule', 'workflow_dispatch'].includes(context.eventName)
-    ? await runTimestamp(github, context.repo, context.runId) : '';
-  const ref = context.ref.replace(/^refs\/(tags|heads)\//, '');
+  const timestamp = ["schedule", "workflow_dispatch"].includes(context.eventName)
+    ? await runTimestamp(github, context.repo, context.runId)
+    : "";
+  const ref = context.ref.replace(/^refs\/(tags|heads)\//, "");
   const { tag, prerelease } = releaseTag(context.eventName, ref, timestamp, context.sha);
-  await publish(github, core, 'release-assets', context.repo, tag, context.sha, prerelease);
+  await publish(github, core, "release-assets", context.repo, tag, context.sha, prerelease);
 }

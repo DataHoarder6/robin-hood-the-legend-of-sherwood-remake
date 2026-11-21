@@ -3,6 +3,62 @@
     "correctness": "error",
     "suspicious": "error"
   },
+  "rules": {
+    // The client decodes untrusted JSON at the wire boundary and narrows parsed
+    // records with explicit schema checks oxlint cannot see. The narrowing is
+    // deliberate and covered by the runtime/signer contract tests.
+    "typescript/no-unsafe-type-assertion": "off",
+    // Build/staging scripts sort local arrays in place with the default
+    // lexicographic order; a comparator would change the order for numbers.
+    "unicorn/no-array-sort": "off",
+    "typescript/require-array-sort-compare": "off",
+    // Helper functions are kept beside their unique call site for readability;
+    // hoisting them would only spread logic away from the code it serves.
+    "unicorn/consistent-function-scoping": "off",
+    // Shadowed locals in narrow callbacks are intentional and do not obscure
+    // the value they close over.
+    "eslint/no-shadow": "off",
+    // Treat unknown values interpolated into diagnostics/URLs as opaque; the
+    // client already validates them, and a full formatter would add noise.
+    "typescript/no-base-to-string": "off",
+    // These functions end in exhaustive switches or in `fail()`, which always
+    // throws. The rule cannot see either, so it invents a missing return.
+    "typescript/consistent-return": "off",
+    // Worker.postMessage has no targetOrigin parameter; only Window messages do.
+    "unicorn/require-post-message-target-origin": "off",
+    // IndexedDB request/transaction `on<event>` handlers are the conventional
+    // API here. Swapping them for addEventListener changes error propagation.
+    "unicorn/prefer-add-event-listener": "off"
+  },
+  "overrides": [
+    {
+      // node:test owns the promises returned by test()/describe(); awaiting
+      // them here would defeat the runner. Test fixtures also narrow parsed
+      // JSON deliberately, and redundant assertions document the fixture shape.
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.mjs"],
+      "rules": {
+        "typescript/no-floating-promises": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/unbound-method": "off"
+      }
+    },
+    {
+      // The pattern matches ANSI escape sequences, whose control character is
+      // the point of the expression.
+      "files": ["src/log.ts"],
+      "rules": {
+        "eslint/no-control-regex": "off"
+      }
+    },
+    {
+      // `disposed` is set from the disposal callback while seekReplay is awaited;
+      // the rule only inspects the loop body and cannot see that mutation.
+      "files": ["src/timeline.ts"],
+      "rules": {
+        "eslint/no-unmodified-loop-condition": "off"
+      }
+    }
+  ],
   "options": {
     "typeAware": true,
     "maxWarnings": 0
