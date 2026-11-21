@@ -220,7 +220,9 @@ pub(crate) fn render_entities_gpu(
         // should still be a shadow.  Always go through the active-
         // profile pointer.
         let sprite = &elem.sprite;
-        let Some((script, frame, bank_id)) = current_render_frame(sprite) else {
+        let Some((script, frame, bank_id)) =
+            current_render_frame(sprite, ctx.host.viewport().camera_steps())
+        else {
             render_entity_fallback(
                 renderer,
                 entity.kind(),
@@ -981,7 +983,9 @@ pub(crate) fn render_selection_outlines_gpu(
         // Resolve sprite frame (same calculation as render_entities_gpu).
         // See note there about `current_scripts_opt` vs direct field read.
         let sprite = &elem.sprite;
-        let Some((script, frame, bank_id)) = current_render_frame(sprite) else {
+        let Some((script, frame, bank_id)) =
+            current_render_frame(sprite, host.viewport().camera_steps())
+        else {
             continue;
         };
 
@@ -1132,7 +1136,9 @@ pub(super) fn render_fx_entities_gpu<I>(
 
         let elem = entity.element_data();
         let sprite = &elem.sprite;
-        let Some((script, frame, bank_id)) = current_render_frame(sprite) else {
+        let Some((script, frame, bank_id)) =
+            current_render_frame(sprite, host.viewport().camera_steps())
+        else {
             continue;
         };
 

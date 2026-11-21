@@ -306,12 +306,26 @@ mod fog_render_tests {
 }
 
 /// Resolve the active profile and validate its frame without choosing a pass's fallback.
+///
+/// `steps` shifts the 16 view-angle rows to compensate for host camera
+/// rotation. It is a render-only override: engine sprite state is untouched.
 fn current_render_frame(
     sprite: &robin_engine::sprite::Sprite,
+    steps: i8,
 ) -> Option<(&robin_engine::sprite_script::SpriteScript, u16, u32)> {
-    let script = sprite
-        .current_scripts_opt()?
-        .get(usize::from(sprite.current_row))?;
+    let scripts = sprite.current_scripts_opt()?;
+    let row = if steps == 0 {
+        sprite.current_row
+    } else {
+        match sprite.row_for_action(sprite.last_action) {
+            Some(base) if sprite.current_row >= base && sprite.current_row - base < 16 => {
+                let direction = (sprite.current_row - base) as i16;
+                base + (direction + i16::from(steps)).rem_euclid(16) as u16
+            }
+            _ => sprite.current_row,
+        }
+    };
+    let script = scripts.get(usize::from(row))?;
     let frame = sprite.current_frame;
     let bank_id = *script.frame_ids.get(usize::from(frame))?;
     Some((script, frame, bank_id))
@@ -330,22 +344,79 @@ fn render_frame_lookup_preserves_active_rows_and_rejects_missing_frames() {
         Arc::new(Vec::new()),
     );
     assert_eq!(
-        current_render_frame(&sprite).map(|(_, frame, bank)| (frame, bank)),
+        current_render_frame(&sprite, 0).map(|(_, frame, bank)| (frame, bank)),
         Some((0, 17))
     );
     sprite.current_frame = 1;
     assert_eq!(
-        current_render_frame(&sprite).map(|(_, frame, bank)| (frame, bank)),
+        current_render_frame(&sprite, 0).map(|(_, frame, bank)| (frame, bank)),
         Some((1, 23))
     );
     sprite.current_frame = 2;
-    assert!(current_render_frame(&sprite).is_none());
+    assert!(current_render_frame(&sprite, 0).is_none());
     sprite.current_frame = 0;
     sprite.current_row = 1;
-    assert!(current_render_frame(&sprite).is_none());
+    assert!(current_render_frame(&sprite, 0).is_none());
     sprite.current_row = 0;
     sprite.use_alternate_profile = true;
-    assert!(current_render_frame(&sprite).is_none());
+    assert!(current_render_frame(&sprite, 0).is_none());
+}
+
+#[cfg(test)]
+fn directional_sprite(base: u16, current_row: u16) -> robin_engine::sprite::Sprite {
+    use robin_engine::order::OrderType;
+    use robin_engine::sprite::Sprite;
+    use robin_engine::sprite_script::{SpriteScript, UNMAPPED};
+    use std::sync::Arc;
+    let mut conversion = vec![UNMAPPED; OrderType::WaitingUpright as usize + 1];
+    conversion[OrderType::WaitingUpright as usize] = base;
+    let scripts = (0..32)
+        .map(|row| SpriteScript {
+            frame_ids: vec![1000 + row],
+            ..Default::default()
+        })
+        .collect();
+    let mut sprite = Sprite::new(Arc::new(scripts), Arc::new(conversion));
+    sprite.last_action = OrderType::WaitingUpright;
+    sprite.current_row = current_row;
+    sprite
+}
+
+#[test]
+fn camera_step_shifts_view_row_by_one() {
+    let sprite = directional_sprite(10, 13);
+    assert_eq!(
+        current_render_frame(&sprite, 1).map(|(_, _, bank)| bank),
+        Some(1014)
+    );
+    assert_eq!(
+        current_render_frame(&sprite, 0).map(|(_, _, bank)| bank),
+        Some(1013)
+    );
+    assert_eq!(
+        current_render_frame(&sprite, -1).map(|(_, _, bank)| bank),
+        Some(1012)
+    );
+}
+
+#[test]
+fn unmapped_or_out_of_range_row_keeps_current_render_frame() {
+    use robin_engine::order::OrderType;
+    use robin_engine::sprite_script::UNMAPPED;
+    use std::sync::Arc;
+
+    let mut unmapped = directional_sprite(10, 13);
+    unmapped.conversion = Arc::new(vec![UNMAPPED; OrderType::WaitingUpright as usize + 1]);
+    assert_eq!(
+        current_render_frame(&unmapped, 1).map(|(_, _, bank)| bank),
+        Some(1013)
+    );
+
+    let out_of_range = directional_sprite(10, 26);
+    assert_eq!(
+        current_render_frame(&out_of_range, 1).map(|(_, _, bank)| bank),
+        Some(1026)
+    );
 }
 
 /// Transform both map-pixel edges without independently snapping position or size.
