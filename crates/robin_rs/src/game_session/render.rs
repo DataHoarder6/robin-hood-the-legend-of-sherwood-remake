@@ -1445,28 +1445,9 @@ fn render_frame_with_hud(
             let player_presentation = FramePresentationInputs::prepare(&player_host, engine);
             ctx.renderer.begin_split_view();
             render_world_pass(engine, &player_host, assets, dev, &player_presentation, ctx);
-            if viewport.level_size.x > 0.0 && viewport.level_size.y > 0.0 {
-                let width = viewport.screen_size.x as i32;
-                let height = viewport.screen_size.y as i32;
-                let left = (-viewport.view_position.x * viewport.zoom_factor)
-                    .clamp(0.0, width as f32) as i32;
-                let top = (-viewport.view_position.y * viewport.zoom_factor)
-                    .clamp(0.0, height as f32) as i32;
-                let right = ((viewport.level_size.x - viewport.view_position.x)
-                    * viewport.zoom_factor)
-                    .clamp(0.0, width as f32) as i32;
-                let bottom = ((viewport.level_size.y - viewport.view_position.y)
-                    * viewport.zoom_factor)
-                    .clamp(0.0, height as f32) as i32;
-                for (x, y, w, h) in [
-                    (0, 0, left, height),
-                    (right, 0, width - right, height),
-                    (0, 0, width, top),
-                    (0, bottom, width, height - bottom),
-                ] {
-                    if w > 0 && h > 0 {
-                        ctx.renderer.render_gpu_rect(x, y, w, h, [0, 0, 0, 255]);
-                    }
+            for (x, y, w, h) in crate::split_screen::split_edge_bars(&viewport) {
+                if w > 0 && h > 0 {
+                    ctx.renderer.render_gpu_rect(x, y, w, h, [0, 0, 0, 255]);
                 }
             }
             ctx.renderer.finish_split_view(index, &view.polygon);

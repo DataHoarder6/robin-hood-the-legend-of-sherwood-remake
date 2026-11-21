@@ -262,6 +262,35 @@ fn clip_cell(points: &[[f32; 2]], a: [f32; 2], b: [f32; 2]) -> Vec<[f32; 2]> {
     }
     output
 }
+/// Four out-of-map masks for one split view, as `(x, y, w, h)`.
+///
+/// At angle zero these are the legacy axis-aligned strips outside the level.
+/// A rotated view needs none: `ViewportState::clip_view` keeps every rotated
+/// corner inside the level once rotation coverage is enforced, so there is no
+/// uncovered area to paint.
+pub(super) fn split_edge_bars(viewport: &crate::host::ViewportState) -> [(i32, i32, i32, i32); 4] {
+    if viewport.camera_angle() != 0.0
+        || viewport.level_size.x <= 0.0
+        || viewport.level_size.y <= 0.0
+    {
+        return [(0, 0, 0, 0); 4];
+    }
+    let width = viewport.screen_size.x as i32;
+    let height = viewport.screen_size.y as i32;
+    let left = (-viewport.view_position.x * viewport.zoom_factor).clamp(0.0, width as f32) as i32;
+    let top = (-viewport.view_position.y * viewport.zoom_factor).clamp(0.0, height as f32) as i32;
+    let right = ((viewport.level_size.x - viewport.view_position.x) * viewport.zoom_factor)
+        .clamp(0.0, width as f32) as i32;
+    let bottom = ((viewport.level_size.y - viewport.view_position.y) * viewport.zoom_factor)
+        .clamp(0.0, height as f32) as i32;
+    [
+        (0, 0, left, height),
+        (right, 0, width - right, height),
+        (0, 0, width, top),
+        (0, bottom, width, height - bottom),
+    ]
+}
+
 impl SplitView {
     pub fn contains(&self, point: [f32; 2]) -> bool {
         self.polygon.len() >= 3
@@ -313,6 +342,49 @@ impl SplitView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_edge_bars_match_legacy_rects_at_angle_zero() {
+        let mut viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(3136.0, 1984.0);
+        viewport.view_position = robin_engine::coordinates::MapPoint::new(10.0, 20.0);
+        viewport.zoom_factor = 1.0;
+        let width = viewport.screen_size.x as i32;
+        let height = viewport.screen_size.y as i32;
+        let left =
+            (-viewport.view_position.x * viewport.zoom_factor).clamp(0.0, width as f32) as i32;
+        let top =
+            (-viewport.view_position.y * viewport.zoom_factor).clamp(0.0, height as f32) as i32;
+        let right = ((viewport.level_size.x - viewport.view_position.x) * viewport.zoom_factor)
+            .clamp(0.0, width as f32) as i32;
+        let bottom = ((viewport.level_size.y - viewport.view_position.y) * viewport.zoom_factor)
+            .clamp(0.0, height as f32) as i32;
+        assert_eq!(
+            split_edge_bars(&viewport),
+            [
+                (0, 0, left, height),
+                (right, 0, width - right, height),
+                (0, 0, width, top),
+                (0, bottom, width, height - bottom),
+            ]
+        );
+    }
+
+    #[test]
+    fn split_edge_bars_are_empty_when_rotated() {
+        let mut viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(3136.0, 1984.0);
+        viewport.rotate_by(1);
+        viewport.advance_rotation(u32::MAX);
+        assert_eq!(split_edge_bars(&viewport), [(0, 0, 0, 0); 4]);
+    }
+
+    #[test]
+    fn split_edge_bars_are_empty_without_level_size() {
+        let viewport = crate::host::ViewportState::new(1024.0, 768.0);
+        assert_eq!(split_edge_bars(&viewport), [(0, 0, 0, 0); 4]);
+    }
+
     #[test]
     fn split_view_centre_stays_at_site_when_rotated() {
         let mut base = crate::host::ViewportState::new(1000.0, 800.0);
