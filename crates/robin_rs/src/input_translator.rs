@@ -83,13 +83,6 @@ pub enum GameKey {
     AiInfo,
     /// Built-in Sherwood-only shortcut for the post-port trading panel.
     SherwoodTrading,
-    /// Non-rebindable cooperative pause toggle (P). Host-authoritative in
-    /// multiplayer; Esc/DisplayMenu stays the local modal binding.
-    CoopPause,
-    // Host-only camera rotation; never recorded in simulation input.
-    RotateLeft,
-    RotateRight,
-    ResetRotation,
 }
 
 // The persisted key-config rows occupy the prefix before reserved/debug keys.
@@ -110,9 +103,6 @@ pub enum GameAction {
     ScrollDown,
     ZoomIn,
     ZoomOut,
-    RotateLeft,
-    RotateRight,
-    ResetRotation,
 
     // Character selection
     SelectCharacter {
@@ -279,13 +269,6 @@ impl InputTranslator {
         self.bindings[GameKey::PrintScreen] = Some(PrintScreen);
         self.bindings[GameKey::DisplayMenu] = Some(Escape);
         self.bindings[GameKey::SherwoodTrading] = Some(KeyT);
-        self.bindings[GameKey::CoopPause] = Some(KeyP);
-        // CapsLock already drives SwitchMaskedDisplay (masked sprite
-        // edges), so the reveal key is a distinct, unused binding.
-        self.bindings[GameKey::RevealHiddenCharacters] = Some(KeyO);
-        self.bindings[GameKey::RotateLeft] = Some(BracketLeft);
-        self.bindings[GameKey::RotateRight] = Some(BracketRight);
-        self.bindings[GameKey::ResetRotation] = Some(Backslash);
 
         // Debug keys (only in non-shipping builds)
         self.bindings[GameKey::SlowMotion] = Some(Pause);
@@ -655,16 +638,6 @@ impl InputTranslator {
                     actions.push(GameAction::ZoomIn);
                 }
 
-                if key_released(keys, prev, self.key(GameKey::RotateLeft)) {
-                    actions.push(GameAction::RotateLeft);
-                }
-                if key_released(keys, prev, self.key(GameKey::RotateRight)) {
-                    actions.push(GameAction::RotateRight);
-                }
-                if key_released(keys, prev, self.key(GameKey::ResetRotation)) {
-                    actions.push(GameAction::ResetRotation);
-                }
-
                 // Action slots precede portrait selection, including when bindings overlap.
                 for (key, index) in [GameKey::Action1, GameKey::Action2, GameKey::Action3]
                     .into_iter()
@@ -733,36 +706,28 @@ mod tests {
     }
 
     #[test]
-    fn rotation_keys_translate_once_per_press() {
+    fn rotation_keys_never_enter_the_action_stream() {
         let mut t = make_translator();
-        for (key, game_key, action) in [
-            (
-                KeyCode::BracketLeft,
-                GameKey::RotateLeft,
-                GameAction::RotateLeft,
-            ),
-            (
-                KeyCode::BracketRight,
-                GameKey::RotateRight,
-                GameAction::RotateRight,
-            ),
-            (
-                KeyCode::Backslash,
-                GameKey::ResetRotation,
-                GameAction::ResetRotation,
-            ),
+        for key in [
+            KeyCode::BracketLeft,
+            KeyCode::BracketRight,
+            KeyCode::Backslash,
         ] {
-            assert_eq!(t.translate_key(key), Some(game_key));
-            let pressed = keys_down(&[key]);
-            assert!(
-                !t.translate_keyboard(&pressed, TranslationFlags::ALL)
-                    .contains(&action)
+            assert_eq!(
+                t.translate_key(key),
+                None,
+                "rotation keys are physical edges, not bindable GameKeys"
             );
-            let released = t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL);
-            assert_eq!(released.iter().filter(|a| **a == action).count(), 1);
+            let pressed = keys_down(&[key]);
+            assert!(!t.was_key_released(key, &pressed));
             assert!(
-                !t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL)
-                    .contains(&action)
+                t.translate_keyboard(&pressed, TranslationFlags::ALL)
+                    .is_empty()
+            );
+            assert!(t.was_key_released(key, &BTreeSet::new()));
+            assert!(
+                t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL)
+                    .is_empty()
             );
         }
     }

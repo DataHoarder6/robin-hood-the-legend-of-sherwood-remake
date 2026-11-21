@@ -448,6 +448,26 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
     use winit::keyboard::KeyCode;
     let step_keys_gated =
         ui.console_overlay.is_visible() || ui.pause_menu.is_some() || modal_input_active;
+    // Camera rotation is a host presentation edge on the same physical-key
+    // path as the minimap accelerator. Sampling it here keeps the keys out of
+    // GameAction and replay input entirely; only the viewport changes.
+    if !step_keys_gated {
+        if input
+            .translator
+            .was_key_released(KeyCode::BracketLeft, keys)
+        {
+            host.frontend.viewport.rotate_by(-1);
+        }
+        if input
+            .translator
+            .was_key_released(KeyCode::BracketRight, keys)
+        {
+            host.frontend.viewport.rotate_by(1);
+        }
+        if input.translator.was_key_released(KeyCode::Backslash, keys) {
+            host.frontend.viewport.reset_rotation();
+        }
+    }
     let step_shortcuts = plan_step_shortcuts(
         StepShortcutInput {
             now_ms: frame.started_at_ms,
