@@ -482,7 +482,7 @@ mod tests {
         .unwrap();
         let code = ticket.encode();
         assert!(BrowserJoinTicket::decode_for_initial_use(&code, u64::MAX - 1).is_ok());
-        assert_eq!(ticket.payload().expires_never, true);
+        assert!(ticket.payload().expires_never);
         assert_eq!(ticket.payload().expires_at_epoch_s, NEVER_EXPIRES_EPOCH_S);
     }
 
