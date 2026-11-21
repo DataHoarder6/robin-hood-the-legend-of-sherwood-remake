@@ -83,6 +83,25 @@ scripts/remote-check.sh --list     # copies and sizes on the build host
 scripts/remote-check.sh --prune    # drop every copy but this one
 ```
 
+## "A raw `nix develop --command cargo build` fills the runtime disk"
+
+Symptom: a `runbg` job compiles a whole worktree on `oci-vm` and fills the root
+disk, even though `scripts/check-quality.sh` refuses to run there. The task-3
+host guard covered only that entry point; the toolchain was still open.
+
+Rule: the refusal lives at the toolchain boundary now. The devShell installs
+`scripts/cargo-runtime-guard.sh` as `cargo` ahead of the pinned toolchain. On
+`oci-vm` it refuses `build`, `test`, `check` and `clippy` and points at
+`scripts/remote-check.sh SUITE`; every other cargo command (`cargo run --example
+…`, `cargo metadata`) and every other host exec the real cargo unchanged.
+`scripts/tests/cargo-runtime-guard.sh` is the fixture; it injects the host with
+`ROBIN_TEST_HOSTNAME` and uses a stub cargo, so it compiles nothing.
+
+```sh
+bash scripts/tests/cargo-runtime-guard.sh   # no cargo, no ssh, no build
+scripts/remote-check.sh engine              # the only way to build from oci-vm
+```
+
 ## "Every agent's gate takes an hour"
 
 Symptom: 3–5 agents each compile the same wasm/LLVM graph; the build host runs

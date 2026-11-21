@@ -31,7 +31,12 @@
   rules. Gate builds set `CARGO_INCREMENTAL=0` and never set
   `SCCACHE_ALLOW_INCREMENTAL` — `docs/adr/0007-no-cargo-incremental-in-gates.md`.
 - `nix develop` gives the same shell locally, with the clang + wild that
-  `.cargo/config.toml` expects; without them links are slow and warn.
+  `.cargo/config.toml` expects; without them links are slow and warn. Its PATH
+  starts with `scripts/cargo-runtime-guard.sh`, which refuses `cargo build`,
+  `test`, `check` and `clippy` on `oci-vm` with `scripts/remote-check.sh SUITE` —
+  a raw `nix develop --command cargo build` is not a way around the build-host
+  rule. `cargo run --example …` and `cargo metadata` still run locally, and any
+  other host is untouched. Host detection is `${ROBIN_TEST_HOSTNAME:-$(hostname)}`.
 - `scripts/check-quality.sh SUITE` is the only test entry point; `docs/TESTING.md`
   maps every crate to its suite (`format` is the whole-tree rustfmt gate). Bare
   `cargo test` selects only the two default members, never a gate. The
