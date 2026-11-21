@@ -23,8 +23,8 @@ impl CameraRotation {
         }
     }
 
-    pub(crate) fn to_screen(&self, point: MapPoint, view: MapPoint, zoom: f32) -> ScreenPoint {
-        map_to_screen(point, view, zoom, *self)
+    pub(crate) fn to_screen(self, point: MapPoint, view: MapPoint, zoom: f32) -> ScreenPoint {
+        map_to_screen(point, view, zoom, self)
     }
 
     /// Undo the screen rotation about the playfield centre.

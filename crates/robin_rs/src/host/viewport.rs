@@ -121,10 +121,7 @@ impl ViewportState {
     }
 
     pub(crate) fn camera_rotation(&self) -> CameraRotation {
-        CameraRotation {
-            angle: self.display_angle,
-            center: self.playfield_center(),
-        }
+        CameraRotation::new(self.display_angle, self.screen_size)
     }
 
     /// Rotate by whole sprite-view steps, clamped to ±45°.
@@ -230,7 +227,8 @@ impl ViewportState {
             self.camera_angle = 0.0;
             self.display_angle = 0.0;
         } else if before.owns_view {
-            if let Some(saved) = self.saved_camera_angle.take() {
+            let saved = self.saved_camera_angle.take();
+            if let Some(saved) = saved {
                 self.camera_angle = saved;
                 self.display_angle = saved;
             }
