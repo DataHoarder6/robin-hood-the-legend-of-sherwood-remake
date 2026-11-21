@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -711,6 +712,15 @@ class RunSelectedTest(unittest.TestCase):
 
     def test_a_single_selection_never_starts_a_pool(self):
         self.assertEqual(suite.run_selected(["H12"], record_run, 4), ["H12"])
+
+
+class DisplayStartupTest(unittest.TestCase):
+    def test_display_allocation_reaches_xvfb_without_a_name_error(self):
+        # A missing `tempfile` import made every process row fail before Xvfb
+        # started. Stop at Popen and require that exact point to be reached.
+        with mock.patch.object(suite.subprocess, "Popen", side_effect=RuntimeError("stop")):
+            with self.assertRaises(RuntimeError):
+                suite.start_display(Path("/tmp"), "fixture")
 
 
 if __name__ == "__main__":
