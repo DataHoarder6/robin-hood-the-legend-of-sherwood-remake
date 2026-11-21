@@ -1,4 +1,4 @@
-# H02: 55 lines, 6751 characters of English.
+# H02: machine-draft Lithuanian, needs a human ear pass.
 [meta]
 mission = "H02"
 level_code = "HB"
@@ -30,306 +30,306 @@ provenance = "machine-draft"
 [[line]]
 id = 1000445
 index = 0
-display = "Good evening, my child.  Take a seat.  In nomine patris…"
+display = "Labas vakaras, mano vaikeli. Sėskis. In nomine patris..."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 1
-display = "Your voice is quite strange, Father …  Have you perhaps been sampling rather more of your abbey's delicious ale than is reasonable?"
+display = "Jūsų balsas labai keistas, tėve... Gal paragavote daugiau savo vienuolyno skanaus alaus, nei derėtų?"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 2
-display = "My child, it would be to give poor thanks to our Creator if we couldn't appreciate the fruits of the earth and our labours …"
+display = "Mano vaikeli, būtų menkas padėkingumas mūsų Kūrėjui, jei negalėtume džiaugtis žemės vaisiais ir savo triūso rezultatais..."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 3
-display = "That's an original point of view …  But your voice has never been so strange before …But you aren't Friar Tuck!"
+display = "Keistas požiūris... Bet jūsų balsas niekada nebuvo toks keistas... Ir jūs ne brolis Tukas!"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 4
-display = "Shhh!  Calm down, Marian, it's me, Robin!  Robin of Locksley!"
+display = "Ššš! Nusiramink, Marijana, tai aš, Robinas! Robinas iš Loksli!"
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 5
-display = "Robin?  I daren't believe it!  They said  you were dead in the Holy Land …So where's Friar Tuck?"
+display = "Robinas? Nedrįstu tikėti! Sakė, kad žuvote Šventojoje žemėje... Tai kur brolis Tukas?"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 6
-display = "Hm, Friar Tuck is …. meditating.   Yes, that's it, he's meditating.  Very deeply.  I think he'll be meditating for a few more hours yet …"
+display = "Hm, brolis Tukas... medituoja. Taip, būtent, jis medituoja. Labai giliai. Manau, jis dar kelias valandas medituos..."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 7
-display = "Poor Friar Tuck!"
+display = "Vargšas brolis Tukas!"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 8
-display = "Alas, Marian, it was the only way I could meet you …  The Sheriff is after me,  he's frightened I'm going to claim my inheritance."
+display = "Deja, Marijana, tai buvo vienintelis būdas tave pamatyti... Šerifas manęs ieško, jis bijo, kad pareikšiu teisę į savo palikimą."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 9
-display = "It's true.  Your poor father.  Oh Robin, I was so frightened when I heard you were dead.  But what are you going to do?  The Sheriff is deceitful and cruel, he will never agree to give you back your lands!  Where will you live?"
+display = "Tiesa. Tavo vargšas tėvas. O, Robinas, taip išsigandau, kai išgirdau, kad žuvai. Bet ką dabar darysi? Šerifas klastingas ir žiaurus, jis niekada negrąžins tau žemių! Kur gyvensi?"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 10
-display = "Well, I mean … with some friends, we're  sheltering in Sherwood Forest and …"
+display = "Na, aš... su keliais draugais slepiamės Šervudo miške ir..."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 11
-display = "What?  Are you the bandit, the outlaw that the Sheriff is looking for, that Robin Hood?"
+display = "Ką? Ar tu tas plėšikas, tas nusikaltėlis, kurio ieško šerifas, tas Robinas Hudas?"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 12
-display = "Don't worry, Marian, my merry men and I have sworn only to ambush the Sheriff's men, in order to give back to the poor the money that he has squeezed out of them!"
+display = "Nesijaudink, Marijana, mano linksmieji vyrai ir aš prisiekėme tik puldinėti šerifo karius, kad iš vargšų atimtus pinigus grąžintume jiems!"
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 13
-display = "I can't allow you to continue, Robin!  Something must be done …  I'm sure that Prince John would listen to your complaints against the Sheriff of Nottingham, you must meet him."
+display = "Negaliu leisti tau tęsti, Robinai! Kažkas turi būti padaryta... Esu tikra, kad princas Džonas išklausys tavo skundo prieš Notingamo šerifą, privalai su juo susitikti."
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 14
-display = "But where can I meet him?  And would he agree to receive a simple outlaw?"
+display = "Bet kur aš galiu su juo susitikti? Ar jis sutiks priimti paprastą nusikaltėlį?"
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 15
-display = "I'll  help you, my friend.  The Prince is coming to the region soon.  We will go and see him together, I'll speak for you.  Meanwhile, take care of yourself, my good Robin.  Leave before somebody discovers poor Friar Tuck's \"meditations\"!  I'll contact you, go on, go!"
+display = "Aš tau padėsiu, mano drauge. Princas netrukus atvyks į šias apylinkes. Nueisime pas jį kartu, aš už tave kalbėsiu. O kol kas saugokis, gerasis Robinai. Išeik, kol kas nors neaptiko brolio Tuko „meditacijos“! Aš su tavimi susisieksiu, na, eik, eik!"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 16
-display = "I've missed you, Marian."
+display = "Man tavęs trūko, Marijana."
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 17
-display = "I know, Robin.  Go on, go, don't take any more risks!"
+display = "Žinau, Robinai. Eik, eik, nerizikuok daugiau!"
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 18
-display = "You're right, till we meet again, Marian!"
+display = "Tu teisi, iki pasimatymo, Marijana!"
 spoken = ""
 voice = "robin"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000445
 index = 19
-display = "Till we meet again, Robin!  Take care…"
+display = "Iki pasimatymo, Robinai! Saugokis..."
 spoken = ""
 voice = "marian"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 0
-display = "Robin is back in Nottingham. The danger is considerable, but it's such a long time since he's seen Marian! But how will he find her? Where does she live now? Robin doesn't know… He will have to ask the inhabitants of the town, but without rousing the suspicion of the loathsome Sheriff or his men... But Robin's greatest fear is that Marian will refuse to speak to one who is no more than an outlaw..."
+display = "Robinas vėl Notingame. Pavojus didelis, bet jis taip seniai nematė Marianos! Tačiau kaip ją rasti? Kur ji dabar gyvena? Robinas nežino... Jam teks paklausti miesto gyventojų, bet neįtariant galbūt šlykščiam šerifui ar jo kariams... Didžiausia Robino baimė – kad Marijana atsisakys kalbėtis su paprastu nusikaltėliu..."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 1
-display = "It seems unlikely that this well-fed monk will agree to help you to find Marian! It would be better to knock him out, so you can take his place. Hiding his body in the vestry seems like a good idea, but be careful, you must not harm him!"
+display = "Atrodo, šis gerai maitinamas vienuolis vargu ar sutiks padėti tau rasti Marianą! Geriau jį apsvaiginti, kad galėtum užimti jo vietą. Kūną paslėpti zakristijoje atrodo gera mintis, bet būk atsargus – negali jo sužeisti!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 2
-display = "The coast is clear: all Robin has to do now is go and hide in the confessional to wait for Marian!"
+display = "Kelias laisvas: dabar Robinas gali tik pasislėpti išpažinčių kabinoje ir laukti Marianos!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 3
-display = "\"Oh dear! I almost forgot to tie this big monk up and hide him in the vestry!\""
+display = "Oi! Beveik pamiršau surišti šį storąjį vienuolį ir paslėpti jį zakristijoje!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 4
-display = "Robin is the only person Marian wants to talk to!"
+display = "Marijana nori kalbėti tik su Robinu!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 5
-display = "\"The Sheriff's brother-in-law is a malicious man! He takes advantage of the Sheriff's influence to impose heavy taxes on the town's craftsmen. He hides his treasure in his house. He deserves to be taught a good lesson!\""
+display = "Šerifo svainis yra piktas žmogus! Jis naudojasi šerifo įtaka ir apdeda miesto amatininkus sunkiais mokesčiais. Savo turtą jis slepia namuose. Jis vertas geros pamokos!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 6
-display = "According to the beggar, this is where the Sheriff's brother-in-law lives."
+display = "Pagal elgetą, čia gyvena šerifo svainis."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 7
-display = "\"Oh! My poor son! He was such a good boy, and so brave! But it was madness to oppose the Sheriff's men as he did! Ah, my dear child! His body is being displayed as an example, at least that's what they said! And I, his poor mother, have nothing left… Not even the comfort of being able to bury him in hallowed ground!\""
+display = "Oi! Mano vargšas sūnus! Jis buvo toks geras ir narsus berniukas! Bet buvo beprotybė taip priešintis šerifo vyrams! Ak, mano brangus vaikeli! Jo kūną pastatė kaip pavyzdį, bent jau taip sakė! O aš, jo vargšė motina, nebeturiu nieko... Netgi paguodos, kad galėsiu jį palaidoti šventoje žemėje!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 8
-display = "The son of the old woman that Robin met was sentenced to hanging. The Sheriff ordered that his body remain on public display for one week, to serve as an example. His poor mother would certainly be grateful if Robin were to take down his body so that she could bury it..."
+display = "Senutės, kurią sutiko Robinas, sūnus buvo nuteistas pakarti. Šerifas įsakė jo kūną savaitę laikyti viešai, kaip pavyzdį. Vargšė motina tikrai būtų dėkinga, jei Robinas nuimtų kūną, kad ji galėtų jį palaidoti..."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 9
-display = "\"Oh! Master Robin! What a generous soul! Such a noble heart! Tomorrow I will send for a chaplain who will help me lay my beloved son to rest, but this evening, I will pray for his salvation, and for yours too, if you permit me.\""
+display = "O! Mokytojau Robinai! Kokia dosni siela! Tokia kilni širdis! Rytoj atsiųstu kunigą, kuris padės man palaidoti mylimą sūnų, bet šį vakarą aš melsiuosi už jo sielą ir už tavo, jei leisi."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 10
-display = "Wanted: Robin Hood; Guilty of saving the bandit Stutely from his just punishment; Reward: £50"
+display = "Ieškomas: Robinas Hudas; kaltas dėl to, kad išgelbėjo plėšiką Stiutlį nuo pelnyto bausmės; atlygis: 50 svarų"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 11
-display = "\"Each evening, Lady Marian meets her confessor in the church at Nottingham. Strange, for one whose soul is so pure!\""
+display = "Kiekvieną vakarą ledi Marijana susitinka su savo nuodėmklausiu Notingamo bažnyčioje. Keista, jei jos siela tokia tyra!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 12
-display = "\"Lady Marian? Doesn't ring any bells…\""
+display = "Ledi Marijana? Nieko tokio vardo negirdėjau..."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 13
-display = "\"Lady Marian? A particularly pious person, the truth be known! But I know not where she can be found…\""
+display = "Ledi Marijana? Ypač pamaldi žmogus, tiesą sakant! Bet nežinau, kur ją galima rasti..."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 14
-display = "\"This is Lady Marian's residence.\""
+display = "Čia ledi Marianos gyvenamoji vieta."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 15
-display = "\"Lady Marian's confessor is a rather awkward character. He may well not want to let you near her.\""
+display = "Ledi Marianos nuodėmklausys gana keistas žmogus. Jis gali ir neleisti tau prie jos."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 16
-display = "\"Lady Marian? But she's not at home at the moment! The Sheriff has invited her to supper!\""
+display = "Ledi Marijana? Bet jos šiuo metu nėra namie! Šerifas pakvietė ją vakarienės!"
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000122
 index = 17
-display = "The corpse has been taken down. Now we must take it to that poor woman…"
+display = "Kūnas nuimtas. Dabar turime jį nuvežti tai vargšei moteriai..."
 spoken = ""
 voice = "narrator"
-provenance = "machine-draft"
+provenance = "machine-draft-lt"
 
 [[line]]
 id = 1000351

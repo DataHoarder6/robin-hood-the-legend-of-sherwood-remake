@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.request
 from datetime import date
@@ -139,6 +140,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--spent", type=Path, default=Path("scripts/voiceover/spent.json"))
     parser.add_argument("--out", type=Path, default=Path("build/voiceover"))
     parser.add_argument("--budget", type=int, default=900_000)
+    parser.add_argument(
+        "--min-interval",
+        type=float,
+        default=12.0,
+        help="seconds between requests; the project's Chirp 3 HD quota is 5/min",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -166,7 +173,8 @@ def main(argv: list[str]) -> int:
         )
 
     print(
-        f"{len(entries)} lines, {len(pending)} pending, {characters} characters",
+        f"{len(entries)} lines, {len(pending)} pending, {characters} characters, "
+        f"{args.min_interval:.1f}s interval",
         file=sys.stderr,
     )
     if args.dry_run:
@@ -189,7 +197,9 @@ def main(argv: list[str]) -> int:
     if not api_key:
         raise SystemExit("GOOGLE_TTS_API_KEY is not set")
 
-    for entry in pending:
+    for index, entry in enumerate(pending):
+        if index:
+            time.sleep(args.min_interval)
         key = key_of(entry)
         voice = resolve_voice(entry, cast)
         raw = synthesise(entry["spoken"], voice, cast[entry["voice"]].get("encoding", "OGG_OPUS"), api_key)

@@ -137,6 +137,12 @@ class DryRun(Fixture):
         self.assertIn("2 lines, 2 pending", result.stderr)
 
 
+    def test_dry_run_accepts_a_rate_limit_for_the_project_quota(self):
+        result = self.run_synth("--dry-run", "--min-interval", "12")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("12.0s", result.stderr)
+
+
 class LineTable(unittest.TestCase):
     def test_shipped_line_tables_carry_display_text_for_every_line(self):
         import tomllib
