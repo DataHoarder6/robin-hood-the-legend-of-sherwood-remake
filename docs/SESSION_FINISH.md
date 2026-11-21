@@ -43,7 +43,9 @@ non-destructive route. Never force a rebase through someone's commits.
 
 ## Freezing deferred work
 
-A feature that is postponed (not abandoned) is frozen, never deleted:
+A feature that is postponed (not abandoned) is frozen, never deleted. A feature
+is frozen only if it has a [BACKLOG.md](BACKLOG.md) entry; otherwise finish it
+or delete it.
 
 1. Stop execution without removing the session:
    `opencode api POST /api/session/<id>/interrupt` — it returns
@@ -51,12 +53,15 @@ A feature that is postponed (not abandoned) is frozen, never deleted:
    is only for data you truly want gone; it is irreversible.
 2. Stop every job it started with `runbg stop <name>`; a session that keeps a
    job alive will respawn it. Do not kill the runtime itself.
-3. Rename the session `[FROZEN] <feature> — backlog <release>`.
-4. Keep the worktree and branch. Record the backlog location in the session
-   title and in the release's notes; the next release resumes from that state.
+3. Add a [BACKLOG.md](BACKLOG.md) entry: feature, target release and why it is
+   deferred. Do this before renaming the session.
+4. Rename the session `[FROZEN] <feature> — backlog <release>`.
+5. Keep the worktree and branch.
 
-Freezing is a lifecycle decision, not a patch: the code, branch and transcript
-all survive, but no gate or agent runs until the backlog item is picked up.
+`scripts/backlog-check.sh` flags `[FROZEN]` sessions with no entry and entries
+whose worktree is gone; run it before ending the session. Freezing is a
+lifecycle decision, not a patch: the code, branch and transcript all survive,
+but no gate or agent runs until the backlog item is picked up.
 
 ## Builds
 
