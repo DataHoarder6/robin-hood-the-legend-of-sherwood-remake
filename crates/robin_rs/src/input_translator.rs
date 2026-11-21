@@ -86,6 +86,10 @@ pub enum GameKey {
     /// Non-rebindable cooperative pause toggle (P). Host-authoritative in
     /// multiplayer; Esc/DisplayMenu stays the local modal binding.
     CoopPause,
+    // Host-only camera rotation; never recorded in simulation input.
+    RotateLeft,
+    RotateRight,
+    ResetRotation,
 }
 
 // The persisted key-config rows occupy the prefix before reserved/debug keys.
@@ -106,6 +110,9 @@ pub enum GameAction {
     ScrollDown,
     ZoomIn,
     ZoomOut,
+    RotateLeft,
+    RotateRight,
+    ResetRotation,
 
     // Character selection
     SelectCharacter {
@@ -276,6 +283,9 @@ impl InputTranslator {
         // CapsLock already drives SwitchMaskedDisplay (masked sprite
         // edges), so the reveal key is a distinct, unused binding.
         self.bindings[GameKey::RevealHiddenCharacters] = Some(KeyO);
+        self.bindings[GameKey::RotateLeft] = Some(BracketLeft);
+        self.bindings[GameKey::RotateRight] = Some(BracketRight);
+        self.bindings[GameKey::ResetRotation] = Some(Backslash);
 
         // Debug keys (only in non-shipping builds)
         self.bindings[GameKey::SlowMotion] = Some(Pause);
@@ -645,6 +655,16 @@ impl InputTranslator {
                     actions.push(GameAction::ZoomIn);
                 }
 
+                if key_released(keys, prev, self.key(GameKey::RotateLeft)) {
+                    actions.push(GameAction::RotateLeft);
+                }
+                if key_released(keys, prev, self.key(GameKey::RotateRight)) {
+                    actions.push(GameAction::RotateRight);
+                }
+                if key_released(keys, prev, self.key(GameKey::ResetRotation)) {
+                    actions.push(GameAction::ResetRotation);
+                }
+
                 // Action slots precede portrait selection, including when bindings overlap.
                 for (key, index) in [GameKey::Action1, GameKey::Action2, GameKey::Action3]
                     .into_iter()
@@ -710,6 +730,41 @@ mod tests {
             t.translate_key(KeyCode::Digit1),
             Some(GameKey::SelectCharacter1)
         );
+    }
+
+    #[test]
+    fn rotation_keys_translate_once_per_press() {
+        let mut t = make_translator();
+        for (key, game_key, action) in [
+            (
+                KeyCode::BracketLeft,
+                GameKey::RotateLeft,
+                GameAction::RotateLeft,
+            ),
+            (
+                KeyCode::BracketRight,
+                GameKey::RotateRight,
+                GameAction::RotateRight,
+            ),
+            (
+                KeyCode::Backslash,
+                GameKey::ResetRotation,
+                GameAction::ResetRotation,
+            ),
+        ] {
+            assert_eq!(t.translate_key(key), Some(game_key));
+            let pressed = keys_down(&[key]);
+            assert!(
+                !t.translate_keyboard(&pressed, TranslationFlags::ALL)
+                    .contains(&action)
+            );
+            let released = t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL);
+            assert_eq!(released.iter().filter(|a| **a == action).count(), 1);
+            assert!(
+                !t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL)
+                    .contains(&action)
+            );
+        }
     }
 
     #[test]

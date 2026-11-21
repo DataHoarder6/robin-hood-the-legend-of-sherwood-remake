@@ -168,6 +168,7 @@ fn apply_host_view_input(
         }
     }
     let now_ms = crate::window::process_uptime_ms();
+    host.frontend.viewport.advance_rotation(now_ms);
     if pan_suppressed || engine.user_locked() {
         host.frontend.viewport.cancel_touch_motion();
     } else {
@@ -199,6 +200,9 @@ fn apply_host_view_input(
                 }
                 GameAction::ZoomIn => host.frontend.viewport.zoom_by(2.0, Some(mouse_position)),
                 GameAction::ZoomOut => host.frontend.viewport.zoom_by(0.5, Some(mouse_position)),
+                GameAction::RotateLeft => host.frontend.viewport.rotate_by(-1),
+                GameAction::RotateRight => host.frontend.viewport.rotate_by(1),
+                GameAction::ResetRotation => host.frontend.viewport.reset_rotation(),
                 _ => {}
             }
         }
