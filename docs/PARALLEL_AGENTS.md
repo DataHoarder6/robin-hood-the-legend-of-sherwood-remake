@@ -288,9 +288,14 @@ gate-shared` while it waits. `ROBIN_GATE_QUEUE_WAIT_SECS` (default 7200, two
 hours) bounds the wait and names itself in the timeout message; a killed
 caller's ticket is reaped by its deadline or owner PID. The build host's own
 per-copy `flock` still serialises the suites against writers from other
-machines. Keep `ROBIN_BUILD_SLOTS` at 3: throughput is bounded by the one gate
-copy, not by slots. `scripts/build-status.sh` prints the local gate-shared
-waiters beside the per-host slot queue depth.
+machines. The default `ROBIN_BUILD_SLOTS` is 2. On 2026-11-21 the minipc ran at
+load 14–20 on 12 cores with 3 slots plus a multiplayer e2e test; dropping the
+default to 2 gives each held build 6 jobs and leaves at most two compiler trees
+running at once. It is a tunable (`ROBIN_BUILD_SLOTS=x`), not a measured optimum.
+Gates are still serialized by `gate-shared`, so this changes only interactive
+per-worktree checks; gate throughput is bounded by the one gate copy, not slots.
+`scripts/build-status.sh` prints the local gate-shared waiters beside the
+per-host slot queue depth.
 
 ```sh
 bash scripts/tests/gate-shared-fifo.sh   # FIFO order, queue position, timeout
