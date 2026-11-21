@@ -245,8 +245,11 @@ export function validateBrowserJoinTicketUse(
   if (ticket.payload.issued_at_epoch_s > nowEpochSeconds + MAX_CLOCK_SKEW_SECONDS) {
     fail("invitation was issued too far in the future");
   }
-  if (!redeemed && !ticket.payload.expires_never
-    && nowEpochSeconds >= ticket.payload.expires_at_epoch_s) {
+  if (
+    !redeemed &&
+    !ticket.payload.expires_never &&
+    nowEpochSeconds >= ticket.payload.expires_at_epoch_s
+  ) {
     fail("invitation expired before first use");
   }
 }

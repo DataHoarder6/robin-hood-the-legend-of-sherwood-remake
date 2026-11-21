@@ -5,9 +5,13 @@ import { pathToFileURL } from "node:url";
 // A second deployment of this shell can serve a different signer origin. The
 // default stays upstream's, so Cloudflare CI is unchanged; an estate build sets
 // ROBIN_SIGNER_ORIGIN and the verifier then checks the origin it actually ships.
-const signerOrigin = process.env.ROBIN_SIGNER_ORIGIN ?? 'https://identity.robinhood.phiresky.xyz';
+const signerOrigin = process.env.ROBIN_SIGNER_ORIGIN ?? "https://identity.robinhood.phiresky.xyz";
 let signerHost;
-try { signerHost = new URL(signerOrigin).host; } catch { throw new Error(`ROBIN_SIGNER_ORIGIN is not a URL: ${signerOrigin}`); }
+try {
+  signerHost = new URL(signerOrigin).host;
+} catch {
+  throw new Error(`ROBIN_SIGNER_ORIGIN is not a URL: ${signerOrigin}`);
+}
 export const DEPLOYMENT = Object.freeze({
   apiBase: "https://robinhood.phiresky.xyz/api/v1",
   publicHost: "robinhood.phiresky.xyz",
