@@ -1,5 +1,6 @@
 //! Client-local camera and touch motion.
 use super::*;
+use std::f32::consts::{FRAC_PI_4, FRAC_PI_8};
 
 /// Host-local viewport state. This is deliberately outside
 /// `robin_engine`: screen size, mouse anchoring, render culling, and
@@ -22,6 +23,12 @@ pub struct ViewportState {
     /// Whether ordinary selection may pan the view to reveal an off-screen
     /// PC (XAG 117). Enabled by default; players can switch it off.
     ensure_selection_on_screen: bool,
+    /// Requested angle, in radians. Host-only: no engine state depends on it.
+    camera_angle: f32,
+    /// Rendered angle, eased towards `camera_angle` between frames.
+    display_angle: f32,
+    saved_camera_angle: Option<f32>,
+    last_rotation_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +78,10 @@ impl ViewportState {
             director_slide: None,
             cutscene_view: None,
             ensure_selection_on_screen: true,
+            camera_angle: 0.0,
+            display_angle: 0.0,
+            saved_camera_angle: None,
+            last_rotation_ms: None,
         }
     }
 
@@ -82,6 +93,75 @@ impl ViewportState {
     pub fn set_level_size(&mut self, width: f32, height: f32) {
         self.level_size = MapSize::new(width, height);
         self.clip_view();
+    }
+
+    /// Requested camera angle, in radians.
+    pub fn camera_angle(&self) -> f32 {
+        self.camera_angle
+    }
+
+    /// Angle currently used by every renderer transform.
+    pub fn display_angle(&self) -> f32 {
+        self.display_angle
+    }
+
+    /// Angle quantised to the sprite's 22.5° view frames.
+    ///
+    /// Sprite rows snap to the requested angle; only terrain/screen geometry
+    /// eases between frames.
+    pub fn camera_steps(&self) -> i8 {
+        (self.camera_angle / FRAC_PI_8).round() as i8
+    }
+
+    pub fn playfield_center(&self) -> ScreenPoint {
+        ScreenPoint::new(
+            self.screen_size.x * 0.5,
+            (self.screen_size.y - PANNEL_HEIGHT) * 0.5,
+        )
+    }
+
+    pub(crate) fn camera_rotation(&self) -> CameraRotation {
+        CameraRotation {
+            angle: self.display_angle,
+            center: self.playfield_center(),
+        }
+    }
+
+    /// Rotate by whole sprite-view steps, clamped to ±45°.
+    pub fn rotate_by(&mut self, steps: i8) {
+        let next = (self.camera_angle + f32::from(steps) * FRAC_PI_8).clamp(-FRAC_PI_4, FRAC_PI_4);
+        if (next - self.camera_angle).abs() < f32::EPSILON {
+            return;
+        }
+        self.camera_angle = next;
+        if self.level_size.x > 0.0 && self.level_size.y > 0.0 {
+            let needed = minimum_zoom(self.screen_size, self.level_size, self.camera_angle);
+            if needed > self.zoom_factor {
+                self.zoom_factor = needed;
+            }
+        }
+        self.clip_view();
+    }
+
+    pub fn reset_rotation(&mut self) {
+        self.camera_angle = 0.0;
+        self.display_angle = 0.0;
+        self.saved_camera_angle = None;
+        self.last_rotation_ms = None;
+        self.clip_view();
+    }
+
+    /// Ease the rendered angle towards the requested one.
+    pub fn advance_rotation(&mut self, now_ms: u32) {
+        let dt = self
+            .last_rotation_ms
+            .map_or(0, |last| now_ms.saturating_sub(last));
+        self.last_rotation_ms = Some(now_ms);
+        let factor = 1.0 - (-(dt as f32) / 50.0).exp();
+        self.display_angle += (self.camera_angle - self.display_angle) * factor;
+        if (self.camera_angle - self.display_angle).abs() < 0.001 {
+            self.display_angle = self.camera_angle;
+        }
     }
 
     pub fn center_on_point(&mut self, point: MapPoint) {
@@ -144,6 +224,16 @@ impl ViewportState {
         }
         if !before.owns_view && after.owns_view {
             self.cutscene_view = Some((self.view_position, self.zoom_factor));
+        }
+        if after.owns_view {
+            self.saved_camera_angle.get_or_insert(self.camera_angle);
+            self.camera_angle = 0.0;
+            self.display_angle = 0.0;
+        } else if before.owns_view {
+            if let Some(saved) = self.saved_camera_angle.take() {
+                self.camera_angle = saved;
+                self.display_angle = saved;
+            }
         }
         if before.zoom_factor != after.zoom_factor {
             // Script zooms retain the local focal point until a pan or jump
@@ -226,6 +316,9 @@ impl ViewportState {
             zoom_factor.is_finite() && zoom_factor > 0.0,
             "director camera supplied invalid zoom factor {zoom_factor}"
         );
+        self.saved_camera_angle.get_or_insert(self.camera_angle);
+        self.camera_angle = 0.0;
+        self.display_angle = 0.0;
         self.old_view_position = self.view_position;
         self.old_zoom_factor = self.zoom_factor;
         self.zoom_factor = zoom_factor;
@@ -412,9 +505,11 @@ impl ViewportState {
     }
 
     pub fn screen_to_map_unchecked(&self, screen_pt: ScreenPoint) -> MapPoint {
-        MapPoint::new(
-            self.view_position.x + screen_pt.x / self.zoom_factor,
-            self.view_position.y + screen_pt.y / self.zoom_factor,
+        screen_to_map(
+            screen_pt,
+            self.view_position,
+            self.zoom_factor,
+            self.camera_rotation(),
         )
     }
 
@@ -432,9 +527,11 @@ impl ViewportState {
     }
 
     pub fn map_to_screen_unclamped(&self, map_pt: MapPoint) -> ScreenPoint {
-        ScreenPoint::new(
-            (map_pt.x - self.view_position.x) * self.zoom_factor,
-            (map_pt.y - self.view_position.y) * self.zoom_factor,
+        map_to_screen(
+            map_pt,
+            self.view_position,
+            self.zoom_factor,
+            self.camera_rotation(),
         )
     }
 
@@ -445,14 +542,14 @@ impl ViewportState {
         if self.view_position.y < 0.0 {
             self.view_position.y = 0.0;
         }
+        let (visible_w, visible_h) =
+            rotated_playfield_size(self.screen_size, self.zoom_factor, self.display_angle);
         if self.level_size.x > 0.0 {
-            let max_x = (self.level_size.x - self.screen_size.x / self.zoom_factor).max(0.0);
+            let max_x = (self.level_size.x - visible_w).max(0.0);
             self.view_position.x = self.view_position.x.min(max_x);
         }
         if self.level_size.y > 0.0 {
-            let max_y = (self.level_size.y
-                - (self.screen_size.y - PANNEL_HEIGHT) / self.zoom_factor)
-                .max(0.0);
+            let max_y = (self.level_size.y - visible_h).max(0.0);
             self.view_position.y = self.view_position.y.min(max_y);
         }
     }
@@ -510,6 +607,54 @@ mod viewport_touch_tests {
 
         viewport.ensure_on_screen(MapPoint::new(before.x - 100.0, before.y));
         assert_eq!(viewport.view_position, before);
+    }
+
+    #[test]
+    fn rotate_by_steps_and_director_restore() {
+        use std::f32::consts::FRAC_PI_4;
+        use std::f32::consts::FRAC_PI_8;
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(1000.0, 1000.0);
+        viewport.rotate_by(1);
+        close(viewport.camera_angle(), FRAC_PI_8);
+        assert_eq!(viewport.camera_steps(), 1);
+        viewport.rotate_by(1);
+        close(viewport.camera_angle(), FRAC_PI_4);
+        viewport.rotate_by(1);
+        close(viewport.camera_angle(), FRAC_PI_4);
+        viewport.rotate_by(-3);
+        close(viewport.camera_angle(), -FRAC_PI_8);
+        viewport.reset_rotation();
+        close(viewport.camera_angle(), 0.0);
+
+        viewport.rotate_by(1);
+        let idle = engine_api::DirectorCameraFrame {
+            view_position: MapPoint::new(100.0, 100.0),
+            zoom_factor: 1.0,
+            slide_target: None,
+            owns_view: false,
+        };
+        let owned = engine_api::DirectorCameraFrame {
+            owns_view: true,
+            ..idle
+        };
+        viewport.advance_director_camera(idle, owned, viewport.screen_size);
+        close(viewport.camera_angle(), 0.0);
+        viewport.advance_director_camera(owned, idle, viewport.screen_size);
+        close(viewport.camera_angle(), FRAC_PI_8);
+    }
+
+    #[test]
+    fn zoom_anchor_holds_at_rotated_angle() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.rotate_by(1);
+        let anchor = ScreenPoint::new(600.0, 200.0);
+        let before = viewport.screen_to_map_unchecked(anchor);
+        viewport.zoom_by(1.5, Some(anchor));
+        let after = viewport.screen_to_map_unchecked(anchor);
+        close(after.x, before.x);
+        close(after.y, before.y);
     }
 
     #[test]

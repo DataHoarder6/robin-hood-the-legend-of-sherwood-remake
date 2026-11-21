@@ -32,6 +32,10 @@ use crate::key_config::KeyConfig;
 use crate::pc_info_overlay::PcInfoOverlay;
 use crate::sound::SoundManager;
 
+mod camera_transform;
+pub(crate) use camera_transform::{
+    map_to_screen, minimum_zoom, rotated_playfield_size, screen_to_map, CameraRotation,
+};
 mod frontend;
 #[cfg(test)]
 pub(crate) use frontend::{FrontendPreferenceEffects, QueueStripAnimations};
