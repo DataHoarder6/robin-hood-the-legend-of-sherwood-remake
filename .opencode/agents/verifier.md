@@ -15,19 +15,19 @@ permissions:
   - action: "playwright*"
     resource: "*"
     effect: allow
-  - action: "task"
+  - action: "subagent"
     resource: "*"
     effect: deny
   - action: "edit"
     resource: "*"
     effect: deny
-  - action: "bash"
+  - action: "shell"
     resource: "git push*"
     effect: deny
-  - action: "bash"
+  - action: "shell"
     resource: "git merge*"
     effect: deny
-  - action: "bash"
+  - action: "shell"
     resource: "*land.sh*"
     effect: deny
   - action: "google*"

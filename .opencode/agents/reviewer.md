@@ -12,13 +12,13 @@ permissions:
   - action: "context7*"
     resource: "*"
     effect: allow
-  - action: "task"
+  - action: "subagent"
     resource: "*"
     effect: deny
   - action: "edit"
     resource: "*"
     effect: deny
-  - action: "bash"
+  - action: "shell"
     resource: "*"
     effect: deny
   - action: "google*"
