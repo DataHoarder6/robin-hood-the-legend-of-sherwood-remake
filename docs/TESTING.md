@@ -202,20 +202,27 @@ The assets gate checks resolved normal/build dependencies across all targets:
 offline `robin_modding_tools` must not pull in the `robin_rs` client;
 pure `robin_assets` must not pull in `robin_engine`. The checker prints
 the complete Cargo tree and rejects an empty or unexpected graph.
-The wasm gate is a compile check, not a browser execution or memory-cap test.
-`scripts/remote-check.sh wasm` runs it on the build host in the devShell, which
-is also what gives `zstd-sys`'s bundled C a compiler that targets wasm32
-(`flake.nix` sets `CC_wasm32_unknown_unknown` for exactly that; the shell's
-`CC` is the host gcc). Its last two commands build the client with the feature
-set `wasm-www/scripts/build-runtime.mjs` ships — `audio,multiplayer`, because a
-runtime without `multiplayer` exports ticket schema 0 and the stable shell
-refuses every invitation — once unthreaded and once threaded, the second adding
-`wasm-threads` with `-Zbuild-std=std,panic_abort` under
-`scripts/wasm-threads.cargo-config.toml`. Both are `cargo build`, not `cargo
-check`: a module that never links hides the link-argument contract the threaded
-runtime depends on. What is proved is compilation at `wasm-dev`; the published
-`wasm-release` module (fat LTO, `wasm-opt`) is built and checked for its shared
-memory import by `build-runtime.mjs` itself and is not gated here.
+The wasm gate builds and verifies the shipped artifact; it is not a browser
+execution or memory-cap test. `scripts/remote-check.sh wasm` runs it on the
+build host in the devShell, which is also what gives `zstd-sys`'s bundled C a
+compiler that targets wasm32 (`flake.nix` sets `CC_wasm32_unknown_unknown` for
+exactly that; the shell's `CC` is the host gcc). Its first commands build the
+client with the feature set `wasm-www/scripts/build-runtime.mjs` ships —
+`audio,multiplayer`, because a runtime without `multiplayer` exports ticket
+schema 0 and the stable shell refuses every invitation — once unthreaded and
+once threaded, the second adding `wasm-threads` with
+`-Zbuild-std=std,panic_abort` under `scripts/wasm-threads.cargo-config.toml`.
+Both are `cargo build`, not `cargo check`: a module that never links hides the
+link-argument contract the threaded runtime depends on.
+The gate then builds the published `wasm-release` module (fat LTO, `wasm-opt`)
+through that same plan and verifies the optimized bytes the site ships.
+`scripts/check-wasm-release-artifact.sh` is the source for what is asserted:
+one shared memory import with the full 65536-page maximum after optimization,
+and the multiplayer contract read from the artifact's own glue by
+`wasm-www/scripts/verify-runtime-multiplayer.mjs` against the schema in
+`wasm-www/runtime-contract.json`. Instantiating the glue is the assertion —
+`wasm-opt` need not keep bindgen's name in the wasm Export section. A
+release-only break can no longer hide behind a green `wasm-dev` compile.
 
 The client module this gate compiles is the browser guest's whole game, so a
 desktop-only module that a browser path reaches breaks a shipped artifact while
