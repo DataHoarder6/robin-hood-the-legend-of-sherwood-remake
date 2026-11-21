@@ -6,7 +6,7 @@
 //! [`crate::game_session`].
 
 use crate::gfx_types::Rect;
-use crate::host::{CameraRotation, HostDraw};
+use crate::host::{CameraRotation, HostDraw, aabb_of_points};
 use crate::renderer::{BLIT_SOURCE_TRANSPARENT, OUTLINE_PAD, Renderer, rgb565_to_rgb8};
 use crate::titbit_renderer::TitbitRenderer;
 use robin_engine::coordinates as engine_coordinates;
@@ -410,6 +410,24 @@ fn camera_step_shifts_view_row_by_one() {
 }
 
 #[test]
+fn every_directional_row_remaps_with_wraparound() {
+    // A full 16-view family (characters, projectiles and animals all use this
+    // shape) must remap in both directions, not just the one sampled above.
+    for direction in 0..16_u16 {
+        let sprite = directional_sprite(10, 10 + direction);
+        for steps in [-2_i8, -1, 1, 2] {
+            let expected = 10 + (direction as i16 + i16::from(steps)).rem_euclid(16) as u16;
+            assert_eq!(
+                current_render_frame(&sprite, steps).map(|(_, _, bank)| bank),
+                Some(1000 + expected),
+                "row {} with steps {steps} must map to {expected}",
+                10 + direction
+            );
+        }
+    }
+}
+
+#[test]
 fn unmapped_or_out_of_range_row_keeps_current_render_frame() {
     use robin_engine::order::OrderType;
     use robin_engine::sprite_script::UNMAPPED;
@@ -498,18 +516,8 @@ pub(crate) fn map_sprite_bounds(
     rotation: CameraRotation,
 ) -> BBox {
     let corners = map_sprite_corners(origin, width, height, view, zoom, rotation);
-    BBox::from_coords(
-        corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min),
-        corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min),
-        corners
-            .iter()
-            .map(|p| p.0)
-            .fold(f32::NEG_INFINITY, f32::max),
-        corners
-            .iter()
-            .map(|p| p.1)
-            .fold(f32::NEG_INFINITY, f32::max),
-    )
+    let (min_x, min_y, max_x, max_y) = aabb_of_points(corners);
+    BBox::from_coords(min_x, min_y, max_x, max_y)
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]

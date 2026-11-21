@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::rotate_screen_point;
+use crate::host::{CameraRotation, aabb_of_points, rotate_screen_point};
 use crate::{gfx_types::Rect, renderer::Renderer};
 use robin_engine::coordinates::{MapBBox, MapPoint, ScreenPoint};
 use robin_engine::sprite::BBox;
@@ -73,9 +73,9 @@ impl DrawManager {
     }
 
     /// Set the host-only rotation applied to every overlay point.
-    pub fn set_rotation(&mut self, angle: f32, center: ScreenPoint) {
-        self.angle = angle;
-        self.rotation_center = center;
+    pub(crate) fn set_rotation(&mut self, rotation: CameraRotation) {
+        self.angle = rotation.angle;
+        self.rotation_center = rotation.center;
     }
 
     /// Update the rendering parameters (called each frame by the engine).
@@ -163,18 +163,8 @@ impl DrawManager {
             self.map_to_screen(MapPoint::new(min_x, max_y)),
             self.map_to_screen(MapPoint::new(max_x, max_y)),
         ];
-        Some(BBox::from_coords(
-            corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
-            corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
-            corners
-                .iter()
-                .map(|p| p.x)
-                .fold(f32::NEG_INFINITY, f32::max),
-            corners
-                .iter()
-                .map(|p| p.y)
-                .fold(f32::NEG_INFINITY, f32::max),
-        ))
+        let (min_x, min_y, max_x, max_y) = aabb_of_points(corners.iter().map(|p| (p.x, p.y)));
+        Some(BBox::from_coords(min_x, min_y, max_x, max_y))
     }
 
     // -- Drawing methods --
@@ -670,13 +660,19 @@ mod tests {
         let mut dm = DrawManager::new(16);
         dm.update_drawing_parameters(0, MapBBox::from_coords(0.0, 0.0, 800.0, 600.0), 1.0);
         let east = MapPoint::new(500.0, 300.0);
-        dm.set_rotation(std::f32::consts::FRAC_PI_4, ScreenPoint::new(400.0, 300.0));
+        dm.set_rotation(CameraRotation {
+            angle: std::f32::consts::FRAC_PI_4,
+            center: ScreenPoint::new(400.0, 300.0),
+        });
         let turned = dm.map_to_screen(east);
         assert!(
             turned.y > 300.0,
             "east point must rotate below centre: {turned:?}"
         );
-        dm.set_rotation(0.0, ScreenPoint::new(400.0, 300.0));
+        dm.set_rotation(CameraRotation {
+            angle: 0.0,
+            center: ScreenPoint::new(400.0, 300.0),
+        });
         assert_eq!(dm.map_to_screen(east), ScreenPoint::new(500.0, 300.0));
     }
 
