@@ -38,6 +38,14 @@ display = "Sargybinis!"
 spoken = "Sargybinis!"
 voice = "soldier"
 provenance = "machine-draft"
+
+[[line]]
+id = 1000349
+index = 0
+display = "Robinas paliko Lincolną."
+spoken = ""
+voice = "none"
+provenance = "machine-draft"
 """
 
 
@@ -118,6 +126,15 @@ class DryRun(Fixture):
         second = self.run_synth("--dry-run")
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn("0 pending", second.stderr)
+
+
+    def test_lines_without_a_playback_lane_are_not_synthesised(self):
+        result = self.run_synth("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(self.manifest.read_text())
+        self.assertEqual(len(manifest["lines"]), 2)
+        self.assertNotIn("H01-1000349-0", manifest["lines"])
+        self.assertIn("2 lines, 2 pending", result.stderr)
 
 
 class LineTable(unittest.TestCase):

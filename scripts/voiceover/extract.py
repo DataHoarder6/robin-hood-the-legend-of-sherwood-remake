@@ -40,7 +40,10 @@ def voice_for(descriptor, dump: dict, table_id: int, index: int) -> str:
             break
         speaker = paths[index].rsplit("_", 1)[-1].rsplit(".", 1)[0]
         return SPEAKERS.get(speaker, "villager")
-    return "narrator"
+    if table_id == descriptor.popup_text:
+        return "narrator"
+    # Mission description, short briefings and debrief have no audio lane.
+    return "none"
 
 
 def main(argv: list[str]) -> int:

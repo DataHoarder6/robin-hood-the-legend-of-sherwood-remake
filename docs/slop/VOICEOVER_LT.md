@@ -140,9 +140,10 @@ one-shot narrator hook on the popup modal. Content tooling landed:
 
 **Measured scope.** `H01` has 32 text entries / 7,212 characters; `H02` has 55
 entries / 6,751 characters, of which 20 are the cutscene sentences. Total
-87 lines / 13,963 characters — 1.4% of Chirp 3 HD's 1,000,000-character monthly
-allowance ($0.42 at list price). Both line tables are checked in under
-`scripts/voiceover/lines/`.
+87 lines / 13,963 characters total; **61 lines / 10,584 characters are
+voiced** — 1.1% of Chirp 3 HD's 1,000,000-character monthly allowance.
+`H01` has 23 narrated popups; `H02` has 18 narrated popups and 20 cutscene
+sentences. Both line tables are checked in under `scripts/voiceover/lines/`.
 
 **Ruling — narration naming.** An earlier version keyed narration by a
 pack-level WAVE table. Popup text ids restart in every mission, so two missions
@@ -156,7 +157,7 @@ finds that out.
 text in `display`; they are extraction skeletons, not a Lithuanian script.
 No synthesis has run: it needs `GOOGLE_TTS_API_KEY`, which is the one input the
 pipeline cannot supply. Consequently no pack was assembled and no in-game
-verification was performed. To finish: translate `display` for 87 lines
+verification was performed. To finish: translate `display` for the 61 voiced lines
 (keeping the correct orthography; `pronunciation.toml` respells names for the
 synthesiser), then
 
@@ -173,6 +174,8 @@ just voiceover-pack --retail <datadir> --dump <dump_res JSON> \
 and install `build/pack/` as the `1063` locale root. `just voiceover-synth
 --dry-run` is the zero-cost way to re-measure after translation.
 
-**Known scope limits, unchanged:** barks stay English (the engine's English
-fallback), port-owned UI strings stay English, and the debrief has no audio
-lane yet — its text is translated but not narrated.
+**Known scope limits:** barks stay English (the engine's English fallback),
+port-owned UI strings stay English. Mission descriptions, short briefings and
+debriefs have no audio lane, so they are marked `voice = "none"` in the line
+tables and are excluded from extraction, synthesis and the manifest by
+`synth.py`; they remain English on screen. No unplayable clips are produced.

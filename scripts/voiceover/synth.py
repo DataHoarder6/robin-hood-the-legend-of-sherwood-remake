@@ -39,6 +39,10 @@ def load_lines(directory: Path) -> list[dict]:
                     raise SystemExit(f"{path}: line {index} has no {key}")
             if not line["display"].strip():
                 raise SystemExit(f"{path}: line {index} has an empty display text")
+            if line["voice"] == "none":
+                # No playback lane exists for this text (mission description,
+                # short briefings, debrief): do not synthesise an unplayable clip.
+                continue
             entries.append(
                 {
                     "mission": mission,

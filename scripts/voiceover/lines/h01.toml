@@ -8,7 +8,7 @@ id = 1000017
 index = 0
 display = "The Godfather"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -200,7 +200,7 @@ id = 1000349
 index = 0
 display = "With the help of Edward's son, Robin managed to leave the estate of Lincoln, but his situation is far from brilliant: he was unable to find his godfather, and has nowhere to try and take refuge. What's more, the young man informs our hero that the situation is even worse than he feared. The Sheriff reigns over the region with an iron fist, and has anyone who dares to stand up to him executed. Only a small group of men, led by a craftsman, Stutely, has dared to defy him. Unfortunately, they were arrested a short time ago, and will soon meet the fate the Sheriff reserves for \"highwaymen\": hanging. These men could be a great help to Robin; we must go and free them."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -208,7 +208,7 @@ id = 1000350
 index = 0
 display = "Hell! Robin has been slain by the Sheriff's formidable soldiers! All we can do now is start another game…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -216,7 +216,7 @@ id = 1000283
 index = 0
 display = "Robin must get into the castle to find Godwin."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -224,7 +224,7 @@ id = 1000283
 index = 1
 display = "Edward's son awaits Robin in the village to help him leave the town!"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -232,7 +232,7 @@ id = 1000283
 index = 2
 display = "Edward's brave son will take Robin to a safe place as soon as he tells him he wants to leave."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -240,7 +240,7 @@ id = 1000283
 index = 3
 display = "Master Worman has received some money from the Sheriff… Ill-gotten gains could be of use for Robin!"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -248,7 +248,7 @@ id = 1000283
 index = 4
 display = "Haldric the knight has been bribed by the Sheriff; why not rob him?"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -256,5 +256,5 @@ id = 1000283
 index = 5
 display = "These bowmen are far too clumsy! By hitting one of the targets with an arrow, Robin could put an end to the training session. The path to the beggar would then be clear!"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"

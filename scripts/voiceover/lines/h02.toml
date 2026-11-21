@@ -8,7 +8,7 @@ id = 1000018
 index = 0
 display = "Confessions of an Outlaw"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -16,7 +16,7 @@ id = 1000018
 index = 1
 display = "Fair Marian, the love of Robin's youth, lives in Nottingham…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -24,7 +24,7 @@ id = 1000018
 index = 2
 display = "Before leaving for the crusades, Robin was planning to ask the fair Marian for her hand. Although he is no longer an outlaw, he is convinced the girl could help him. Perhaps she will be able to tell him what has become of Godwin? Or help our hero to recover his rights? To find out, Robin will have to take the risk of venturing into Nottingham once more..."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -336,7 +336,7 @@ id = 1000351
 index = 0
 display = "Only Prince John could allow Robin to recover his lands and his honour, though it will not be easy to obtain an audience with him... But, perhaps he would agree to talk to Marian?"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -344,7 +344,7 @@ id = 1000351
 index = 1
 display = "Only Prince John could allow Robin to recover his lands and his honour, though it will not be easy to obtain an audience with him... But, perhaps he would agree to talk to Marian?"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -352,7 +352,7 @@ id = 1000352
 index = 0
 display = "After the capture of our young Hero, Marian sunk into a state of melancholy, and… What? Yes, all right, it's not very romantic, although melancholy is quite a romantic feeling, if you think about it… OK, OK, load a savegame game then…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -360,7 +360,7 @@ id = 1000352
 index = 1
 display = "\"Alas! You've just lost the last person on your team who has one of the skills required for this Mission! There's no way you can pull it off now… You've lost!\""
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -368,7 +368,7 @@ id = 1000284
 index = 0
 display = "Marian is the only one that can help Robin now. He must find her."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -376,7 +376,7 @@ id = 1000284
 index = 1
 display = "But where can she be? Perhaps the beggars know something…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -384,7 +384,7 @@ id = 1000284
 index = 2
 display = "The best way to meet Marian is to wait for her in the confessional."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -392,7 +392,7 @@ id = 1000284
 index = 3
 display = "But first you must ensure you have the right confessor. Why not knock him out, tie him up and then hide him in the vestry?"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -400,7 +400,7 @@ id = 1000284
 index = 4
 display = "Marian will help Robin; all we need to do is leave Nottingham before the alarm is raised…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -408,7 +408,7 @@ id = 1000284
 index = 5
 display = "The body of the son of a poor woman has been put on public display. We must take it down from the gallows!"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -416,7 +416,7 @@ id = 1000284
 index = 6
 display = "We must deliver the body of the woman's son to her, so that she can give him a proper burial."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -424,7 +424,7 @@ id = 1000284
 index = 7
 display = "The Sheriff's brother-in-law is sure to have a large stash of money at home…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -432,7 +432,7 @@ id = 1000284
 index = 8
 display = "Robin has discovered where Marian is living."
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
 
 [[line]]
@@ -440,5 +440,5 @@ id = 1000284
 index = 9
 display = "Maid Marian is having supper with the Sheriff! There must be another way of making contact with her: we must keep questioning the beggars…"
 spoken = ""
-voice = "narrator"
+voice = "none"
 provenance = "machine-draft"
