@@ -27,8 +27,10 @@ mkdir -p "$stubs"
 # rendered preflight/suite heredoc and reports a controllable suite status.
 cat >"$stubs/ssh" <<'STUB'
 #!/usr/bin/env bash
+no_stdin=0
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -n) no_stdin=1; shift ;;
         -o) shift 2 ;;
         -*) shift ;;
         *) break ;;
@@ -39,7 +41,14 @@ if [[ ${1:-} == cat\ * ]]; then
     exec cat "$FAKE_SUMMARY_FILE"
 fi
 printf '%s\n' "$*" >>"$FAKE_CALLS"
-cat >"$FAKE_REMOTE_SCRIPT"
+# Real ssh -n reopens its stdin from /dev/null, swallowing a heredoc. Emulate
+# that here: a gate that passes -n alongside a heredoc loses the remote script,
+# so the marker the host was meant to run never reaches FAKE_REMOTE_SCRIPT.
+if (( no_stdin )); then
+    : >"$FAKE_REMOTE_SCRIPT"
+else
+    cat >"$FAKE_REMOTE_SCRIPT"
+fi
 printf '%s\n' "${FAKE_SUITE_OUTPUT:-}"
 exit "${FAKE_SUITE_EXIT:-0}"
 STUB
@@ -179,6 +188,17 @@ other=$(git rev-parse HEAD)
 git checkout --quiet main
 run_gate "$work/summary-all.json" 0 "$other"
 expect_status 1 'a HEAD that is not the candidate is refused'
+
+# 8. The host-side preflight/suite script is delivered on ssh's stdin. An
+#    `ssh -n` reopens stdin from /dev/null, so the heredoc is swallowed and the
+#    remote script is empty: no binary preflight, no evidence dir, no suite.
+#    This guards the exact regression where the gate failed with no summary.json.
+run_gate "$work/summary-all.json" 0 "$head"
+if grep -q 'ROBIN_E2E_JOBS=2' "$work/remote.sh"; then
+    pass 'the remote script reaches the host on stdin'
+else
+    fail "the remote script was not delivered on stdin: $(cat "$work/remote.sh")"
+fi
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

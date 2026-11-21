@@ -71,7 +71,7 @@ done
 # One ssh for the whole host side: preflight the binary against the candidate,
 # require an empty evidence directory, then run the existing suite with no
 # --only so D06's H23 half is proved under the corpus's full load.
-suite_output=$(ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$host" bash -s <<EOF
+suite_output=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "$host" bash -s <<EOF
 set -euo pipefail
 checkout=$checkout
 binary=$binary
