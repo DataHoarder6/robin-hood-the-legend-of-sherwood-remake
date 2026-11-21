@@ -254,3 +254,11 @@ speed. Gate builds keep `CARGO_INCREMENTAL=0`: a trial with
 clippy's `rustc -vV` probe with "incremental compilation is prohibited". See
 [ADR 0007](../adr/0007-no-cargo-incremental-in-gates.md) before changing
 either variable; a version probe is not proof, only a full gate is.
+
+Baseline after the fix (2026-11-21): `cargo build --timings -p robin_rs --bin
+robin` on the stable copy reported a warm build and saved
+`target/cargo-timings/cargo-timing.html`. The report is the evidence; re-run it
+before any new tuning claim. Dependency `opt-level`, linker swaps, Kache and
+distributed compilation are deferred: the stable copy removed the cold rebuild
+that made them look worthwhile. See
+[ADR 0008](../adr/0008-one-stable-gate-copy.md) for the rejected alternatives.
