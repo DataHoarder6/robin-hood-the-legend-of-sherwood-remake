@@ -1,60 +1,74 @@
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import test from 'node:test';
-import { runtimeBuildPlan } from './build-runtime.mjs';
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import test from "node:test";
+import { runtimeBuildPlan } from "./build-runtime.mjs";
 
-const repository = resolve(import.meta.dirname, '../..');
+const repository = resolve(import.meta.dirname, "../..");
 
 async function repositoryFile(path) {
-    return readFile(resolve(repository, path), 'utf8');
+  return readFile(resolve(repository, path), "utf8");
 }
 
 function ordered(text, markers) {
-    let previous = -1;
-    for (const marker of markers) {
-        const index = text.indexOf(marker);
-        assert(index >= 0, `missing ${marker}`);
-        assert(index > previous, `${marker} is out of order`);
-        previous = index;
-    }
+  let previous = -1;
+  for (const marker of markers) {
+    const index = text.indexOf(marker);
+    assert(index >= 0, `missing ${marker}`);
+    assert(index > previous, `${marker} is out of order`);
+    previous = index;
+  }
 }
 
-test('Cloudflare deploy verifies builds, deploys signer before public, then reconciles routes', async () => {
-    const script = await repositoryFile('wasm-www/scripts/deploy-cloudflare.sh');
-    ordered(script, [
-        'pnpm verify:public',
-        'pnpm verify:signer',
-        'deploy_worker signer robinhood-identity-signer',
-        'deploy_worker public robinhood-public-site',
-        'sync-cloudflare-routes.mjs --apply',
-        'sync-cloudflare-routes.mjs --check',
-        'pnpm smoke:cloudflare',
-    ]);
-    const workflow = await repositoryFile('.github/workflows/deploy-static-workers.yml');
-    assert.match(workflow, /^\s*workflow_dispatch:/mu);
-    assert.match(workflow, /run: wasm-www\/scripts\/deploy-cloudflare\.sh$/mu);
-    for (const text of [workflow, await repositoryFile('.github/workflows/build-static-runtime.yml')]) {
-        assert.match(text, /scripts\/install_pinned_wasm_bindgen\.sh/u);
-        assert.match(text, /wasm-bindgen 0\.2\.128/u);
-        assert.doesNotMatch(text, /cargo install wasm-bindgen-cli|wrangler pages|github-pages/iu);
-    }
+// The CLI the workflows pin must match the wasm-bindgen crate the build locks.
+// Derive the version from Cargo.lock so a re-pin cannot leave a stale literal
+// behind in this assertion.
+async function pinnedBindgenVersion() {
+  const lock = await repositoryFile("Cargo.lock");
+  const match = lock.match(/name = "wasm-bindgen"\nversion = "(\d+\.\d+\.\d+)"/u);
+  assert(match, "cannot find the wasm-bindgen version in Cargo.lock");
+  return match[1];
+}
+
+test("Cloudflare deploy verifies builds, deploys signer before public, then reconciles routes", async () => {
+  const script = await repositoryFile("wasm-www/scripts/deploy-cloudflare.sh");
+  ordered(script, [
+    "pnpm verify:public",
+    "pnpm verify:signer",
+    "deploy_worker signer robinhood-identity-signer",
+    "deploy_worker public robinhood-public-site",
+    "sync-cloudflare-routes.mjs --apply",
+    "sync-cloudflare-routes.mjs --check",
+    "pnpm smoke:cloudflare",
+  ]);
+  const workflow = await repositoryFile(".github/workflows/deploy-static-workers.yml");
+  assert.match(workflow, /^\s*workflow_dispatch:/mu);
+  assert.match(workflow, /run: wasm-www\/scripts\/deploy-cloudflare\.sh$/mu);
+  const pinnedVersionCheck = `wasm-bindgen ${await pinnedBindgenVersion()}`;
+  for (const text of [
+    workflow,
+    await repositoryFile(".github/workflows/build-static-runtime.yml"),
+  ]) {
+    assert.match(text, /scripts\/install_pinned_wasm_bindgen\.sh/u);
+    assert(text.includes(pinnedVersionCheck), `workflows must check '${pinnedVersionCheck}'`);
+    assert.doesNotMatch(text, /cargo install wasm-bindgen-cli|wrangler pages|github-pages/iu);
+  }
 });
 
-test('runtime workflow stages the artifact before uploading it', async () => {
-    const text = await repositoryFile('.github/workflows/build-static-runtime.yml');
-    ordered(text, ['node wasm-www/scripts/stage-runtime-addition.mjs', 'actions/upload-artifact@']);
-    const plan = runtimeBuildPlan();
-    const nameIndex = plan.bindgenArgs.indexOf('--out-name');
-    assert(nameIndex >= 0);
-    assert.equal(plan.bindgenArgs[nameIndex + 1], 'robin');
+test("runtime workflow stages the artifact before uploading it", async () => {
+  const text = await repositoryFile(".github/workflows/build-static-runtime.yml");
+  ordered(text, ["node wasm-www/scripts/stage-runtime-addition.mjs", "actions/upload-artifact@"]);
+  const plan = runtimeBuildPlan();
+  const nameIndex = plan.bindgenArgs.indexOf("--out-name");
+  assert(nameIndex >= 0);
+  assert.equal(plan.bindgenArgs[nameIndex + 1], "robin");
 });
 
-test('shipping datadir wrapper selects the locked converter package and tools feature', async () => {
-    const text = await repositoryFile('scripts/build_web_shipping_datadir.sh');
-    assert.match(
-        text,
-        /^cargo build --locked --release -p robin_rs --bin convert_datadir --features tools$/mu,
-    );
-    assert.doesNotMatch(text, /^cargo build --release --bin convert_datadir$/mu);
+test("shipping datadir wrapper selects the locked converter package and tools feature", async () => {
+  const text = await repositoryFile("scripts/build_web_shipping_datadir.sh");
+  assert.match(
+    text,
+    /^cargo build --locked --release -p robin_rs --bin convert_datadir --features tools$/mu,
+  );
+  assert.doesNotMatch(text, /^cargo build --release --bin convert_datadir$/mu);
 });
