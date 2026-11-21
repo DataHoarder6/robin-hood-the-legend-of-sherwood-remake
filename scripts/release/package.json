@@ -2,9 +2,6 @@
   "name": "robin-release-scripts",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "test": "node --test *.test.ts",
     "typecheck": "tsc --noEmit",
@@ -12,7 +9,7 @@
     "lint:fix": "oxlint --fix *.ts",
     "fmt": "oxfmt '*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
     "fmt:check": "oxfmt --check '*.{js,mjs,cjs,ts,tsx}' package.json .oxlintrc.json .oxfmtrc.json",
-    "verify": "pnpm typecheck && pnpm test"
+    "verify": "pnpm fmt:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@actions/core": "^3.0.1",
@@ -22,6 +19,9 @@
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "packageManager": "pnpm@12.3.4"
 }
