@@ -15,6 +15,7 @@
 - [Known capability gaps](GAPS.md) — the one-page index of what is unfinished and where the detail lives
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
+- [Authored map compiler design](slop/AUTHORED_MAP_COMPILER.md) — offline bake pattern, the no-runtime-solver ruling, and the first slice
 - [Android build and packaging](../android/README.md)
 
 ## Service and deployment guides
