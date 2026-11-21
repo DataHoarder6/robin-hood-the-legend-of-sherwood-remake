@@ -840,12 +840,19 @@ class Peer:
             argv += ["--server", "--mp-expected-players",
                      str(scenario.defaults["expected_players"])]
             if scenario.expanded.get("campaign"):
-                # A campaign is one host-owned session: the host names it, and a
-                # joiner learns it from the lobby listing, never from its own
-                # flags, so a client needs no local campaign save.
+                # A campaign is one host-owned session. A UI joiner learns it
+                # from the lobby listing, but the harness forces --mission, so
+                # a campaign joiner must be told explicitly.
                 argv += ["--mp-campaign"]
         else:
             argv += ["--connect", json.dumps(scenario.connect)]
+            if scenario.expanded.get("campaign"):
+                # Forced --mission alone runs one mission and exits; the joiner
+                # needs --mp-campaign to carry the host's session across. A
+                # campaign session also needs the host's fixed roster size.
+                argv += ["--mp-expected-players",
+                         str(scenario.defaults["expected_players"]),
+                         "--mp-campaign"]
         return argv
 
     def launch(self):
