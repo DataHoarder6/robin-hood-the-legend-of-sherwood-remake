@@ -41,14 +41,14 @@ function cacheKey(file: CachedFile): Request {
 export async function readCachedContent(
   file: CachedFile,
   storage: CacheStorageLike | undefined = globalThis.caches,
-): Promise<Uint8Array<ArrayBuffer> | undefined> {
+): Promise<Uint8Array | undefined> {
   if (storage === undefined) return undefined;
   try {
     const cache = await storage.open(CONTENT_CACHE_NAME);
     const key = cacheKey(file);
     const response = await cache.match(key);
     if (response === undefined || !response.ok) return undefined;
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer()).slice();
     if (bytes.byteLength !== file.byteLength || (await digestHex(bytes)) !== file.sha256) {
       await cache.delete(key);
       return undefined;
@@ -63,7 +63,7 @@ export async function readCachedContent(
 
 export async function writeCachedContent(
   file: CachedFile,
-  bytes: Uint8Array<ArrayBuffer>,
+  bytes: Uint8Array,
   storage: CacheStorageLike | undefined = globalThis.caches,
 ): Promise<void> {
   if (storage === undefined) return;
@@ -74,7 +74,7 @@ export async function writeCachedContent(
     const cache = await storage.open(CONTENT_CACHE_NAME);
     await cache.put(
       cacheKey(file),
-      new Response(bytes, {
+      new Response(new Uint8Array(bytes).slice(), {
         headers: {
           "Content-Type": "application/octet-stream",
           "X-Robin-Content-Sha256": file.sha256,
