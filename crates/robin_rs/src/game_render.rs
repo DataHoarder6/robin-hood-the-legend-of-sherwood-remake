@@ -6,7 +6,7 @@
 //! [`crate::game_session`].
 
 use crate::gfx_types::Rect;
-use crate::host::HostDraw;
+use crate::host::{CameraRotation, HostDraw};
 use crate::renderer::{BLIT_SOURCE_TRANSPARENT, OUTLINE_PAD, Renderer, rgb565_to_rgb8};
 use crate::titbit_renderer::TitbitRenderer;
 use robin_engine::coordinates as engine_coordinates;
@@ -66,6 +66,7 @@ pub(crate) struct FramePresentationInputs {
     view: MapPoint,
     zoom: f32,
     screen_size: engine_coordinates::ScreenSize,
+    rotation: CameraRotation,
     draw_order_ids: Vec<engine_element::EntityId>,
 }
 
@@ -88,6 +89,7 @@ impl FramePresentationInputs {
             view: host.viewport().view_position,
             zoom: host.viewport().zoom_factor,
             screen_size: host.viewport().screen_size,
+            rotation: host.viewport().camera_rotation(),
             draw_order_ids: host.frontend.presentation.draw_order.ids.clone(),
         }
     }
@@ -148,6 +150,7 @@ fn render_ground_mark_set(
         return;
     }
     let zoom = host.viewport().zoom_factor;
+    let rotation = host.viewport().camera_rotation();
     let screen_w = host.viewport().screen_size.x as i32;
     let screen_h = host.viewport().screen_size.y as i32;
 
@@ -178,8 +181,9 @@ fn render_ground_mark_set(
         // (half-diagonal was subtracted at `add_mark` time), so the
         // on-screen destination is the direct affine transform — no
         // additional half-width offset.
-        let screen_x = (mark.x - view_pos.x) * zoom;
-        let screen_y = (mark.y - view_pos.y) * zoom;
+        let screen = rotation.to_screen(MapPoint::new(mark.x, mark.y), view_pos, zoom);
+        let screen_x = screen.x;
+        let screen_y = screen.y;
 
         let scaled_w = (fw as f32 * zoom).round() as i32;
         let scaled_h = (fh as f32 * zoom).round() as i32;
@@ -246,6 +250,7 @@ fn render_ground_mark_set(
             draw_checkpoint,
             view_pos,
             zoom,
+            rotation,
         );
     }
 }
@@ -351,12 +356,33 @@ pub(crate) fn map_sprite_bounds(
     height: u32,
     view: MapPoint,
     zoom: f32,
+    rotation: CameraRotation,
 ) -> BBox {
+    let corners = [
+        rotation.to_screen(origin, view, zoom),
+        rotation.to_screen(MapPoint::new(origin.x + width as f32, origin.y), view, zoom),
+        rotation.to_screen(
+            MapPoint::new(origin.x, origin.y + height as f32),
+            view,
+            zoom,
+        ),
+        rotation.to_screen(
+            MapPoint::new(origin.x + width as f32, origin.y + height as f32),
+            view,
+            zoom,
+        ),
+    ];
     BBox::from_coords(
-        (origin.x - view.x) * zoom,
-        (origin.y - view.y) * zoom,
-        (origin.x + width as f32 - view.x) * zoom,
-        (origin.y + height as f32 - view.y) * zoom,
+        corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
+        corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
+        corners
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max),
+        corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max),
     )
 }
 
@@ -375,24 +401,34 @@ fn sprite_placement(
     offset: SpriteFrameOffset,
     view: MapPoint,
     zoom: f32,
+    rotation: CameraRotation,
 ) -> SpritePlacement {
     let x = (position.x - center.x).floor() + offset.x;
     let y = (position.y - center.y).floor() + offset.y;
-    let smooth_x = (position.x - center.x + offset.x - view.x) * zoom;
-    let smooth_y = (position.y - center.y + offset.y - view.y) * zoom;
+    let floored = rotation.to_screen(MapPoint::new(x, y), view, zoom);
+    let smooth = rotation.to_screen(
+        MapPoint::new(
+            position.x - center.x + offset.x,
+            position.y - center.y + offset.y,
+        ),
+        view,
+        zoom,
+    );
     SpritePlacement {
         world_origin: MapPoint::new(x, y),
         smooth_world_origin: MapPoint::new(
             position.x - center.x + offset.x,
             position.y - center.y + offset.y,
         ),
-        screen_origin: (((x - view.x) * zoom) as i32, ((y - view.y) * zoom) as i32),
-        screen_position: (smooth_x, smooth_y),
+        screen_origin: (floored.x as i32, floored.y as i32),
+        screen_position: (smooth.x, smooth.y),
     }
 }
 
 #[test]
-fn sprite_origin_preserves_floor_before_zoom_and_signed_truncation() {
+fn sprite_placement_floor_before_zoom_survives_rotation() {
+    use robin_engine::coordinates::ScreenSize;
+    let flat = CameraRotation::new(0.0, ScreenSize::new(800.0, 680.0));
     for (zoom, expected) in [
         (0.5, (4, 0)),
         (1.0, (9, -1)),
@@ -406,6 +442,7 @@ fn sprite_origin_preserves_floor_before_zoom_and_signed_truncation() {
                 SpriteFrameOffset::new(0.25, 0.75),
                 MapPoint::new(0.5, -0.5),
                 zoom,
+                flat,
             )
             .screen_origin,
             expected,
@@ -418,10 +455,42 @@ fn sprite_origin_preserves_floor_before_zoom_and_signed_truncation() {
             SpriteFrameOffset::ZERO,
             MapPoint::ZERO,
             0.5,
+            flat,
         )
         .screen_origin,
         (0, 0),
     );
+    let turned = CameraRotation::new(std::f32::consts::FRAC_PI_4, ScreenSize::new(800.0, 680.0));
+    let rotated = sprite_placement(
+        MapPoint::new(500.0, 300.0),
+        SpriteAnchor::ZERO,
+        SpriteFrameOffset::ZERO,
+        MapPoint::ZERO,
+        1.0,
+        turned,
+    );
+    assert!(rotated.screen_position.1 > turned.center.y);
+}
+
+#[test]
+fn sprite_bounds_are_conservative_at_angle() {
+    use robin_engine::coordinates::ScreenSize;
+    let rotation = CameraRotation::new(std::f32::consts::FRAC_PI_4, ScreenSize::new(800.0, 680.0));
+    let bounds = map_sprite_bounds(
+        MapPoint::new(100.0, 100.0),
+        20,
+        20,
+        MapPoint::ZERO,
+        1.0,
+        rotation,
+    );
+    for x in [100.0, 120.0] {
+        for y in [100.0, 120.0] {
+            let point = rotation.to_screen(MapPoint::new(x, y), MapPoint::ZERO, 1.0);
+            assert!(point.x >= bounds.min.x - 1e-3 && point.x <= bounds.max.x + 1e-3);
+            assert!(point.y >= bounds.min.y - 1e-3 && point.y <= bounds.max.y + 1e-3);
+        }
+    }
 }
 
 /// Keep anchors on the margin boundary visible, matching the legacy sprite passes.

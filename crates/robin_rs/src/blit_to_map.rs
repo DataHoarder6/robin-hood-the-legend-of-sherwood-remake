@@ -58,6 +58,7 @@ pub fn render_background_decals(
 
     let view = viewport.view_position;
     let zoom = viewport.zoom_factor;
+    let rotation = viewport.camera_rotation();
     let screen_w = viewport.screen_size.x as i32;
     let screen_h = viewport.screen_size.y as i32;
     let margin = 256;
@@ -69,6 +70,7 @@ pub fn render_background_decals(
             decal.height,
             view,
             zoom,
+            rotation,
         );
 
         if bounds.max.x <= -margin as f32
@@ -97,6 +99,7 @@ pub fn render_background_decals(
             MapPoint::new(decal.dst_x as f32, decal.dst_y as f32),
             view,
             zoom,
+            rotation,
         );
     }
 }

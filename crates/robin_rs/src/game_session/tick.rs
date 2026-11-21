@@ -234,6 +234,10 @@ pub(super) fn sync_render_camera(frontend: &mut crate::host::HostFrontend) {
                 ),
                 zoom,
             );
+        frontend.presentation.draw_manager.set_rotation(
+            frontend.viewport.display_angle(),
+            frontend.viewport.playfield_center(),
+        );
     }
 }
 

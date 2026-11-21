@@ -9,7 +9,7 @@ use robin_engine::coordinates::{MapPoint, MapSize, ScreenPoint, ScreenSize};
 use super::PANNEL_HEIGHT;
 
 /// Angle and pivot shared by every world-to-screen mapping in one view.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CameraRotation {
     pub(crate) angle: f32,
     pub(crate) center: ScreenPoint,
@@ -22,11 +22,32 @@ impl CameraRotation {
             center: ScreenPoint::new(screen.x * 0.5, (screen.y - PANNEL_HEIGHT) * 0.5),
         }
     }
+
+    pub(crate) fn to_screen(&self, point: MapPoint, view: MapPoint, zoom: f32) -> ScreenPoint {
+        map_to_screen(point, view, zoom, *self)
+    }
+
+    pub(crate) fn to_map(&self, point: ScreenPoint, view: MapPoint, zoom: f32) -> MapPoint {
+        screen_to_map(point, view, zoom, *self)
+    }
+
+    pub(crate) fn screen(&self, point: ScreenPoint) -> ScreenPoint {
+        rotate_screen_point(point, self.angle, self.center)
+    }
 }
 
 fn rotate(point: (f32, f32), angle: f32) -> (f32, f32) {
     let (sin, cos) = angle.sin_cos();
     (point.0 * cos - point.1 * sin, point.0 * sin + point.1 * cos)
+}
+
+pub(crate) fn rotate_screen_point(
+    point: ScreenPoint,
+    angle: f32,
+    center: ScreenPoint,
+) -> ScreenPoint {
+    let (x, y) = rotate((point.x - center.x, point.y - center.y), angle);
+    ScreenPoint::new(x + center.x, y + center.y)
 }
 
 pub(crate) fn map_to_screen(

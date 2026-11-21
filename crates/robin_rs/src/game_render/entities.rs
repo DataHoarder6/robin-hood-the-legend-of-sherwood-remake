@@ -21,6 +21,7 @@ pub(super) fn render_character_masks_clipped(
     draw_checkpoint: usize,
     view: engine_coordinates::MapPoint,
     zoom: f32,
+    rotation: CameraRotation,
 ) {
     let mask_indices = engine
         .fast_grid()
@@ -28,7 +29,7 @@ pub(super) fn render_character_masks_clipped(
     if mask_indices.is_empty() {
         return;
     }
-    let screen_masks = sprite_screen_masks(engine, &mask_indices, view, zoom);
+    let screen_masks = sprite_screen_masks(engine, &mask_indices, view, zoom, rotation);
     renderer.mask_queued_draws(draw_checkpoint, &screen_masks, clip_rect);
 }
 
@@ -37,14 +38,23 @@ pub(super) fn sprite_screen_masks(
     mask_indices: &[engine_mask::MaskIndex],
     view: engine_coordinates::MapPoint,
     zoom: f32,
+    rotation: CameraRotation,
 ) -> Vec<(u32, Rect)> {
     let mut screen_masks = Vec::with_capacity(mask_indices.len());
     for &mask_idx in mask_indices {
         let mask = &engine.fast_grid().level.masks[usize::from(mask_idx)];
-        let mask_screen_x = ((mask.bbox.x_min() - view.x) * zoom).round() as i32;
-        let mask_screen_y = ((mask.bbox.y_min() - view.y) * zoom).round() as i32;
-        let mask_screen_w = (mask.width as f32 * zoom).round() as u32;
-        let mask_screen_h = (mask.height as f32 * zoom).round() as u32;
+        let bounds = map_sprite_bounds(
+            MapPoint::new(mask.bbox.x_min(), mask.bbox.y_min()),
+            mask.width as u32,
+            mask.height as u32,
+            view,
+            zoom,
+            rotation,
+        );
+        let mask_screen_x = bounds.min.x.round() as i32;
+        let mask_screen_y = bounds.min.y.round() as i32;
+        let mask_screen_w = (bounds.max.x - bounds.min.x).round().max(0.0) as u32;
+        let mask_screen_h = (bounds.max.y - bounds.min.y).round().max(0.0) as u32;
         if mask_screen_w == 0 || mask_screen_h == 0 {
             continue;
         }
@@ -116,6 +126,7 @@ pub(crate) fn render_entities_gpu(
         frame: EntityPassFrame {
             view: presentation.view,
             zoom: presentation.zoom,
+            rotation: presentation.rotation,
             screen_w: presentation.screen_size.x as i32,
             screen_h: presentation.screen_size.y as i32,
             shadow_color: presentation.shadow_color,
@@ -126,6 +137,7 @@ pub(crate) fn render_entities_gpu(
     let EntityPassFrame {
         view,
         zoom,
+        rotation,
         screen_w,
         screen_h,
         shadow_color,
@@ -189,8 +201,9 @@ pub(crate) fn render_entities_gpu(
             continue;
         }
 
-        let screen_x = ((world_x - view.x) * zoom) as i32;
-        let screen_y = ((world_y - view.y) * zoom) as i32;
+        let screen = rotation.to_screen(MapPoint::new(world_x, world_y), view, zoom);
+        let screen_x = screen.x as i32;
+        let screen_y = screen.y as i32;
 
         if outside_sprite_cull_margin((screen_x, screen_y), (screen_w, screen_h), zoom) {
             continue;
@@ -259,6 +272,7 @@ pub(crate) fn render_entities_gpu(
 struct EntityPassFrame {
     view: MapPoint,
     zoom: f32,
+    rotation: CameraRotation,
     screen_w: i32,
     screen_h: i32,
     shadow_color: u16,
@@ -330,6 +344,7 @@ fn render_cached_entity_sprite(
     let EntityPassFrame {
         view,
         zoom,
+        rotation,
         shadow_color,
         ..
     } = ctx.frame;
@@ -348,6 +363,7 @@ fn render_cached_entity_sprite(
         cached.script.offsets[cached.frame as usize],
         view,
         zoom,
+        rotation,
     );
     let (dst_x, dst_y) = placement.screen_origin;
 
@@ -400,6 +416,7 @@ fn render_cached_entity_sprite(
             placement.smooth_world_origin,
             view,
             zoom,
+            rotation,
         );
     } else {
         renderer.render_cached_sprite_subpixel(
@@ -504,6 +521,7 @@ fn render_teleport_ghost(
     let EntityPassFrame {
         view,
         zoom,
+        rotation,
         shadow_color,
         ..
     } = ctx.frame;
@@ -515,6 +533,7 @@ fn render_teleport_ghost(
         cached.script.offsets[cached.frame as usize],
         view,
         zoom,
+        rotation,
     );
     let (ghost_dst_x, ghost_dst_y) = ghost.screen_origin;
     let ghost_x = ghost.world_origin.x;
@@ -551,7 +570,8 @@ fn render_teleport_ghost(
         facts.is_flying_human,
         facts.is_flying_human,
     );
-    let ghost_screen_masks = sprite_screen_masks(ctx.engine, &ghost_mask_indices, view, zoom);
+    let ghost_screen_masks =
+        sprite_screen_masks(ctx.engine, &ghost_mask_indices, view, zoom, rotation);
     renderer.mask_queued_draws(ghost_draw_checkpoint, &ghost_screen_masks, ghost_rect);
     if let Some(rgb) = facts.hidden_outline_rgb {
         render_hidden_mask_outlines(ctx, renderer, cached, &ghost_screen_masks, ghost_rect, rgb);
@@ -579,7 +599,12 @@ fn render_entity_sprite_masks(
     dst_rect: Rect,
     sprite_world_bbox: &engine_coordinates::MapBBox,
 ) {
-    let EntityPassFrame { view, zoom, .. } = ctx.frame;
+    let EntityPassFrame {
+        view,
+        zoom,
+        rotation,
+        ..
+    } = ctx.frame;
     let entity = cached.entity;
     let actor_position = cached.world;
     let use_projectile_path = facts.is_flying_human || entity.kind().is_projectile();
@@ -602,7 +627,7 @@ fn render_entity_sprite_masks(
     // become the actor's outline colour. Stencil rejection does the
     // transparency part; the hidden outline pass restores those edge
     // pixels.
-    let screen_masks = sprite_screen_masks(ctx.engine, &mask_indices, view, zoom);
+    let screen_masks = sprite_screen_masks(ctx.engine, &mask_indices, view, zoom, rotation);
     if use_projectile_path {
         renderer.mask_queued_draws(sprite_draw_checkpoint, &screen_masks, dst_rect);
     } else {
@@ -871,6 +896,7 @@ pub(crate) fn render_selection_outlines_gpu(
 ) {
     let view = presentation.view;
     let zoom = presentation.zoom;
+    let rotation = presentation.rotation;
     let screen_w = presentation.screen_size.x as i32;
     let screen_h = presentation.screen_size.y as i32;
     let shadow_color = presentation.shadow_color;
@@ -964,8 +990,9 @@ pub(crate) fn render_selection_outlines_gpu(
         let visual_pos = entity_visual_map_position(entity);
         let world_x = visual_pos.x;
         let world_y = visual_pos.y;
-        let screen_x = ((world_x - view.x) * zoom) as i32;
-        let screen_y = ((world_y - view.y) * zoom) as i32;
+        let screen = rotation.to_screen(MapPoint::new(world_x, world_y), view, zoom);
+        let screen_x = screen.x as i32;
+        let screen_y = screen.y as i32;
         if outside_sprite_cull_margin((screen_x, screen_y), (screen_w, screen_h), zoom) {
             continue;
         }
@@ -977,6 +1004,7 @@ pub(crate) fn render_selection_outlines_gpu(
             script.offsets[frame as usize],
             view,
             zoom,
+            rotation,
         );
         let (dst_x, dst_y) = placement.screen_origin;
 
@@ -1070,6 +1098,7 @@ pub(super) fn render_fx_entities_gpu<I>(
 {
     let view = host.viewport().view_position;
     let zoom = host.viewport().zoom_factor;
+    let rotation = presentation.rotation;
     let screen_w = host.viewport().screen_size.x as i32;
     let screen_h = host.viewport().screen_size.y as i32;
     let shadow_color = presentation.shadow_color;
@@ -1113,8 +1142,9 @@ pub(super) fn render_fx_entities_gpu<I>(
             continue;
         }
 
-        let screen_x = ((world_x - view.x) * zoom) as i32;
-        let screen_y = ((world_y - view.y) * zoom) as i32;
+        let screen = rotation.to_screen(MapPoint::new(world_x, world_y), view, zoom);
+        let screen_x = screen.x as i32;
+        let screen_y = screen.y as i32;
         if outside_sprite_cull_margin((screen_x, screen_y), (screen_w, screen_h), zoom) {
             continue;
         }
@@ -1140,6 +1170,7 @@ pub(super) fn render_fx_entities_gpu<I>(
                 script.offsets[frame as usize],
                 view,
                 zoom,
+                rotation,
             );
             if uses_pixel_fog_visibility(entity) {
                 renderer.render_cached_map_sprite(
@@ -1150,6 +1181,7 @@ pub(super) fn render_fx_entities_gpu<I>(
                     placement.smooth_world_origin,
                     view,
                     zoom,
+                    rotation,
                 );
             } else {
                 renderer.render_cached_sprite_subpixel(

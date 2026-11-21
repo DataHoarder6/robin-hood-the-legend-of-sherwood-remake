@@ -34,7 +34,8 @@ use crate::sound::SoundManager;
 
 mod camera_transform;
 pub(crate) use camera_transform::{
-    CameraRotation, map_to_screen, minimum_zoom, rotated_playfield_size, screen_to_map,
+    CameraRotation, map_to_screen, minimum_zoom, rotate_screen_point, rotated_playfield_size,
+    screen_to_map,
 };
 mod frontend;
 #[cfg(test)]
@@ -214,6 +215,7 @@ impl HostDraw<'_> {
             ),
             zoom,
         );
+        draw_manager.set_rotation(viewport.display_angle(), viewport.playfield_center());
         HostDraw {
             frontend: self.frontend,
             sound: self.sound,

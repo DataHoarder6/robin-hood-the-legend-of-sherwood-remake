@@ -381,6 +381,7 @@ impl Renderer {
         origin: robin_engine::coordinates::MapPoint,
         view: robin_engine::coordinates::MapPoint,
         zoom: f32,
+        rotation: crate::host::CameraRotation,
     ) -> bool {
         let key = SpriteCacheKey {
             bank_id,
@@ -398,6 +399,7 @@ impl Renderer {
             slot.height as u32,
             view,
             zoom,
+            rotation,
         );
         let (x0, y0) = (bounds.min.x, bounds.min.y);
         let (x1, y1) = (bounds.max.x, bounds.max.y);
@@ -418,7 +420,7 @@ impl Renderer {
                 atlas_x as f32 - origin.x,
                 atlas_y as f32 - origin.y,
             ],
-            tint: [view.x, view.y, zoom, 0.0],
+            tint: [view.x, view.y, zoom, rotation.angle],
             operation: DrawOperation::Map(texture),
         });
         true
