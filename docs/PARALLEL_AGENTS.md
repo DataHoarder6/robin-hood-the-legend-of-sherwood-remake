@@ -97,9 +97,9 @@ unchanged artifacts across landings; `rsync --checksum --no-times` preserves
 mtimes and `sync_worktree` purges only the crates whose sources changed. The
 copy lock is held from rsync through the suites, so one copy cannot swap trees
 under a running build. Each gate runs in a bounded user scope, so a killed
-harness leaves no build behind. Keep **one gate in flight** across agents:
-queue behind the other agent's `runbg` unit instead of starting a competing
-gate. Gate copies expire after `GATE_COPY_TTL_DAYS` (default 7).
+harness leaves no build behind. Queue behind the other agent's `runbg` unit
+instead of starting a competing gate. Gate copies expire after
+`GATE_COPY_TTL_DAYS` (default 7).
 
 Build slots and the gate are different budgets. `scripts/build-slot.sh`
 arbitrates CPU across build copies with **3 build slots** (`ROBIN_BUILD_SLOTS`,
@@ -126,9 +126,9 @@ Rule: retries are bounded and quarantine is central. A suite gets **two retries
 in CI and none locally** (CI 2, local 0) — the extra CI attempts absorb
 infrastructure flake, while a local rerun would hide the failure from the gate.
 A failure that survives its budget is never rerun again: it is filed in
-[the defect ledger](DEFECTS.md) with an **owner** and a **bug** link and
-quarantined there until someone fixes it. Quarantine ends in a defect row, not
-an endless rerun. `docs/TESTING.md` owns which suite runs where.
+[the defect ledger](DEFECTS.md) with status `deferred` — the row names its
+issue — until someone fixes it. Quarantine ends in a defect row, not an endless
+rerun. `docs/TESTING.md` owns which suite runs where.
 
 ## "Connection refused when joining after an update"
 

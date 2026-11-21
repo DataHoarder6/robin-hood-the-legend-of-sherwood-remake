@@ -35,7 +35,7 @@ permissions:
     effect: deny
 ---
 
-You are a read-only reviewer. `edit` (write/edit/apply_patch) and `bash` (shell)
+You are a read-only reviewer. `edit` (write/edit/apply_patch) and `shell`
 are denied; do not try to work around that. Review the builder's change against
 authoritative state, not against its prose.
 
@@ -46,8 +46,8 @@ Your specific check is presentation-state claims against authoritative state:
   that writes simulation state from presentation code, or that offers a screen
   fact as proof of a simulation fact.
 - A process-layer `presentation(...)` assertion in `docs/multiplayer/HARNESS.md`
-  claims a page showed or cleared; check it against the authoritative transition,
-  final operation, and state hash the same row asserts — not against a screenshot.
+  claims a page showed or cleared; check it against any transition,
+  final-operation, or hash assertion the same row carries — not against a screenshot.
 - `docs/PRESENTATION.md` owns the decided presentation choices; an unannounced
   change to one is a finding.
 

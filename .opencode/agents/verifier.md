@@ -15,6 +15,9 @@ permissions:
   - action: "playwright*"
     resource: "*"
     effect: allow
+  - action: "playwright_laptop*"
+    resource: "*"
+    effect: deny
   - action: "subagent"
     resource: "*"
     effect: deny

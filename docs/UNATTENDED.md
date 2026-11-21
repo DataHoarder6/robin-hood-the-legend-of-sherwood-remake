@@ -12,6 +12,9 @@ The four loop agents live in [`.opencode/agents/`](../.opencode/agents/):
 [verifier](../.opencode/agents/verifier.md). This page owns the loop's policy;
 the agent files own only their role and permissions.
 
+Launch the loop explicitly with `opencode run --agent director ...`; no
+`default_agent` is configured here, so a bare `opencode run` does not select it.
+
 ## Terminal states
 
 Every iteration ends in exactly one of three states and reports it. There is no
@@ -20,9 +23,9 @@ fourth state and no prompt to the owner to choose, confirm, or continue.
 - **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`,
   whose remote read-back confirms it on the integration ref. Landing is the only
   path to this state; a push's exit status is not proof of it.
-- **FILED** — the failure survived its bounded retry budget and was quarantined
-  as a [DEFECTS.md](DEFECTS.md) row with an owner and a bug link. Quarantine ends
-  in a row, never another rerun.
+- **FILED** — the failure survived its bounded retry budget and was filed in
+  [DEFECTS.md](DEFECTS.md) with status `deferred`: the row names its issue.
+  The row, never another rerun, ends the iteration.
 - **BLOCKED** — the next step needs a capability the loop cannot supply. Name the
   missing capability and stop; do not ask the owner to provide it.
 
@@ -58,7 +61,8 @@ before a tag is scriptable and owned by [RELEASES.md](RELEASES.md).
 Retries are bounded and quarantine is central.
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the budget (CI retries, no local
 rerun) and the rule; a surviving failure is FILED in [DEFECTS.md](DEFECTS.md)
-with an owner and bug link. This page does not restate the numbers.
+with status `deferred` and a row that names its issue. This page does not
+restate the numbers.
 
 ## Windows as BLOCKED
 

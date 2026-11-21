@@ -41,7 +41,8 @@ tag pushed without it is a bet rather than a release.
    Linux seats and over `win-run` on the Windows seat, compare the 12-hex commit
    on every seat, and reject the tag unless all match. A real two-seat
    multiplayer session (`docs/PLAY.md`) is an explicit opt-out of this automated
-   step — a runner skips it unless a human asks for one.
+   step — a runner skips it unless a human asks for one. The concrete
+   `robin --version` / `win-run` check is in [PLAY.md](PLAY.md).
 6. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's
