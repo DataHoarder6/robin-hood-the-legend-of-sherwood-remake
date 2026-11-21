@@ -30,6 +30,12 @@ class CommandTest(unittest.TestCase):
         argv = supervised.command(["/bin/robin", "--server"], unit="rh-e2e-x",
                                   budget_s=130, env={"ROBIN_X": "1"})
         self.assertEqual(argv[:2], ["systemd-run", "--user"])
+        # A service unit starts in the user manager's namespace, so a harness
+        # inside `unshare --net` cannot reach the child's loopback HTTP server.
+        # A scope starts in the caller's namespace and still owns the cgroup.
+        self.assertIn("--scope", argv)
+        self.assertNotIn("--pipe", argv)
+        self.assertNotIn("--wait", argv)
         self.assertIn("--unit", argv)
         self.assertIn("rh-e2e-x", argv)
         self.assertIn("--property=RuntimeMaxSec=130s", argv)

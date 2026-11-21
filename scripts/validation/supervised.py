@@ -58,13 +58,19 @@ def command(argv, *, unit: str, budget_s: int, env: dict[str, str] | None = None
     """Wrap `argv` in a transient user unit with a hard runtime budget."""
     if budget_s <= 0:
         raise ValueError("budget_s must be positive")
+    # A scope starts in the caller's namespace and blocks until the child
+    # exits, so the driver can track its PID and reach its loopback HTTP
+    # server. A service starts in the user manager's namespace: a harness
+    # inside `unshare --net` then cannot poll the child's /state at all.
+    # `--pipe` and `--wait` are exclusive with `--scope`; stdin/stdout are
+    # inherited through Popen, and systemd-run already waits for the scope.
     wrapped = [
-        "systemd-run", "--user",
+        "systemd-run", "--user", "--scope",
         "--unit", unit,
         f"--property=RuntimeMaxSec={int(budget_s)}s",
         "--property=KillMode=control-group",
         "--property=TimeoutStopSec=10s",
-        "--collect", "--wait", "--pipe", "--same-dir",
+        "--collect", "--same-dir",
     ]
     # systemd does not inherit the caller's environment. Pass exactly what the
     # child was going to get: no more, no less. Values are passed as one argv
