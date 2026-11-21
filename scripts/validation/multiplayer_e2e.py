@@ -1397,45 +1397,56 @@ def confine(argv):
                           sys.executable, str(Path(__file__).resolve()), *argv])
 
 
+X_SOCKET_DIR = Path("/tmp/.X11-unix")
+X_DISPLAY_RANGE = range(100, 300)
+
+
+def display_lock_path():
+    return Path(tempfile.gettempdir()) / "robin-xvfb-display.lock"
+
+
 def start_display(run, scope):
     # Xvfb used to publish its display over an inherited `-displayfd` pipe. A
     # systemd service cannot inherit that pipe, so allocate a display number
-    # under a lock and wait for the socket instead. The lock is held only while
-    # choosing a number — never while starting or running the server — so two
-    # agents cannot pick the same display and cannot deadlock on each other.
-    display_lock = Path(tempfile.gettempdir()) / "robin-xvfb-display.lock"
-    with display_lock.open("a+") as lock:
+    # under a lock and wait for its socket instead. The reservation is only
+    # real once that socket exists: releasing the lock at selection time lets
+    # a second scenario in the pool scan an empty socket directory and pick
+    # the same number, so Xvfb refuses to start ("Server is already active
+    # for display N"), its game never gets a window and the modal stalls the
+    # frame. Hold the lock until the socket appears (or startup fails) — it
+    # serialises the few seconds of Xvfb startup, never a whole scenario.
+    lock = display_lock_path().open("a+")
+    with lock:
         import fcntl
         fcntl.flock(lock, fcntl.LOCK_EX)
-        used = {p.name[1:] for p in Path("/tmp/.X11-unix").glob("X*")} if Path("/tmp/.X11-unix").exists() else set()
-        number = next((n for n in range(100, 300) if str(n) not in used), None)
+        used = {p.name[1:] for p in X_SOCKET_DIR.glob("X*")} if X_SOCKET_DIR.exists() else set()
+        number = next((n for n in X_DISPLAY_RANGE if str(n) not in used), None)
         if number is None:
             raise PrerequisiteMissing("X server: no display number left between 100 and 299")
         lock.write(f"{number} {os.getpid()}\n")
         lock.flush()
-        fcntl.flock(lock, fcntl.LOCK_UN)
-    display = f":{number}"
-    unit = supervised.unit_name(f"{scope}-xvfb-{number}")
-    env = os.environ.copy()
-    argv = supervised.command(
-        ["Xvfb", display, "-screen", "0", "1280x1024x24", "-nolisten", "tcp", "-ac"],
-        unit=unit, budget_s=1800, env=env,
-    )
-    with (run / "xvfb.log").open("w") as log:
-        xvfb = subprocess.Popen(argv, cwd=run, env=env, start_new_session=True,
-                                stdout=log, stderr=subprocess.STDOUT)
-    xvfb.unit = unit
-    xvfb.name = "xvfb"
-    deadline = time.monotonic() + 15
-    socket_path = Path("/tmp/.X11-unix") / f"X{number}"
-    while time.monotonic() < deadline:
-        if socket_path.exists():
-            return xvfb, display
-        if xvfb.poll() is not None:
-            break
-        time.sleep(0.1)
-    supervised.stop(unit)
-    raise PrerequisiteMissing(f"X server: {display} never became ready; see {run / 'xvfb.log'}")
+        display = f":{number}"
+        unit = supervised.unit_name(f"{scope}-xvfb-{number}")
+        env = os.environ.copy()
+        argv = supervised.command(
+            ["Xvfb", display, "-screen", "0", "1280x1024x24", "-nolisten", "tcp", "-ac"],
+            unit=unit, budget_s=1800, env=env,
+        )
+        with (run / "xvfb.log").open("w") as log:
+            xvfb = subprocess.Popen(argv, cwd=run, env=env, start_new_session=True,
+                                    stdout=log, stderr=subprocess.STDOUT)
+        xvfb.unit = unit
+        xvfb.name = "xvfb"
+        deadline = time.monotonic() + 15
+        socket_path = X_SOCKET_DIR / f"X{number}"
+        while time.monotonic() < deadline:
+            if socket_path.exists():
+                return xvfb, display
+            if xvfb.poll() is not None:
+                break
+            time.sleep(0.1)
+        supervised.stop(unit)
+        raise PrerequisiteMissing(f"X server: {display} never became ready; see {run / 'xvfb.log'}")
 
 
 def run_scenario(identifier, expanded, options, evidence):

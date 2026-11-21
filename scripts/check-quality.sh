@@ -229,6 +229,7 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p parity_check_test.py
         python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
         python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py
+        python3 -m unittest discover -s scripts/validation -p display_allocation_test.py
         test -f tools/crash-receiver/test_receiver.py
         python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py
         bash scripts/test_parity_orchestration.sh
