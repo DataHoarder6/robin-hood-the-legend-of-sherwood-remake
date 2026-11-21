@@ -160,6 +160,22 @@ for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=
     fi
 done
 
+# --- the build host stays awake against idle and explicit suspend -------------
+# `idle` alone only blocks automatic idle detection; `sleep` is what blocks
+# explicit suspend/hibernate requests. A gate lock that drops `sleep` can have
+# the host suspended mid-build by a scheduled or user request (systemd-inhibit(1)).
+inhibit_count=$(grep -F -c 'systemd-inhibit --what=idle:sleep' "$source_root/scripts/remote-check.sh" || true)
+if [ "$inhibit_count" -ge 2 ]; then
+    pass "both remote gates inhibit idle and sleep"
+else
+    fail "remote-check has $inhibit_count idle:sleep inhibits, expected at least two"
+fi
+if grep -Fq 'systemd-inhibit --what=idle ' "$source_root/scripts/remote-check.sh"; then
+    fail "a remote gate inhibits only idle, so an explicit suspend can kill the build"
+else
+    pass "no remote gate drops the sleep inhibit"
+fi
+
 # --- every gate reuses one locked copy so its target cache survives ------------
 tree_sha=0123456789abcdef0123456789abcdef01234567
 other_sha=fedcba9876543210fedcba9876543210fedcba98

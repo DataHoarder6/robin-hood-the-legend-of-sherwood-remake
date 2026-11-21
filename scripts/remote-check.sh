@@ -396,7 +396,7 @@ trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
-    systemd-inhibit --what=idle --why='check-quality ${requested[*]}' \\
+    systemd-inhibit --what=idle:sleep --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
     TMPDIR=\$gate_tmp \
@@ -422,7 +422,7 @@ trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
-    systemd-inhibit --what=idle --why='check-quality ${requested[0]}' \\
+    systemd-inhibit --what=idle:sleep --why='check-quality ${requested[0]}' \\
     flock -w 7200 $lock \\
     env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
     TMPDIR=\$gate_tmp \
