@@ -16,6 +16,7 @@
 - [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-BLOCKED boundary
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
+- [Finishing and freezing sessions](SESSION_FINISH.md) — definition of done, FIFO landing, and freeze-not-delete for deferred work
 - [Authored map compiler design](slop/AUTHORED_MAP_COMPILER.md) — offline bake pattern, the no-runtime-solver ruling, and the first slice
 - [Android build and packaging](../android/README.md)
 
