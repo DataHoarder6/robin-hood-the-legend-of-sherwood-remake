@@ -48,7 +48,7 @@ export async function readCachedContent(
     const key = cacheKey(file);
     const response = await cache.match(key);
     if (response === undefined || !response.ok) return undefined;
-    const bytes = new Uint8Array(await response.arrayBuffer()) as Uint8Array<ArrayBuffer>;
+    const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength !== file.byteLength || (await digestHex(bytes)) !== file.sha256) {
       await cache.delete(key);
       return undefined;
