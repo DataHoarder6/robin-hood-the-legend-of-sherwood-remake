@@ -13,6 +13,7 @@
 - [Defect ledger](DEFECTS.md) — one row per diagnosed defect: class, reproduction, the check that proves it, status
 - [New features and remaining product work](NEW_FEATURES.md)
 - [Known capability gaps](GAPS.md) — the one-page index of what is unfinished and where the detail lives
+- [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-BLOCKED boundary
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
 - [Authored map compiler design](slop/AUTHORED_MAP_COMPILER.md) — offline bake pattern, the no-runtime-solver ruling, and the first slice

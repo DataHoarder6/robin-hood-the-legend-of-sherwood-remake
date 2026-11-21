@@ -67,6 +67,7 @@
   reply is paid for again by the next session.
 - A defect seen in a session becomes a row of `docs/DEFECTS.md` before it
   becomes a fix: class, reproduction, and the check that fails without it.
+- The unattended loop, its terminal states and fixed iteration order are [docs/UNATTENDED.md](docs/UNATTENDED.md); its agent definitions live in [.opencode/agents/](.opencode/agents/).
 
 ## Searching
 
