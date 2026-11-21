@@ -549,6 +549,42 @@ mod tests {
     }
 
     #[test]
+    fn mission_bundle_catalog_hashes_every_planned_payload() {
+        use super::super::dependency_plan::{DependencyPlan, PlannedMission};
+
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("missions")).unwrap();
+        fs::create_dir(temp.path().join("rhs")).unwrap();
+        fs::write(temp.path().join("missions/a.rhmission.zst"), b"a payload").unwrap();
+        fs::write(temp.path().join("rhs/shared.rhs.zst"), b"shared").unwrap();
+        let mut plan = DependencyPlan::default();
+        plan.missions.insert(
+            "M01".to_owned(),
+            PlannedMission {
+                sources: std::collections::BTreeMap::new(),
+                destination_payloads: vec![
+                    "rhs/shared.rhs.zst".to_owned(),
+                    "missions/a.rhmission.zst".to_owned(),
+                ],
+            },
+        );
+
+        let catalog = super::mission_bundle_catalog(&plan, temp.path()).unwrap();
+        let files = &catalog.missions["M01"];
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["missions/a.rhmission.zst", "rhs/shared.rhs.zst"],
+        );
+        for file in files {
+            assert_eq!(file.sha256.len(), 64);
+            assert!(file.byte_length > 0);
+        }
+    }
+
+    #[test]
     fn mission_bundle_catalog_does_not_change_web_manifest_bytes() {
         use robin_rs::multiplayer::content_identity::{
             WEB_CONTENT_MANIFEST_NAME, WebContentEdition,
