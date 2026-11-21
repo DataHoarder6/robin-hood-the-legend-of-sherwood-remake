@@ -1,7 +1,8 @@
 # Working in parallel: symptoms, rules, commands
 
-Every value below is printed by the command beside it, never stamped here; the
-gate section records the mechanism, not a measurement.
+Measured values below are printed by the command beside them, never stamped
+here; the declared budgets (build slots, retries) and the gate section are
+rules, not measurements.
 
 Every trap here has cost a session real work. Each section starts with what you
 see, then the rule that avoids it and the command that applies the rule.
@@ -100,6 +101,13 @@ harness leaves no build behind. Keep **one gate in flight** across agents:
 queue behind the other agent's `runbg` unit instead of starting a competing
 gate. Gate copies expire after `GATE_COPY_TTL_DAYS` (default 7).
 
+Build slots and the gate are different budgets. `scripts/build-slot.sh`
+arbitrates CPU across build copies with **3 build slots** (`ROBIN_BUILD_SLOTS`,
+default 3 in `scripts/remote-check.sh`); each copy holds one for its build and
+gets `nproc / held` jobs. That is three concurrent builds but still **one gate
+in flight**. Slots never shard a suite: each suite runs whole on one copy, so a
+slot buys parallelism across trees, not a split test run.
+
 ```sh
 scripts/remote-check.sh --suites format lint  # one sync, one lock
 scripts/land.sh                               # rebase, gate, push, read-back
@@ -108,6 +116,19 @@ scripts/land.sh                               # rebase, gate, push, read-back
 `minipc` is the code default; no override is needed. Mechanics, primary
 sources and the measurement checklist are in
 [`docs/slop/BUILD_CACHE_AND_QUEUE.md`](slop/BUILD_CACHE_AND_QUEUE.md).
+
+## "A suite failed once — I'll rerun it until it's green"
+
+Symptom: a red suite is rerun until it happens to pass, which hides a real
+regression and spends build-host time on a flake.
+
+Rule: retries are bounded and quarantine is central. A suite gets **two retries
+in CI and none locally** (CI 2, local 0) — the extra CI attempts absorb
+infrastructure flake, while a local rerun would hide the failure from the gate.
+A failure that survives its budget is never rerun again: it is filed in
+[the defect ledger](DEFECTS.md) with an **owner** and a **bug** link and
+quarantined there until someone fixes it. Quarantine ends in a defect row, not
+an endless rerun. `docs/TESTING.md` owns which suite runs where.
 
 ## "Connection refused when joining after an update"
 

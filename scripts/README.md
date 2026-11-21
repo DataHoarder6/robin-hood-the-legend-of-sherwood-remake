@@ -3,7 +3,9 @@
 Run scripts from the repository root unless their usage says otherwise.
 Tests named `test_<driver>.sh` or `test_<module>.py` exercise the corresponding
 driver/module with isolated fixtures; they do not imply permission to run a
-live corpus or deployment. See `docs/TESTING.md` for package and fixture gates.
+live corpus or deployment. Concurrency rules — build slots and the one gate in
+flight — live in `docs/PARALLEL_AGENTS.md`; suite names and which gate runs where
+live in `docs/TESTING.md`.
 
 ## Build and quality gates
 

@@ -37,9 +37,11 @@ tag pushed without it is a bet rather than a release.
    `ROBIN_E2E_BINARY=<binary> ROBINHOOD_DATA_DIR=<game root> bash
    scripts/check-quality.sh multiplayer-e2e`; the suite must print `observed`
    with exit 0 and leave its evidence directory.
-5. Install the same tag on two seats and run `robin --version` on both
-   (`docs/PLAY.md`); a multiplayer session is joined only by seats naming the
-   same commit. This is the step a runner cannot do.
+5. Run a scriptable `robin --version` preflight before the tag: over SSH on the
+   Linux seats and over `win-run` on the Windows seat, compare the 12-hex commit
+   on every seat, and reject the tag unless all match. A real two-seat
+   multiplayer session (`docs/PLAY.md`) is an explicit opt-out of this automated
+   step — a runner skips it unless a human asks for one.
 6. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's

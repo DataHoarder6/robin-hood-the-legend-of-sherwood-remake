@@ -2,17 +2,18 @@
 
 One-page index of what the port cannot yet do. This is a pointer list, not a
 second copy of the detail: follow the links for scope, evidence, and owner.
-Current bug status is printed by `gh issue list -R DataHoarder6/robin-hood-the-legend-of-sherwood-remake`
-and recorded per defect in [the defect ledger](DEFECTS.md).
+Current bug status is the
+[issue list](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues);
+per-defect evidence lives in [the defect ledger](DEFECTS.md).
+
+[Issue #49](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/49)
+— a bug-free, end-to-end co-op campaign meeting its nine criteria — is the
+standing goal; the gaps below are what remains of it.
 
 Last verified: 2026-11-21 against `fork/main`.
 
-## Release blockers
-
-- Mission completion exits the game instead of returning to the menu —
-  [issue #47](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/47).
-- A replay is not consumed when the mission opens a modal —
-  [issue #45](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/45).
+Closed 2026-11-21: [issue #45](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/45)
+and [issue #47](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/47).
 
 ## Editor and map pipeline
 

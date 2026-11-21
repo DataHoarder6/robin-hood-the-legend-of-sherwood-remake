@@ -87,10 +87,9 @@ on one mission, and every row fails by deadline if any seat hangs.
 Won and lost variants reuse the same rows once `/mission-result` exists; the
 result is the only field that changes.
 
-Quick save / quick load becomes its own pair of rows once the command surface is
-driven from a scenario: quicksave on the host, quickload on the host, assert both
-seats adopt the same snapshot and continue inside the hash agreement — the
-interesting failure is a client that keeps simulating the pre-load mission.
+Quick save / quick load is its own pair of rows — that decision stands. The
+two-seat behaviour and every assertion are owned by H29 and H31 in
+[HARNESS.md](../multiplayer/HARNESS.md); this page does not repeat them.
 
 ## What is deliberately not here
 
