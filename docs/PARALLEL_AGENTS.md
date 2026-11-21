@@ -97,14 +97,15 @@ unchanged artifacts across landings; `rsync --checksum --no-times` preserves
 mtimes and `sync_worktree` purges only the crates whose sources changed. The
 copy lock is held from rsync through the suites, so one copy cannot swap trees
 under a running build. Each gate runs in a bounded user scope, so a killed
-harness leaves no build behind. Queue behind the other agent's `runbg` unit
-instead of starting a competing gate. Gate copies expire after
+harness leaves no build behind. Prefer **one gate in flight** across agents:
+a competing gate now queues in ticket order instead of racing for the copy
+(see "Twenty gates time out on gate-shared" below). Gate copies expire after
 `GATE_COPY_TTL_DAYS` (default 7).
 
 Build slots and the gate are different budgets. `scripts/build-slot.sh`
-arbitrates CPU across build copies with **3 build slots** (`ROBIN_BUILD_SLOTS`,
-default 3 in `scripts/remote-check.sh`); each copy holds one for its build and
-gets `nproc / held` jobs. That is three concurrent builds but still **one gate
+arbitrates CPU across build copies with **2 build slots** (`ROBIN_BUILD_SLOTS`,
+default 2 in `scripts/remote-check.sh`); each copy holds one for its build and
+gets `nproc / held` jobs. That is two concurrent builds but still **one gate
 in flight**. Slots never shard a suite: each suite runs whole on one copy, so a
 slot buys parallelism across trees, not a split test run.
 
@@ -272,3 +273,25 @@ racing retries on a busy integration branch. Queue position is printed while
 waiting; `ROBIN_LAND_QUEUE_WAIT_SECS` (default 7200) bounds it, and a killed
 holder's ticket is reaped by its PID. `bash scripts/test_land.sh` covers FIFO
 admission, the named timeout, and stale-ticket reaping.
+
+## "Twenty gates time out on gate-shared"
+
+Symptom: twenty agents start gates together; nineteen queue on the shared copy
+lock in no particular order and most hit the two-hour `flock` bound with no
+line saying where they are.
+
+Rule: `gate-shared` admission is a FIFO ticket queue under
+`$XDG_STATE_HOME/robin-remote-check/queue/<host>-gate-shared`, the same shape as
+the landing and slot queues. A caller tries the local lock only when its ticket
+is first, and logs `remote-check: waiting in gate copy queue (k/n) for
+gate-shared` while it waits. `ROBIN_GATE_QUEUE_WAIT_SECS` (default 7200, two
+hours) bounds the wait and names itself in the timeout message; a killed
+caller's ticket is reaped by its deadline or owner PID. The build host's own
+per-copy `flock` still serialises the suites against writers from other
+machines. Keep `ROBIN_BUILD_SLOTS` at 3: throughput is bounded by the one gate
+copy, not by slots. `scripts/build-status.sh` prints the local gate-shared
+waiters beside the per-host slot queue depth.
+
+```sh
+bash scripts/tests/gate-shared-fifo.sh   # FIFO order, queue position, timeout
+```
