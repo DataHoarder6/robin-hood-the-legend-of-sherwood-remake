@@ -61,16 +61,18 @@ one named test level.
 4. **Angle feedback.** A compact readout or compass that appears on rotation
    and fades afterwards. Use an existing debug-text mechanism if one exists;
    otherwise omit it rather than inventing a HUD surface.
-5. **Right-drag rotation.** Mission mode already has a right-drag camera
-   gesture. Bind horizontal right-drag (or a modifier on it) to rotation and
-   keep `[`/`]` for precise steps. Check the gesture handler before choosing
-   the binding.
+5. **Keys (corrected).** The shipped game's right-drag is deselection, not a
+   camera gesture — the "right-drag rotation" note is about the level editor.
+   Keep `[`/`]`/`\` as the bindings for this pass; a continuous-rotation
+   gesture is deferred.
 
 ## Left to the builder
 
 - Exact bar-mask derivation and whether it can be deleted under rotation.
 - Analytic or binary-search method for the map-size angle cap.
-- Whether the depth data is sufficient for step 3; drop it if not.
-- Which existing text surface, if any, carries the angle readout.
+- Whether the depth data is sufficient for step 3; drop it if not. The spike
+  needs a build, so it cannot run while 0.3.0 is landing.
+- The angle readout uses the existing `hud_text::render_text_with_shadow_gpu`;
+  no new HUD surface is introduced.
 - Tests for each change, written failing first; names and files chosen during
   planning. No test may be claimed passing without a gate run.
