@@ -3,6 +3,30 @@
     "correctness": "error",
     "suspicious": "error"
   },
+  "rules": {
+    // Release scripts narrow parsed GitHub API/JSON values with assertions
+    // after explicit validation; oxlint cannot see those guards.
+    "typescript/no-unsafe-type-assertion": "off",
+    // Local arrays are sorted in place before staging; the results are not shared.
+    "unicorn/no-array-sort": "off",
+    // Version strings are intentionally interpolated into log/file-name templates.
+    "typescript/restrict-template-expressions": "off",
+    // Shadowed locals in narrow callbacks are intentional and do not obscure
+    // the value they close over.
+    "eslint/no-shadow": "off"
+  },
+  "overrides": [
+    {
+      // node:test owns the promises returned by test(); awaiting them here
+      // would defeat the runner. Fixture assertions document the mock shape.
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.test.mjs"],
+      "rules": {
+        "typescript/no-floating-promises": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/unbound-method": "off"
+      }
+    }
+  ],
   "options": {
     "typeAware": true,
     "maxWarnings": 0
