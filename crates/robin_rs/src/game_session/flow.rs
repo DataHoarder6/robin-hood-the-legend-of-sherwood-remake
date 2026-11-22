@@ -502,7 +502,9 @@ impl InteractiveFrameFinish<'_, '_, '_> {
         } = self;
         // Sample the pointer once, here at the frame boundary, before borrowing
         // anything else. The writer composes it off-frame; no render state is
-        // read mid-frame to describe what was under the cursor.
+        // read mid-frame to describe what was under the cursor. Browser builds
+        // have no writer to hand it to, and `report` is desktop-only there.
+        #[cfg(not(target_arch = "wasm32"))]
         let cursor = super::report::CursorSample::from_window(services.window);
         let callbacks = &mut *services.callbacks;
         let args = services.args;
