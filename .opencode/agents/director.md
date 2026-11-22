@@ -49,7 +49,12 @@ Read the authoritative sources yourself: issue #49, `docs/multiplayer/HARNESS.md
 and `docs/DEFECTS.md`. Select exactly one failing assertion per iteration in the
 fixed order owned by `docs/UNATTENDED.md`, then dispatch one builder for the fix,
 one reviewer for the presentation/authority review, and one verifier for the
-suites. Wait for each before the next; never overlap gates.
+suites. Wait for each before the next; never overlap gates. Read
+`/home/matt/.local/state/robin-director/handoff.json` on `oci-vm` first each tick
+(outside the repo, never commit it), and write it at selection and after every
+state transition with the selected item, worktree path, gate unit/result,
+terminal state or `pending`, and next action — `docs/UNATTENDED.md` owns the
+Handoff artifact rule.
 
 Own the terminal states — LANDED, FILED, BLOCKED — defined in `docs/UNATTENDED.md`.
 Emit exactly one and report it. Never ask the owner to choose, confirm, or

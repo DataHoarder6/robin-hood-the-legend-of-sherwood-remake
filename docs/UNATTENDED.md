@@ -23,9 +23,8 @@ The evidence behind these rules, and the mitigation each one adopts, is in
 Every iteration ends in exactly one of three states and reports it. There is no
 fourth state and no prompt to the owner to choose, confirm, or continue.
 
-- **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`,
-  whose remote read-back confirms it on the integration ref. Landing is the only
-  path to this state; a push's exit status is not proof of it.
+- **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`.
+  What a landing requires is defined in LANDED requires origin read-back below.
 - **FILED** — the failure survived its bounded retry budget and was filed in
   [DEFECTS.md](DEFECTS.md) with status `deferred`: the row names its issue.
   The row, never another rerun, ends the iteration.
@@ -60,11 +59,25 @@ One assertion per iteration. A criterion or row with no failing assertion is
 skipped; the order is recomputed each iteration from the sources above, never
 from a cached copy.
 
+## Handoff artifact
+
+Every tick is a fresh context and `TimeoutStartSec` can kill a tick mid-work.
+Before selecting anything, the director reads
+`/home/matt/.local/state/robin-director/handoff.json` on `oci-vm` — outside the
+repo, never committed, no git churn. It is state, not a second source of rules.
+
+Write the file at selection and after every state transition. It records exactly
+five fields: selected item, worktree path, gate unit/result, current terminal
+state or `pending`, and next action. An absent file means no prior selection was
+recorded; start from Iteration order. The rules stay here and in the agent
+files; the artifact records only where this loop stopped.
+
 ## Gate and land path
 
 `scripts/remote-check.sh` and `scripts/land.sh` are the only paths: the first
-runs the build-host gate, the second gates the tree it will land, pushes, and
-reads the remote back. [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the
+runs the build-host gate, the second gates and lands the tree — see LANDED
+requires origin read-back above for what a landing requires.
+[PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the
 build-slot/gate rule and the FIFO landing queue; one gate is in flight across
 agents, and a competing gate queues behind the running one. Suite names live in
 [TESTING.md](TESTING.md).
@@ -100,9 +113,9 @@ fresh-context loop from spinning or declaring false success.
 A corpus row that fails in a full-gate run but passes in isolation is a known
 load flake, not a defect to keep fixing. Record one `deferred` row in
 [DEFECTS.md](DEFECTS.md): class `release`, reproduction = full corpus run on
-the build host, check = isolated row recheck, and an issue link (or "no issue
-yet"). The row is the end of the item — do not retry it indefinitely and do
-not land a "fix" for it. The quarantine rule itself stays with
+the build host, check = isolated row recheck, and a link to the issue that owns
+the discussion. The row is the end of the item — do not retry it indefinitely
+and do not land a "fix" for it. The quarantine rule itself stays with
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md).
 
 ## Risk routing
@@ -112,9 +125,10 @@ The loop never edits `.github/workflows/*`, `scripts/land.sh`,
 machine config or secret (`*.nix` included). Those files are CI, deploy and
 landing authority, or host configuration — human capabilities. If an item's fix
 needs one of them, the item is BLOCKED with that capability named: never
-attempted, never asked for. Stable tags stay human work
-([RELEASES.md](RELEASES.md)). The director's `edit` denies enforce the file
-subset ([director.md](../.opencode/agents/director.md)).
+attempted, never asked for. Stable tags: see
+[Gate and land path](#gate-and-land-path) and [RELEASES.md](RELEASES.md). The
+director's `edit` denies enforce the file subset
+([director.md](../.opencode/agents/director.md)).
 
 ## Windows as BLOCKED
 
