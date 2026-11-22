@@ -668,7 +668,9 @@ function onBootFailure(e: unknown): void {
 
 function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
-  void navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
+  // sw.js is ESM (its pure predicates are imported by the Node tests), so it
+  // must be registered as a module worker or Chrome rejects its `export`.
+  void navigator.serviceWorker.register("/sw.js", { type: "module" }).catch((error: unknown) => {
     logErr(`[service worker registration failed] ${String(error)}`);
   });
 }
