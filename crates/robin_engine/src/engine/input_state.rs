@@ -136,6 +136,13 @@ pub struct CursorFeedback {
     /// player can't currently see (inside buildings, blipped) are
     /// still rendered so the debug view can inspect AI state.
     pub draw_hidden: bool,
+
+    /// Player-triggered reveal for hostiles/NPCs hidden inside buildings.
+    /// Unlike `draw_hidden` (which only restores masked sprite edges), this
+    /// gives hidden characters a persistent constant-alpha outline. Fog
+    /// always wins over it.
+    #[serde(default)]
+    pub reveal_hidden: bool,
 }
 
 /// Host-local input domains. The engine's serialized authoritative state does

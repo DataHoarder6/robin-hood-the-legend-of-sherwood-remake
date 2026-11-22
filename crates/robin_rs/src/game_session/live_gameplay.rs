@@ -202,6 +202,10 @@ fn dispatch_gameplay_action(
         GameAction::SwitchMaskedDisplay => {
             host.frontend.input.feedback.draw_hidden = !host.frontend.input.feedback.draw_hidden
         }
+        GameAction::RevealHiddenCharacters => {
+            host.frontend.input.feedback.reveal_hidden =
+                !host.frontend.input.feedback.reveal_hidden;
+        }
         // Host-only view actions have already run in the preceding phase.
         GameAction::ScrollUp
         | GameAction::ScrollDown
