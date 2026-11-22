@@ -94,6 +94,18 @@ ssh -n minipc "cd $copy && nix develop --command cargo test --locked -p robin_rs
 scripts/remote-check.sh client-release
 ```
 
+**Every test run needs a private TMPDIR.** Never hardcode a shared one such as
+`/tmp/agent-<name>-tmp`: two concurrent suites sharing a TMPDIR delete each
+other's per-test directories and deadlock the env-mutating tests
+(`install_home::tests::*`, `save_file::tests::*`) that serialize on the
+process-local `ENV_LOCK` — all threads end up in `futex_wait` with no log
+progress. `scripts/remote-check.sh` already does this correctly with a
+`mktemp -d /tmp/robin-gate.XXXXXX` per run and an EXIT trap. Ad-hoc runs must
+do the same: create a fresh `mktemp -d` for each suite, set `TMPDIR` to it, and
+remove it only after that suite exits. If a suite has hung in `futex_wait` with
+a static log for several minutes, kill it and rerun with a fresh TMPDIR rather
+than waiting.
+
 There is **one** build copy: `~/build/robin-gate/gate-shared` on `minipc`, held
 under a lock from the first sync until the last suite finishes, outside the
 pruned root. Cargo incremental is off in gates (`CARGO_INCREMENTAL=0`); the
