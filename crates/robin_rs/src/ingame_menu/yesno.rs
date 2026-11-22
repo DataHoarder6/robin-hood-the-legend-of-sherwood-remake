@@ -32,6 +32,15 @@ use super::widget_bridge::{self, ModalCursor, ModalInputState, ModalScreenIo, Sc
 pub const WIN_W: i32 = 400;
 pub const WIN_H: i32 = 200;
 
+/// Shortcut hint under the seal row. The original only rendered hover
+/// tooltips, so the keyboard bindings were invisible until discovered by
+/// trial; the bug-report screen already shows its bindings, so do the same
+/// here.
+const SHORTCUT_HINT: &str = "Enter = Yes · Escape = No";
+/// Top of the hint box, below the 130-px seal row.
+const HINT_Y: i32 = 166;
+const HINT_H: i32 = 20;
+
 /// Message label bounding box `(25,50)..(375,120)`.
 const MSG_X: i32 = 25;
 const MSG_Y: i32 = 50;
@@ -121,6 +130,11 @@ pub struct YesNoModalState {
     win_y: i32,
     focus: FrameButtonFocusManager,
     choice: Option<YesNoChoice>,
+    /// Set when a seal is activated by mouse or shortcut. The dialog stays
+    /// open for one more frame after the choice is recorded so the pressed
+    /// sprite is presented at least once; otherwise a fast click can resolve
+    /// in the frame it is pressed and appear to do nothing.
+    pressed_frame_pending: bool,
     /// `Some` only for the mission-start confirmation; every other Yes/No
     /// dialog keeps opening in place.
     fly_in: Option<FlyInTransition>,
@@ -230,6 +244,7 @@ impl YesNoModalState {
             win_y,
             focus,
             choice: None,
+            pressed_frame_pending: false,
             fly_in: None,
         }
     }
@@ -267,7 +282,13 @@ impl YesNoModalState {
 
     pub fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> Option<bool> {
         if let Some(choice) = self.choice {
-            return Some(choice == YesNoChoice::Yes);
+            if self.pressed_frame_pending {
+                // The activation frame drew the pressed seal. Clear the
+                // marker and draw once more, then report the choice.
+                self.pressed_frame_pending = false;
+            } else {
+                return Some(choice == YesNoChoice::Yes);
+            }
         }
 
         let screen = ScreenFrame::poll(io);
@@ -277,6 +298,12 @@ impl YesNoModalState {
         screen.begin_draw(io.renderer);
         self.draw_content(io.renderer, io.resources);
         screen.finish(io, &self.input_state);
+        if self.pressed_frame_pending {
+            // The pressed sprite was drawn this frame; hold the modal open
+            // for the host's next tick so the player sees the activation.
+            self.pressed_frame_pending = false;
+            return None;
+        }
         self.result()
     }
 
@@ -352,10 +379,34 @@ impl YesNoModalState {
                 continue;
             }
             match event.origin_widget_id {
-                ID_YES => self.resolve(YesNoChoice::Yes),
-                ID_NO => self.resolve(YesNoChoice::No),
+                ID_YES => {
+                    self.note_pressed(ID_YES);
+                    self.resolve(YesNoChoice::Yes);
+                }
+                ID_NO => {
+                    self.note_pressed(ID_NO);
+                    self.resolve(YesNoChoice::No);
+                }
                 id => panic!("yes/no modal received activation from unknown widget {id}"),
             }
+        }
+    }
+
+    /// Show the activated seal in its pressed sprite for one frame. Mouse
+    /// clicks can press and release inside a single frame, skipping the
+    /// widget's pushed state, and keyboard activation never sets it at all —
+    /// forcing it here makes both paths visibly acknowledge the click.
+    ///
+    /// TODO(#72): play the original's seal-activation noise here once
+    /// `ModalScreenIo` carries `ScreenAudio`; the yes/no dialog has no audio
+    /// service today, so only the visual acknowledgement is wired.
+    fn note_pressed(&mut self, id: u32) {
+        if self.choice.is_some() || self.pressed_frame_pending {
+            return;
+        }
+        self.pressed_frame_pending = true;
+        if let Some(crate::widget::Widget::Button(button)) = self.frame.widget_mut(id) {
+            button.base.state = crate::ui::UiState::Pushed;
         }
     }
 
@@ -415,6 +466,23 @@ impl YesNoModalState {
                 // Top-origin with word-wrap: the original renders the
                 // message with centered text rendering inside
                 // the box, wrapping lines from the box top.
+                VAlign::Top,
+            );
+        }
+
+        if let Some(font) = resources.popup_font_any() {
+            render_clipped_text_in_box_font(
+                renderer,
+                font,
+                draw_transform,
+                SHORTCUT_HINT,
+                MenuRect {
+                    x: self.win_x,
+                    y: self.win_y + HINT_Y,
+                    w: WIN_W,
+                    h: HINT_H,
+                },
+                TextAlign::Center,
                 VAlign::Top,
             );
         }
@@ -680,6 +748,7 @@ mod tests {
             win_y: 0,
             focus,
             choice: None,
+            pressed_frame_pending: false,
             fly_in: None,
         }
     }
@@ -732,6 +801,28 @@ mod tests {
         let transform = MenuTransform::centered(1920, 1080);
         assert_eq!(state.handle_events(&[], transform), Some(false));
         assert_eq!(state.transform.to_screen(0, 0), transform.to_screen(0, 0));
+    }
+
+    #[test]
+    fn yesno_hint_names_both_shortcuts() {
+        assert!(SHORTCUT_HINT.contains("Enter"), "{SHORTCUT_HINT}");
+        assert!(SHORTCUT_HINT.contains("Yes"), "{SHORTCUT_HINT}");
+        assert!(SHORTCUT_HINT.contains("Escape"), "{SHORTCUT_HINT}");
+        assert!(SHORTCUT_HINT.contains("No"), "{SHORTCUT_HINT}");
+    }
+
+    #[test]
+    fn activated_seal_renders_pressed_before_the_dialog_closes() {
+        let mut state = modal_state();
+        send_key(&mut state, Keycode::Return, KeyCode::Enter, true);
+        send_key(&mut state, Keycode::Return, KeyCode::Enter, false);
+
+        // The choice is recorded, but the modal holds for one frame so the
+        // pressed sprite is actually drawn before the host closes it.
+        assert_eq!(state.choice, Some(YesNoChoice::Yes));
+        assert!(state.pressed_frame_pending);
+        let yes = state.frame.widget(ID_YES).expect("yes seal");
+        assert_eq!(yes.base().state, crate::ui::UiState::Pushed);
     }
 
     #[test]
