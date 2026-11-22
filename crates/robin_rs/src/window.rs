@@ -70,6 +70,46 @@ const GAME_THREAD_STACK_SIZE: usize = 32 * 1024 * 1024;
 
 static NATIVE_REFRESH_PRESENTATION: AtomicBool = AtomicBool::new(true);
 
+/// Visibility signals from the winit event loop, read by the game thread
+/// before it acquires a swapchain texture. On Wayland a hidden FIFO surface
+/// blocks in `get_current_texture`/`present` until the compositor latches a
+/// frame — about a second when fully covered (issue #63). A hidden window
+/// must therefore skip presentation entirely while the fixed tick continues.
+static WINDOW_OCCLUDED: AtomicBool = AtomicBool::new(false);
+static WINDOW_MINIMIZED: AtomicBool = AtomicBool::new(false);
+
+/// Pure visibility rule shared by the winit handler and the game thread.
+/// Keeping it side-effect-free makes the hidden/visible transition testable
+/// without a real window or GPU surface.
+pub(crate) fn hidden_from_visibility_signals(occluded: bool, minimized: bool) -> bool {
+    occluded || minimized
+}
+
+/// Update the process-wide visibility state from the winit signals. The
+/// minimized signal is derived from a 0x0 surface extent, which is how native
+/// window systems report a minimized surface.
+pub(crate) fn set_window_visibility(occluded: bool, minimized: bool) {
+    WINDOW_OCCLUDED.store(occluded, Ordering::Release);
+    WINDOW_MINIMIZED.store(minimized, Ordering::Release);
+}
+
+/// True while the swapchain must not be acquired: the window is occluded,
+/// minimized, or its surface has been suspended.
+pub(crate) fn window_hidden() -> bool {
+    hidden_from_visibility_signals(
+        WINDOW_OCCLUDED.load(Ordering::Acquire),
+        WINDOW_MINIMIZED.load(Ordering::Acquire),
+    )
+}
+
+/// A present costing more than one monitor period is compositor back-pressure,
+/// not the cost of drawing a frame. It must never be adopted as the frame
+/// budget that gates the next presentation sample. `None` when the monitor
+/// cadence is unknown (wasm, headless tests): no bound can be applied there.
+pub(crate) fn present_cost_is_stall(cost_us: u64, monitor_period_us: Option<u64>) -> bool {
+    monitor_period_us.is_some_and(|period| cost_us > period)
+}
+
 /// Wall-clock-ish millis since process start. Wraps at ~49 days,
 /// which is fine for game pacing (used as a delta between frames).
 pub fn process_uptime_ms() -> u32 {
@@ -1195,6 +1235,8 @@ impl ApplicationHandler for AppHandler {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // A resumed window is mapped again: allow presentation to restart.
+        set_window_visibility(false, false);
         if let Some(window) = &self.window {
             #[cfg(target_os = "android")]
             window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
@@ -1277,6 +1319,8 @@ impl ApplicationHandler for AppHandler {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        // A suspended window is not mapped: stop presenting until `resumed`.
+        set_window_visibility(WINDOW_OCCLUDED.load(Ordering::Acquire), true);
         let output = self.touch.cancel_all();
         self.emit_touch_outputs(output);
         self.send_pause_request();
@@ -1295,7 +1339,21 @@ impl ApplicationHandler for AppHandler {
     ) {
         match event {
             WindowEvent::CloseRequested => self.handle_close_requested(event_loop),
+            WindowEvent::Occluded(occluded) => {
+                // A fully covered window must stop presenting: a FIFO present
+                // can block for ~1 s and would otherwise become the game's
+                // frame budget (issue #63). The fixed tick keeps running.
+                let minimized = WINDOW_MINIMIZED.load(Ordering::Acquire);
+                set_window_visibility(occluded, minimized);
+                tracing::debug!(occluded, "window occlusion changed");
+            }
             WindowEvent::Resized(PhysicalSize { width, height }) => {
+                // A minimized native surface reports a 0x0 extent. Treat it
+                // like occlusion so the game stops acquiring the swapchain.
+                set_window_visibility(
+                    WINDOW_OCCLUDED.load(Ordering::Acquire),
+                    width == 0 || height == 0,
+                );
                 report_window_send(self.events_tx.try_send(HostMsg::Resized { width, height }));
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
