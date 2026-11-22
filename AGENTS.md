@@ -13,6 +13,10 @@
   it. Work in `.worktrees/<name>` off `fork/main`; read scripts and docs from the
   integration ref (`git show fork/main:<path>`), never the stale mirror.
   `just doctor` and `docs/PARALLEL_AGENTS.md` carry the rules and the recoveries.
+  Batches of ready worktrees share one gate: `docs/adr/0009-batched-agent-builds.md`
+  and `docs/research/batched-agent-builds.md`.
+  Batched landings: `docs/adr/0009-batched-agent-builds.md` and
+  `docs/research/batched-agent-builds.md`.
 - **NEVER redirect Cargo's target directory** — no `CARGO_TARGET_DIR`, no
   `--target-dir`, no Cargo config that moves it. Artifacts belong to the
   checkout that produced them.
