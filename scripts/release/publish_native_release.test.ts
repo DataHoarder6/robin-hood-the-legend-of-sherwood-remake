@@ -12,6 +12,8 @@ import {
   main,
   packageTimestamp,
   publish,
+  releaseBody,
+  releaseNotesSection,
   releaseTag,
   runTimestamp,
   type GitHubScriptContext,
@@ -50,6 +52,14 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   return root;
 }
 
+async function notesFixture(t: { after(fn: () => Promise<void>): void }, notes: string) {
+  const root = await mkdtemp(join(tmpdir(), "release-notes-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "RELEASE_NOTES.md");
+  await writeFile(path, notes);
+  return path;
+}
+
 function api() {
   const calls: string[] = [];
   const bytes = new Map<number, Buffer>();
@@ -69,6 +79,7 @@ function api() {
     corrupt: false,
     omit: false,
     promoted: false,
+    body: "",
   };
   const client = {
     paginate: {
@@ -102,10 +113,12 @@ function api() {
           draft: boolean;
           target_commitish: string;
           prerelease: boolean;
+          body: string;
         }) {
           calls.push("create");
           assert.equal(args.draft, true);
           assert.equal(args.target_commitish, "commit");
+          state.body = args.body;
           return { data: draft };
         },
         async uploadReleaseAsset(args: {
@@ -183,6 +196,57 @@ test("timestamp uses original workflow creation time and normalizes timezone", a
   await assert.rejects(runTimestamp(github, repo, 99), /timezone/);
   state.createdAt = "invalidZ";
   await assert.rejects(runTimestamp(github, repo, 99), /invalid/);
+});
+
+const sampleNotes = [
+  "# Release notes",
+  "",
+  "## v1",
+  "",
+  "Tag summary: first release",
+  "",
+  "### What's new",
+  "",
+  "- A verified feature.",
+  "",
+  "## v10",
+  "",
+  "- A different feature.",
+  "",
+].join("\n");
+
+test("release note sections match an exact tag", () => {
+  assert.equal(
+    releaseNotesSection(sampleNotes, "v1"),
+    "Tag summary: first release\n\n### What's new\n\n- A verified feature.",
+  );
+  assert.equal(releaseNotesSection(sampleNotes, "v10"), "- A different feature.");
+  assert.equal(releaseNotesSection(sampleNotes, "v2"), undefined);
+});
+
+test("release bodies paste only the matching tag's verified notes", async (t) => {
+  const body = releaseBody("v1", "abc123", sampleNotes);
+  assert.match(body, /Automatic build of abc123/);
+  assert.match(body, /A verified feature/);
+  assert.doesNotMatch(body, /A different feature/);
+  const unmatched = releaseBody("v2", "abc123", sampleNotes);
+  assert.match(unmatched, /Automatic build of abc123/);
+  assert.doesNotMatch(unmatched, /A verified feature/);
+
+  const a = api();
+  const notes = await notesFixture(t, sampleNotes);
+  await publish(a.github, core, await fixture(t), repo, "v1", "commit", true, notes);
+  assert.equal(a.state.body, releaseBody("v1", "commit", sampleNotes));
+});
+
+test("a missing release-notes file fails closed", async (t) => {
+  const root = await fixture(t);
+  const a = api();
+  await assert.rejects(
+    publish(a.github, core, root, repo, "v1", "commit", true, join(root, "missing.md")),
+    /ENOENT/,
+  );
+  assert.equal(a.calls.includes("create"), false);
 });
 
 test("inventory requires complete, hash-verified update indexes", async (t) => {

@@ -13,6 +13,7 @@
 - [Presentation decisions](PRESENTATION.md) — the zoom ladder and what a viewport larger than the level shows
 - [Defect ledger](DEFECTS.md) — one row per diagnosed defect: class, reproduction, the check that proves it, status
 - [New features and remaining product work](NEW_FEATURES.md)
+- [What's new in each stable release](RELEASE_NOTES.md) — generated per-tag notes the GitHub release body pastes; sources in [releases/whats-new.json](releases/whats-new.json)
 - [Known capability gaps](GAPS.md) — the one-page index of what is unfinished and where the detail lives
 - [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-BLOCKED boundary
 - [Nix package and cross-host install](NIX.md)

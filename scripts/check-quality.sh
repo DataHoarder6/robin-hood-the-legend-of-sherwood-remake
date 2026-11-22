@@ -234,6 +234,7 @@ case "$1" in
         python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py
         bash scripts/test_parity_orchestration.sh
         bash scripts/test_release.sh
+        bash scripts/test_release_notes.sh
         bash scripts/test_verify_release_tag.sh
         bash scripts/test_doctor.sh
         bash scripts/test_reconcile_main.sh

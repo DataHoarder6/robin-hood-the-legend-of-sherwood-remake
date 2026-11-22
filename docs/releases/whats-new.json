@@ -1,0 +1,24 @@
+{
+  "v0.1.0": {
+    "new_features": [
+      "Sherwood perk purchases.",
+      "Multiplayer desync recovery.",
+      "Fresh-mission parity capture."
+    ],
+    "commits": ["e002cf24f"]
+  },
+  "v0.2.0": {
+    "new_features": [
+      "Campaign map mission availability.",
+      "Campaign co-op is one session."
+    ],
+    "commits": ["34b656a44", "ac867e6e2", "d3b596c7e"]
+  },
+  "v0.3.0": {
+    "new_features": [
+      "Opt-in teammate cursors.",
+      "Empty selection boxes leave your party alone."
+    ],
+    "commits": ["109b019ec", "ce650692b", "229fe654c"]
+  }
+}

@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type GitHubScriptContext = {
   core: typeof actionsCore;
@@ -177,6 +178,32 @@ export async function verifyRemote(
   return missing;
 }
 
+/** The section `scripts/release-notes.sh whats-new` generated for one tag. */
+export function releaseNotesSection(notes: string, tag: string): string | undefined {
+  const lines = notes.split(/\r?\n/);
+  const start = lines.indexOf(`## ${tag}`);
+  if (start < 0) return undefined;
+  const next = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  const section = lines.slice(start + 1, next < 0 ? undefined : next).join("\n").trim();
+  return section || undefined;
+}
+
+/** Boilerplate plus the verified notes for this tag; never invented features. */
+export function releaseBody(tag: string, commit: string, notes: string): string {
+  const boilerplate =
+    `Automatic build of ${commit}.\n\n` +
+    "Downloads:\n" +
+    "- If you’re on Windows, you likely want to get `robinhood-remake-windows-Setup.exe`.\n" +
+    "- Linux: download `robinhood-remake-linux.AppImage`, make it executable, and run it.\n\n" +
+    "The two `.nupkg` files are automatic-update payloads (Windows and Linux); " +
+    "you do not need to download them manually. " +
+    "The `releases.*.json` files are required update indexes.";
+  const section = releaseNotesSection(notes, tag);
+  return section ? `${boilerplate}\n\n## What's new in ${tag}\n\n${section}\n` : boilerplate;
+}
+
+const defaultNotesFile = fileURLToPath(new URL("../../docs/RELEASE_NOTES.md", import.meta.url));
+
 export async function publish(
   github: GitHub,
   core: Pick<GitHubScriptContext["core"], "info">,
@@ -185,7 +212,11 @@ export async function publish(
   tag: string,
   commit: string,
   prerelease: boolean,
+  notesFile: string = defaultNotesFile,
 ) {
+  // Read first: a missing generator output must fail the release, not silently
+  // publish a body with no verified features.
+  const notes = await readFile(notesFile, "utf8");
   const assets = await inventory(root);
   let release = await findRelease(github, repo, tag);
   if (!release) {
@@ -196,14 +227,7 @@ export async function publish(
       tag_name: tag,
       target_commitish: commit,
       name: tag,
-      body:
-        `Automatic build of ${commit}.\n\n` +
-        "Downloads:\n" +
-        "- If you’re on Windows, you likely want to get `robinhood-remake-windows-Setup.exe`.\n" +
-        "- Linux: download `robinhood-remake-linux.AppImage`, make it executable, and run it.\n\n" +
-        "The two `.nupkg` files are automatic-update payloads (Windows and Linux); " +
-        "you do not need to download them manually. " +
-        "The `releases.*.json` files are required update indexes.",
+      body: releaseBody(tag, commit, notes),
       draft: true,
       prerelease,
     }));
