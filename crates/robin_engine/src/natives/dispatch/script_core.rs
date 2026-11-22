@@ -47,6 +47,16 @@ impl NativeContext<'_, '_> {
                 0
             }
 
+            // Test/harness only: the same engine command a scripted objective
+            // completion yields when a mission's win condition is met. The
+            // engine marks `mission_won` and raises the leave prompt; the
+            // player's `QuitMissionRequested` then ends the mission through
+            // the game's own mission phase and debriefing.
+            HarnessMarkMissionWon => {
+                self.yield_engine_command(EngineCommand::Win { show_window: true });
+                0
+            }
+
             // --- globals ---
             InitGlobal => {
                 let value = stack.pop_i32();

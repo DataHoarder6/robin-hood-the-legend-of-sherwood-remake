@@ -102,6 +102,18 @@ class SelectionTest(unittest.TestCase):
         run, skipped, refused = suite.select(scenarios)
         self.assertEqual((run, skipped, refused), (["H95"], [], []))
 
+    def test_a_scripted_victory_row_runs_here_with_its_own_verb(self):
+        """The gameplay-outcome verb is a process fault, selected not refused."""
+        scenarios = {"H96": row(
+            "H96",
+            faults=[{"at": {"frame": 40}, "peer": 0, "fault": "script-win"}],
+            resolve=[{"peer": 0, "result": "Completed"},
+                     {"peer": 1, "result": "Completed"}],
+            expect=[{"assert": "log", "contains":
+                     "opening debriefing exit_code=LevelSucceeded", "at_least": 1}])}
+        run, skipped, refused = suite.select(scenarios)
+        self.assertEqual((run, skipped, refused), (["H96"], [], []))
+
     def test_the_container_extension_problem_is_absent(self):
         """`extended` scenarios contribute their parent's faults and expectations."""
         parent = {"H90": row("H90", expect=[

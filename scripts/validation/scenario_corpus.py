@@ -59,7 +59,7 @@ SCENARIO_DIRECTORY = ROOT / "scripts/validation/scenarios"
 HARNESS = ROOT / "docs/multiplayer/HARNESS.md"
 GAME_OPERATION = ROOT / "crates/robin_engine/src/game_operation.rs"
 
-SCHEMA = 4
+SCHEMA = 5
 
 # Section 1: the three layers and the five barriers a scenario may name.
 LAYERS = ("core", "transport", "process")
@@ -87,9 +87,11 @@ FAULT_VERBS = {
     "restart": frozenset(LAYERS),
     "stall-surface": frozenset(LAYERS),
     # Section 1's terminal-choice rows. Ending a mission is a process decision
-    # (`POST /mission-result`); a key is the only way to reach the save surface,
-    # which is a window, so it is the process layer's alone.
+    # (`POST /mission-result`, or the scripted-victory path `script-win`); a key
+    # is the only way to reach the save surface, which is a window, so it is
+    # the process layer's alone.
     "mission-result": frozenset({"process"}),
+    "script-win": frozenset({"process"}),
     "console": frozenset({"process"}),
     "key": frozenset({"process"}),
     "command": frozenset({"core", "process"}),

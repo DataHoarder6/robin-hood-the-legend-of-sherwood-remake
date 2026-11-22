@@ -457,6 +457,11 @@ macro_rules! native_registry {
             GetDiplomacyRelationship => ("int", [("int", "iFirst"), ("int", "iSecond")], lua, ScriptCore, Never);
             SetDiplomacyRelationship => ("void", [("int", "iFirst"), ("int", "iSecond"), ("int", "iRelationship")], lua, ScriptCore, Never);
             SummonReinforcements => ("int", [("int", "iFaction"), ("int", "iMinTier"), ("int", "iCount"), ("int", "iDoor")], lua, Campaign, Always);
+            // Test/harness only: yields the same scripted-victory command a
+            // scripted objective completion (`WinBlazon` on a won mission)
+            // yields, so a process-layer row can drive the game's own
+            // debriefing without the `/mission-result` developer trigger.
+            HarnessMarkMissionWon => ("void", [], lua, ScriptCore, Always);
             }
         }
     };

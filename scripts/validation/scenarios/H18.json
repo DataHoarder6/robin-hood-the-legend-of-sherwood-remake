@@ -1,5 +1,5 @@
 {
-  "schema": 4,
+  "schema": 5,
   "id": "H18",
   "proves": { "layer": "transport", "tests": [
       "robin_rs::multiplayer::tests::host_content_preflight_uses_no_seat_then_exact_resume_reconnects"

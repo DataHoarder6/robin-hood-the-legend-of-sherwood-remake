@@ -1,0 +1,27 @@
+{
+  "schema": 5,
+  "id": "H38",
+  "campaign": true,
+  "extends": "H36",
+  "proves": {
+    "layer": "process",
+    "runner": "scripts/validation/multiplayer_e2e.py"
+  },
+  "peers": [
+    { "seat": 0, "role": "host" },
+    { "seat": 1, "role": "client" }
+  ],
+  "faults": [
+    { "at": { "frame": 40 }, "peer": 0, "fault": "script-win" }
+  ],
+  "resolve": [
+    { "peer": 0, "result": "Completed" },
+    { "peer": 1, "result": "Completed" }
+  ],
+  "expect": [
+    { "assert": "mission", "peers": [0, 1], "count": 2 },
+    { "assert": "hash-equal", "peers": [1], "every": 25 },
+    { "assert": "exit", "peers": [0, 1], "status": "running" },
+    { "assert": "log", "contains": "opening debriefing exit_code=LevelSucceeded", "at_least": 1 }
+  ]
+}

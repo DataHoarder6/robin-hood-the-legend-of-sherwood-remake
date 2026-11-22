@@ -157,6 +157,17 @@ class CorpusValidationTests(unittest.TestCase):
         broken = self.process_scenario("H01", faults=[{**good, "result": "draw"}])
         self.process_refused([broken, self.process_scenario("H02")], "must name one of")
 
+    def test_a_scripted_victory_is_a_host_only_process_verb(self):
+        good = {"at": {"frame": 40}, "peer": 0, "fault": "script-win"}
+        document = self.process_scenario("H01", faults=[good], expect=PROVEN)
+        self.assertEqual(corpus.validate(DEFAULTS,
+                                         corpus_of(document, self.process_scenario("H02")),
+                                         PROCESS_CONTRACT), [])
+        # Not expressible at core: only the process layer drives the game's own
+        # victory command plus the player's leave command through HTTP.
+        core = scenario("H01", faults=[good])
+        self.assert_refused([core, scenario("H02")], "layer 'core' cannot express")
+
     def test_a_page_that_is_gone_cannot_name_a_kind(self):
         omitted = self.process_scenario("H01", expect=PROVEN + [
             {"assert": "presentation", "peers": [0, 1], "state": "gone"}])

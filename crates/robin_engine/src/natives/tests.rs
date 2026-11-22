@@ -1134,6 +1134,24 @@ fn mission_ui_mutations_are_visible_in_same_callback() {
     assert!(host.script_domains.mission_ui.force_check);
 }
 
+/// H38: the harness victory native yields the same scripted-victory engine
+/// command `WinBlazon` yields on a won objective, and nothing else — the
+/// mission is won by the game's own mission phase, not by a dev trigger.
+#[test]
+fn harness_mark_mission_won_yields_the_scripted_victory_command() {
+    let mut host = NativeTestHost::new();
+    let command = call_host_command(
+        &mut host,
+        NativeFn::HarnessMarkMissionWon,
+        &mut NativeStack::default(),
+        0,
+    );
+    assert!(matches!(
+        command,
+        NativeCommand::Engine(EngineCommand::Win { show_window: true })
+    ));
+}
+
 // --- Sequence manager ---
 
 #[test]

@@ -1,5 +1,5 @@
 {
-  "schema": 4,
+  "schema": 5,
   "id": "H20",
   "proves": { "layer": "core", "tests": [
       "robin_rs::game_session::multiplayer::story_regression::a_lost_commit_cannot_suppress_the_replacement_missions_begin_sim"
