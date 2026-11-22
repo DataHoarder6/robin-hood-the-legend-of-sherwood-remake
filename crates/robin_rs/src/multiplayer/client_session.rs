@@ -889,6 +889,7 @@ pub(super) async fn run_client_io<T: ClientTransport>(
                             speech_timing_locale: new_speech_timing_locale.as_deref(),
                             session_id: new_session_id,
                         },
+                        admitted_offer.as_ref(),
                     ) {
                         let _ = incoming.send(NetEvent::Fatal(NetFatal::new(error)));
                         return;

@@ -308,6 +308,7 @@ fn reconnect_rejects_identity_change_and_adopts_host_context() {
         validate_reconnect_state(
             admitted(),
             identity(PlayerId(2), "MissionA", expected, Some("en-US"), 1),
+            None,
         )
         .is_err()
     );
@@ -315,6 +316,7 @@ fn reconnect_rejects_identity_change_and_adopts_host_context() {
         validate_reconnect_state(
             admitted(),
             identity(PlayerId(1), "MissionA", expected, Some("en-US"), 2),
+            None,
         )
         .is_err()
     );
@@ -327,6 +329,7 @@ fn reconnect_rejects_identity_change_and_adopts_host_context() {
         validate_reconnect_state(
             admitted(),
             identity(PlayerId(1), "MissionB", expected, Some("en-US"), 1),
+            None,
         )
         .is_ok()
     );
@@ -336,6 +339,7 @@ fn reconnect_rejects_identity_change_and_adopts_host_context() {
         validate_reconnect_state(
             admitted(),
             identity(PlayerId(1), "MissionA", changed, Some("en-US"), 1),
+            None,
         )
         .is_ok()
     );
@@ -343,10 +347,11 @@ fn reconnect_rejects_identity_change_and_adopts_host_context() {
         validate_reconnect_state(
             admitted(),
             identity(PlayerId(1), "MissionA", expected, Some("de-DE"), 1),
+            None,
         )
         .is_ok()
     );
-    assert!(validate_reconnect_state(admitted(), admitted()).is_ok());
+    assert!(validate_reconnect_state(admitted(), admitted(), None).is_ok());
 }
 
 #[test]

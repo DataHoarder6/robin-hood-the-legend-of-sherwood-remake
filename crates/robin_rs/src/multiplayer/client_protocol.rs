@@ -284,9 +284,10 @@ pub(super) fn validate_reconnect_content(
 }
 
 /// The authoritative Welcome identity a reconnect must reproduce: the seat and
-/// session the host admitted this client to. Mission, seed, sim config and
-/// speech locale travel alongside but are host-authored context that changes
-/// at a mission boundary, so they are adopted rather than enforced.
+/// session the host admitted this client to, plus the mission whose content
+/// this client mounted. Seed, sim config and speech locale travel alongside
+/// but are host-authored context that changes at a mission boundary, so they
+/// are adopted rather than enforced.
 #[derive(Debug, Clone)]
 pub(super) struct ReconnectIdentity<'a> {
     pub(super) seat: PlayerId,
@@ -315,6 +316,7 @@ impl WelcomeData {
 pub(super) fn validate_reconnect_state(
     expected: ReconnectIdentity<'_>,
     actual: ReconnectIdentity<'_>,
+    admitted_content: Option<&DistributedModOffer>,
 ) -> Result<(), MultiplayerError> {
     let ReconnectIdentity {
         seat: expected_seat,
@@ -336,6 +338,23 @@ pub(super) fn validate_reconnect_state(
         return Err(MultiplayerError::Handshake(format!(
             "reconnect joined incompatible seat {seat:?} session {session_id:?}; expected seat {expected_seat:?} session {expected_session_id:?}"
         ).into()));
+    }
+    // The first Welcome was admitted only after `from_welcome` bound its
+    // mission id to the mounted content's mission basename. A reconnect reuses
+    // that exact content (see `validate_reconnect_content`), so it must repeat
+    // the same binding: host-authored context may change at a mission
+    // boundary, but Welcome and the admitted content cannot disagree about
+    // which mission they describe.
+    if let Some(content) = admitted_content
+        && content.mission_basename != mission_id
+    {
+        return Err(MultiplayerError::ContentMismatch(
+            format!(
+                "reconnect Welcome mission `{mission_id}` differs from admitted content mission `{}`",
+                content.mission_basename
+            )
+            .into(),
+        ));
     }
     // Mission, seed, sim config and speech locale are host-authored context,
     // not client identity. The host rewrites all four when a mission starts,
@@ -609,7 +628,11 @@ mod tests {
             panic!("expected Welcome")
         };
         let check = |actual: &WelcomeData| {
-            validate_reconnect_state(expected.reconnect_identity(), actual.reconnect_identity())
+            validate_reconnect_state(
+                expected.reconnect_identity(),
+                actual.reconnect_identity(),
+                None,
+            )
         };
         assert!(check(&expected).is_ok());
         // Identity: seat and session. A reconnect that changes either is a
@@ -636,5 +659,39 @@ mod tests {
             }
             assert!(check(&actual).is_ok(), "host context field {field}");
         }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn reconnect_revalidates_welcome_against_the_originally_admitted_content() {
+        // The first Welcome was admitted only after `from_welcome` bound its
+        // mission id to the mounted content's `mission_basename`. A reconnect
+        // that reuses that exact content must repeat the same binding: the
+        // identity may survive a mission boundary, but Welcome and the mounted
+        // content cannot disagree about which mission they describe.
+        let HandshakeAction::Welcome(expected) = ClientHandshake::new("endpoint-key".into(), None)
+            .receive(Some(welcome()))
+            .unwrap()
+        else {
+            panic!("expected Welcome")
+        };
+        let content = offer(); // mission_basename = "Mission"
+        let check = |actual: &WelcomeData| {
+            validate_reconnect_state(
+                expected.reconnect_identity(),
+                actual.reconnect_identity(),
+                Some(&content),
+            )
+        };
+        assert!(
+            check(&expected).is_ok(),
+            "same mission and content is admitted"
+        );
+        let mut other_mission = expected.clone();
+        other_mission.mission_id = "OtherMission".into();
+        assert!(
+            check(&other_mission).is_err(),
+            "reconnect must reject a Welcome naming a mission other than the mounted content"
+        );
     }
 }
