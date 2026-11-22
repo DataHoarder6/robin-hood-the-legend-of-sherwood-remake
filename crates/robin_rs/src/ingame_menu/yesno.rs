@@ -19,7 +19,8 @@ use winit::keyboard::KeyCode;
 
 use crate::gfx_types::GameEvent;
 use crate::renderer::Renderer;
-use crate::ui::{KeyState as WidgetKeyState, TypeWriter, UiEvent, UiMsg};
+use crate::ui::{KeyState as WidgetKeyState, MouseButtons, TypeWriter, UiEvent, UiMsg};
+use crate::widget::WidgetInput;
 
 use super::layout::{
     FALLBACK_PANEL_EDGE, FALLBACK_PANEL_FILL, MenuRect, MenuTransform, TextAlign, TooltipState,
@@ -356,8 +357,21 @@ impl YesNoModalState {
     }
 
     fn process_widget_input(&mut self) {
+        let hover_before_press = self.input_state.take_hover_before_press();
         let events = {
             let widget_input = self.input_state.as_widget_input();
+            if hover_before_press {
+                // A menu button leaves `Default` only on a hover frame. When
+                // a press arrives with no preceding `MouseMove`, deliver the
+                // pointer position once with no button held so the seal under
+                // it reaches `Focused`; the real pass then pushes it and the
+                // release frame turns that into `WidgetActivated`.
+                let hover = WidgetInput {
+                    mouse_button: MouseButtons::empty(),
+                    ..widget_input
+                };
+                let _ = self.frame.process_input(&hover);
+            }
             let events = self.frame.process_input(&widget_input);
             let mouse_captured = widget_input
                 .capture
@@ -885,11 +899,7 @@ mod tests {
     /// offset that transform will have after `handle_events` advances it.
     fn click_visible_seal(state: &mut YesNoModalState, virt_x: f32, virt_y: f32) {
         let base = MenuTransform::centered(640, 480);
-        // A menu button only activates on release from `Pushed`, and only
-        // reaches `Pushed` from `Focused` — which needs a hover frame first.
-        // A real pointer delivers move/down/up over three frames; mirror that
-        // so the synthetic click exercises the same state-machine path.
-        for phase in 0..3 {
+        for down in [true, false] {
             let offset = match state.fly_in {
                 Some(f) => fly_in_offset_x((f.elapsed_ticks + 1.0) / FLY_IN_TICKS),
                 None => 0,
@@ -899,15 +909,10 @@ mod tests {
                 origin_y: base.origin_y,
             };
             let (sx, sy) = visible.to_screen(virt_x as i32, virt_y as i32);
-            let event = match phase {
-                0 => GameEvent::MouseMove {
-                    x: sx,
-                    y: sy,
-                    xrel: 0,
-                    yrel: 0,
-                },
-                1 => GameEvent::MouseDown(sx, sy, 1, 0),
-                _ => GameEvent::MouseUp(sx, sy, 1),
+            let event = if down {
+                GameEvent::MouseDown(sx, sy, 1, 0)
+            } else {
+                GameEvent::MouseUp(sx, sy, 1)
             };
             let _ = state.handle_events(&[event], base);
         }

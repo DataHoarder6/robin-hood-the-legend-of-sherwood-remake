@@ -719,6 +719,13 @@ pub struct ModalInputState {
     /// frame-based counter.
     pending_double_click_left: bool,
     pending_double_click_right: bool,
+    /// A press can arrive without any preceding `MouseMove` frame — the
+    /// pointer may already sit over a seal when the dialog opens, or the
+    /// window can coalesce move/press into one batch. The menu-button state
+    /// machine only leaves `Default` on a hover frame, so without this flag
+    /// the press and its release are both dropped. Set on `MouseDown`,
+    /// consumed once by the frame's hover pass.
+    hover_before_press: bool,
     gamepad_axis_direction: Option<crate::gfx_types::Keycode>,
 }
 
@@ -736,6 +743,7 @@ impl Default for ModalInputState {
             capture: CaptureSlot::default(),
             pending_double_click_left: false,
             pending_double_click_right: false,
+            hover_before_press: false,
             gamepad_axis_direction: None,
         }
     }
@@ -853,6 +861,7 @@ impl ModalInputState {
                 if *btn == 1 {
                     self.buttons |= MouseButtons::LEFT_DOWN;
                     self.pending_double_click_left = *clicks >= 2;
+                    self.hover_before_press = true;
                 } else if *btn == 3 {
                     self.buttons |= MouseButtons::RIGHT_DOWN;
                     self.pending_double_click_right = *clicks >= 2;
@@ -890,6 +899,7 @@ impl ModalInputState {
                 self.buttons.remove(MouseButtons::LEFT_CLICK);
                 self.buttons.remove(MouseButtons::LEFT_DOUBLE_CLICK);
                 self.pending_double_click_left = false;
+                self.hover_before_press = false;
                 self.capture.clear();
             }
             GameEvent::TextInput { text } => {
@@ -980,6 +990,13 @@ impl ModalInputState {
     /// [`CaptureSlot::set`] inside a widget's `process_input`.
     pub fn capture(&self) -> Option<WidgetId> {
         self.capture.get()
+    }
+
+    /// Consume the press-without-hover marker. Callers feed a button-free
+    /// hover pass at the live pointer once before the press itself so menu
+    /// buttons can leave `Default` and register the release as a click.
+    pub fn take_hover_before_press(&mut self) -> bool {
+        std::mem::take(&mut self.hover_before_press)
     }
 
     /// Clear one-shot flags (click / double-click / text-input buffer)
