@@ -91,9 +91,11 @@ pub enum YesNoChoice {
     No,
 }
 
-/// Which wax seals a confirmation offers. A mission that can only be left
-/// offers the confirm seal alone; the cancel seal would promise a choice the
-/// mission does not have.
+/// Which wax seals a confirmation offers.
+///
+/// Leave/abandon prompts always use [`Self::YesNo`]: a confirmation without a
+/// cancel is not a choice. `YesOnly` remains a constructor option for dialogs
+/// that are statements rather than questions, but no mission prompt uses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfirmButtons {
     YesNo,
