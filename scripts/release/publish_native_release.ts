@@ -184,7 +184,10 @@ export function releaseNotesSection(notes: string, tag: string): string | undefi
   const start = lines.indexOf(`## ${tag}`);
   if (start < 0) return undefined;
   const next = lines.findIndex((line, index) => index > start && line.startsWith("## "));
-  const section = lines.slice(start + 1, next < 0 ? undefined : next).join("\n").trim();
+  const section = lines
+    .slice(start + 1, next < 0 ? undefined : next)
+    .join("\n")
+    .trim();
   return section || undefined;
 }
 
