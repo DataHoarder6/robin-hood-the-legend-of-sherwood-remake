@@ -120,6 +120,12 @@ struct CampaignTransportState {
     continuation: Mutex<Option<HostSessionContinuation>>,
     #[serde(skip)]
     server_active: AtomicBool,
+    /// One iroh endpoint owned by the campaign, not by a mission. Bound on the
+    /// first hosted mission and closed only at campaign teardown, so every
+    /// mission keeps the same direct address and a joiner's frozen connect
+    /// string stays valid across the handoff (D07 / H36).
+    #[serde(skip)]
+    endpoint: Mutex<Option<server::CampaignEndpoint>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -142,6 +148,7 @@ impl Default for MultiplayerCampaignSession {
             state: Some(Arc::new(CampaignTransportState {
                 continuation: Mutex::new(None),
                 server_active: AtomicBool::new(false),
+                endpoint: Mutex::new(None),
             })),
         }
     }
@@ -177,6 +184,26 @@ impl MultiplayerCampaignSession {
         Ok(CampaignServerLease {
             state: Some(Arc::clone(self.state())),
         })
+    }
+}
+
+impl Drop for MultiplayerCampaignSession {
+    fn drop(&mut self) {
+        // Campaign teardown is the only owner allowed to close the socket: a
+        // mission's ServerHandle::shutdown rotates dispatch and drains the
+        // commit but deliberately leaves the endpoint bound (D07 / H36).
+        let Some(state) = self.state.as_ref() else {
+            return;
+        };
+        let Some(endpoint) = state.endpoint.lock().take() else {
+            return;
+        };
+        let _ = endpoint.shutdown_tx.send(true);
+        if let Some(thread) = endpoint.runtime_thread
+            && thread.join().is_err()
+        {
+            tracing::error!("campaign multiplayer endpoint runtime panicked during teardown");
+        }
     }
 }
 

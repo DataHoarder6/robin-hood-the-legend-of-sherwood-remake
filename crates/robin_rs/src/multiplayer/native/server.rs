@@ -1,14 +1,150 @@
 //! Native server transport lifecycle; shared framing stays in the parent.
 use super::*;
 
+/// The campaign-scoped iroh endpoint and its long-lived accept runtime. Bound
+/// once for the whole host-owned campaign; each mission only rotates the
+/// dispatch slot, so the direct address a joiner dials never changes (D07/H36).
+pub(super) struct CampaignEndpoint {
+    pub(super) endpoint_id: EndpointId,
+    pub(super) endpoint_addr: EndpointAddr,
+    /// Shared with the long-lived accept loop: every mission installs its
+    /// context here, so openings reach the currently active generation.
+    pub(super) dispatch: Arc<Mutex<Option<Arc<ServerContext>>>>,
+    pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
+    pub(super) runtime_thread: Option<JoinHandle<()>>,
+}
+
+/// Bind the one endpoint a campaign owns and run its accept loop for the whole
+/// campaign. The runtime thread outlives every per-mission runtime; only
+/// campaign teardown signals `shutdown_tx` and closes the endpoint.
+pub(super) fn bind_campaign_endpoint(
+    key: SecretKey,
+    retained_relay: Option<iroh::RelayUrl>,
+    browser_join_enabled: bool,
+    dispatch: Arc<Mutex<Option<Arc<ServerContext>>>>,
+) -> std::io::Result<(
+    EndpointId,
+    EndpointAddr,
+    JoinHandle<()>,
+    tokio::sync::watch::Sender<bool>,
+)> {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let (startup_tx, startup_rx) =
+        std::sync::mpsc::sync_channel::<Result<(EndpointId, EndpointAddr), MultiplayerError>>(1);
+    let runtime_thread = thread::Builder::new()
+        .name("mp-campaign-endpoint".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = startup_tx
+                        .send(Err(MultiplayerError::transport("build tokio runtime", e)));
+                    return;
+                }
+            };
+            rt.block_on(async move {
+                let endpoint = match bind_endpoint_with_relay(key, GAME_ALPN, retained_relay).await {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => {
+                        let _ = startup_tx.send(Err(e));
+                        return;
+                    }
+                };
+                if browser_join_enabled {
+                    if tokio::time::timeout(Duration::from_secs(15), endpoint.online())
+                        .await
+                        .is_err()
+                    {
+                        endpoint.close().await;
+                        let _ = startup_tx.send(Err(MultiplayerError::Unavailable(
+                            "iroh relay did not become reachable within 15 seconds; disable browser join-link publication for a native-only game"
+                                .into(),
+                        )));
+                        return;
+                    }
+                    if endpoint.addr().relay_urls().next().is_none() {
+                        endpoint.close().await;
+                        let _ = startup_tx.send(Err(MultiplayerError::Unavailable(
+                            "iroh reported online without a relay URL; a browser invitation cannot be published"
+                                .into(),
+                        )));
+                        return;
+                    }
+                }
+                let id = endpoint.id();
+                let addr = endpoint.addr();
+                if startup_tx.send(Ok((id, addr.clone()))).is_err() {
+                    endpoint.close().await;
+                    return;
+                }
+                let accept = tokio::spawn(run_campaign_accept_loop(
+                    Arc::clone(&dispatch),
+                    endpoint.clone(),
+                ));
+                let _ = shutdown_rx.wait_for(|stop| *stop).await;
+                accept.abort();
+                let _ = accept.await;
+                endpoint.close().await;
+                tracing::info!("campaign multiplayer endpoint stopped");
+            });
+        })?;
+
+    let (id, addr) = match startup_rx.recv() {
+        Ok(Ok(result)) => result,
+        Ok(Err(err)) => {
+            let _ = shutdown_tx.send(true);
+            let _ = runtime_thread.join();
+            return Err(std::io::Error::other(err));
+        }
+        Err(e) => {
+            let _ = shutdown_tx.send(true);
+            let _ = runtime_thread.join();
+            return Err(std::io::Error::other(MultiplayerError::transport(
+                "campaign endpoint startup channel closed",
+                e,
+            )));
+        }
+    };
+    Ok((id, addr, runtime_thread, shutdown_tx))
+}
+
+/// Accept loop for the campaign's one endpoint. Each opening is handed to the
+/// mission whose dispatch is currently installed; with no active mission the
+/// connection is dropped rather than admitted into a stale generation.
+async fn run_campaign_accept_loop(
+    dispatch: Arc<Mutex<Option<Arc<ServerContext>>>>,
+    endpoint: Endpoint,
+) {
+    while let Some(incoming) = endpoint.accept().await {
+        let Some(context) = dispatch.lock().clone() else {
+            tracing::warn!("multiplayer: incoming connection with no active mission dispatch");
+            continue;
+        };
+        tokio::spawn(async move {
+            let cancelled = context.cancellation.load(Ordering::Acquire);
+            if let Err(e) = handle_incoming_peer(Arc::clone(&context), incoming).await
+                && !cancelled
+                && !context.cancellation.load(Ordering::Acquire)
+            {
+                tracing::warn!("incoming peer handler ended: {e}");
+            }
+        });
+    }
+    tracing::info!("multiplayer accept loop stopped");
+}
+
 // ─── Server ──────────────────────────────────────────────────────
 
-/// Handle to a running multiplayer server.
+/// Handle to one mission's dispatch on a campaign-owned iroh endpoint.
 ///
-/// Shutdown is deterministic: the shutdown signal makes the runtime
-/// close the iroh endpoint (which ends the accept loop and every peer
-/// connection), the outgoing pump stops, and the runtime thread plus
-/// its bridge thread are joined before `shutdown` returns.
+/// Shutdown is deterministic: the shutdown signal ends the mission's outgoing
+/// pump and watchdog, the commit drain finishes, and the mission runtime plus
+/// its bridge thread are joined before `shutdown` returns. The endpoint stays
+/// bound — it belongs to the campaign and is closed only at teardown, so a
+/// joiner's frozen connect string survives mission rotation (D07 / H36).
 /// Drop the handle before creating the next mission transport: retained
 /// handles keep the campaign lease so they cannot publish stale handoffs.
 pub struct ServerHandle {
@@ -26,6 +162,9 @@ pub struct ServerHandle {
     pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
     pub(super) runtime_thread: Option<JoinHandle<()>>,
     pub(super) bridge_thread: Option<JoinHandle<()>>,
+    /// The campaign accept loop reads this to route openings to the active
+    /// mission. A shutdown clears it; the next mission installs its own.
+    pub(super) dispatch: Arc<Mutex<Option<Arc<ServerContext>>>>,
 }
 
 impl ServerHandle {
@@ -81,13 +220,17 @@ impl ServerHandle {
         if let Some(handle) = self.runtime_thread.take()
             && handle.join().is_err()
         {
-            tracing::error!("multiplayer server runtime panicked during shutdown");
+            tracing::error!("multiplayer mission runtime panicked during shutdown");
         }
         if let Some(handle) = self.bridge_thread.take()
             && handle.join().is_err()
         {
             tracing::error!("multiplayer server outgoing bridge panicked during shutdown");
         }
+        // Rotate the campaign accept loop away from this mission. The socket
+        // itself stays bound until campaign teardown so the joiner's frozen
+        // connect string remains valid across the handoff (D07 / H36).
+        *self.dispatch.lock() = None;
     }
 
     pub(in crate::multiplayer) fn preserve_session_for_next_mission(&mut self) {
@@ -502,13 +645,10 @@ pub(in crate::multiplayer) fn start_server_with_key(
     channels: ServerChannels,
     content: Option<HostedModContent>,
 ) -> std::io::Result<ServerHandle> {
-    start_server_inner(
-        &MultiplayerCampaignSession::default(),
-        key,
-        config,
-        channels,
-        content,
-    )
+    // The campaign owns the endpoint for its whole lifetime. Test callers do
+    // not hold one, so keep this throwaway campaign alive for the process.
+    let campaign = Box::leak(Box::new(MultiplayerCampaignSession::default()));
+    start_server_inner(campaign, key, config, channels, content)
 }
 
 /// Immutable identity and admission policy for one hosted mission.
@@ -640,6 +780,55 @@ pub(super) fn start_server_inner(
         Arc::clone(&cancellation),
     )?;
 
+    // One endpoint for the whole campaign. The first mission binds it; every
+    // later mission reuses the same id/address and only rotates dispatch.
+    let campaign_state = Arc::clone(campaign.state());
+    let (endpoint_id, endpoint_addr, dispatch) = {
+        let mut slot = campaign_state.endpoint.lock();
+        match slot.as_ref() {
+            Some(existing) => {
+                if let Some(continuation) = &continuation {
+                    assert_eq!(
+                        continuation.host_endpoint_id, existing.endpoint_id,
+                        "campaign continuation belongs to a different host endpoint"
+                    );
+                }
+                (
+                    existing.endpoint_id,
+                    existing.endpoint_addr.clone(),
+                    Arc::clone(&existing.dispatch),
+                )
+            }
+            None => {
+                if continuation.is_some() {
+                    // A decoded campaign has no live endpoint; never invent one.
+                    cancellation.store(true, Ordering::Release);
+                    let _ = shutdown_tx.send(true);
+                    let _ = bridge_thread.join();
+                    return Err(std::io::Error::other(
+                        "decoded campaign has no live multiplayer endpoint",
+                    ));
+                }
+                let dispatch: Arc<Mutex<Option<Arc<ServerContext>>>> = Arc::new(Mutex::new(None));
+                let (id, addr, thread, campaign_shutdown_tx) = bind_campaign_endpoint(
+                    key.clone(),
+                    None,
+                    browser_join_enabled,
+                    Arc::clone(&dispatch),
+                )
+                .map_err(std::io::Error::other)?;
+                *slot = Some(CampaignEndpoint {
+                    endpoint_id: id,
+                    endpoint_addr: addr.clone(),
+                    dispatch: Arc::clone(&dispatch),
+                    shutdown_tx: campaign_shutdown_tx,
+                    runtime_thread: Some(thread),
+                });
+                (id, addr, dispatch)
+            }
+        }
+    };
+
     let context = Arc::new(ServerContext {
         _campaign_lease: campaign_lease,
         campaign: Arc::clone(campaign.state()),
@@ -660,9 +849,11 @@ pub(super) fn start_server_inner(
         connections: Mutex::new(std::collections::HashMap::new()),
         commit_drain: Mutex::new(None),
         relay_url: Mutex::new(
-            continuation
-                .as_ref()
-                .and_then(|continuation| continuation.relay_url.clone()),
+            endpoint_addr
+                .relay_urls()
+                .next()
+                .cloned()
+                .or_else(|| continuation.as_ref().and_then(|c| c.relay_url.clone())),
         ),
         speech_timing_locale,
         frame_cursor,
@@ -677,65 +868,41 @@ pub(super) fn start_server_inner(
     // been released into it, so no shared page may await one.
     publish_session_seats(&context);
 
-    let (startup_tx, startup_rx) =
-        std::sync::mpsc::sync_channel::<Result<(EndpointId, EndpointAddr), MultiplayerError>>(1);
-    let runtime_thread = thread::Builder::new().name("mp-server".into()).spawn({
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(error) => {
+            cancellation.store(true, Ordering::Release);
+            let _ = shutdown_tx.send(true);
+            let _ = bridge_thread.join();
+            return Err(std::io::Error::other(MultiplayerError::transport(
+                "build tokio runtime",
+                error,
+            )));
+        }
+    };
+    // Publish this mission as the accept loop's current dispatch only after
+    // its runtime and context exist; shutdown clears it before the next one.
+    *dispatch.lock() = Some(Arc::clone(&context));
+    let cancellation_for_thread = Arc::clone(&cancellation);
+    let runtime_thread = match thread::Builder::new().name("mp-server".into()).spawn({
         let context = Arc::clone(&context);
         move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    context.cancellation.store(true, Ordering::Release);
-                    let _ =
-                        startup_tx.send(Err(MultiplayerError::transport("build tokio runtime", e)));
-                    return;
-                }
-            };
-            rt.block_on(run_server(
-                key,
-                Arc::clone(&context),
-                outgoing_async_rx,
-                startup_tx,
-                shutdown_rx,
-                browser_join_enabled,
-            ));
-            context.cancellation.store(true, Ordering::Release);
+            rt.block_on(run_mission_runtime(context, outgoing_async_rx, shutdown_rx));
+            cancellation_for_thread.store(true, Ordering::Release);
         }
-    });
-    let runtime_thread = match runtime_thread {
+    }) {
         Ok(handle) => handle,
         Err(error) => {
             cancellation.store(true, Ordering::Release);
-            if bridge_thread.join().is_err() {
-                tracing::error!("multiplayer server outgoing bridge panicked after failed startup");
-            }
+            let _ = shutdown_tx.send(true);
+            let _ = bridge_thread.join();
             return Err(error);
         }
     };
 
-    let (endpoint_id, endpoint_addr) = match startup_rx.recv() {
-        Ok(Ok(result)) => result,
-        Ok(Err(err)) => {
-            cancellation.store(true, Ordering::Release);
-            let _ = shutdown_tx.send(true);
-            let _ = runtime_thread.join();
-            let _ = bridge_thread.join();
-            return Err(std::io::Error::other(err));
-        }
-        Err(e) => {
-            cancellation.store(true, Ordering::Release);
-            let _ = shutdown_tx.send(true);
-            let _ = runtime_thread.join();
-            let _ = bridge_thread.join();
-            return Err(std::io::Error::other(MultiplayerError::transport(
-                "server startup channel closed",
-                e,
-            )));
-        }
-    };
     // Only successful startup consumes the handoff. Validation, thread or
     // endpoint failures leave it available for an explicit retry.
     *campaign.state().continuation.lock() = None;
@@ -759,70 +926,25 @@ pub(super) fn start_server_inner(
         shutdown_tx,
         runtime_thread: Some(runtime_thread),
         bridge_thread: Some(bridge_thread),
+        dispatch,
     })
 }
 
-pub(super) async fn run_server(
-    key: SecretKey,
+/// Per-mission runtime on the campaign-owned endpoint. Owns only the outgoing
+/// pump, the barrier watchdog and the shutdown/commit-drain lifecycle. The
+/// socket and accept loop belong to the campaign and stay bound across mission
+/// rotation, so a joiner's frozen connect string remains valid (D07 / H36).
+pub(super) async fn run_mission_runtime(
     context: Arc<ServerContext>,
     outgoing_async_rx: UnboundedReceiver<NetOutbound>,
-    startup_tx: std::sync::mpsc::SyncSender<Result<(EndpointId, EndpointAddr), MultiplayerError>>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
-    browser_join_enabled: bool,
 ) {
-    let retained_relay = context.relay_url.lock().clone();
-    let endpoint = match bind_endpoint_with_relay(key, GAME_ALPN, retained_relay).await {
-        Ok(endpoint) => endpoint,
-        Err(e) => {
-            let _ = startup_tx.send(Err(e));
-            return;
-        }
-    };
-    if browser_join_enabled {
-        if tokio::time::timeout(Duration::from_secs(15), endpoint.online())
-            .await
-            .is_err()
-        {
-            endpoint.close().await;
-            let _ = startup_tx.send(Err(MultiplayerError::Unavailable(
-                "iroh relay did not become reachable within 15 seconds; disable browser join-link publication for a native-only game"
-                    .into(),
-            )));
-            return;
-        }
-        if endpoint.addr().relay_urls().next().is_none() {
-            endpoint.close().await;
-            let _ = startup_tx.send(Err(MultiplayerError::Unavailable(
-                "iroh reported online without a relay URL; a browser invitation cannot be published"
-                    .into(),
-            )));
-            return;
-        }
-    }
-    *context.relay_url.lock() = endpoint.addr().relay_urls().next().cloned();
-    if startup_tx
-        .send(Ok((endpoint.id(), endpoint.addr())))
-        .is_err()
-    {
-        // Startup's owner was dropped; there is nobody to own an accept loop.
-        endpoint.close().await;
-        return;
-    }
-
     let mut pump = tokio::spawn(run_server_outgoing_pump(
         Arc::clone(&context),
         outgoing_async_rx,
     ));
-    let accept = tokio::spawn(run_server_accept_loop(
-        Arc::clone(&context),
-        endpoint.clone(),
-    ));
     let watchdog = tokio::spawn(run_barrier_watchdog(Arc::clone(&context)));
 
-    // Root task: explicit shutdown and an invalid host-side publication both
-    // close the endpoint, ending every peer connection and the accept loop.
-    // A direction violation is surfaced to the game instead of leaving a
-    // partially live server with a dead outgoing pump.
     let pump_result = tokio::select! {
         _ = shutdown_rx.wait_for(|stop| *stop) => None,
         result = &mut pump => Some(result),
@@ -853,20 +975,16 @@ pub(super) async fn run_server(
             );
         }
     }
-    // Keep the endpoint alive until every seat's snapshot commit frame is on
-    // the wire. Closing first races the peer writer and the client reads a
-    // reader-side `connection lost` instead of the commit (D07 / H36).
+    // Drain every seat's commit frame before this mission's dispatch ends. The
+    // endpoint stays bound for the replacement mission (D07 / H36).
     await_commit_frame_drains(&context, COMMIT_FRAME_DRAIN_TIMEOUT).await;
-    endpoint.close().await;
-    accept.abort();
-    let _ = accept.await;
     watchdog.abort();
     let _ = watchdog.await;
     if !pump_finished {
         pump.abort();
         let _ = pump.await;
     }
-    tracing::info!("multiplayer server runtime stopped");
+    tracing::info!("multiplayer mission runtime stopped");
 }
 
 pub(super) fn publish_connect_seats(context: &ServerContext, seats: Vec<(u8, String)>) {
@@ -1032,22 +1150,6 @@ async fn run_barrier_watchdog(context: Arc<ServerContext>) {
         // alone. Both are changes to the simulation's seat set.
         publish_session_seats(&context);
     }
-}
-
-pub(super) async fn run_server_accept_loop(context: Arc<ServerContext>, endpoint: Endpoint) {
-    while let Some(incoming) = endpoint.accept().await {
-        let context = Arc::clone(&context);
-        tokio::spawn(async move {
-            let cancelled = context.cancellation.load(Ordering::Acquire);
-            if let Err(e) = handle_incoming_peer(context.clone(), incoming).await
-                && !cancelled
-                && !context.cancellation.load(Ordering::Acquire)
-            {
-                tracing::warn!("incoming peer handler ended: {e}");
-            }
-        });
-    }
-    tracing::info!("multiplayer accept loop stopped");
 }
 
 pub(super) async fn handle_incoming_peer(

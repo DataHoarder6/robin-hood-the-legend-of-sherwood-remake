@@ -1696,3 +1696,92 @@ fn session_seat_mask_drops_every_seat_when_the_session_resynchronizes() {
         seat_facts(&context)
     );
 }
+
+/// D07 / H36: the campaign owns one iroh endpoint for its whole lifetime. A
+/// mission handoff rotates dispatch but never rebinds, so a joiner dialing the
+/// address it froze at the first mission reaches the replacement mission's
+/// dispatch with its durable seat intact.
+#[test]
+fn campaign_endpoint_survives_mission_rotation_and_frozen_addr_reconnects() {
+    let campaign = super::MultiplayerCampaignSession::default();
+    let key = iroh::SecretKey::from_bytes(&[9; 32]);
+
+    let (first_in_tx, _first_in_rx) = channel();
+    let (_first_out_tx, first_out_rx) = channel();
+    let mut first = super::start_server_inner(
+        &campaign,
+        key.clone(),
+        ServerConfig {
+            host_nickname: "host".into(),
+            mission_id: "Dem_Lei_MP".into(),
+            mission_seed: 7,
+            sim_config: robin_engine::engine::SimConfig::default(),
+            speech_timing_locale: None,
+            expected_players: 2,
+            browser_join_enabled: false,
+        },
+        ServerChannels {
+            incoming_tx: first_in_tx,
+            outgoing_rx: first_out_rx,
+            frame_cursor: Arc::new(AtomicU32::new(0)),
+            initial_snapshot: Arc::new(StdMutex::new(None)),
+            session_seats: Default::default(),
+        },
+        None,
+    )
+    .expect("start first campaign mission");
+    let endpoint_id = first.endpoint_id();
+    let frozen_addr = first.connect_string();
+
+    // Preserve the session: publish the continuation, drain the commit and
+    // rotate dispatch away, but leave the endpoint bound for mission 2.
+    first.preserve_session_for_next_mission();
+    first.shutdown();
+    drop(first);
+
+    let (_second_in_tx, _second_in_rx) = channel();
+    let (second_out_tx, second_out_rx) = channel();
+    let mut second = super::start_server_inner(
+        &campaign,
+        key,
+        ServerConfig {
+            host_nickname: "host".into(),
+            mission_id: "S01_Not_VL".into(),
+            mission_seed: 8,
+            sim_config: robin_engine::engine::SimConfig::default(),
+            speech_timing_locale: None,
+            expected_players: 2,
+            browser_join_enabled: false,
+        },
+        ServerChannels {
+            incoming_tx: _second_in_tx,
+            outgoing_rx: second_out_rx,
+            frame_cursor: Arc::new(AtomicU32::new(0)),
+            initial_snapshot: Arc::new(StdMutex::new(None)),
+            session_seats: Default::default(),
+        },
+        None,
+    )
+    .expect("start second campaign mission on the same endpoint");
+    assert_eq!(second.endpoint_id(), endpoint_id);
+    assert_eq!(second.connect_string(), frozen_addr);
+
+    // The joiner dials the address it froze at mission 1 and is admitted to
+    // mission 2's dispatch under its durable owner key.
+    let (client_in_tx, client_in_rx) = channel();
+    let (_client_out_tx, client_out_rx) = channel();
+    let mut client = connect_client_with_key(
+        iroh::SecretKey::from_bytes(&[5; 32]),
+        &frozen_addr,
+        "alice".into(),
+        client_in_tx,
+        client_out_rx,
+    )
+    .expect("reconnect with the frozen first-mission address");
+    recv_matching(&client_in_rx, Duration::from_secs(10), |event| {
+        matches!(event, NetEvent::AssignedLocalSeat(PlayerId(1)))
+    });
+    let _ = second_out_tx;
+    client.shutdown();
+    second.shutdown();
+}
