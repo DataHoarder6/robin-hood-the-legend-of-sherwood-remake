@@ -1,5 +1,6 @@
 import { fullGameContentBuild } from "./mission-launch.ts";
 import { installCursorMode } from "./cursor-mode.js";
+import { installTouchControls } from "./touch-controls.ts";
 import { installDiagnostics } from "./diagnostics.js";
 import { requestFullContentFolder } from "./content-picker.js";
 import { fetchWithProgress, fetchJson, fetchRuntimeWasm } from "./boot-transport.js";
@@ -627,11 +628,19 @@ async function loadWasmModule(
   return wasm;
 }
 
+let disposeTouchControls: (() => void) | undefined;
+
 function installRpcClient(wasm: RobinWasmModule): RobinRpc {
   disposeTimeline?.();
   disposeTimeline = undefined;
   const rpc = createRpcClient(wasm);
   globalThis.robinRpc = rpc;
+  disposeTouchControls?.();
+  disposeTouchControls = installTouchControls(
+    document,
+    rpc,
+    navigator.maxTouchPoints > 0 || pageParams.get("touch") === "1",
+  );
   return rpc;
 }
 

@@ -191,6 +191,11 @@
 </head>
 <body>
     <canvas id="canvas" width="1024" height="768"></canvas>
+    <div id="touch-controls" class="touch-controls" hidden aria-label="Touch controls">
+        <button type="button" data-robin-command='{"ScriptKeyPressed":{"virtual_key":27}}' title="Menu (Esc)">Menu</button>
+        <button type="button" data-robin-command='{"ScriptKeyPressed":{"virtual_key":32}}' title="Quick action (Space)">Action</button>
+        <button type="button" data-robin-command='{"ClearAlliedSelection":null}' title="Clear selection">Clear</button>
+    </div>
     <div id="boot-progress" role="status">
         <div class="bp-label" id="bp-label">loading&hellip;</div>
         <div class="bp-bar"><div class="bp-fill" id="bp-fill"></div></div>
