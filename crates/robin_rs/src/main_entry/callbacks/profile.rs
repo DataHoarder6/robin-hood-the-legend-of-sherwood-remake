@@ -44,14 +44,22 @@ impl ProfileClockCredits {
 /// Import only records that already exist in the authoritative campaign.
 /// In particular, a pre-terminal synchronization cannot create the pending
 /// attempt. The terminal path calls this again after append and attestation.
+///
+/// A conflict between durable lifetime history and the canonical campaign is a
+/// data-integrity diagnostic, not a control-flow failure. Log it and keep the
+/// in-memory profile for the next save/synchronization to retry, the same
+/// policy used for persistence failures below. Aborting at terminal debriefing
+/// would throw away the whole session over one bad attempt (issue #74).
 fn promote_recorded_history(
     profile: &mut robin_engine::player_profile::PlayerProfile,
     campaign: &Campaign,
     profiles: &ProfileManager,
 ) {
-    profile
-        .promote_campaign_history(campaign, profiles)
-        .unwrap_or_else(|error| panic!("campaign-history promotion failed: {error}"));
+    if let Err(error) = profile.promote_campaign_history(campaign, profiles) {
+        tracing::error!(
+            "Campaign-history promotion failed; retained the profile in memory and will retry on the next profile save/synchronization: {error}"
+        );
+    }
 }
 
 pub(super) fn synchronize_metrics(
@@ -217,6 +225,141 @@ mod tests {
                 .lifetime_campaign_totals()
                 .attempts,
             2
+        );
+    }
+
+    /// Regression for crash fingerprint 0279c47b1873225f (issue #74): a
+    /// lifetime attempt whose durable `(campaign_run_id, sequence)` key is
+    /// already occupied by a different canonical mission must be logged, not
+    /// panicked on, at terminal debriefing. The original replay bundle is not
+    /// part of this checkout, so the conflicting state is built deterministically.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn conflicting_lifetime_attempt_does_not_panic_at_terminal_promotion() {
+        const RUN_ID: u64 = 0xDEAD_BEEF;
+        const CANONICAL_MISSION_ID: u32 = 17;
+        const CONFLICTING_MISSION_ID: u32 = 0xC0FFEE;
+
+        let directory = tempfile::tempdir().unwrap();
+        let (callbacks, _host, engine, _assets, _game, profiles) =
+            super::super::operation_outcome_tests::diagnostic_callback_fixture(directory.path());
+        let application = &callbacks.application_context;
+
+        // Seed attempt 5 of one canonical run against mission 17.
+        let mut seed = engine.campaign().clone();
+        for _ in 0..5 {
+            seed.record_mission_attempt(
+                0,
+                robin_engine::campaign_history::MissionAttemptOutcome::Won,
+                Some(100),
+                Some(RUN_ID),
+                70,
+                engine_api::SimConfig::default(),
+                &robin_engine::mission_stat::MissionStat::default(),
+                None,
+            );
+        }
+        RustCallbacks::promote_terminal_profile(application, &seed, &profiles);
+        assert_eq!(
+            application
+                .with_player_profiles(|manager| manager
+                    .get_active()
+                    .unwrap()
+                    .lifetime_campaign_totals()
+                    .attempts)
+                .unwrap(),
+            5
+        );
+
+        // The same run's attempt 5 now belongs to a different mission, so
+        // promote_campaign raises ConflictingAttempt on the durable key.
+        let mut conflicting_profiles = profiles.clone();
+        conflicting_profiles
+            .missions
+            .push(robin_engine::profiles::MissionProfile {
+                id: CONFLICTING_MISSION_ID,
+                mission_name: "Conflicting Mission".into(),
+                ..Default::default()
+            });
+        let mut conflicting_campaign = engine.campaign().clone();
+        conflicting_campaign
+            .missions
+            .push(robin_engine::mission::Mission {
+                profile_idx: Some(1),
+                ..Default::default()
+            });
+        for _ in 0..4 {
+            conflicting_campaign.record_mission_attempt(
+                0,
+                robin_engine::campaign_history::MissionAttemptOutcome::Won,
+                Some(100),
+                Some(RUN_ID),
+                70,
+                engine_api::SimConfig::default(),
+                &robin_engine::mission_stat::MissionStat::default(),
+                None,
+            );
+        }
+        conflicting_campaign.record_mission_attempt(
+            1,
+            robin_engine::campaign_history::MissionAttemptOutcome::Failed,
+            Some(100),
+            Some(RUN_ID),
+            70,
+            engine_api::SimConfig::default(),
+            &robin_engine::mission_stat::MissionStat::default(),
+            None,
+        );
+
+        // This used to abort the process through unwrap_or_else in
+        // promote_recorded_history, reached from terminal debriefing.
+        RustCallbacks::promote_terminal_profile(
+            application,
+            &conflicting_campaign,
+            &conflicting_profiles,
+        );
+
+        let attempts = application
+            .with_player_profiles(|manager| {
+                manager
+                    .get_active()
+                    .unwrap()
+                    .campaign_history
+                    .attempts()
+                    .iter()
+                    .map(|entry| (entry.mission_id(), entry.attempt().sequence()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
+        assert_eq!(
+            attempts.len(),
+            5,
+            "conflicting promotion must neither drop nor duplicate lifetime history"
+        );
+        assert!(
+            attempts
+                .iter()
+                .all(|&(mission_id, _)| mission_id == CANONICAL_MISSION_ID),
+            "conflicting canonical record must not overwrite the retained lifetime attempt"
+        );
+        assert!(
+            attempts
+                .iter()
+                .any(|&(mission_id, sequence)| mission_id == CANONICAL_MISSION_ID && sequence == 5)
+        );
+
+        // Retry on the next save with the compatible campaign: still coherent.
+        RustCallbacks::promote_terminal_profile(application, &seed, &profiles);
+        assert_eq!(
+            application
+                .with_player_profiles(|manager| manager
+                    .get_active()
+                    .unwrap()
+                    .campaign_history
+                    .attempts()
+                    .len())
+                .unwrap(),
+            5
         );
     }
 
