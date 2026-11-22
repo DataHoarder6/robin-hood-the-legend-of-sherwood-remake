@@ -1106,6 +1106,12 @@ fn virtual_rect(bbox: ScreenBBox) -> Option<(i32, i32, i32, i32)> {
 ///
 /// Widgets without a recognised sprite pack are left mask-less and
 /// fall back to bbox-only hit testing (no behaviour change).
+/// True when a baked mask marks no pixel as opaque. Such a mask would
+/// reject every click, so the caller falls back to bbox hit testing.
+fn mask_is_fully_transparent(mask: &crate::ui::AlphaMask) -> bool {
+    mask.bits.iter().all(|byte| *byte == 0)
+}
+
 pub fn attach_alpha_masks(
     frame: &mut FrameWnd,
     resources: &IngameMenuResources,
@@ -1143,6 +1149,13 @@ pub fn attach_alpha_masks(
         let mask = renderer
             .surface_alpha_mask(surf)
             .expect("live menu button mask");
+        if mask_is_fully_transparent(&mask) {
+            tracing::warn!(
+                ?resource_id,
+                "menu button alpha mask is fully transparent; using bbox hit test"
+            );
+            continue;
+        }
         if let Some(rb) = widget.base_mut().appearance.as_mut() {
             rb.alpha_mask = Some(mask);
         }
@@ -1766,6 +1779,15 @@ pub fn play_frame_widget_noise(
 #[cfg(test)]
 mod noisy_tracker_tests {
     use super::*;
+
+    #[test]
+    fn a_fully_transparent_alpha_mask_is_rejected() {
+        let empty = crate::ui::AlphaMask::from_pixels(2, 2, 2, &[0, 0, 0, 0], 0);
+        assert!(mask_is_fully_transparent(&empty));
+
+        let visible = crate::ui::AlphaMask::from_pixels(2, 2, 2, &[7, 0, 0, 0], 0);
+        assert!(!mask_is_fully_transparent(&visible));
+    }
 
     #[test]
     fn virtual_rect_preserves_empty_and_fractional_widget_geometry() {

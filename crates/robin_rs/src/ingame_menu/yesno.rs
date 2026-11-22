@@ -252,6 +252,17 @@ impl YesNoModalState {
         self.fly_in.map_or(0, FlyInTransition::offset_x)
     }
 
+    /// The transform shared by drawing and pointer hit-testing. During the
+    /// mission-start fly-in the panel is displaced, so input must map screen
+    /// coordinates through the same transform the player sees — otherwise a
+    /// click on the visible seal lands on the settled, invisible position.
+    fn active_transform(&self) -> MenuTransform {
+        MenuTransform {
+            origin_x: self.transform.origin_x + self.fly_in_offset_x(),
+            origin_y: self.transform.origin_y,
+        }
+    }
+
     pub fn tick(&mut self, io: &mut ModalScreenIo<'_, '_>) -> Option<bool> {
         if let Some(choice) = self.choice {
             return Some(choice == YesNoChoice::Yes);
@@ -284,8 +295,9 @@ impl YesNoModalState {
         if self.choice.is_some() {
             return self.result();
         }
+        let active_transform = self.active_transform();
         for event in events {
-            self.input_state.update_from_event(event, self.transform);
+            self.input_state.update_from_event(event, active_transform);
             if matches!(event, GameEvent::Quit) {
                 self.resolve(YesNoChoice::No);
             }
@@ -357,12 +369,9 @@ impl YesNoModalState {
     /// Dialog panel, message, buttons and tooltip; the caller owns the modal
     /// phase/dim before and the cursor/present after.
     fn draw_content(&mut self, renderer: &mut Renderer, resources: &IngameMenuResources) {
-        // The whole panel translates from the right edge; input still uses
-        // `self.transform`, so hit masks stay at the settled position.
-        let draw_transform = MenuTransform {
-            origin_x: self.transform.origin_x + self.fly_in_offset_x(),
-            origin_y: self.transform.origin_y,
-        };
+        // Drawing and pointer hit-testing both use `active_transform`, so a
+        // click on the flying seal resolves against what the player sees.
+        let draw_transform = self.active_transform();
 
         if let Some(bg) = resources.menu_bg_small {
             draw_background(
@@ -415,7 +424,7 @@ impl YesNoModalState {
         self.tooltip.update(&self.frame, mouse_pt);
         if let Some(font) = resources.popup_font_any() {
             self.tooltip
-                .draw(renderer, font, self.transform, &self.frame, mouse_pt);
+                .draw(renderer, font, draw_transform, &self.frame, mouse_pt);
         }
     }
 }
@@ -776,6 +785,54 @@ mod tests {
         let mut state = modal_state();
         state.fly_in = Some(FlyInTransition::new());
         state
+    }
+
+    /// Click a seal at its *visible* screen position. During a fly-in the
+    /// panel is displaced, so each frame's screen point is computed with the
+    /// offset that transform will have after `handle_events` advances it.
+    fn click_visible_seal(state: &mut YesNoModalState, virt_x: f32, virt_y: f32) {
+        let base = MenuTransform::centered(640, 480);
+        for down in [true, false] {
+            let offset = match state.fly_in {
+                Some(f) => fly_in_offset_x((f.elapsed_ticks + 1.0) / FLY_IN_TICKS),
+                None => 0,
+            };
+            let visible = MenuTransform {
+                origin_x: base.origin_x + offset,
+                origin_y: base.origin_y,
+            };
+            let (sx, sy) = visible.to_screen(virt_x as i32, virt_y as i32);
+            let event = if down {
+                GameEvent::MouseDown(sx, sy, 1, 0)
+            } else {
+                GameEvent::MouseUp(sx, sy, 1)
+            };
+            let _ = state.handle_events(&[event], base);
+        }
+    }
+
+    #[test]
+    fn clicking_each_seal_resolves_the_dialog() {
+        let mut yes = modal_state();
+        click_visible_seal(&mut yes, 40.0, 15.0);
+        assert_eq!(yes.choice, Some(YesNoChoice::Yes));
+
+        let mut no = modal_state();
+        click_visible_seal(&mut no, 140.0, 15.0);
+        assert_eq!(no.choice, Some(YesNoChoice::No));
+    }
+
+    #[test]
+    fn a_click_on_the_flying_seal_resolves_the_dialog() {
+        let transform = MenuTransform::centered(640, 480);
+        let mut state = mission_start_modal_state();
+        for _ in 0..3 {
+            state.handle_events(&[], transform);
+        }
+        assert!(state.fly_in_offset_x() > 0, "seal must still be flying in");
+
+        click_visible_seal(&mut state, 40.0, 15.0);
+        assert_eq!(state.choice, Some(YesNoChoice::Yes));
     }
 
     #[test]
