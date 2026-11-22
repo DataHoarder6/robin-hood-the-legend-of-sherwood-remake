@@ -1,13 +1,8 @@
 import { parseHostedReplayContent } from "./run-replay.ts";
 
-const CAPABILITY_PATH = /^\/play\/([0-9a-f]{32})\/$/u;
-
-/** The private site boots the campaign from its root; the old capability URL
- * stays readable for links already shared. */
+/** The private site has exactly one campaign entry point: the origin root. */
 export function privateBindingPath(pathname: string): string | undefined {
-  if (pathname === "/" || pathname === "/index.html") return "/campaign.json";
-  const token = CAPABILITY_PATH.exec(pathname)?.[1];
-  return token === undefined ? undefined : `/play/${token}/campaign.json`;
+  return pathname === "/" || pathname === "/index.html" ? "/campaign.json" : undefined;
 }
 
 export type PrivateCampaignContent = {
@@ -17,9 +12,8 @@ export type PrivateCampaignContent = {
   readonly parts: readonly string[];
 };
 
-/** Resolve the digest-pinned full corpus bound to a private capability URL.
- * A normal page never fetches it and a bad binding is a launch error, never a
- * silent fallback to the Demo generation. */
+/** Resolve the digest-pinned full corpus bound to the private origin root.
+ * A bad binding is a launch error, never a silent fallback to Demo. */
 export async function resolvePrivateCampaignContent(
   pageUrl: URL,
   latestBuild: string,

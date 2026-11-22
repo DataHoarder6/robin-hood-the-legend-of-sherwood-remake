@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { resolvePrivateCampaignContent } from "./private_campaign.ts";
 
-const TOKEN = "a".repeat(32);
 const SHA = "b".repeat(64);
 const BINDING = {
   url: `/datadirs/full/${SHA}/datadir.bin`,
@@ -19,23 +18,6 @@ function fakeFetch(value: unknown) {
   return { fetchJson, urls };
 }
 
-test("a valid private capability URL resolves a digest-pinned full campaign", async () => {
-  const { fetchJson, urls } = fakeFetch(BINDING);
-  const result = await resolvePrivateCampaignContent(
-    new URL(`https://robin.jautis.lt/play/${TOKEN}/`),
-    "abc1234",
-    fetchJson,
-    new AbortController().signal,
-  );
-  assert.deepEqual(urls, [`/play/${TOKEN}/campaign.json?build=abc1234`]);
-  assert.deepEqual(result, {
-    url: `https://robin.jautis.lt/datadirs/full/${SHA}/datadir.bin`,
-    sha256: SHA,
-    byteLength: 1024,
-    parts: [`https://robin.jautis.lt/datadirs/full/${SHA}/datadir.bin`],
-  });
-});
-
 test("the site root resolves the same digest-pinned generation", async () => {
   const { fetchJson, urls } = fakeFetch(BINDING);
   const result = await resolvePrivateCampaignContent(
@@ -49,8 +31,8 @@ test("the site root resolves the same digest-pinned generation", async () => {
   assert.equal(result?.byteLength, 1024);
 });
 
-test("the ordinary page and a malformed token never fetch private content", async () => {
-  for (const path of ["/demo", `/play/${"a".repeat(31)}/`, "/play/not-a-token/"]) {
+test("any path other than the origin root never fetches private content", async () => {
+  for (const path of ["/demo", "/play/not-a-token/", "/leaderboards/"]) {
     const { fetchJson, urls } = fakeFetch(BINDING);
     const result = await resolvePrivateCampaignContent(
       new URL(`https://robin.jautis.lt${path}`),
