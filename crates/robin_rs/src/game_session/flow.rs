@@ -567,7 +567,8 @@ impl InteractiveFrameFinish<'_, '_, '_> {
             && runtime.frame_number() <= args.config.capture.map_frame;
         let should_draw = !world.view().host.frontend.presentation.skip_render
             && !modal_rendered_this_frame
-            && !warming_up_map_export;
+            && !warming_up_map_export
+            && !crate::window::window_hidden();
         if should_draw {
             // Cursor command production and deferred decal effects belong to
             // the fixed-tick input/host boundary, not the rendering capability.
@@ -739,7 +740,18 @@ impl InteractiveFrameFinish<'_, '_, '_> {
                 crate::window::process_uptime_us()
             };
             let Some(sampled_camera) = native_refresh_interpolation.sample(now_us) else {
-                return presentation.renderer.present_cached();
+                // The world pass was skipped this tick (modal page or map
+                // export warm-up). Re-present the cached composited frame at
+                // display cadence instead of collapsing to one present per
+                // 40 ms tick. A page shown before any world frame has no
+                // cached presentation yet: compose it once from the live draw
+                // queue so the remaining samples can re-present it.
+                if presentation.renderer.has_cached_presentation() {
+                    return presentation.renderer.present_cached();
+                }
+                let mut render_ctx =
+                    presentation.render_context(resources, hud, input, ui, game, render_view_state);
+                return render_ctx.present();
             };
             let render_engine = native_refresh_interpolation
                 .engine()
@@ -1055,19 +1067,28 @@ impl RefreshPresentationSchedule {
         elapsed_us < self.budget_us && (cost_fits || retry_due)
     }
 
-    fn record_present(&mut self, started_at_us: u64, finished_at_us: u64) {
+    fn record_present(
+        &mut self,
+        started_at_us: u64,
+        finished_at_us: u64,
+        monitor_period_us: Option<u64>,
+    ) {
         self.presents = self.presents.saturating_add(1);
         self.last_present_us = finished_at_us;
         let cost_us = finished_at_us.saturating_sub(started_at_us);
-        if cost_us > 0 {
-            self.observed_present_cost_us = cost_us;
-        } else {
+        if cost_us == 0 {
             // A prior long stall (window move, compositor hiccup) must not
             // permanently throttle a recovered high-refresh surface. An
             // immediate acquisition lowers the estimate; a later blocking
             // acquisition in this same budget will replace it with a fresh
             // measured interval.
             self.observed_present_cost_us /= 2;
+        } else if !crate::window::present_cost_is_stall(cost_us, monitor_period_us) {
+            // A fully occluded FIFO present can block for ~1 s. That is
+            // compositor back-pressure, not the cost of drawing a frame;
+            // adopting it would make the next budget one second and stall the
+            // recovery loop (issue #63). Keep the last representative sample.
+            self.observed_present_cost_us = cost_us;
         }
     }
 
@@ -1079,6 +1100,21 @@ impl RefreshPresentationSchedule {
         self.budget_us
             .saturating_sub(now_us.saturating_sub(self.started_at_us))
     }
+}
+
+/// Explicit policy for the display-rate presentation loop between fixed
+/// ticks. The fixed 25 Hz tick is never the frame budget for a visible page:
+/// even when the world pass is skipped by a modal or a map-export warm-up,
+/// the cached composited frame still goes out at display cadence. Only an
+/// explicit fast-forward (`skip_render`), a monitor rate we cannot follow, a
+/// short tick budget, or a hidden window drops back to tick-rate pacing.
+pub(crate) fn refresh_presentation_enabled(
+    native_refresh: bool,
+    target_ms: u32,
+    skip_render: bool,
+    hidden: bool,
+) -> bool {
+    native_refresh && target_ms >= engine_api::FRAME_TIME_MS && !skip_render && !hidden
 }
 
 /// Apply graphical cadence, host-clock correction, and authoritative hash
@@ -1183,9 +1219,12 @@ async fn pace_interactive_frame(
     let remaining_wait_ms =
         presentation_wait_ms(presentation_deadline_ms, crate::window::process_uptime_us());
     if remaining_wait_ms > 0 {
-        let refresh_presentation = host.frontend.preferences().native_refresh_presentation()
-            && target >= engine_api::FRAME_TIME_MS
-            && !host.frontend.presentation.skip_render;
+        let refresh_presentation = refresh_presentation_enabled(
+            host.frontend.preferences().native_refresh_presentation(),
+            target,
+            host.frontend.presentation.skip_render,
+            crate::window::window_hidden(),
+        );
         if refresh_presentation {
             // Each callback waits for its monitor-rate slot and recomposes
             // an absolute interpolation sample from immutable fixed-tick
@@ -1206,7 +1245,11 @@ async fn pace_interactive_frame(
                 }
                 crate::window::yield_to_display_refresh().await;
                 let present_end_us = crate::window::process_uptime_us();
-                schedule.record_present(present_start_us, present_end_us);
+                schedule.record_present(
+                    present_start_us,
+                    present_end_us,
+                    crate::window::presentation_period_us(),
+                );
             }
             host.frontend.diagnostics_mut().observe_present_cost(
                 schedule.observed_present_cost_us(),
@@ -1236,6 +1279,31 @@ fn presentation_wait_ms(deadline_ms: u64, now_us: u64) -> u64 {
 mod tests {
     use super::{FrameControl, MissionExit, RefreshPresentationSchedule};
     use robin_engine::game_operation::GameCode;
+
+    #[test]
+    fn modal_frames_keep_display_rate_presentation() {
+        // The world pass is skipped on modal/map-warmup frames, but the cached
+        // frame must still be presented at display rate: only fast-forward and
+        // a hidden window suppress the refresh loop.
+        assert!(super::refresh_presentation_enabled(true, 40, false, false));
+        assert!(!super::refresh_presentation_enabled(true, 40, true, false));
+        assert!(!super::refresh_presentation_enabled(true, 40, false, true));
+        assert!(!super::refresh_presentation_enabled(
+            false, 40, false, false
+        ));
+        assert!(!super::refresh_presentation_enabled(true, 1, false, false));
+    }
+
+    #[test]
+    fn stalled_present_does_not_become_the_next_frames_budget() {
+        let mut schedule = RefreshPresentationSchedule::new(0, 40_000, 6_000, 0);
+        // A ~1 s compositor stall while occluded is not a frame budget.
+        schedule.record_present(0, 1_000_000, Some(6_060));
+        assert_eq!(schedule.observed_present_cost_us(), 6_000);
+        // A normal present still replaces the estimate.
+        schedule.record_present(1_000_000, 1_002_500, Some(6_060));
+        assert_eq!(schedule.observed_present_cost_us(), 2_500);
+    }
 
     #[test]
     fn presentation_deadline_charges_handoff_time_and_survives_u32_clock_wrap() {
@@ -1273,7 +1341,7 @@ mod tests {
         while schedule.should_present(now_us) {
             let started_at_us = now_us;
             now_us += period_us;
-            schedule.record_present(started_at_us, now_us);
+            schedule.record_present(started_at_us, now_us, None);
         }
         (schedule.presents, now_us, schedule.remaining_us(now_us))
     }
@@ -1300,7 +1368,7 @@ mod tests {
     #[test]
     fn refresh_present_scheduler_recovers_after_a_stall() {
         let mut previous = RefreshPresentationSchedule::new(0, 40_000, 0, 0);
-        previous.record_present(0, 50_000);
+        previous.record_present(0, 50_000, None);
         // Each subsequent tick has less spare time than the stalled sample.
         // A recovered 5 ms renderer must eventually get another opportunity.
         let mut recovered = false;
@@ -1312,7 +1380,7 @@ mod tests {
                 previous.last_present_us,
             );
             if schedule.should_present(now) {
-                schedule.record_present(now, now + 5_000);
+                schedule.record_present(now, now + 5_000, None);
                 assert!(schedule.should_present(now + 5_000));
                 recovered = true;
                 break;
@@ -1329,7 +1397,7 @@ mod tests {
     fn refresh_present_scheduler_limits_expensive_retries_and_respects_deadlines() {
         let mut schedule = RefreshPresentationSchedule::new(300_000, 10_000, 50_000, 0);
         assert!(schedule.should_present(300_000));
-        schedule.record_present(300_000, 350_000);
+        schedule.record_present(300_000, 350_000, None);
         assert!(!schedule.should_present(350_000));
         for now in (360_000..600_000).step_by(40_000) {
             let next = RefreshPresentationSchedule::new(now, 10_000, 50_000, 350_000);
@@ -1348,7 +1416,7 @@ mod tests {
     fn refresh_present_scheduler_caps_non_blocking_surfaces() {
         let mut schedule = RefreshPresentationSchedule::new(10, 40_000, 0, 0);
         while schedule.should_present(10) {
-            schedule.record_present(10, 10);
+            schedule.record_present(10, 10, None);
         }
 
         assert_eq!(schedule.presents, 400);
@@ -1363,7 +1431,7 @@ mod tests {
         while schedule.should_present(now_us) {
             let started_at_us = now_us;
             now_us += period_us;
-            schedule.record_present(started_at_us, now_us);
+            schedule.record_present(started_at_us, now_us, None);
         }
 
         assert_eq!(schedule.presents, 96);

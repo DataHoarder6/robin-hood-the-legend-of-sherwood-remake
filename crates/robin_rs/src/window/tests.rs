@@ -1,6 +1,83 @@
 use super::{GameRuntimeCompletion, receive_game_exit_code, touch_output_needs_deferred_up};
 use crate::touch_input::TouchOutput;
 
+/// In-memory stand-in for the presentation frontend. It accepts exactly the
+/// two visibility signals the winit handler forwards (occlusion and a 0x0
+/// minimized surface) and exposes the derived state the game thread reads
+/// before acquiring a swapchain texture.
+#[derive(Default)]
+struct FakeFrontend {
+    occluded: bool,
+    minimized: bool,
+}
+
+impl FakeFrontend {
+    fn occlude(&mut self, occluded: bool) {
+        self.occluded = occluded;
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        self.minimized = width == 0 || height == 0;
+    }
+
+    fn hidden(&self) -> bool {
+        super::hidden_from_visibility_signals(self.occluded, self.minimized)
+    }
+}
+
+#[test]
+fn hidden_window_resumes_presentation_when_visible_again() {
+    let mut frontend = FakeFrontend::default();
+    assert!(!frontend.hidden(), "a mapped window presents");
+
+    frontend.occlude(true);
+    assert!(frontend.hidden(), "occlusion must stop presenting");
+    frontend.occlude(false);
+    assert!(!frontend.hidden(), "uncovering must resume presenting");
+
+    frontend.resize(0, 0);
+    assert!(
+        frontend.hidden(),
+        "a minimized 0x0 surface must not present"
+    );
+    frontend.resize(1920, 1080);
+    assert!(
+        !frontend.hidden(),
+        "restoring the surface must resume presenting"
+    );
+
+    frontend.occlude(true);
+    assert!(frontend.hidden());
+    frontend.resize(0, 0);
+    frontend.occlude(false);
+    assert!(frontend.hidden(), "minimized alone still hides the window");
+    frontend.resize(1280, 720);
+    assert!(!frontend.hidden());
+}
+
+#[test]
+fn a_present_longer_than_one_monitor_period_is_a_stall_not_a_budget() {
+    // 165 Hz monitor period is ~6060 us. A fully occluded FIFO present takes
+    // ~1 s; it must not be adopted as the next frame's cost estimate.
+    assert!(super::present_cost_is_stall(1_000_000, Some(6_060)));
+    assert!(!super::present_cost_is_stall(2_500, Some(6_060)));
+    assert!(!super::present_cost_is_stall(6_060, Some(6_060)));
+    // No monitor rate (wasm / headless tests) means no bound to apply.
+    assert!(!super::present_cost_is_stall(1_000_000, None));
+}
+
+#[test]
+fn process_visibility_tracks_the_visibility_signals() {
+    super::set_window_visibility(false, false);
+    assert!(!super::window_hidden());
+    super::set_window_visibility(true, false);
+    assert!(super::window_hidden());
+    super::set_window_visibility(false, true);
+    assert!(super::window_hidden());
+    super::set_window_visibility(false, false);
+    assert!(!super::window_hidden());
+}
+
 #[test]
 fn failed_window_send_preserves_the_already_queued_message() {
     let (sender, receiver) = async_channel::bounded(1);
