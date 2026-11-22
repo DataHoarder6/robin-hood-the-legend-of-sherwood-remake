@@ -45,6 +45,7 @@
             pointer-events: none;
         }
         .touch-controls:not([hidden]) { display: flex; }
+        @media (pointer: coarse) { #cursor-controls { display: none; } }
         .touch-controls button {
             pointer-events: auto;
             min-width: 64px;
