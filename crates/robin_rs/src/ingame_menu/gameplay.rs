@@ -968,7 +968,7 @@ mod tests {
         assert_eq!(
             authoritative,
             [
-                0, 2, 4, 6, 16, 18, 19, 20, 21, 22, 23, 24, 34, 35, 36, 37, 38, 39, 43, 48, 49,
+                0, 2, 4, 6, 16, 18, 19, 20, 21, 22, 23, 24, 34, 35, 36, 37, 38, 39, 43, 48, 49, 50,
             ]
         );
 
@@ -1038,6 +1038,7 @@ mod tests {
                 "Block Victory During Combat (Next Launch)",
                 "Exclude Starting Corpses",
                 "Exclude Required Kills",
+                "Extra guards (Enhanced encounter)",
             ]
         );
         let text = LocalizedGameplayText::for_locale("en-US");
