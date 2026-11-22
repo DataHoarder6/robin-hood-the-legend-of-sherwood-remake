@@ -6,9 +6,9 @@ Stream: browser/WASM Android client. Companion spec:
 
 ## What is live
 
-- Private link: `https://robin.jautis.lt/` — the entire origin is private; the
-  older capability link `https://robin.jautis.lt/play/eaab90981616b10b19c333fba8308133/`
-  still works. The root boots the full campaign by default (`?edition=demo`
+- Private link: `https://robin.jautis.lt/` — the entire origin is private. The
+  root is the only campaign entry point; there are no capability tokens or
+  legacy links. The root boots the full campaign by default (`?edition=demo`
   selects the Demo generation).
 - Username and password: **`robin` / `robin`** (owner's choice). The sops secret
   stores only an argon2id hash (base64) rendered into
