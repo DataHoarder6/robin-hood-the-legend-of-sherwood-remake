@@ -885,7 +885,11 @@ mod tests {
     /// offset that transform will have after `handle_events` advances it.
     fn click_visible_seal(state: &mut YesNoModalState, virt_x: f32, virt_y: f32) {
         let base = MenuTransform::centered(640, 480);
-        for down in [true, false] {
+        // A menu button only activates on release from `Pushed`, and only
+        // reaches `Pushed` from `Focused` — which needs a hover frame first.
+        // A real pointer delivers move/down/up over three frames; mirror that
+        // so the synthetic click exercises the same state-machine path.
+        for phase in 0..3 {
             let offset = match state.fly_in {
                 Some(f) => fly_in_offset_x((f.elapsed_ticks + 1.0) / FLY_IN_TICKS),
                 None => 0,
@@ -895,10 +899,15 @@ mod tests {
                 origin_y: base.origin_y,
             };
             let (sx, sy) = visible.to_screen(virt_x as i32, virt_y as i32);
-            let event = if down {
-                GameEvent::MouseDown(sx, sy, 1, 0)
-            } else {
-                GameEvent::MouseUp(sx, sy, 1)
+            let event = match phase {
+                0 => GameEvent::MouseMove {
+                    x: sx,
+                    y: sy,
+                    xrel: 0,
+                    yrel: 0,
+                },
+                1 => GameEvent::MouseDown(sx, sy, 1, 0),
+                _ => GameEvent::MouseUp(sx, sy, 1),
             };
             let _ = state.handle_events(&[event], base);
         }
