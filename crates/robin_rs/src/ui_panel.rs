@@ -450,6 +450,26 @@ pub(crate) fn slot_left_x(screen_width: u16, slot_index: u16, slot_count: usize)
     slot_index * sw + position_in_slot
 }
 
+/// Screen rect of one portrait slot, for diagnostics that hit-test a point and
+/// need to name the area that claimed it. Uses the same layout constants as
+/// [`hit_test_portrait`] so the two cannot disagree.
+pub(crate) fn portrait_slot_rect(
+    screen_width: u16,
+    screen_height: u16,
+    slot: u8,
+    num_pcs: usize,
+) -> (i32, i32, i32, i32) {
+    let count = portrait_slot_count(screen_width, num_pcs.min(portrait_capacity(screen_width)));
+    let left = i32::from(slot_left_x(screen_width, slot as u16, count));
+    let top = i32::from(screen_height.saturating_sub(PORTRAIT_TOTAL_HEIGHT));
+    (
+        left,
+        top,
+        left + i32::from(ELEMENT_WIDTH),
+        top + i32::from(PORTRAIT_TOTAL_HEIGHT.saturating_sub(BORDURE)),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortraitTarget {
     Pc(EntityId),

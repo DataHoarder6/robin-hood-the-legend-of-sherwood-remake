@@ -137,6 +137,34 @@ def bug_bundle(fingerprint: str = "fedcba9876543210") -> dict:
             "terminal": {"active": False},
             "presentation": {"pause_menu": False, "console_visible": False},
         },
+        "cursor": {
+            "sample": {
+                "x": 132.0,
+                "y": 451.0,
+                "surface_w": 640,
+                "surface_h": 480,
+                "scale": 2.0,
+            },
+            "coordinates": "logical game-surface pixels, the space the HUD hit tests use",
+            "element": {
+                "id": "sherwood.start_mission",
+                "name": "Start Mission",
+                "parent_layer": "sherwood_hud",
+                "rect": {"x": 105, "y": 400, "w": 32, "h": 40},
+                "label": "Start the next mission",
+                "label_source": "menu tooltip",
+            },
+            "miss": None,
+            "layers_tested": [
+                "touch_plan_hud",
+                "zoom_hud",
+                "corner_hud",
+                "stature_hud",
+                "sherwood_hud",
+            ],
+            "active_modal": None,
+            "terminal_page": {"active": False},
+        },
         "world": {
             "player_characters": [{"entity": 7, "position_map": [1.0, 2.0]}],
             "alive": {"count": 4, "predicate": "player characters with life_points > 0"},
@@ -358,6 +386,29 @@ class BugReportTests(ReceiverFixture):
         ):
             self.assertIn(expected, issue["body"], f"{expected} is in the issue body")
         self.assertEqual(self.github.comments(), [])
+
+    def test_the_element_and_label_under_the_cursor_lead_the_issue_body(self) -> None:
+        self.assertEqual(self.post_bug(bug_bundle())[0], 202)
+        body = self.github.issues[0]["body"]
+        line = "- Under cursor: `Start Mission` (`Start the next mission`) on `sherwood_hud`"
+        self.assertIn(line, body, "the element, its visible label and its layer are named")
+        self.assertLess(
+            body.index(line),
+            body.index("- Session:"),
+            "the cursor line leads the reproduction facts",
+        )
+        self.assertLess(body.index(line), body.index("### Description"))
+
+    def test_a_cursor_miss_names_every_layer_that_was_tested(self) -> None:
+        bundle = bug_bundle()
+        bundle["cursor"]["element"] = None
+        bundle["cursor"]["miss"] = {"reason": "no UI element under the cursor"}
+        bundle["cursor"]["layers_tested"] = ["zoom_hud", "sherwood_hud", "ui_panel"]
+        self.assertEqual(self.post_bug(bundle)[0], 202)
+        body = self.github.issues[0]["body"]
+        line = "- Under cursor: no UI element under the cursor (layers tested: zoom_hud, sherwood_hud, ui_panel)"
+        self.assertIn(line, body)
+        self.assertLess(body.index(line), body.index("- Session:"))
 
     def test_labels_are_created_once_before_the_first_issue(self) -> None:
         self.assertEqual(self.post_bug(bug_bundle())[0], 202)

@@ -55,11 +55,34 @@ there".
 | `game.script` | `MissionScript::diagnostic_state()`: script name, instance counts, and the global instance's class and members — the objective flags a stuck mission is diagnosed from |
 | `game.terminal` | the mission-end page the player is looking at: `active`, `presentation`, `decision_order`, `awaiting_snapshot`, and whether a campaign update is pending |
 | `world` | every player character's position and state, horses and companions, and an alive count with the predicate that produced it |
+| `cursor` | the pointer sampled once at the frame boundary and the UI element under it: `sample`, `coordinates`, `element`, `miss`, `layers_tested`, `active_modal`, `terminal_page` |
 | `files.saves` | every file of the profile's save directory, copied under `saves/` with name and size, within a 32 MiB budget; anything left out is named in `notes` |
 | `files.replay` | the active recording's files under `replay/`, within an 8 MiB budget, each entry recording the truncation the copy applied |
 | `state` | the last `/state` document (`docs/JSON_SERVER.md`) |
 | `run_log_tail`, `events_tail` | the last 200 lines of the run log and of the session event file `/state` names |
 | `notes` | every section that could not be captured, and why |
+
+### What was under the cursor
+
+`cursor.sample` is `{x, y, surface_w, surface_h, scale}` sampled once at the
+frame boundary, before the writer runs on its worker thread. `x` and `y` are
+already in logical game-surface coordinates — the space the HUD hit tests use —
+and `surface_w`/`surface_h` are that same logical canvas; `scale` is physical
+surface pixels per logical pixel, so a DPI mismatch is distinguishable from a
+layout defect. Nothing reads render state mid-frame to build this section.
+
+`cursor.element` names the topmost widget that claims the point, using the
+widgets' own hit tests in `touch_plan_hud`, `zoom_hud`, `corner_hud`,
+`stature_hud`, `sherwood_hud` and `ui_panel`, in that order. It carries `id`,
+`name`, `parent_layer`, `rect` and the `label` the player sees (the same menu
+table the tooltip uses), with `label_source` saying where the text came from.
+A point that claims no widget is a `miss` with a reason and a `layers_tested`
+list naming every layer the query probed. `active_modal` and `terminal_page`
+carry the modal and mission-end page from that frame. If no sample was captured,
+`sample.available` is `false` with the reason instead of a silent omission.
+
+The receiver puts the element and its label — or the miss and its layers — as
+the first reproduction fact in the issue body.
 
 ### Captured as unavailable, on purpose
 
@@ -131,10 +154,11 @@ Same process and the same environment as the crash side; `CRASH_TOKEN`,
 
 A first report creates one issue with the labels `bug` and `bug-report` (created
 first if the repository lacks them), titled with the description and led by the
-reproduction facts: session, mission, tick, build, operation, seats, desync and
-alive count. The body summarises the bundle and links its download; it never
-pastes the raw document. A repeat fingerprint adds a comment naming the
-occurrence count and the new bundle's id.
+reproduction facts. The first of those names the UI element under the cursor —
+or the miss and the layers tested — followed by session, mission, tick, build,
+operation, seats, desync and alive count. The body summarises the bundle and
+links its download; it never pastes the raw document. A repeat fingerprint adds
+a comment naming the occurrence count and the new bundle's id.
 
 ## Multiplayer
 

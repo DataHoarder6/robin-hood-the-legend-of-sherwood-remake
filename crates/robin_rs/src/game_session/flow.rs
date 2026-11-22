@@ -500,6 +500,10 @@ impl InteractiveFrameFinish<'_, '_, '_> {
             services,
             state,
         } = self;
+        // Sample the pointer once, here at the frame boundary, before borrowing
+        // anything else. The writer composes it off-frame; no render state is
+        // read mid-frame to describe what was under the cursor.
+        let cursor = super::report::CursorSample::from_window(services.window);
         let callbacks = &mut *services.callbacks;
         let args = services.args;
         let FramePresentationHandoff {
@@ -528,7 +532,14 @@ impl InteractiveFrameFinish<'_, '_, '_> {
         // worker thread; nothing in this frame waits for it. Browser builds
         // have no bundle writer and no surface that queues one.
         #[cfg(not(target_arch = "wasm32"))]
-        super::report::drain_requested(runtime, world, frontend, &frame, &callbacks.save_manager);
+        super::report::drain_requested(
+            runtime,
+            world,
+            frontend,
+            &frame,
+            &callbacks.save_manager,
+            &cursor,
+        );
         let profiling = super::frame_perf::enabled();
         let phase_start = super::frame_perf::start(profiling);
         finish_interactive_audio(runtime, world, frontend, callbacks);

@@ -232,6 +232,60 @@ pub(crate) fn write(request: Request, snapshot: Value) -> PathBuf {
     directory
 }
 
+/// Compose the one `cursor` section from the two raw facts the frame boundary
+/// left in the snapshot, then drop those keys: the section is the single source
+/// for what was under the cursor. A fact that was not captured is named rather
+/// than omitted, the same rule every other section follows.
+fn cursor_section(snapshot: &mut serde_json::Map<String, Value>) -> Value {
+    let sample = snapshot.remove("cursor_sample");
+    let query = snapshot.remove("cursor_element");
+    let sampled = sample.as_ref().is_some_and(Value::is_object);
+    let sample = match sample {
+        Some(sample) if sampled => sample,
+        Some(_) => json!({
+            "available": false,
+            "reason": "cursor_sample was not an object at the frame boundary"
+        }),
+        None => json!({
+            "available": false,
+            "reason": "no cursor_sample was captured at the frame boundary"
+        }),
+    };
+    let mut section = json!({
+        "sample": sample,
+        "coordinates": "logical game-surface pixels, the space the HUD hit tests use",
+        "element": Value::Null,
+        "miss": {
+            "reason": if sampled {
+                "no cursor_element query was captured at the frame boundary"
+            } else {
+                "no cursor sample was captured, so no layer could be tested"
+            }
+        },
+        "layers_tested": Vec::<Value>::new(),
+        "active_modal": Value::Null,
+        "terminal_page": {"active": false},
+    });
+    if let Some(query) = query.filter(Value::is_object) {
+        if let Some(element) = query.get("element").filter(|value| !value.is_null()) {
+            section["element"] = element.clone();
+        }
+        if let Some(miss) = query.get("miss").filter(|value| !value.is_null()) {
+            section["miss"] = miss.clone();
+        }
+        if let Some(layers) = query.get("layers_tested") {
+            section["layers_tested"] = layers.clone();
+        }
+        if let Some(modal) = query.get("active_modal") {
+            section["active_modal"] = modal.clone();
+        }
+        if let Some(page) = query.get("terminal_page") {
+            section["terminal_page"] = page.clone();
+        }
+    }
+    section
+}
+
 /// The bundle writer, also called directly by tests.
 fn write_bundle(
     directory: &Path,
@@ -316,6 +370,8 @@ fn write_bundle(
         json!(crate::install_home::root().map(|root| root.to_string_lossy().into_owned())),
     );
     object.insert("files".into(), files);
+    let cursor = cursor_section(object);
+    object.insert("cursor".into(), cursor);
     object.insert(
         "upload".into(),
         match endpoint() {
@@ -787,5 +843,138 @@ mod tests {
         let queued = take_requests();
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].description, "stuck on the sign");
+    }
+
+    /// A synthetic frame with a known widget. The raw frame-boundary facts are
+    /// composed by the writer into one `cursor` section, off the frame loop.
+    #[test]
+    fn a_bundle_names_the_widget_under_the_cursor() {
+        let home = tempfile::tempdir().unwrap();
+        let _guard = with_install_home(home.path(), true);
+        let snapshot = json!({
+            "schema_version": 1,
+            "fingerprint": "0123456789abcdef",
+            "paths": {"save_directory": null, "replay": null},
+            "notes": [],
+            "cursor_sample": {
+                "x": 617.0, "y": 5.0,
+                "surface_w": 640, "surface_h": 480, "scale": 2.0,
+            },
+            "cursor_element": {
+                "element": {
+                    "id": "zoom.up",
+                    "name": "Zoom in",
+                    "parent_layer": "zoom_hud",
+                    "rect": {"x": 614, "y": 0, "w": 24, "h": 24},
+                    "label": "Zoom in",
+                    "enabled": true,
+                },
+                "miss": null,
+                "layers_tested": ["touch_plan_hud", "zoom_hud"],
+                "active_modal": {"kind": "dialogue"},
+                "terminal_page": {"active": false},
+            },
+        });
+        let directory = home.path().join("bug-reports/cursor-widget");
+        write_bundle(&directory, &request(directory.clone()), snapshot, None).unwrap();
+        let bundle: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("bundle.json")).unwrap()).unwrap();
+        assert_eq!(bundle["cursor"]["element"]["name"], "Zoom in");
+        assert_eq!(bundle["cursor"]["element"]["label"], "Zoom in");
+        assert_eq!(bundle["cursor"]["element"]["parent_layer"], "zoom_hud");
+        assert_eq!(bundle["cursor"]["element"]["rect"]["x"], 614);
+        assert_eq!(bundle["cursor"]["sample"]["scale"], 2.0);
+        assert_eq!(bundle["cursor"]["active_modal"]["kind"], "dialogue");
+        assert_eq!(bundle["cursor"]["terminal_page"]["active"], false);
+        assert!(
+            bundle.get("cursor_sample").is_none() && bundle.get("cursor_element").is_none(),
+            "the raw frame-boundary facts are replaced by the one cursor section"
+        );
+        assert!(
+            bundle["cursor"]["coordinates"]
+                .as_str()
+                .is_some_and(|text| text.contains("logical")),
+            "the coordinate space is named for the reader"
+        );
+    }
+
+    /// Empty space is a positive fact: the miss record names every layer the
+    /// query tested, so it cannot be read as "nobody looked".
+    #[test]
+    fn an_empty_space_cursor_miss_lists_every_layer_tested() {
+        let home = tempfile::tempdir().unwrap();
+        let _guard = with_install_home(home.path(), true);
+        let snapshot = json!({
+            "schema_version": 1,
+            "fingerprint": "0123456789abcdef",
+            "paths": {"save_directory": null, "replay": null},
+            "notes": [],
+            "cursor_sample": {
+                "x": 320.0, "y": 240.0,
+                "surface_w": 640, "surface_h": 480, "scale": 1.0,
+            },
+            "cursor_element": {
+                "element": null,
+                "miss": {"reason": "no UI element under the cursor"},
+                "layers_tested": [
+                    "touch_plan_hud", "zoom_hud", "corner_hud",
+                    "stature_hud", "sherwood_hud", "ui_panel",
+                ],
+                "active_modal": null,
+                "terminal_page": {"active": false},
+            },
+        });
+        let directory = home.path().join("bug-reports/cursor-miss");
+        write_bundle(&directory, &request(directory.clone()), snapshot, None).unwrap();
+        let bundle: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("bundle.json")).unwrap()).unwrap();
+        assert!(bundle["cursor"]["element"].is_null());
+        assert_eq!(
+            bundle["cursor"]["miss"]["reason"],
+            "no UI element under the cursor"
+        );
+        let layers = bundle["cursor"]["layers_tested"]
+            .as_array()
+            .expect("the miss lists the layers it tested");
+        for name in [
+            "touch_plan_hud",
+            "zoom_hud",
+            "corner_hud",
+            "stature_hud",
+            "sherwood_hud",
+            "ui_panel",
+        ] {
+            assert!(
+                layers.iter().any(|layer| layer == name),
+                "{name} is one of {layers:?}"
+            );
+        }
+    }
+
+    /// A snapshot with no cursor facts still writes a section that says why,
+    /// instead of leaving the reader to guess at a missing key.
+    #[test]
+    fn a_missing_cursor_sample_is_named_instead_of_silently_dropped() {
+        let home = tempfile::tempdir().unwrap();
+        let _guard = with_install_home(home.path(), true);
+        let snapshot = json!({
+            "schema_version": 1,
+            "fingerprint": "0123456789abcdef",
+            "paths": {"save_directory": null, "replay": null},
+            "notes": [],
+        });
+        let directory = home.path().join("bug-reports/cursor-absent");
+        write_bundle(&directory, &request(directory.clone()), snapshot, None).unwrap();
+        let bundle: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("bundle.json")).unwrap()).unwrap();
+        assert_eq!(bundle["cursor"]["sample"]["available"], false);
+        assert!(
+            bundle["cursor"]["sample"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("cursor_sample")),
+            "the absent raw fact is named"
+        );
+        assert!(bundle["cursor"]["element"].is_null());
+        assert_eq!(bundle["cursor"]["layers_tested"], json!([]));
     }
 }

@@ -453,7 +453,22 @@ def bug_facts(bundle: dict) -> list[str]:
         for seat in seats
         if isinstance(seat, dict)
     )
+    cursor = bundle.get("cursor") if isinstance(bundle.get("cursor"), dict) else {}
+    element = cursor.get("element") if isinstance(cursor.get("element"), dict) else None
+    if element is None:
+        miss = cursor.get("miss") if isinstance(cursor.get("miss"), dict) else {}
+        reason = str(miss.get("reason") or "no UI element under the cursor")
+        layers = cursor.get("layers_tested")
+        tested = ", ".join(str(layer) for layer in layers) if isinstance(layers, list) else "none"
+        cursor_fact = f"- Under cursor: {bounded(reason, 120)} (layers tested: {tested})"
+    else:
+        cursor_fact = (
+            f"- Under cursor: `{bounded(element.get('name'), 120)}` "
+            f"(`{bounded(element.get('label'), 120)}`) "
+            f"on `{bounded(element.get('parent_layer'), 60)}`"
+        )
     return [
+        cursor_fact,
         f"- Session: `{bounded(session.get('session_id'), 80)}` — "
         f"{bounded(session.get('kind'), 20)}, local seat "
         f"`{bounded(transport.get('local_seat'), 8)}` of "

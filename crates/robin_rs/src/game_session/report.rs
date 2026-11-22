@@ -18,6 +18,276 @@ use serde_json::{Value, json};
 use super::interactive::InteractiveFrontend;
 use super::runtime::{MissionFrame, MissionMutation, MissionWorld, TimelineRuntime};
 
+/// The pointer sampled once at the frame boundary, in the space the HUD hit
+/// tests use. Nothing here reads render state mid-frame: the window has already
+/// converted the raw pointer to the logical game surface, and this copy is
+/// passed down to the writer with the rest of the snapshot.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CursorSample {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    /// Logical game surface: the canvas the HUD layouts and hit tests share.
+    pub(super) surface_w: u32,
+    pub(super) surface_h: u32,
+    /// Physical surface pixels per logical game pixel on the x axis.
+    pub(super) scale: f32,
+}
+
+impl CursorSample {
+    pub(super) fn from_window(window: &crate::window::GameWindow) -> Self {
+        let (x, y) = window.cursor_pos();
+        let (logical_w, logical_h) = window.logical_size();
+        let (physical_w, _) = window.surface_size();
+        Self {
+            x: x as f32,
+            y: y as f32,
+            surface_w: logical_w,
+            surface_h: logical_h,
+            scale: physical_w as f32 / logical_w.max(1) as f32,
+        }
+    }
+
+    fn into_json(self) -> Value {
+        json!({
+            "x": self.x,
+            "y": self.y,
+            "surface_w": self.surface_w,
+            "surface_h": self.surface_h,
+            "scale": self.scale,
+        })
+    }
+}
+
+/// The layers a cursor query probes, topmost first. Small controls are tested
+/// before the larger rails and the portrait panel, matching the order in which
+/// the HUD claims pixels; the first geometric hit wins.
+const CURSOR_LAYERS: [&str; 6] = [
+    "touch_plan_hud",
+    "zoom_hud",
+    "corner_hud",
+    "stature_hud",
+    "sherwood_hud",
+    "ui_panel",
+];
+
+fn rect_tuple(rect: &crate::gfx_types::Rect) -> (i32, i32, i32, i32) {
+    (
+        rect.x(),
+        rect.y(),
+        rect.width() as i32,
+        rect.height() as i32,
+    )
+}
+
+fn element(
+    id: &str,
+    name: &str,
+    layer: &str,
+    rect: (i32, i32, i32, i32),
+    label: String,
+    label_source: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "name": name,
+        "parent_layer": layer,
+        "rect": {"x": rect.0, "y": rect.1, "w": rect.2, "h": rect.3},
+        "label": label,
+        "label_source": label_source,
+    })
+}
+
+/// Resolve the text the player actually sees for a HUD button: the same menu
+/// table the tooltip renderer reads. A missing table is named through
+/// `label_source`, never silently replaced.
+fn tooltip(
+    menu_text: Option<&crate::ingame_menu::resources::MenuText>,
+    id: usize,
+) -> Option<String> {
+    let text = menu_text?.get(id);
+    (!text.is_empty()).then_some(text)
+}
+
+/// Query the HUD layers under one sampled point with the widgets' own hit
+/// tests. The first layer that claims the point names its element; a miss is
+/// a positive record of every layer that was tested. The modal and mission-end
+/// page come from the same frame-boundary helpers the rest of the snapshot uses.
+fn cursor_element(
+    sample: &CursorSample,
+    is_sherwood: bool,
+    men_to_blazon: bool,
+    frontend: &InteractiveFrontend,
+    num_pcs: usize,
+) -> Value {
+    use crate::corner_hud::CornerButton;
+    use crate::sherwood_hud::SherwoodButton;
+    use crate::stature_hud::StatureButton;
+    use crate::zoom_hud::ZoomButton;
+
+    let hud = &frontend.hud;
+    let ui = &frontend.ui;
+    let menu_text = frontend.resources.menu.as_ref().map(|menu| &menu.menu_text);
+    let x = sample.x.round() as i32;
+    let y = sample.y.round() as i32;
+    let sw = sample.surface_w.min(u32::from(u16::MAX)) as u16;
+    let sh = sample.surface_h.min(u32::from(u16::MAX)) as u16;
+    let resolve = |id, name, layer, rect, mt_id: Option<usize>| match mt_id
+        .and_then(|id| tooltip(menu_text, id))
+    {
+        Some(label) => element(id, name, layer, rect, label, "menu tooltip"),
+        None => element(
+            id,
+            name,
+            layer,
+            rect,
+            name.to_owned(),
+            "name (menu text unavailable)",
+        ),
+    };
+
+    let mut tested = Vec::new();
+    let mut found = None;
+
+    tested.push(CURSOR_LAYERS[0]);
+    if crate::touch_plan_hud::hit_test(sw, x, y) {
+        let (left, top, right, bottom) = crate::touch_plan_hud::rect(sw);
+        found = Some(element(
+            "touch_plan.plan",
+            "Plan actions",
+            CURSOR_LAYERS[0],
+            (left, top, right - left, bottom - top),
+            "PLAN ACTIONS".to_owned(),
+            "control text",
+        ));
+    }
+
+    if found.is_none() {
+        tested.push(CURSOR_LAYERS[1]);
+        if let Some(button) = hud.zoom_layout.hit_test_geometric(x, y) {
+            let (id, name, rect, mt) = match button {
+                ZoomButton::ZoomUp => (
+                    "zoom.up",
+                    "Zoom in",
+                    &hud.zoom_layout.zoom_up,
+                    crate::zoom_hud::zoom_button_tooltip_mt_id(button),
+                ),
+                ZoomButton::ZoomDown => (
+                    "zoom.down",
+                    "Zoom out",
+                    &hud.zoom_layout.zoom_down,
+                    crate::zoom_hud::zoom_button_tooltip_mt_id(button),
+                ),
+            };
+            found = Some(resolve(
+                id,
+                name,
+                CURSOR_LAYERS[1],
+                rect_tuple(rect),
+                Some(mt),
+            ));
+        }
+    }
+
+    if found.is_none() {
+        tested.push(CURSOR_LAYERS[2]);
+        if let Some(button) = hud.corner_layout.hit_test_geometric(x, y) {
+            let (id, name, rect) = match button {
+                CornerButton::Clock => (
+                    "corner.clock",
+                    "Record quick action",
+                    &hud.corner_layout.clock,
+                ),
+                CornerButton::Sight => ("corner.sight", "View cone", &hud.corner_layout.sight),
+                CornerButton::QuickStart => (
+                    "corner.quickstart",
+                    "Launch all quick actions",
+                    &hud.corner_layout.quickstart,
+                ),
+            };
+            found = Some(resolve(
+                id,
+                name,
+                CURSOR_LAYERS[2],
+                rect_tuple(rect),
+                Some(crate::corner_hud::corner_button_tooltip_mt_id(button)),
+            ));
+        }
+    }
+
+    if found.is_none() {
+        tested.push(CURSOR_LAYERS[3]);
+        if let Some(button) = hud.stature_layout.hit_test_geometric(x, y) {
+            let (id, name, rect) = match button {
+                StatureButton::Up => ("stature.up", "Stand up", &hud.stature_layout.up),
+                StatureButton::Down => ("stature.down", "Crouch", &hud.stature_layout.down),
+            };
+            found = Some(resolve(
+                id,
+                name,
+                CURSOR_LAYERS[3],
+                rect_tuple(rect),
+                Some(crate::stature_hud::stature_button_tooltip_mt_id(button)),
+            ));
+        }
+    }
+
+    if found.is_none() {
+        tested.push(CURSOR_LAYERS[4]);
+        if let Some(button) = hud.sherwood_layout.hover_test(x, y, hud.sherwood_rail) {
+            let (id, name) = match button {
+                SherwoodButton::DisplayCampaignMap => ("sherwood.map", "Campaign map"),
+                SherwoodButton::GoToExit => ("sherwood.exit", "Go to exit"),
+                SherwoodButton::StartMission => ("sherwood.start_mission", "Start mission"),
+                SherwoodButton::QuitMission => ("sherwood.quit_mission", "Quit mission"),
+                SherwoodButton::SherwoodTrading => ("sherwood.trading", "Trading"),
+                SherwoodButton::PerksPanel => ("sherwood.perks", "Perks"),
+            };
+            found = Some(resolve(
+                id,
+                name,
+                CURSOR_LAYERS[4],
+                rect_tuple(&hud.sherwood_layout.rect(button)),
+                crate::sherwood_hud::sherwood_button_tooltip_mt_id(
+                    button,
+                    is_sherwood,
+                    men_to_blazon,
+                ),
+            ));
+        }
+    }
+
+    if found.is_none() {
+        tested.push(CURSOR_LAYERS[5]);
+        if let Some(slot) = crate::ui_panel::hit_test_portrait(sw, sh, sample.x, sample.y, num_pcs)
+        {
+            let name = format!("Portrait {slot}");
+            found = Some(element(
+                "ui_panel.portrait",
+                &name,
+                CURSOR_LAYERS[5],
+                crate::ui_panel::portrait_slot_rect(sw, sh, slot, num_pcs),
+                name.clone(),
+                "element name",
+            ));
+        }
+    }
+
+    let (element, miss) = match found {
+        Some(element) => (element, Value::Null),
+        None => (
+            Value::Null,
+            json!({"reason": "no UI element under the cursor"}),
+        ),
+    };
+    json!({
+        "element": element,
+        "miss": miss,
+        "layers_tested": tested,
+        "active_modal": presentation(ui)["active_modal"].clone(),
+        "terminal_page": terminal(ui),
+    })
+}
+
 /// Write every queued report against one snapshot of the current frame.
 pub(super) fn drain_requested(
     timeline: &TimelineRuntime,
@@ -25,12 +295,13 @@ pub(super) fn drain_requested(
     frontend: &mut InteractiveFrontend,
     frame: &MissionFrame,
     save_manager: &crate::savegame::SaveGameManager,
+    cursor: &CursorSample,
 ) {
     let requests = crate::bug_bundle::take_requests();
     if requests.is_empty() {
         return;
     }
-    let snapshot = snapshot(timeline, world, frontend, frame, save_manager);
+    let snapshot = snapshot(timeline, world, frontend, frame, save_manager, cursor);
     for request in requests {
         crate::bug_bundle::write(request, snapshot.clone());
     }
@@ -43,6 +314,7 @@ fn snapshot(
     frontend: &mut InteractiveFrontend,
     frame: &MissionFrame,
     save_manager: &crate::savegame::SaveGameManager,
+    cursor: &CursorSample,
 ) -> Value {
     let MissionMutation {
         host,
@@ -53,6 +325,13 @@ fn snapshot(
     } = world.mutation();
     let engine = &manager.engine;
     let ui = &frontend.ui;
+    let cursor_query = cursor_element(
+        cursor,
+        game.is_sherwood,
+        engine.is_men_to_blazon_conversion_mode(),
+        frontend,
+        engine.pc_ids().len(),
+    );
 
     json!({
         "schema_version": 1,
@@ -83,6 +362,8 @@ fn snapshot(
             "replay": crate::bug_report::replay_path().map(|path| path.display().to_string()),
             "install_home": crate::install_home::root().map(|root| root.display().to_string()),
         },
+        "cursor_sample": cursor.into_json(),
+        "cursor_element": cursor_query,
         "notes": Vec::<String>::new(),
     })
 }
