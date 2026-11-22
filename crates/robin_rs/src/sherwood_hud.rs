@@ -94,17 +94,36 @@ pub enum SherwoodRail {
     /// Sherwood, next mission committed but its requirements are unmet:
     /// `StartMission` is not rendered at all.
     PostCommitStartNotReady,
-    /// A mission being played.
-    InMission,
+    /// A mission being played. `can_quit` is false in the first two campaign
+    /// missions, which have no route back to Sherwood: the red abandon control
+    /// would be a false choice, so it is removed from the rail entirely.
+    InMission { can_quit: bool },
 }
 
 impl SherwoodRail {
+    /// The rail while a mission is being played.
+    ///
+    /// `H01_Lin_VL` and `H02_Not_EC` cannot return to Sherwood, so they do not
+    /// offer `QuitMission`. Everywhere else the abandon control stays.
+    pub fn in_mission(mission_name: Option<&str>) -> Self {
+        Self::InMission {
+            can_quit: !matches!(mission_name, Some("H01_Lin_VL" | "H02_Not_EC")),
+        }
+    }
+
     /// Derive the rail from campaign state. `has_next_mission` is
     /// `campaign.next_mission_idx.is_some()`; `start_ready` is the live
-    /// requirements (or blazon-conversion) gate for the committed mission.
-    pub fn from_campaign(is_sherwood: bool, has_next_mission: bool, start_ready: bool) -> Self {
+    /// requirements (or blazon-conversion) gate for the committed mission;
+    /// `mission_name` is the running mission's filename, used only to decide
+    /// whether an abandon route exists.
+    pub fn from_campaign(
+        is_sherwood: bool,
+        has_next_mission: bool,
+        start_ready: bool,
+        mission_name: Option<&str>,
+    ) -> Self {
         match (is_sherwood, has_next_mission) {
-            (false, _) => Self::InMission,
+            (false, _) => Self::in_mission(mission_name),
             (true, false) => Self::PreCommit,
             (true, true) if start_ready => Self::PostCommit,
             (true, true) => Self::PostCommitStartNotReady,
@@ -116,7 +135,10 @@ impl SherwoodRail {
         use SherwoodButton::*;
         matches!(
             (self, button),
-            (Self::InMission, StartMission | QuitMission)
+            (
+                Self::InMission { can_quit: true },
+                StartMission | QuitMission
+            ) | (Self::InMission { can_quit: false }, StartMission)
                 | (Self::PreCommit, DisplayCampaignMap | PerksPanel)
                 | (
                     Self::PostCommit,
@@ -595,7 +617,7 @@ mod tests {
     fn a_mission_offers_finish_and_abandon() {
         let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
         let point = (layout.start_mission.x() + 1, layout.start_mission.y() + 1);
-        let rail = SherwoodRail::InMission;
+        let rail = SherwoodRail::in_mission(Some("H03_Der_MK"));
         assert_eq!(
             layout.hit_test(
                 point.0,
@@ -627,11 +649,43 @@ mod tests {
     }
 
     #[test]
+    fn first_missions_hide_the_abandon_button() {
+        use SherwoodButton::*;
+
+        let sprites = SherwoodButtonSprites::default();
+        let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
+        let enable = SherwoodButtonEnable::in_mission(true);
+
+        // The first two campaign missions have no route back to Sherwood, so
+        // the red abandon control is a false choice and must not be offered.
+        for name in ["H01_Lin_VL", "H02_Not_EC"] {
+            let rail = SherwoodRail::from_campaign(false, false, true, Some(name));
+            assert!(!rail.present(QuitMission), "{name} must hide QuitMission");
+            assert!(rail.present(StartMission), "{name} still offers finish");
+            assert_eq!(rail.visible().collect::<Vec<_>>(), vec![StartMission]);
+            let rect = layout.rect(QuitMission);
+            assert_eq!(
+                layout.hit_test(rect.x() + 2, rect.y() + 2, rail, enable),
+                None,
+                "{name} must not claim the old button's pixels"
+            );
+        }
+
+        // Every later mission — and the Sherwood hub — keep the button and
+        // its enabled state.
+        let later = SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK"));
+        assert!(later.present(QuitMission));
+        assert!(enable.is_enabled(QuitMission));
+        let hub = SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK"));
+        assert!(hub.present(QuitMission));
+    }
+
+    #[test]
     fn unmet_requirements_remove_the_start_mission_button() {
         let sprites = SherwoodButtonSprites::default();
         let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
         // Committed mission, but its team requirements are not met.
-        let rail = SherwoodRail::from_campaign(true, true, false);
+        let rail = SherwoodRail::from_campaign(true, true, false, Some("H03_Der_MK"));
         let mut enable = SherwoodButtonEnable::post_commit();
         enable.apply_update_mission_team(false, false, false, false, false);
 
@@ -654,7 +708,7 @@ mod tests {
     #[test]
     fn a_hidden_start_button_frees_its_pixels_but_other_controls_keep_theirs() {
         let layout = SherwoodHudLayout::for_resolution(800, 600, &SherwoodButtonSprites::default());
-        let rail = SherwoodRail::from_campaign(true, true, false);
+        let rail = SherwoodRail::from_campaign(true, true, false, Some("H03_Der_MK"));
         let enable = SherwoodButtonEnable::post_commit();
         let rect = layout.rect(SherwoodButton::StartMission);
         let point = (rect.x() + 2, rect.y() + 2);
@@ -683,13 +737,13 @@ mod tests {
     fn presence_follows_campaign_state() {
         use SherwoodButton::*;
 
-        let pre = SherwoodRail::from_campaign(true, false, true);
+        let pre = SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK"));
         assert_eq!(
             pre.visible().collect::<Vec<_>>(),
             vec![DisplayCampaignMap, SherwoodTrading, PerksPanel]
         );
 
-        let post = SherwoodRail::from_campaign(true, true, true);
+        let post = SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK"));
         assert_eq!(
             post.visible().collect::<Vec<_>>(),
             vec![
@@ -701,13 +755,16 @@ mod tests {
             ]
         );
 
-        let mission = SherwoodRail::from_campaign(false, false, true);
+        let mission = SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK"));
         assert_eq!(
             mission.visible().collect::<Vec<_>>(),
             vec![StartMission, QuitMission]
         );
         // A committed campaign while a mission plays is still a mission.
-        assert_eq!(SherwoodRail::from_campaign(false, true, true), mission);
+        assert_eq!(
+            SherwoodRail::from_campaign(false, true, true, Some("H03_Der_MK")),
+            mission
+        );
 
         // The two controls that share the wide slot are never both present:
         // the draft column must not hide the map button, and the map button
@@ -728,7 +785,7 @@ mod tests {
     fn unmet_requirements_remove_the_start_button_from_the_rail() {
         let sprites = SherwoodButtonSprites::default();
         let layout = SherwoodHudLayout::for_resolution(800, 600, &sprites);
-        let rail = SherwoodRail::from_campaign(true, true, false);
+        let rail = SherwoodRail::from_campaign(true, true, false, Some("H03_Der_MK"));
         let mut enable = SherwoodButtonEnable::post_commit();
         enable.apply_update_mission_team(false, false, false, false, false);
 
@@ -763,9 +820,9 @@ mod tests {
     fn visible_rects_never_intersect() {
         let sprites = SherwoodButtonSprites::default();
         let every_rail = [
-            SherwoodRail::from_campaign(true, false, true),
-            SherwoodRail::from_campaign(true, true, true),
-            SherwoodRail::from_campaign(false, false, true),
+            SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK")),
         ];
 
         for (width, height) in [(800, 600), (2259, 1271)] {
@@ -830,9 +887,9 @@ mod tests {
         };
 
         for rail in [
-            SherwoodRail::from_campaign(true, false, true),
-            SherwoodRail::from_campaign(true, true, true),
-            SherwoodRail::from_campaign(false, false, true),
+            SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK")),
         ] {
             for button in rail.visible() {
                 let rect = layout.rect(button);
@@ -853,7 +910,7 @@ mod tests {
     fn absent_buttons_do_not_claim_clicks() {
         let sprites = SherwoodButtonSprites::default();
         let layout = SherwoodHudLayout::for_resolution(2259, 1271, &sprites);
-        let pre = SherwoodRail::from_campaign(true, false, true);
+        let pre = SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK"));
         let all_gates_open = SherwoodButtonEnable {
             display_campaign_map: true,
             go_to_exit: true,
@@ -912,7 +969,7 @@ mod tests {
             layout.hit_test(
                 pt_map.0,
                 pt_map.1,
-                SherwoodRail::from_campaign(true, true, true),
+                SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK")),
                 SherwoodButtonEnable::post_commit()
             ),
             Some(SherwoodButton::GoToExit)
@@ -921,7 +978,7 @@ mod tests {
             layout.hit_test(
                 pt_map.0,
                 pt_map.1,
-                SherwoodRail::from_campaign(true, false, true),
+                SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
                 SherwoodButtonEnable::pre_commit()
             ),
             Some(SherwoodButton::DisplayCampaignMap)
@@ -937,7 +994,7 @@ mod tests {
             layout.hit_test(
                 pt_trade.0,
                 pt_trade.1,
-                SherwoodRail::from_campaign(true, false, true),
+                SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
                 trading
             ),
             Some(SherwoodButton::SherwoodTrading)
@@ -956,7 +1013,7 @@ mod tests {
             layout.hit_test(
                 point.0,
                 point.1,
-                SherwoodRail::from_campaign(true, false, true),
+                SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
                 SherwoodButtonEnable::pre_commit()
             ),
             Some(SherwoodButton::PerksPanel)
@@ -969,7 +1026,7 @@ mod tests {
             layout.hit_test(
                 point.0,
                 point.1,
-                SherwoodRail::from_campaign(false, false, true),
+                SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK")),
                 SherwoodButtonEnable::in_mission(true)
             ),
             None
@@ -985,7 +1042,7 @@ mod tests {
                 .hit_test(
                     0,
                     0,
-                    SherwoodRail::from_campaign(true, true, true),
+                    SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK")),
                     SherwoodButtonEnable::post_commit()
                 )
                 .is_none()
@@ -1050,9 +1107,9 @@ mod tests {
     #[test]
     fn visible_rects_never_intersect_with_the_shipped_artwork() {
         let every_rail = [
-            SherwoodRail::from_campaign(true, false, true),
-            SherwoodRail::from_campaign(true, true, true),
-            SherwoodRail::from_campaign(false, false, true),
+            SherwoodRail::from_campaign(true, false, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(true, true, true, Some("H03_Der_MK")),
+            SherwoodRail::from_campaign(false, false, true, Some("H03_Der_MK")),
         ];
 
         for (width, height) in [(800, 600), (1024, 768), (2259, 1271)] {

@@ -1780,6 +1780,9 @@ struct OverlayHudInputs<'a> {
     stature_layout: &'a stature_hud::StatureHudLayout,
     stature_sprites: &'a stature_hud::StatureSprites,
     game: &'a Game,
+    /// Running mission filename, so the in-mission rail can hide the abandon
+    /// control in the two opening missions with no route back to Sherwood.
+    mission_name: Option<&'a str>,
     display_info_elapsed_secs: u32,
     local_seat: robin_engine::player_command::PlayerId,
 }
@@ -1828,6 +1831,7 @@ fn render_overlay_pass(
         stature_layout: ctx.stature_layout,
         stature_sprites: ctx.stature_sprites,
         game,
+        mission_name: assets.scripts.mission_name.as_deref(),
         display_info_elapsed_secs: ctx.display_info_elapsed_secs,
         local_seat,
     };
@@ -2219,12 +2223,13 @@ impl OverlayHudInputs<'_> {
             sherwood_rail,
             sherwood_sprites,
             game,
+            mission_name,
             ..
         } = *self;
         let sherwood_rail = if game.is_sherwood {
             sherwood_rail
         } else {
-            SherwoodRail::InMission
+            SherwoodRail::in_mission(mission_name)
         };
         let sherwood_enable = if game.is_sherwood {
             sherwood_enable

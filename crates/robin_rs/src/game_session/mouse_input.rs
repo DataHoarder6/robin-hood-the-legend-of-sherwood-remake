@@ -2033,7 +2033,12 @@ pub(super) fn handle_sherwood_hud_buttons(
         };
         (has_next, ready)
     };
-    *sherwood_rail = SherwoodRail::from_campaign(game.is_sherwood, has_next_mission, start_ready);
+    *sherwood_rail = SherwoodRail::from_campaign(
+        game.is_sherwood,
+        has_next_mission,
+        start_ready,
+        assets.scripts.mission_name.as_deref(),
+    );
     if host.transport.net().is_some()
         && host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST
     {
