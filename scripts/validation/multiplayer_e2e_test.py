@@ -432,7 +432,9 @@ class HashCadenceTest(unittest.TestCase):
         self.assertEqual(observed[0]["compared_frames"], 3)
 
     def test_one_compared_frame_is_not_a_cadence(self):
-        samples = [(0, None, 0), (10, 0, 0), (20, 0, 0)]
+        # The peer advanced past the next boundary, so one comparison proves
+        # nothing about the cadence.
+        samples = [(0, None, 0), (10, 0, 0), (30, 0, 0)]
         ok, detail, _ = self.evaluate({0: samples, 1: samples})
         self.assertFalse(ok)
         self.assertIn("unobservable", detail)
@@ -458,9 +460,16 @@ class HashCadenceTest(unittest.TestCase):
         self.assertTrue(ok, detail)
 
     def test_a_new_generation_must_show_its_own_cadence(self):
-        samples = [(0, None, 0, 0), (26, 25, 0, 0), (51, 50, 0, 0),
-                   (0, None, 0, 1), (26, 25, 0, 1)]
-        ok, detail, _ = self.evaluate({1: samples}, peers=(1,))
+        # A replacement mission that only reached frame 1 has not advanced to
+        # its next boundary: its single comparison at 0 is not a missed cadence.
+        evidence = [(0, None, 0, 0), (26, 25, 0, 0), (51, 50, 0, 0),
+                    (0, None, 0, 1), (1, 0, 0, 1)]
+        ok, detail, _ = self.evaluate({1: evidence}, peers=(1,))
+        self.assertTrue(ok, detail)
+        # The same single comparison after advancing to frame 26 is unobservable.
+        stalled = [(0, None, 0, 0), (26, 25, 0, 0), (51, 50, 0, 0),
+                   (0, None, 0, 1), (26, 0, 0, 1)]
+        ok, detail, _ = self.evaluate({1: stalled}, peers=(1,))
         self.assertFalse(ok)
         self.assertIn("unobservable", detail)
 

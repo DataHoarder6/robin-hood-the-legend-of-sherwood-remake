@@ -521,7 +521,8 @@ def _generation_cadence(samples, every):
     seen = sorted({value for value in compared if value is not None})
     if not seen:
         return problems
-    if len(seen) < 2:
+    advanced = max((frame for frame in frames if frame is not None), default=None)
+    if len(seen) < 2 and advanced is not None and advanced >= seen[0] + every:
         problems.append(
             f"only one compared frame ({seen[0]}) was observed, so the {every}-frame "
             "cadence is unobservable")
