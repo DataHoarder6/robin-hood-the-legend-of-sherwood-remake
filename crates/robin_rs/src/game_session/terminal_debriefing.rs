@@ -259,6 +259,9 @@ pub(super) struct TerminalDebriefingState {
     /// end. A wait with no deadline froze the whole session (audit item 1), so
     /// the wait is bounded and its expiry names itself.
     snapshot_wait_since: Option<std::time::Instant>,
+    /// The derived wait budget for the confirming commit. Held per state so
+    /// the host can use the exact wire size of the transition it prepared.
+    snapshot_confirm_budget: std::time::Duration,
     http_result: Option<(
         engine_player_command::ModalKind,
         engine_player_command::DialogResult,
@@ -308,15 +311,25 @@ pub(super) enum TerminalDebriefingProgress {
     SnapshotUnconfirmed,
 }
 
-/// How long a peer waits for the commit that confirms the mission end.
+/// Margin granted past the host's authoritative commit deadline so this peer
+/// never declares the mission end unconfirmed while the host still holds the
+/// transition as valid.
+const SNAPSHOT_CONFIRM_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait budget for the commit that confirms the mission end.
 ///
 /// The host publishes the transition as it finishes its debriefing and commits
-/// it once the seats that are connected acknowledge it; a client waits for that
-/// commit. Both sides used to wait forever, which froze the session with the
-/// mission pinned to `LevelInProgress` and no screen (audit item 1). The wait is
-/// generous — the leaderboard handoff runs first — and it is a wait on the
-/// session's own boundary, not on a player's decision.
-const SNAPSHOT_CONFIRM_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+/// it under `robin_engine::multiplayer::transition_budget(wire_bytes)` — a 60 s
+/// floor plus a payload allowance. A client waits for that same commit, so its
+/// budget must be derived from the host's: a fixed 30 s wait let a client eject
+/// while the host still considered the commit valid. The margin keeps the peer
+/// strictly behind the host's own deadline. Both sides used to wait forever,
+/// which froze the session with the mission pinned to `LevelInProgress` and no
+/// screen (audit item 1); this is a wait on the session's own boundary, not on a
+/// player's decision.
+fn snapshot_confirm_budget(wire_bytes: u64) -> std::time::Duration {
+    robin_engine::multiplayer::transition_budget(wire_bytes) + SNAPSHOT_CONFIRM_MARGIN
+}
 
 /// Explicit owners borrowed by the blocking terminal graphical flow.
 pub(super) struct TerminalDebriefingContext<'a> {
@@ -407,7 +420,7 @@ impl TerminalDebriefingState {
     /// `now` is a parameter so the test does not have to sleep through it.
     fn snapshot_wait_expired(&self, now: std::time::Instant) -> bool {
         self.snapshot_wait_since
-            .is_some_and(|since| now.duration_since(since) >= SNAPSHOT_CONFIRM_BUDGET)
+            .is_some_and(|since| now.duration_since(since) >= self.snapshot_confirm_budget)
     }
 
     fn await_remote_snapshot(
@@ -457,6 +470,7 @@ impl TerminalDebriefingState {
             leaderboard_preparation: Some(leaderboard_preparation),
             local_load: None,
             snapshot_wait_since: None,
+            snapshot_confirm_budget: snapshot_confirm_budget(0),
             http_result: None,
         }
     }
@@ -693,6 +707,7 @@ impl TerminalDebriefingState {
                         ),
                     );
                     self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
+                    self.snapshot_confirm_budget = snapshot_confirm_budget(wire_bytes);
                     self.snapshot_wait_since = Some(std::time::Instant::now());
                     context.game.operation.set(GameCode::LevelInProgress);
                     return TerminalDebriefingProgress::Pending;
@@ -738,7 +753,7 @@ impl TerminalDebriefingState {
                     )
                     .warn()
                     .field("waited_ms", waited.as_millis() as u64)
-                    .field("budget_ms", SNAPSHOT_CONFIRM_BUDGET.as_millis() as u64)
+                    .field("budget_ms", self.snapshot_confirm_budget.as_millis() as u64)
                     .record();
                     return TerminalDebriefingProgress::SnapshotUnconfirmed;
                 }
@@ -1238,6 +1253,7 @@ mod tests {
             },
             phase: TerminalDebriefingPhase::AwaitingFinalAuthority,
             snapshot_wait_since: None,
+            snapshot_confirm_budget: snapshot_confirm_budget(0),
             leaderboard_preparation: None,
             local_load: None,
             http_result: None,
@@ -1451,9 +1467,30 @@ mod tests {
         assert!(state.awaiting_snapshot());
 
         let start = std::time::Instant::now();
+        let budget = state.snapshot_confirm_budget;
         assert!(!state.snapshot_wait_expired(start));
-        assert!(!state.snapshot_wait_expired(start + SNAPSHOT_CONFIRM_BUDGET / 2));
-        assert!(state.snapshot_wait_expired(start + SNAPSHOT_CONFIRM_BUDGET));
+        assert!(!state.snapshot_wait_expired(start + budget / 2));
+        assert!(state.snapshot_wait_expired(start + budget));
+    }
+
+    /// A client must not give up before the authority's own commit deadline:
+    /// the old fixed 30 s wait was shorter than the host's >= 60 s budget, so a
+    /// legitimate commit could arrive after the client had already ejected.
+    #[test]
+    fn client_snapshot_wait_budget_covers_host_transition_budget() {
+        let host_floor = robin_engine::multiplayer::transition_budget(0);
+        let client_budget = snapshot_confirm_budget(0);
+        assert!(
+            client_budget >= host_floor,
+            "client wait {client_budget:?} is shorter than the host's floor {host_floor:?}"
+        );
+        // The host may prepare a larger payload; its own wait must cover that
+        // budget too, not just the client's floor.
+        let large_payload_bytes = 8 * 1024 * 1024;
+        assert!(
+            snapshot_confirm_budget(large_payload_bytes)
+                >= robin_engine::multiplayer::transition_budget(large_payload_bytes)
+        );
     }
 
     #[test]
