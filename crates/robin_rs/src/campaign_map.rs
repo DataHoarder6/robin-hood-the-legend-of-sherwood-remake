@@ -3851,6 +3851,75 @@ mod browser_tests {
         }
     }
 
+    /// The Inspect button is drawn and live only for a selectable pin.  The
+    /// same click region on a locked pin must neither open the description
+    /// nor emit a launch choice.
+    #[test]
+    fn inspect_is_inert_for_a_locked_pin() {
+        let mut state = browser();
+        let transform = progress_transform(1024, 768);
+        let mission_idx = state.graph.nodes[state.selected_progress].mission_idx;
+        let inspect = || GameEvent::MouseDown(916, 732, 1, 1); // centre of (840..992, 712..752)
+
+        state.graph.nodes[state.selected_progress].selectable = false;
+        assert_eq!(state.handle_events(vec![inspect()], transform, false), None);
+        assert_eq!(state.details_offset(), None);
+        assert!(state.replay_status.is_empty());
+
+        // The region itself is live: a selectable pin launches from it.  That
+        // makes the locked-pin result a property of the pin state, not dead
+        // click geometry.
+        state.graph.nodes[state.selected_progress].selectable = true;
+        assert_eq!(
+            state.handle_events(vec![inspect()], transform, false),
+            Some(CampaignMapChoice::SelectMission(mission_idx))
+        );
+    }
+
+    /// Each detail-view leaderboard action publishes a status string, whether
+    /// the board opens or the action fails.  `l` names its failure when no
+    /// mission identity is linked; `f` and `s` report their own outcome.
+    #[test]
+    fn detail_leaderboard_actions_report_status() {
+        let mut state = browser();
+        let transform = progress_transform(1024, 768);
+        state.details_open = true;
+
+        // Mission board: no linked identity, so the status is the explicit
+        // refusal rather than a silent no-op.
+        assert_eq!(
+            state.handle_events(vec![key(Keycode::Char(b'l'))], transform, true),
+            None
+        );
+        assert!(
+            state
+                .replay_status
+                .contains("No leaderboard mission identity")
+        );
+
+        // Full-campaign board: opens or fails, but always leaves a status.
+        state.replay_status.clear();
+        assert_eq!(
+            state.handle_events(vec![key(Keycode::Char(b'f'))], transform, true),
+            None
+        );
+        assert!(
+            !state.replay_status.is_empty(),
+            "the full-campaign board action must report a status"
+        );
+
+        // Submit action: no recording is selected, so it reports why.
+        state.replay_status.clear();
+        assert_eq!(
+            state.handle_events(vec![key(Keycode::Char(b's'))], transform, true),
+            None
+        );
+        assert!(
+            !state.replay_status.is_empty(),
+            "the submit action must report a status"
+        );
+    }
+
     #[test]
     fn details_can_select_every_play_without_launching_the_mission() {
         let mut state = browser();

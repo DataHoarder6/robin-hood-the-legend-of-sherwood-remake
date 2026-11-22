@@ -2706,6 +2706,84 @@ where
     SherwoodOverlayEntrance::Allowed
 }
 
+/// Shared bookkeeping result of a completed campaign-map modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CampaignMapExit {
+    /// A reshow is pending: keep the map active, skip the choice dispatch and
+    /// re-enter the overlay next frame.
+    reenter: bool,
+    /// A reshow was observed outside the modal's own poll (legacy path), so
+    /// the overlay's displayed flag survives the close.
+    redisplay_requested: bool,
+}
+
+/// Apply the shared pre-dispatch bookkeeping of a completed campaign map.
+///
+/// Extracted from `handle_sherwood_campaign_map_overlay` so the redisplay
+/// re-entry decision can be driven without a renderer. `on_dispatch` stands
+/// for the command/save-bound `match choice` that follows this call; the
+/// handler passes a no-op because its dispatch continues directly. The test
+/// passes a command-staging stand-in, which makes "no mission launched on a
+/// redisplay" falsifiable.
+fn run_campaign_map_exit<P>(
+    choice: CampaignMapChoice,
+    game: &mut Game,
+    on_dispatch: P,
+) -> CampaignMapExit
+where
+    P: FnOnce(),
+{
+    if choice == CampaignMapChoice::Redisplay
+        && game.operation.get_current() == GameCode::LevelInProgress
+    {
+        return CampaignMapExit {
+            reenter: true,
+            redisplay_requested: false,
+        };
+    }
+    if choice == CampaignMapChoice::Redisplay {
+        game.persistent.campaign_map_active = false;
+    }
+    let redisplay_requested = game.take_campaign_map_redisplay()
+        && game.operation.get_current() == GameCode::LevelInProgress;
+    if !redisplay_requested {
+        game.persistent.campaign_map_active = false;
+    }
+    on_dispatch();
+    CampaignMapExit {
+        reenter: false,
+        redisplay_requested,
+    }
+}
+
+/// How the overlay handles a mission selected on the map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MapSelectionExit<D, C> {
+    /// The description modal is open; no mission has been committed yet.
+    Description(D),
+    /// Menu resources are gone, so the legacy direct-commit path runs.
+    Commit(C),
+}
+
+/// Choose between opening the mission-description modal and the legacy direct
+/// commit when menu resources are unavailable. Extracted from the
+/// `SelectMission` arm of `handle_sherwood_campaign_map_overlay` so "selection
+/// alone commits nothing" can be driven in a GPU-free test. The closures stand
+/// for the renderer-bound modal construction and the command dispatch; the
+/// handler supplies the real ones and returns `Proceed` when the description
+/// opens.
+fn open_map_selection<D, C>(
+    has_menu_resources: bool,
+    on_description: impl FnOnce() -> D,
+    on_commit: impl FnOnce() -> C,
+) -> MapSelectionExit<D, C> {
+    if has_menu_resources {
+        MapSelectionExit::Description(on_description())
+    } else {
+        MapSelectionExit::Commit(on_commit())
+    }
+}
+
 /// Handle the Sherwood campaign-map overlay modal.
 ///
 /// Returns `HandlerAction::Exit(GameCode::Quit)` when the player
@@ -2824,35 +2902,17 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
         };
         *sherwood_flow = None;
 
-        // Handle the redisplay re-entry path before clearing
-        // `campaign_map_active`.  `show_campaign_map` returns
-        // `Redisplay` when it observed `take_campaign_map_redisplay()
-        // == true` at the top of one of its loop iterations — leave
-        // `campaign_map_active` set and `Proceed` so the next frame
-        // re-enters this handler at the new resolution.
-        if matches!(choice, crate::campaign_map::CampaignMapChoice::Redisplay) {
-            if game.operation.get_current() != GameCode::LevelInProgress {
-                // Exit the redisplay loop when the game operation
-                // has changed away from LEVEL_IN_PROGRESS, even if a
-                // redisplay was requested.  Clear the overlay flag
-                // and fall through to the standard post-modal
-                // cleanup below (treated as a Quit-style close —
-                // the ARES check + emergency-exit gate fire through
-                // the Quit branch).
-                game.persistent.campaign_map_active = false;
-            } else {
-                return Ok(HandlerAction::Proceed);
-            }
-        }
-
-        // If a redisplay was requested via `take_campaign_map_redisplay`
-        // *outside* of the modal's loop poll (legacy path; today the
-        // modal consumes the flag itself and returns `Redisplay`), keep
-        // `campaign_map_active` set so we re-enter on the next frame.
-        let redisplay_requested = game.take_campaign_map_redisplay()
-            && game.operation.get_current() == GameCode::LevelInProgress;
-        if !redisplay_requested {
-            game.persistent.campaign_map_active = false;
+        // Leave `campaign_map_active` set and return `Proceed` on a reshow so
+        // the next frame re-enters this handler and rebuilds the map at the
+        // new resolution. The choice dispatch below must not run on that path.
+        // A reshow observed outside the modal's own poll is handled by the
+        // same bookkeeping and keeps the overlay's displayed flag.
+        let CampaignMapExit {
+            reenter,
+            redisplay_requested,
+        } = run_campaign_map_exit(choice, game, || {});
+        if reenter {
+            return Ok(HandlerAction::Proceed);
         }
         // Defer clearing `campaign_map_displayed` until we know the
         // match arm below didn't take the Quit (emergency-end)
@@ -2872,46 +2932,56 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
                 // `ShowPendingMissions` the accessible list is rebuilt
                 // from the pending list; otherwise the campaign map
                 // is re-shown.
-                if let Some(resources) = menu_resources.as_mut() {
-                    let mission_descriptors = {
-                        let campaign = engine.campaign();
-                        let mission = &campaign.missions[idx];
-                        let mission_id = mission.profile(&assets.profile_manager).id;
-                        crate::mission_descriptors::for_presentation(
-                            host.application_context(),
-                            host.frontend.resources.shipping.as_deref(),
-                            mission_id,
-                        )
-                    };
-                    *sherwood_flow = Some(SherwoodCampaignFlow::MissionDescription {
-                        mission_index: idx,
-                        state: mission_description::MissionDescriptionModalState::new(
-                            event_pump,
-                            renderer,
-                            resources,
-                            idx,
-                            engine,
-                            &assets.profile_manager,
-                            mission_descriptors.as_ref(),
-                            text_res,
-                        ),
-                        admitted_actions: Vec::new(),
-                    });
-                    return Ok(HandlerAction::Proceed);
-                }
-
-                tracing::warn!(
-                    "menu_resources unavailable — skipping mission description dialog \
-                     and auto-committing mission {idx}"
-                );
-                dispatch_local_command(
-                    &host.transport,
-                    &mut frame.stage_commands(),
-                    &PlayerCommand::CampaignSelectNextMission {
-                        mission_idx: Some(idx),
+                let has_menu_resources = menu_resources.is_some();
+                match open_map_selection(
+                    has_menu_resources,
+                    || {
+                        let resources = menu_resources
+                            .as_mut()
+                            .expect("description branch requires menu resources");
+                        let mission_descriptors = {
+                            let campaign = engine.campaign();
+                            let mission = &campaign.missions[idx];
+                            let mission_id = mission.profile(&assets.profile_manager).id;
+                            crate::mission_descriptors::for_presentation(
+                                host.application_context(),
+                                host.frontend.resources.shipping.as_deref(),
+                                mission_id,
+                            )
+                        };
+                        *sherwood_flow = Some(SherwoodCampaignFlow::MissionDescription {
+                            mission_index: idx,
+                            state: mission_description::MissionDescriptionModalState::new(
+                                event_pump,
+                                renderer,
+                                resources,
+                                idx,
+                                engine,
+                                &assets.profile_manager,
+                                mission_descriptors.as_ref(),
+                                text_res,
+                            ),
+                            admitted_actions: Vec::new(),
+                        });
                     },
-                );
-                *sherwood_enable = SherwoodButtonEnable::post_commit();
+                    || {
+                        tracing::warn!(
+                            "menu_resources unavailable — skipping mission description dialog \
+                             and auto-committing mission {idx}"
+                        );
+                        dispatch_local_command(
+                            &host.transport,
+                            &mut frame.stage_commands(),
+                            &PlayerCommand::CampaignSelectNextMission {
+                                mission_idx: Some(idx),
+                            },
+                        );
+                        *sherwood_enable = SherwoodButtonEnable::post_commit();
+                    },
+                ) {
+                    MapSelectionExit::Description(()) => return Ok(HandlerAction::Proceed),
+                    MapSelectionExit::Commit(()) => {}
+                }
             }
             CampaignMapChoice::Quit => {
                 if ctx.engine.campaign().next_mission_idx.is_some() {
@@ -3796,6 +3866,145 @@ mod sherwood_outcome_tests {
             assert!(staged(&frame).is_empty(), "None dispatches no command");
             assert!(game.persistent.campaign_map_active);
         }
+    }
+
+    /// A real mission-commit command, staged by a dispatch stand-in so the
+    /// no-launch assertions on re-entry and cancel are falsifiable.
+    fn stage_commit(frame: &mut MissionFrame) {
+        let offline = Host::scratch(800.0, 600.0);
+        dispatch_local_command(
+            &offline.transport,
+            &mut frame.stage_commands(),
+            &PlayerCommand::CampaignSelectNextMission {
+                mission_idx: Some(3),
+            },
+        );
+    }
+
+    /// A pending reshow tears the modal down and re-enters it: the map stays
+    /// active, the choice dispatch is skipped and no mission is committed.
+    #[test]
+    fn redisplay_reenters_the_map_without_launching() {
+        {
+            let (mut game, _host, mut frame, _callbacks) = fresh();
+            game.show_campaign_map();
+            let exit = run_campaign_map_exit(CampaignMapChoice::Redisplay, &mut game, || {
+                stage_commit(&mut frame)
+            });
+            assert!(exit.reenter, "a reshow re-enters the map");
+            assert!(!exit.redisplay_requested);
+            assert!(game.persistent.campaign_map_active);
+            assert!(
+                staged(&frame).is_empty(),
+                "a reshow must not launch a mission: {:?}",
+                staged(&frame)
+            );
+        }
+
+        // Control: an ordinary choice closes the map and really runs the
+        // dispatch continuation, so the emptiness above is meaningful.
+        {
+            let (mut game, _host, mut frame, _callbacks) = fresh();
+            game.show_campaign_map();
+            let exit =
+                run_campaign_map_exit(CampaignMapChoice::SelectMission(3), &mut game, || {
+                    stage_commit(&mut frame)
+                });
+            assert!(!exit.reenter);
+            assert!(!game.persistent.campaign_map_active);
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [PlayerCommand::CampaignSelectNextMission {
+                        mission_idx: Some(3)
+                    }]
+                ),
+                "the control must stage the commit: {:?}",
+                staged(&frame)
+            );
+        }
+
+        // A reshow after leaving LevelInProgress must not loop forever: the
+        // map closes and the tail dispatch runs.
+        {
+            let (mut game, _host, mut frame, _callbacks) = fresh();
+            game.show_campaign_map();
+            game.operation.set(GameCode::Quit);
+            let exit = run_campaign_map_exit(CampaignMapChoice::Redisplay, &mut game, || {
+                stage_commit(&mut frame)
+            });
+            assert!(!exit.reenter);
+            assert!(!game.persistent.campaign_map_active);
+            assert!(
+                !staged(&frame).is_empty(),
+                "the non-LevelInProgress tail must still dispatch"
+            );
+        }
+    }
+
+    /// Selecting a pin opens the description modal; cancelling there re-opens
+    /// the map with no mission committed. The direct-commit continuation is a
+    /// real command probe, so neither half can pass vacuously.
+    #[test]
+    fn cancelling_after_selection_commits_no_mission() {
+        let (mut game, host, mut frame, _callbacks) = fresh();
+        let mut enable = SherwoodButtonEnable::pre_commit();
+
+        let selection = open_map_selection(
+            true,
+            || "description opened",
+            || {
+                stage_commit(&mut frame);
+                "committed"
+            },
+        );
+        assert_eq!(
+            selection,
+            MapSelectionExit::Description("description opened")
+        );
+        assert!(
+            staged(&frame).is_empty(),
+            "a selection must not commit: {:?}",
+            staged(&frame)
+        );
+
+        // The modal's Cancel is MissionChoice::None: the driver re-opens the
+        // map without dispatching a campaign selection.
+        dispatch_sherwood_mission_choice(
+            MissionChoice::None,
+            3,
+            false,
+            &mut game,
+            &host,
+            &mut frame,
+            &mut enable,
+        );
+        assert!(
+            staged(&frame).is_empty(),
+            "cancelling after selection must not commit: {:?}",
+            staged(&frame)
+        );
+        assert!(game.persistent.campaign_map_active);
+
+        // Control: without menu resources the legacy direct commit really
+        // runs the probe, proving the dispatch channel is live.
+        let (_game, _host, mut fallback_frame, _callbacks) = fresh();
+        let fallback = open_map_selection(
+            false,
+            || unreachable!("no menu resources: no description modal"),
+            || stage_commit(&mut fallback_frame),
+        );
+        assert_eq!(fallback, MapSelectionExit::Commit(()));
+        assert!(
+            matches!(
+                staged(&fallback_frame).as_slice(),
+                [PlayerCommand::CampaignSelectNextMission {
+                    mission_idx: Some(3)
+                }]
+            ),
+            "the legacy fallback must commit: {:?}",
+            staged(&fallback_frame)
+        );
     }
 
     /// Stand-in for the renderer-bound remainder of the handler. It stages a
