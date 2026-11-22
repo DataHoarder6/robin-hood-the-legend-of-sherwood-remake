@@ -461,6 +461,19 @@ impl EngineInner {
                 // one locally would end a mission its host is still running.
                 tracing::warn!(seat, "refused a mission-end trigger from a non-host seat");
             }
+            ForceMissionEnd { result } if *result == crate::game_operation::MissionResult::Won => {
+                // WIN is a normal win, not an instant ending. Mark it the way
+                // the script's `win(true)` does: the 235 "leave now" prompt
+                // fires next frame, and accepting it finishes the mission.
+                // Declining leaves `mission_won` set, which keeps the rail's
+                // finish badge available until the player changes their mind.
+                if !self.mission_domain.state.quit_won
+                    && !self.mission_domain.state.quit_lost
+                    && !self.mission_domain.state.quit_interrupted
+                {
+                    self.win(true);
+                }
+            }
             ForceMissionEnd { result } => {
                 // One attempt has one outcome: a second trigger after the flags
                 // were latched is the same decision arriving twice, not a new

@@ -238,10 +238,17 @@ fn end_mission(
     } else {
         frame_commands.push(command);
     }
+    // A win no longer ends the mission in this frame: it raises the 235 leave
+    // prompt and the mission keeps running, so name the code this tick returns.
+    let operation = if result == robin_engine::game_operation::MissionResult::Won {
+        robin_engine::game_operation::GameCode::LevelInProgress.wire_name()
+    } else {
+        result.game_code().wire_name()
+    };
     Ok(ReplyBody::Json(serde_json::json!({
         "ok": true,
         "result": result,
-        "operation": result.game_code().wire_name(),
+        "operation": operation,
     })))
 }
 

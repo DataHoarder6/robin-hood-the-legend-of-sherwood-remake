@@ -1243,8 +1243,8 @@ pub enum PlayerCommand {
     /// abort path).  The tick's own flag-reading arms then convert
     /// these into the matching mission-end `GameCode`.
     QuitMissionRequested,
-    /// The developer trigger (`POST /mission-result`) ended the mission on
-    /// purpose: a victory, a defeat, or an abandonment.
+    /// The developer trigger (`WIN` / `POST /mission-result`) asks for a
+    /// mission result: a victory, a defeat, or an abandonment.
     ///
     /// It rides the command stream so every seat latches the same decision at
     /// the same frame — a mission end is not a host-only fact — and the tick's
@@ -1253,6 +1253,12 @@ pub enum PlayerCommand {
     /// script-driven end reaches. Only the host seat may issue it; a client's
     /// copy is refused by the engine, and the HTTP surface refuses the request
     /// before it reaches the wire.
+    ///
+    /// `Won` is the exception to the immediate ending: it marks the win the
+    /// way a scripted `win(true)` does, raising the 235 leave prompt. Accept
+    /// finishes the mission; declining keeps the won state (and the rail's
+    /// finish badge) so the player can finish whenever they choose. `Lost`
+    /// and `Aborted` still end the mission in the frame the command lands.
     ForceMissionEnd {
         result: crate::game_operation::MissionResult,
     },

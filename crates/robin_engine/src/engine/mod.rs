@@ -1002,6 +1002,10 @@ impl EngineInner {
     /// End the running mission with exactly the quit flag its own decision
     /// would latch.
     ///
+    /// A console WIN does not reach this method with `Won`: the command
+    /// dispatcher marks a victory like a scripted `win(true)` instead, so the
+    /// 235 leave prompt fires and a decline preserves the finish badge.
+    ///
     /// This is the developer trigger's engine half, not a second ending: the
     /// tick's mission phase owns everything that follows from these flags —
     /// `finalize_mission_script`, the returned `GameCode`, the terminal

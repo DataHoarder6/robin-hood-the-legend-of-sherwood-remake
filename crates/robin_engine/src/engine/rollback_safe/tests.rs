@@ -5,8 +5,9 @@ use crate::engine::SimCommand;
 fn a_mission_end_command_ends_the_mission_in_the_frame_that_applies_it() {
     use crate::game_operation::{GameCode, MissionResult};
     use crate::player_command::PlayerCommand;
+    // WIN is not an instant ending: it marks the win and raises the 235 leave
+    // prompt (see win_command_raises_leave_prompt_and_does_not_latch_quit_won).
     for (result, code) in [
-        (MissionResult::Won, GameCode::LevelSucceeded),
         (MissionResult::Lost, GameCode::LevelFailed),
         (MissionResult::Aborted, GameCode::LevelInterrupted),
     ] {
@@ -45,6 +46,57 @@ fn a_mission_end_command_ends_the_mission_in_the_frame_that_applies_it() {
                 .contains("already ended")
         );
     }
+}
+
+#[test]
+fn win_command_raises_leave_prompt_and_does_not_latch_quit_won() {
+    use crate::engine::HostSignal;
+    use crate::game_operation::{GameCode, MissionResult};
+    use crate::player_command::PlayerCommand;
+
+    let (mut engine, assets) = frame_api_fixture();
+    // Every WIN surface (in-game console, WINNER alias, /mission-result)
+    // stages this one authoritative command. It must behave like a normal
+    // win: raise the 235 "leave now" prompt and let the player decide.
+    let tick = engine
+        .advance_frame(
+            &assets,
+            SimulationFrameInput::new(vec![
+                PlayerCommand::ForceMissionEnd {
+                    result: MissionResult::Won,
+                }
+                .into(),
+            ]),
+        )
+        .expect("apply the WIN command");
+
+    assert_eq!(
+        tick.events.code,
+        GameCode::LevelInProgress,
+        "WIN keeps the mission running until the player accepts the prompt"
+    );
+    let mission = engine.inner.mission();
+    assert!(!mission.quit_won, "WIN must not end the mission outright");
+    assert!(
+        mission.mission_won,
+        "the won state is recorded so the rail's finish badge survives a decline"
+    );
+    assert!(
+        tick.events.has_signal(HostSignal::MissionStatePopup),
+        "the 235 leave-mission popup is raised this frame"
+    );
+
+    // Declining the prompt (the modal gate's Aborted outcome) must not clear
+    // the win: the player can still finish with the badge on a later frame.
+    let again = engine
+        .advance_frame(&assets, SimulationFrameInput::default())
+        .expect("the mission keeps running after the prompt is declined");
+    assert_eq!(again.events.code, GameCode::LevelInProgress);
+    assert!(
+        engine.inner.mission().mission_won,
+        "badge survives the decline"
+    );
+    assert!(!engine.inner.mission().quit_won);
 }
 
 #[test]

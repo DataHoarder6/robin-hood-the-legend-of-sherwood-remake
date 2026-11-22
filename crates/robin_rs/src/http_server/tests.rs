@@ -597,7 +597,8 @@ mod dispatch_tests {
         use robin_engine::game_operation::{GameCode, MissionResult};
         use robin_engine::player_command::{PlayerCommand, PlayerId};
         for (result, name, code) in [
-            (MissionResult::Won, "won", GameCode::LevelSucceeded),
+            // WIN raises the 235 prompt; the mission ends only when accepted.
+            (MissionResult::Won, "won", GameCode::LevelInProgress),
             (MissionResult::Lost, "lost", GameCode::LevelFailed),
             (
                 MissionResult::Aborted,
@@ -635,6 +636,7 @@ mod dispatch_tests {
             );
             // The command latches the flag and the same frame's mission phase
             // reads it: the code the reply named is the code this frame returns.
+            // WIN is the exception — it raises the prompt and keeps running.
             let tick = engine
                 .advance_frame(
                     &assets,
@@ -657,7 +659,10 @@ mod dispatch_tests {
         use robin_engine::game_operation::{GameCode, MissionResult};
         use robin_engine::player_command::{PlayerCommand, PlayerId};
         for (command, result, code) in [
-            ("WIN", MissionResult::Won, GameCode::LevelSucceeded),
+            // WIN is a normal win now: it marks the win and raises the 235
+            // leave prompt, so the mission keeps running until the player
+            // accepts. The finish badge stays if the prompt is declined.
+            ("WIN", MissionResult::Won, GameCode::LevelInProgress),
             ("LOOSE", MissionResult::Lost, GameCode::LevelFailed),
         ] {
             let (mut engine, assets) =
@@ -700,6 +705,20 @@ mod dispatch_tests {
                 code,
                 "{command}: the tick returns the code"
             );
+            if result == MissionResult::Won {
+                assert!(
+                    engine.mission().mission_won,
+                    "WIN records the win so the rail's finish badge survives a decline"
+                );
+                assert!(
+                    !engine.mission().quit_won,
+                    "WIN leaves the mission running for the 235 prompt"
+                );
+                let rail = crate::sherwood_hud::SherwoodButtonEnable::in_mission(
+                    engine.mission().mission_won,
+                );
+                assert!(rail.start_mission, "the finish badge is enabled after WIN");
+            }
         }
     }
 
