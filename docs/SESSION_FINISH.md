@@ -43,25 +43,60 @@ non-destructive route. Never force a rebase through someone's commits.
 
 ## Freezing deferred work
 
-A feature that is postponed (not abandoned) is frozen, never deleted. A feature
-is frozen only if it has a [BACKLOG.md](BACKLOG.md) entry; otherwise finish it
-or delete it.
+[BACKLOG.md](BACKLOG.md) owns what may be frozen; this section owns how, and the
+criterion that says the freeze is complete.
 
-1. Stop execution without removing the session:
-   `opencode api POST /api/session/<id>/interrupt` — it returns
-   `{"interrupted": …}` and leaves the session and its history intact. `delete`
-   is only for data you truly want gone; it is irreversible.
-2. Stop every job it started with `runbg stop <name>`; a session that keeps a
-   job alive will respawn it. Do not kill the runtime itself.
+OpenCode replays a pending tool call on every runtime restart, so `interrupt`
+alone can relaunch a frozen session's `runbg` job without anyone resuming it.
+
+1. Stop every job the session started with `runbg stop <name>`; do not kill the
+   runtime or another session's job.
+2. Interrupt the session with `opencode api POST /api/session/<id>/interrupt`.
+   It leaves the session and history intact; `delete` is irreversible and only
+   for data you truly want gone.
 3. Add a [BACKLOG.md](BACKLOG.md) entry: feature, target release and why it is
    deferred. Do this before renaming the session.
 4. Rename the session `[FROZEN] <feature> — backlog <release>`.
 5. Keep the worktree and branch.
 
-`scripts/backlog-check.sh` flags `[FROZEN]` sessions with no entry and entries
-whose worktree is gone; run it before ending the session. Freezing is a
-lifecycle decision, not a patch: the code, branch and transcript all survive,
-but no gate or agent runs until the backlog item is picked up.
+### Completion criterion
+
+Two branches, one trigger each:
+
+- `PENDING` — trigger: a tool part in a `[FROZEN]` session's `session_message`
+  has `state.status` `running` or `pending`, or one of its `runbg` jobs is
+  active. Not frozen; run the revert recipe below and re-check.
+- `CLEAR` — trigger: zero such tool parts and zero `runbg` jobs, observed after
+  a runtime restart (or directly in `session_message`). Frozen; only this
+  branch may end the session.
+
+`scripts/backlog-check.sh` proves the DB half and fails the `PENDING` branch;
+`runbg list` proves the job half. Neither is a claim in a title.
+
+### Revert recipe (`PENDING` only)
+
+`interrupt` has already been tried. Drop the message that still carries the
+pending call, then stop what it relaunched and interrupt again:
+
+```sh
+# Find <msg>: a tool part whose state.status is running or pending.
+sqlite3 -readonly ~/.local/share/opencode/opencode.db "
+  SELECT m.id, s.title, json_extract(p.value,'\$.name')
+  FROM session_message m
+  JOIN session_v2 s ON s.id=m.session_id
+  JOIN json_each(m.data,'\$.content') p
+  WHERE s.title LIKE '[FROZEN]%'
+    AND m.type='assistant' AND json_extract(p.value,'\$.type')='tool'
+    AND json_extract(p.value,'\$.state.status') IN ('running','pending');"
+opencode api POST /api/session/<id>/revert/stage \
+  -d '{"messageID":"<msg>","files":false}'
+opencode api POST /api/session/<id>/revert/commit
+runbg stop <name>
+opencode api POST /api/session/<id>/interrupt
+```
+
+`files:false` is the point: the message leaves the history, the worktree and
+branch stay. Re-run `scripts/backlog-check.sh` to reach `CLEAR`.
 
 ## Builds
 
