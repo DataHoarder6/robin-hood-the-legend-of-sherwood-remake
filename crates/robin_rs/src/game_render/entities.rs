@@ -1221,7 +1221,6 @@ fn outline_camp_is_allied(
         false
     }
 }
-
 #[cfg(test)]
 mod outline_decision_tests {
     use super::*;
