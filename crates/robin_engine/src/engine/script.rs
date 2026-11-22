@@ -1348,17 +1348,29 @@ impl EngineInner {
             .ok_or_else(|| format!("SetActorLocation invalid actor handle {actor_handle}"))?;
 
         if location != 0 {
-            if self
-                .get_entity(actor)
-                .expect("validated SetActorLocation actor vanished")
-                .element_data()
-                .in_honolulu
-            {
+            let woken_alert = {
                 let entity = self
                     .get_entity_mut(actor)
                     .expect("validated SetActorLocation actor vanished before activation");
-                entity.element_data_mut().active = true;
-                entity.element_data_mut().in_honolulu = false;
+                if entity.element_data().in_honolulu {
+                    entity.element_data_mut().active = true;
+                    entity.element_data_mut().in_honolulu = false;
+                    // Publication skipped this staged body; count it here at
+                    // the wake-up boundary so the alert population stays in
+                    // step with the soldiers the tick simulates.
+                    if entity.is_soldier() {
+                        entity
+                            .ai_controller()
+                            .map(|ai| ai.current_music_alert_status)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(alert) = woken_alert {
+                self.ai.global.count_alert_soldier(alert);
             }
 
             let script = self

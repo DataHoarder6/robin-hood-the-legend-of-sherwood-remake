@@ -1352,17 +1352,7 @@ impl EngineInner {
     /// summon that wakes a staged body both go through here, so the counters
     /// always describe the soldiers the tick actually simulates.
     pub(crate) fn publish_soldier_alert_count(&mut self, alert: crate::ai::AlertLevel) {
-        let count = match alert {
-            crate::ai::AlertLevel::Green => &mut self.ai.global.green_alert_soldiers,
-            crate::ai::AlertLevel::Yellow => &mut self.ai.global.yellow_alert_soldiers,
-            crate::ai::AlertLevel::Red => &mut self.ai.global.red_alert_soldiers,
-        };
-        *count = count
-            .checked_add(1)
-            .expect("soldier alert counter overflow at publication");
-        let overall = self.ai.global.overall_villain_alert();
-        self.ai.global.overall_alert_status = overall;
-        self.ai.global.overall_villain_alert_status = overall;
+        self.ai.global.count_alert_soldier(alert);
     }
 
     /// Mission statistics for a soldier that is now in the level.

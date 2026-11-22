@@ -637,6 +637,54 @@ fn enter_and_leave_game_accept_original_movement_style_codes() {
     assert!(!NativeContext::validate_style(-1, "RecordLeaveGame"));
 }
 
+/// A staged soldier woken by the native `RecordEnterGame` off-map placement
+/// must join the alert population. Publication skipped it because it was
+/// inactive, so this wake-up is the only chance to count it.
+#[test]
+fn record_enter_game_wakes_staged_soldier_into_alert_population() {
+    let mut host = NativeTestHost::new();
+    let mut bbox = crate::coordinates::MapBBox::new();
+    bbox.expand_point(crate::coordinates::MapPoint::new(0.0, 0.0));
+    bbox.expand_point(crate::coordinates::MapPoint::new(1000.0, 1000.0));
+    host.fast_grid.level_mut().map_bbox = bbox;
+
+    let mut soldier = native_test_soldier();
+    let ed = soldier.element_data_mut();
+    ed.active = false;
+    ed.in_honolulu = true;
+    soldier
+        .enemy_ai_mut()
+        .expect("native test soldier has enemy AI")
+        .base
+        .current_music_alert_status = crate::ai::AlertLevel::Yellow;
+    host.entities.push(Some(soldier));
+
+    host.bindings.script_location_count = 1;
+    host.bindings.script_point_count = 1;
+    host.bindings.location_positions = std::sync::Arc::new(vec![(80.0, 80.0)]);
+    host.bindings.location_layers = std::sync::Arc::new(vec![0]);
+    host.bindings.location_sectors = std::sync::Arc::new(vec![0]);
+    host.bindings.location_sector_handles = std::sync::Arc::new(vec![None]);
+
+    let actor = ScriptHandleCodec::actor_handle_from_index(0);
+    let location = ScriptHandleCodec::location_handle_from_index(0);
+    let mut stack = NativeStack::default();
+    stack.push_i32(actor);
+    stack.push_i32(location);
+    stack.push_i32(0); // direction
+    stack.push_i32(0); // movement style
+
+    let _ = call_host_command(&mut host, NativeFn::RecordEnterGame, &mut stack, 0);
+
+    assert_eq!(
+        host.ai_global.yellow_alert_soldiers, 1,
+        "the woken staged soldier joins the alert population"
+    );
+    let soldier = host.entities.get_legacy_slot(0).unwrap().1.element_data();
+    assert!(soldier.active, "the staged body is now active");
+    assert!(!soldier.in_honolulu, "the body left Honolulu");
+}
+
 #[test]
 fn enter_and_leave_game_styles_map_to_expected_orders() {
     assert_eq!(

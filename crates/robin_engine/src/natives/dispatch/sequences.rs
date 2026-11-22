@@ -642,19 +642,35 @@ impl NativeContext<'_, '_> {
                     // the next script read.  Also handles the
                     // `in_honolulu` wake-up case.
                     let map_bbox = self.fast_grid.level.map_bbox;
-                    let Some(entity) = self.get_entity_mut(actor) else {
-                        script_error!(native, "invalid actor handle {actor}");
-                        return 0;
+                    let (outside, woken_alert) = {
+                        let Some(entity) = self.get_entity_mut(actor) else {
+                            script_error!(native, "invalid actor handle {actor}");
+                            return 0;
+                        };
+                        let (outside, woke) = crate::engine::reinforcement::place_outside_entity(
+                            map_bbox,
+                            entity,
+                            crate::coordinates::MapPoint { x: dx, y: dy },
+                            dest_layer_sector.map(|(layer, _)| layer),
+                            dest_layer_sector.map(|(_, sector)| sector),
+                            effective_dir,
+                        );
+                        // Publication skipped this body because it was staged.
+                        // Count it here, at the wake-up boundary, so the alert
+                        // population tracks the soldiers the tick simulates.
+                        let alert = if woke && entity.is_soldier() {
+                            entity
+                                .ai_controller()
+                                .map(|ai| ai.current_music_alert_status)
+                        } else {
+                            None
+                        };
+                        (outside, alert)
                     };
-                    let outside = crate::engine::reinforcement::place_outside_entity(
-                        map_bbox,
-                        entity,
-                        crate::coordinates::MapPoint { x: dx, y: dy },
-                        dest_layer_sector.map(|(layer, _)| layer),
-                        dest_layer_sector.map(|(_, sector)| sector),
-                        effective_dir,
-                    );
                     let (ox, oy) = (outside.x, outside.y);
+                    if let Some(alert) = woken_alert {
+                        self.ai_global.count_alert_soldier(alert);
+                    }
                     self.yield_engine_command(EngineCommand::SetActorLocation {
                         actor_handle: actor,
                         x: ox,

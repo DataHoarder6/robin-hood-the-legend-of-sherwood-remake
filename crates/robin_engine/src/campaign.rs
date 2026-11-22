@@ -2321,13 +2321,16 @@ impl Campaign {
         );
 
         if !self.is_mission_accessible(target_idx) {
-            // Committing removed this mission from the accessible list, so
-            // asking for it again (back out to the map, pick the same mission
-            // again — or replay a command recorded by a build that dispatched
-            // the cancel as a selection) would look exactly like a
-            // history-replay request and panic. Re-committing is a no-op; the
-            // aging/removal side effects below only apply to a first commit.
-            if self.next_mission_idx == Some(target_idx) {
+            // Committing removed this mission from the accessible list. A
+            // cancel (`None`) or a re-selection of the still-in-progress
+            // committed mission is a no-op: there is no history to replay and
+            // the aging/removal side effects only apply to a first commit.
+            // Once the mission is completed, an explicit re-selection must
+            // flow into the history-replay transition below instead of being
+            // silently dropped.
+            if self.next_mission_idx == Some(target_idx)
+                && (mission_idx.is_none() || !self.is_mission_replayable(target_idx))
+            {
                 return;
             }
             assert!(
@@ -3560,6 +3563,29 @@ mod tests {
         assert_eq!(campaign.next_mission_idx, Some(1));
         assert_eq!(campaign.accessible_mission_indices, accessible);
         assert_eq!(campaign.history_replay_mission_idx, None);
+    }
+
+    /// Re-selecting the currently committed mission is a no-op while it is
+    /// still in progress, but once the mission has been completed the same
+    /// selection is a legitimate history-replay request: it must capture the
+    /// practice-return snapshot and route into the replay transition rather
+    /// than being silently dropped.
+    #[test]
+    fn recommitting_a_completed_mission_replays_its_history() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1, 2];
+
+        campaign.select_next_mission(Some(1), &profiles);
+        campaign.missions[1].status = MissionStatus::Won;
+        assert_eq!(campaign.next_mission_idx, Some(1));
+        assert!(!campaign.is_mission_accessible(1));
+
+        campaign.select_next_mission(Some(1), &profiles);
+
+        assert_eq!(campaign.history_replay_mission_idx, Some(1));
+        assert_eq!(campaign.next_mission_idx, Some(1));
+        assert!(campaign.practice_return_snapshot.is_some());
     }
 
     #[test]

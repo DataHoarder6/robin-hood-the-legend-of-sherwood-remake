@@ -599,6 +599,24 @@ impl AiGlobalState {
         self.red_alert_soldiers = 0;
     }
 
+    /// Count one soldier into the alert population and refresh the derived
+    /// overall alert statuses. Publication, garrison summons and native
+    /// wake-ups all go through here so the counters describe the soldiers the
+    /// tick actually simulates.
+    pub fn count_alert_soldier(&mut self, alert: AlertLevel) {
+        let count = match alert {
+            AlertLevel::Green => &mut self.green_alert_soldiers,
+            AlertLevel::Yellow => &mut self.yellow_alert_soldiers,
+            AlertLevel::Red => &mut self.red_alert_soldiers,
+        };
+        *count = count
+            .checked_add(1)
+            .expect("soldier alert counter overflow at activation");
+        let overall = self.overall_villain_alert();
+        self.overall_alert_status = overall;
+        self.overall_villain_alert_status = overall;
+    }
+
     /// Add a seek-point direction, either merging it into an existing
     /// nearby seek point or creating a new one.
     pub fn add_seek_point_direction(&mut self, dir: &SeekPointDirection) {

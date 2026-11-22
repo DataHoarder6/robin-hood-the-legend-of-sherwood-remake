@@ -348,13 +348,31 @@ impl EngineInner {
                 .position(|(index, description)| {
                     description.character_profile_idx == Some(profile_idx) && !team.contains(&index)
                 });
-            // The roster is authored spawn data, not progression.  A reused
-            // campaign slot keeps its own `PcStatus` (training XP, ammo, and
-            // purchased perks) — re-running an authored mission must not erase
-            // what the player earned.  Only a character this campaign has never
-            // held is seeded from the profile.
             let character = match reused {
                 Some(index) => {
+                    // Re-seed life, coma and profile-derived state from the
+                    // profile so a previous mission's wounds cannot leak into
+                    // this one. Carry over only the progression the
+                    // authored-roster feature deliberately preserves: trained
+                    // skills, ammo and purchased perks.
+                    let previous = &campaign.characters[index].status;
+                    let mut status =
+                        crate::pc_status::PcStatus::from_profile(profile, true, difficulty);
+                    status.human_status = previous.human_status.clone();
+                    status.num_ales = previous.num_ales;
+                    status.num_arrows = previous.num_arrows;
+                    status.num_apples = previous.num_apples;
+                    status.num_rations = previous.num_rations;
+                    status.num_stones = previous.num_stones;
+                    status.num_wasp_nests = previous.num_wasp_nests;
+                    status.num_nets = previous.num_nets;
+                    status.num_plants = previous.num_plants;
+                    status.num_purses = previous.num_purses;
+                    status.keep_moving_in_combat = previous.keep_moving_in_combat;
+                    status.auto_loot = previous.auto_loot;
+                    status.no_friendly_fire_damage = previous.no_friendly_fire_damage;
+                    status.no_friendly_fire_knockback = previous.no_friendly_fire_knockback;
+                    campaign.characters[index].status = status;
                     campaign.characters[index].instanced = true;
                     index
                 }
@@ -1368,5 +1386,66 @@ mod authored_roster_tests {
             campaign.characters[0].instanced,
             "spawn data still marks the reused character instanced"
         );
+    }
+
+    /// A reused authored slot deliberately keeps trained skills, ammo and
+    /// purchased perks, but it must NOT carry a prior mission's wounds or coma
+    /// into the new level — life and consciousness are re-seeded from the
+    /// character profile just like upstream.
+    #[test]
+    fn authored_roster_reuse_resets_life_and_coma_from_profile() {
+        let loaded = crate::level_data::LoadedLevel::hackable_from_json(
+            br#"{
+            "map_filename":"Mission",
+            "walkable_polygon":[[0,0],[100,0],[100,100],[0,100]],
+            "spawn_points":[{"position":[10,10],"profile":0}]
+        }"#,
+        )
+        .unwrap();
+        let mut profiles = crate::profiles::ProfileManager::default();
+        profiles.characters = vec![crate::profiles::CharacterProfile::default(); 2];
+        let mut status = crate::pc_status::PcStatus::from_profile(
+            &profiles.characters[0],
+            true,
+            crate::player_profile::DifficultyLevel::Medium,
+        );
+        status
+            .human_status
+            .add_experience(crate::pc_status::SkillName::Bow, 250);
+        status.num_arrows = 9;
+        status.keep_moving_in_combat = true;
+        // The prior mission left this character badly wounded and in a coma.
+        status.life_points = 12;
+        status.in_coma = true;
+        let mut campaign = crate::campaign::Campaign::default();
+        campaign.characters.push(crate::campaign::PcDescription {
+            character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
+            instanced: true,
+            status,
+        });
+        campaign.mission_team_indices = vec![0];
+
+        EngineInner::authored_beam_me_spawn_plan(
+            &mut campaign,
+            &profiles,
+            &loaded,
+            crate::player_profile::DifficultyLevel::Medium,
+        )
+        .unwrap();
+
+        let reused = &campaign.characters[0].status;
+        assert_eq!(
+            reused.life_points,
+            crate::pc_status::LIFEPOINTS_PC,
+            "a reused slot spawns at full life, not with the previous mission's wounds"
+        );
+        assert!(
+            !reused.in_coma,
+            "a reused slot spawns conscious, not in the previous mission's coma"
+        );
+        // Progression the authored-roster feature deliberately keeps survives.
+        assert_eq!(reused.human_status.bow.capacity, 2);
+        assert_eq!(reused.num_arrows, 9);
+        assert!(reused.keep_moving_in_combat);
     }
 }

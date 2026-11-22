@@ -52,6 +52,9 @@ pub(crate) enum SummonEntry {
 /// sector are only replaced when the caller supplies them — computed script
 /// locations carry neither, while authored entry points and static script
 /// points carry both.
+///
+/// Returns `true` when this call woke a staged (`in_honolulu`) body. Callers
+/// that own the alert population must count the newly-active soldier.
 pub(crate) fn place_outside_entity(
     map_bbox: crate::coordinates::MapBBox,
     entity: &mut Entity,
@@ -59,7 +62,7 @@ pub(crate) fn place_outside_entity(
     layer: Option<u16>,
     sector: Option<crate::position_interface::SectorHandle>,
     direction: i16,
-) -> MapPoint {
+) -> (MapPoint, bool) {
     let (_border, (x, y)) = crate::natives::compute_border_point_bbox(
         map_bbox,
         (destination.x, destination.y),
@@ -67,7 +70,8 @@ pub(crate) fn place_outside_entity(
     );
     let outside = MapPoint::new(x, y);
     let element = entity.element_data_mut();
-    if element.in_honolulu {
+    let woke = element.in_honolulu;
+    if woke {
         element.active = true;
         element.in_honolulu = false;
     }
@@ -82,7 +86,7 @@ pub(crate) fn place_outside_entity(
             .set_sector_topology(Some(sector), sector.arena_index());
     }
     element.update_grid_cell();
-    outside
+    (outside, woke)
 }
 
 impl EngineInner {
@@ -102,14 +106,18 @@ impl EngineInner {
         let entity = self
             .get_entity_mut(actor)
             .unwrap_or_else(|| panic!("enter_from_outside: actor {actor:?} missing"));
-        place_outside_entity(
+        // The only caller that summons a staged body publishes its own alert
+        // count in `summon_garrison`, so the wake signal is intentionally
+        // ignored here to avoid counting it twice.
+        let (outside, _woke) = place_outside_entity(
             map_bbox,
             entity,
             destination,
             Some(layer),
             sector,
             direction,
-        )
+        );
+        outside
     }
 
     pub(crate) fn create_reinforcement(&mut self, tcx: TickCtx<'_>, dead_pc: Option<EntityId>) {
