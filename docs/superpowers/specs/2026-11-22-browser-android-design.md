@@ -250,11 +250,15 @@ where the shell touches input:
   `manifest-src 'self'`. The service worker needs the already-present
   `worker-src 'self' blob:`; COOP/COEP/CORP must be kept on cached responses or
   the threaded runtime loses cross-origin isolation.
-- A service worker caches the shell, manifest, icons and the most recently used
+- A service worker caches only the shell, manifest, icons and the **Demo**
   runtime/datadir generation with versioned keys and a cache-busting check of
-  `/wasm/latest.json`. It must fail closed: a stale or partial cache falls back
-  to the network instead of booting a mismatched artifact (the deployment rule
-  at `README.md:305-307`). Full campaign content stays online-only.
+  `/wasm/latest.json`. A full-content generation is never cache-eligible, so
+  there is no contradiction with "full campaign content stays online-only".
+  It must fail closed: a stale or partial cache falls back to the network
+  instead of booting a mismatched artifact (the deployment rule at
+  `README.md:305-307`). An offline reload of a full-campaign session shows an
+  explicit "reconnect to load content" state; it does not silently boot a
+  different generation.
 - Installability is the goal; "works fully offline" is not (see §3).
 
 ### 6.4 Cross-play via the existing relay
@@ -269,6 +273,10 @@ where the shell touches input:
   Linux or Windows, a real Android device as guest, and evidence that a
   player command changed the shared simulation (the unproved case in
   `browser-seat.md:481-483`).
+- The proof mission is the same playable mission used for the full-campaign
+  path (§6.5), not the Demo mission that loses on its first tick
+  (`browser-seat.md:476-480`). Fixing that pre-existing engine defect — it
+  reproduces in a single native seat too — is **out of this stream's scope**.
 
 ### 6.5 Full campaign from the browser
 
@@ -346,7 +354,44 @@ where the shell touches input:
 - Full content is published as a new, digest-pinned corpus generation on the
   estate origin; no local-folder path for phone players.
 - The `nixos-config` CSP change is a separate commit from the game repo work.
+- Cross-play proof uses a full-content playable mission; the Demo first-tick
+  defeat is an out-of-scope pre-existing engine defect (§6.4).
+- Leaderboard submission/achievement posting for browser campaign completion is
+  out of scope: the goals ask for play and continuation, not score upload, and
+  no backend integration was requested.
+- Verification device is the estate's phone, POCO X7 Pro (Android 16 / SDK 36,
+  Chrome installed, `~/git/android-tv/devices/poco-x7-pro/docs/device.md`),
+  using current stable Chrome. No older Android/Chrome baseline is claimed.
 
-## 9. Open questions for the owner (from the builder check)
+## 9. Builder-check triage (fresh reviewer, 2026-11-22)
 
-_To be filled after the builder-check subagent returns; see the handoff report._
+Four questions came back. Three were answered here or settled as calls above;
+one needs the owner.
+
+1. **Answered already — full-campaign continuation signing.** The reviewer
+   asked how campaign continuation is signed. §2.3 answers it: the signer
+   operation is explicitly rejected in code; continuation uses the engine's
+   campaign snapshot and save path. No new signer operation is planned.
+2. **Settled (designer's call) — cross-play proof mission.** A played run needs
+   a mission that does not lose on tick one. §6.4 uses the full-campaign
+   mission and declares the Demo defeat fix out of scope. This depends on the
+   owner answer below: without publishable full content there is no such
+   mission, and this stream must stop and ask again.
+3. **Settled (designer's call) — service-worker cache scope.** §6.3 now caches
+   shell + Demo generation only, with an explicit offline state rather than a
+   silent fallback to another generation.
+4. **Settled (designer's call) — device baseline.** §8 names the estate phone
+   and current stable Chrome; no extra device purchase or support matrix.
+   Lower-priority leaderboard question: also settled in §8 (out of scope).
+
+### Needs the owner (blocks the full-campaign goal)
+
+**Q1 — Full campaign content: source and permission to publish.** The full
+web-content corpus is licensed data that is explicitly not in the repo
+(`README.md:266-268`). To make G4 real, the builder must run the shipping
+converter on that data and publish a new digest-pinned generation on
+`robin.jautis.lt` (§6.5). Only the owner can say (a) which licensed install is
+the source for the web conversion, and (b) whether it is permitted to publish
+that content on a public estate origin. Without an affirmative answer, the
+browser can ship touch/PWA/relay cross-play but the full campaign cannot be
+completed from the URL, and the G3 proof mission also has no target.
