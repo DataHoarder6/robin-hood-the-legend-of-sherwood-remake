@@ -146,6 +146,9 @@ fn verify_map_patch_camera_alignment(gpu: GpuContext, oversized_atlas: bool, rot
     );
     let mut viewport =
         crate::host::ViewportState::new(16.0, 16.0 + robin_engine::engine::PANNEL_HEIGHT);
+    // Rotation steps require a sized level; this fixture is a tiny synthetic
+    // canvas, so give it a level that cannot trigger the crisp-zoom cap.
+    viewport.set_level_size(4096.0, 4096.0);
     if rotation_steps != 0 {
         viewport.rotate_by(rotation_steps);
         viewport.advance_rotation(0);
