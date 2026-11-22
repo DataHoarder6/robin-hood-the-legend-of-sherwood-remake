@@ -119,6 +119,23 @@ No cargo/gate/push/land on this host. A rustfmt-only hunk in the
 `callbacks/profile.rs` test module was applied by the pre-commit formatter and
 is included in this follow-up.
 
+## Review round 2 — fix
+
+Continue availability was derived once at menu construction, so switching
+profiles (Select Player replaces `session.save_manager` in place) left the
+button stale: enabled with no checkpoint, or disabled despite one. The
+construction-time boolean is gone. `main_menu_layout` no longer reads the save
+manager; `MainMenuState::sync_continue_availability` derives the widget flag
+from the current `session.save_manager.find_resume_target()` and is called at
+construction plus after every dispatched click — the only path that can
+replace the manager (one swap site, `:1037`). Focus moves off Continue when it
+becomes disabled, and the click handler keeps its authoritative re-check.
+Presentation only reads save state; no cached boolean remains.
+
+Local evidence (non-gate, this host): `node --check` on both mjs files PASSED;
+pure assertions `RESULT pass=6 fail=0` (same six cases as round 1);
+`rustfmt --check --edition 2024 crates/robin_rs/src/main_menu/mod.rs` exit 0.
+
 STATUS: DONE_WITH_CONCERNS
 Commit: 1e6c78ed6371fa35bc9be996d0efdd113d03445d (fix); review fixes 851869919, 22a596f9d; ledger wording 8b855d491
 Evidence: `node --check` on both mjs files passed; reload assertions fail pre-fix (2/2) and pass post-fix (6/6); rustfmt --check on all changed Rust files exit 0.

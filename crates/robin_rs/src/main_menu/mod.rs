@@ -329,9 +329,7 @@ pub(crate) async fn show_main_menu(
         }
     }
 
-    // Issue #76: the menu frame is built after the save manager exists (below,
-    // after the first-launch prompt) so Continue availability comes from the
-    // authoritative resume target rather than being advertised unconditionally.
+    let (buttons, frame) = main_menu_layout(&menu_resources);
 
     // ── First-launch default-profile prompt ──────────────────────────
     //
@@ -399,11 +397,11 @@ pub(crate) async fn show_main_menu(
         return Ok(MainMenuChoice::RedisplayOptions);
     }
 
-    // Issue #76 (criterion 2): build the menu only once the save manager is
-    // available, so Continue is enabled exactly when the authoritative resume
-    // target exists. Presentation reads the save state; it never mutates it.
-    let (buttons, frame) = main_menu_layout(&menu_resources, &save_manager);
     let mut state = MainMenuState::new(frame, buttons, bg, menu_audio);
+    // Issue #76 (criterion 2): derive Continue availability from the current
+    // manager instead of caching it at construction; it is re-derived after
+    // every dispatched click (the only path that can replace the manager).
+    state.sync_continue_availability(&save_manager);
     let mut io = MainMenuIo {
         window,
         renderer: &mut renderer,
@@ -426,16 +424,8 @@ pub(crate) async fn show_main_menu(
 
 /// Main-menu buttons (bottom-right column, `align_bottom_right` spacing=2)
 /// and the widget frame that arms them.
-fn main_menu_layout(
-    resources: &IngameMenuResources,
-    save_manager: &SaveGameManager,
-) -> (Vec<(String, ClickAction)>, FrameWnd) {
+fn main_menu_layout(resources: &IngameMenuResources) -> (Vec<(String, ClickAction)>, FrameWnd) {
     let (btn_w, btn_h) = resources.button_dimensions();
-    // Issue #76 (criterion 2): a Continue entry must only be offered when a
-    // compatible checkpoint actually exists. This is the same read-only source
-    // the click handler consults; a disabled widget cannot be activated by
-    // mouse or keyboard, so the menu never advertises an unavailable action.
-    let continue_enabled = save_manager.find_resume_target().is_some();
 
     let mut buttons: Vec<(String, ClickAction)> = vec![(
         resources.menu_text.get(MT_BTN_START_GAME),
@@ -480,10 +470,7 @@ fn main_menu_layout(
 
     let labels: Vec<(&str, bool)> = buttons
         .iter()
-        .map(|(label, action)| {
-            let enabled = !matches!(action, ClickAction::Continue) || continue_enabled;
-            (label.as_str(), enabled)
-        })
+        .map(|(label, _)| (label.as_str(), true))
         .collect();
     let positions = align_bottom_right(&labels, btn_w, btn_h);
 
@@ -563,6 +550,33 @@ impl MainMenuState {
             buttons,
             bg,
             menu_audio,
+        }
+    }
+
+    /// Refresh the Continue widget from the authoritative save manager.
+    ///
+    /// Called once at construction and after every dispatched click — the only
+    /// path that can replace `session.save_manager` (Select Player). No
+    /// construction-time boolean is retained, so the presentation cannot drift
+    /// from the manager the click handler re-checks. Reading the manager is
+    /// read-only; only this widget's presentation flag is written.
+    fn sync_continue_availability(&mut self, save_manager: &SaveGameManager) {
+        let Some(continue_id) = self
+            .buttons
+            .iter()
+            .position(|(_, action)| matches!(action, ClickAction::Continue))
+            .map(|index| index as u32)
+        else {
+            return;
+        };
+        let enabled = save_manager.find_resume_target().is_some();
+        if let Some(widget) = self.frame.widget_mut(continue_id) {
+            widget.base_mut().enabled = enabled;
+        }
+        if !enabled && self.keyboard_selection == continue_id {
+            // The confirm key activates the focused id without an enabled
+            // check, so focus must leave a newly-disabled Continue.
+            move_keyboard_selection(&self.frame, &mut self.keyboard_selection, 1);
         }
     }
 
@@ -701,6 +715,11 @@ impl MainMenuState {
                 }
             }
         }
+
+        // Select Player swaps `session.save_manager` in place inside dispatch;
+        // re-derive Continue availability from the current manager before this
+        // frame renders, so the button never advertises a stale resume target.
+        self.sync_continue_availability(session.save_manager);
 
         if exit_requested && confirm_exit(io, session.application_context).await {
             return Ok(Some(MainMenuChoice::Exit));
