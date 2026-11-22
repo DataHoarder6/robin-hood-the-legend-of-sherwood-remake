@@ -78,6 +78,47 @@ raw cargo build/test on oci-vm and the director owns the single build-host gate.
 The gate must run `format`, the wasm test suite and
 `--campaign-persistence` before D10 is set to `fixed`.
 
+## Review round 1 — fixes
+
+Two read-only reviewer findings against the authoritative code, both fixed:
+
+1. **Continue advertised with no checkpoint** (`main_menu/mod.rs`): the button
+   was built with `(label, true)` for every entry, so a no-checkpoint menu
+   showed a clickable no-op. `main_menu_layout` is now built after the save
+   manager exists and takes `&SaveGameManager`; it derives `continue_enabled`
+   from the read-only `find_resume_target()` and disables only that widget
+   (disabled widgets cannot be mouse- or keyboard-activated). The click handler
+   still re-reads the authoritative target. Presentation only reads state.
+2. **Raw error text logged** (`main_entry/init.rs`,
+   `main_entry/callbacks/profile.rs`): `validate_archive()` can embed the raw
+   profile name. The rejected-archive `reason` and both profile/campaign-history
+   persistence logs now carry only the stable `classify_profile_rejection` kind,
+   so no profile name reaches a log used by the check (criterion 6).
+   `report_failure`'s shape is unchanged; no test asserted the old strings,
+   so no test edits were needed.
+
+Also fixed a self-discovered native regression from the original fix:
+`preserve_rejected` is now `cfg!(target_arch = "wasm32")`. Browser archives are
+still preserved on rejection (criterion 4); native keeps its original
+self-healing overwrite, so the pre-existing
+`semantically_invalid_player_archive_is_regenerated_and_persisted` test keeps
+passing.
+
+Local evidence (non-gate, this host, after the fixes):
+
+```
+node --check scripts/validation/campaign-persistence.mjs -> PASS
+node --check scripts/validation/browser-game.mjs         -> PASS
+node --input-type=module -e '<inline assertions>'        -> pass=6 fail=0
+```
+
+Cases: empty snapshots throw `missing profile (pre-reload)`; snapshots without
+`resume` throw `missing resume (pre-reload)`; a coherent stable pair passes;
+missing `errorKind` throws; `corrupt` and `oversize` each return their kind.
+No cargo/gate/push/land on this host. A rustfmt-only hunk in the
+`callbacks/profile.rs` test module was applied by the pre-commit formatter and
+is included in this follow-up.
+
 STATUS: DONE_WITH_CONCERNS
-Commit: 1e6c78ed6371fa35bc9be996d0efdd113d03445d
-Evidence: `node --check` on both mjs files passed; reload assertions fail pre-fix (2/2) and pass post-fix; rustfmt --check on all changed Rust files exit 0.
+Commit: 1e6c78ed6371fa35bc9be996d0efdd113d03445d (fix); review fixes 851869919, 22a596f9d; ledger wording 8b855d491
+Evidence: `node --check` on both mjs files passed; reload assertions fail pre-fix (2/2) and pass post-fix (6/6); rustfmt --check on all changed Rust files exit 0.
