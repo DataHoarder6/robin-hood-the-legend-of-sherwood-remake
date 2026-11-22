@@ -6,17 +6,20 @@ Stream: browser/WASM Android client. Companion spec:
 
 ## What is live
 
-- Private link: `https://robin.jautis.lt/play/eaab90981616b10b19c333fba8308133/`
-- Password: held out-of-band and in `/tmp/opencode/robin-private-auth.txt` (mode
-  0600). The sops secret stores only an argon2id hash (base64) rendered into
+- Private link: `https://robin.jautis.lt/` — the entire origin is private; the
+  older capability link `https://robin.jautis.lt/play/eaab90981616b10b19c333fba8308133/`
+  still works. The root boots the full campaign by default (`?edition=demo`
+  selects the Demo generation).
+- Username and password: **`robin` / `robin`** (owner's choice). The sops secret
+  stores only an argon2id hash (base64) rendered into
   `/run/secrets/robin-campaign-auth.caddy` at activation; no plaintext hash in
-  git. Caddy `basic_auth` is enforced inside a `route @robinPrivate` so the
-  capability-path rewrite cannot run before authentication.
+  git. Caddy `basic_auth` applies to the whole vhost, so every path needs the
+  credentials; the identity signer is a separate origin and is unaffected.
 - Caddy landed as `ed26a36`, `fdf93de`, `61168fe` on `nixos-config` main and
   deployed (`just deploy-wait 61168fe`).
-- Public root, `/manifest.webmanifest`, `/sw.js` and `/icons/*` return 200
-  without a prompt; `/play/<token>/*` and `/datadirs/full/*` return 401 without
-  credentials and 200 with them.
+- Verified with the previous path-scoped gate that public paths returned 200
+  and private paths 401/200. With the whole-site gate, every path on
+  `robin.jautis.lt` requires `robin`/`robin`; `robin-id.jautis.lt` is unchanged.
 
 ## Corpus
 
