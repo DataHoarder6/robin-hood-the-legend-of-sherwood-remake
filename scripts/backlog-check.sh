@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Print the live git state of every docs/BACKLOG.md entry, and flag drift:
 #   - a [FROZEN] session with no BACKLOG entry  -> FAIL (breaks the freeze rule)
+#   - a [FROZEN] session with a pending tool   -> FAIL (a restart replays it)
 #   - an entry whose expected worktree is gone -> WARN (may be archived)
 #
 # Test seam: BACKLOG_DOC, BACKLOG_SESSION_DB and BACKLOG_REPO override the
@@ -93,6 +94,29 @@ if [[ -n $sqlite_bin && -f $DB ]]; then
     fi
   done < <("$sqlite_bin" -readonly "$DB" \
     "SELECT title FROM session_v2 WHERE title LIKE '[FROZEN]%' ORDER BY title;" 2>/dev/null || true)
+
+  # `interrupt` leaves the tool call attached; a runtime restart replays it and
+  # relaunches its runbg job. A freeze is not complete until the message that
+  # carries the call is reverted away (files:false) or the state is otherwise
+  # cleared. Only assistant messages are inspected: the part's state lives in
+  # the JSON content array, not in a session_message column.
+  echo "=== [FROZEN] sessions with a pending tool call ==="
+  while IFS='|' read -r title mid name status; do
+    [[ -n $title ]] || continue
+    echo "   FAIL: '[FROZEN]' session has a pending tool call: '$title' (message $mid, tool $name, status $status)"
+    fails=$((fails + 1))
+  done < <("$sqlite_bin" -readonly "$DB" "
+    SELECT s.title, m.id,
+           json_extract(part.value, '\$.name'),
+           json_extract(part.value, '\$.state.status')
+    FROM session_v2 s
+    JOIN session_message m ON m.session_id = s.id
+    JOIN json_each(m.data, '\$.content') part
+    WHERE s.title LIKE '[FROZEN]%'
+      AND m.type = 'assistant'
+      AND json_extract(part.value, '\$.type') = 'tool'
+      AND json_extract(part.value, '\$.state.status') IN ('running', 'pending')
+    ORDER BY s.title, m.seq;" 2>/dev/null || true)
 else
   echo "   SKIP: sqlite3 or session DB unavailable"
 fi

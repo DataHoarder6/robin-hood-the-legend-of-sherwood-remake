@@ -18,6 +18,10 @@ check suite="tooling":
 test-no-local-build:
     bash scripts/tests/no-local-build.sh
 
+# Fixture regression: a frozen session with a pending tool call fails the check.
+test-backlog-pending:
+    bash scripts/tests/backlog-pending-tool.sh
+
 # Build this worktree's dev game on the build host and copy it to the laptop.
 ship-dev:
     scripts/ship-dev.sh
