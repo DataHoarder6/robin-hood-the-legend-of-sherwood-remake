@@ -574,10 +574,15 @@ impl crate::game::GameCallbacks for RustCallbacks {
         self.queue_operation(SaveLoadRequest::Continue { mission_id });
     }
     fn save_profiles(&mut self) {
-        self.application_context
+        let publication = self
+            .application_context
             .save_player_profiles()
-            .unwrap_or_else(|error| panic!("save_profiles lost its ApplicationContext: {error}"))
-            .log_persistence_error("save_profiles failed");
+            .unwrap_or_else(|error| panic!("save_profiles lost its ApplicationContext: {error}"));
+        if let Err(error) = &publication.persistence {
+            let kind = super::init::classify_profile_rejection(error);
+            crate::campaign_persistence::report_failure(kind, "explicit profile save");
+        }
+        publication.log_persistence_error("save_profiles failed");
     }
     fn synchronize_profile_with_campaign(
         &mut self,

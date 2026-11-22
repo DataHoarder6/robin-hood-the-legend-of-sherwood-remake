@@ -26,11 +26,12 @@ use crate::ingame_menu::layout::{
 };
 use crate::ingame_menu::resources::MenuSurface;
 use crate::ingame_menu::resources::{
-    MT_BTN_LOAD, MT_BTN_OPTIONS, MT_BTN_QUIT_GAME, MT_BTN_SELECT_PLAYER, MT_BTN_SHOW_CREDITS,
-    MT_BTN_SHOW_MOVIES, MT_BTN_START_GAME, MT_MSG_RETURN_TO_WINDOWS, MT_PORT_STR_DIFFICULTY_CUSTOM,
-    MT_PORT_STR_DIFFICULTY_LEGENDARY, MT_STR_CARNAGE_FACTOR, MT_STR_DIFFICULTY_EASY,
-    MT_STR_DIFFICULTY_HARD, MT_STR_DIFFICULTY_LEVEL, MT_STR_DIFFICULTY_MEDIUM, MT_STR_MONEY,
-    MT_STR_PLAYING_TIME, MT_STR_PROGRESSION, MT_STR_SCORE, substitute_integer,
+    MT_BTN_CONTINUE, MT_BTN_LOAD, MT_BTN_OPTIONS, MT_BTN_QUIT_GAME, MT_BTN_SELECT_PLAYER,
+    MT_BTN_SHOW_CREDITS, MT_BTN_SHOW_MOVIES, MT_BTN_START_GAME, MT_MSG_RETURN_TO_WINDOWS,
+    MT_PORT_STR_DIFFICULTY_CUSTOM, MT_PORT_STR_DIFFICULTY_LEGENDARY, MT_STR_CARNAGE_FACTOR,
+    MT_STR_DIFFICULTY_EASY, MT_STR_DIFFICULTY_HARD, MT_STR_DIFFICULTY_LEVEL,
+    MT_STR_DIFFICULTY_MEDIUM, MT_STR_MONEY, MT_STR_PLAYING_TIME, MT_STR_PROGRESSION, MT_STR_SCORE,
+    substitute_integer,
 };
 use crate::ingame_menu::widget_bridge::{
     self, AnimatedScreenIo, ModalCursor, ModalInputState, ModalScreenIo, ScreenFrame, ScreenKey,
@@ -88,6 +89,10 @@ pub(crate) enum MainMenuChoice {
 enum ClickAction {
     /// Exit the main-menu loop with this choice.
     Return(MainMenuChoice),
+    /// Resume the latest durable checkpoint without opening the picker.
+    /// Returns [`MainMenuChoice::Load`] for the resume slot, or stays on the
+    /// menu when no compatible checkpoint exists.
+    Continue,
     /// Open the save/load picker in Load mode; on slot selection, return
     /// [`MainMenuChoice::Load`].
     LoadGame,
@@ -425,6 +430,12 @@ fn main_menu_layout(resources: &IngameMenuResources) -> (Vec<(String, ClickActio
     #[cfg(feature = "multiplayer")]
     buttons.push(("Multiplayer".to_string(), ClickAction::Multiplayer));
     buttons.extend([
+        // Issue #76 (criterion 2): a visible Continue entry resumes the saved
+        // campaign instead of starting a new game.
+        (
+            resources.menu_text.get(MT_BTN_CONTINUE),
+            ClickAction::Continue,
+        ),
         (resources.menu_text.get(MT_BTN_LOAD), ClickAction::LoadGame),
         // TODO: Localize this label with the campaign history UI.
         ("Campaign Manager".to_string(), ClickAction::CampaignManager),
@@ -922,6 +933,24 @@ async fn dispatch_click(
                 }
                 crate::window::sleep_ui_frame().await;
             }
+        }
+        ClickAction::Continue => {
+            // Same resume target the browser's boot auto-resume uses. When no
+            // compatible checkpoint exists the menu stays put rather than
+            // fabricating a fresh campaign under the Continue label.
+            let Some(index) = session.save_manager.find_resume_target() else {
+                tracing::info!("Continue: no compatible checkpoint to resume");
+                return Ok(None);
+            };
+            let slot = session
+                .save_manager
+                .slot_name(index)
+                .map_err(|error| format!("Continue: invalid checkpoint slot: {error}"))?;
+            let mission_id = session
+                .save_manager
+                .slot_mission_id(index)
+                .ok_or_else(|| "Continue: checkpoint has no cached mission id".to_owned())?;
+            Some(MainMenuChoice::Load { slot, mission_id })
         }
         ClickAction::LoadGame => {
             save_load::run_main_menu_load(

@@ -230,6 +230,7 @@ pub mod blit_to_map;
 #[cfg(target_arch = "wasm32")]
 pub mod browser_image_decode;
 pub mod campaign_map;
+pub(crate) mod campaign_persistence;
 pub mod campaign_progress;
 pub mod console_overlay;
 pub mod core_overlay;

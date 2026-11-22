@@ -24,6 +24,7 @@ pub(crate) fn info_json() -> serde_json::Value {
             {"method": "GET",  "path": "/script",             "desc": "mission-script class & function listing"},
             {"method": "GET",  "path": "/script/decompile",   "desc": "decompile to TypeScript-like pseudocode (?class=Foo)"},
             {"method": "GET",  "path": "/state",              "desc": "last published mission snapshot, terminal block and this run's evidence paths; answered off the mission queue so it survives a deadlocked or finished mission"},
+            {"method": "GET",  "path": "/campaign-persistence", "desc": "browser profile/campaign persistence probe: digests, counts and error kinds only; answered off the queue so it works at the main menu"},
             {"method": "GET",  "path": "/events",             "desc": "multiplayer session event ring, oldest first (?since=<seq>&limit=<n>) → {events, next_seq}"},
             {"method": "POST", "path": "/native",             "desc": "invoke one native: {op, args, this?}"},
             {"method": "POST", "path": "/batch",              "desc": "invoke many natives on one tick: {calls: [{op, args, this?}]}"},

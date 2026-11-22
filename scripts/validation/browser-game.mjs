@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { hostShortFromVersion, verifyPublishedArtifact } from './browser-boot.mjs';
 import { requireSupervisor, spawnSupervised, stop as stopSupervised, unitName } from './supervised.mjs';
+import { PERSISTENCE_ENDPOINT, assertPersistenceSurvivesReload, assertCorruptionReported } from './campaign-persistence.mjs';
 
 const { values } = parseArgs({ options: {
     data: { type: 'string' }, pkg: { type: 'string', default: 'wasm-www/pkg' },
@@ -16,6 +17,11 @@ const { values } = parseArgs({ options: {
     evidence: { type: 'string' }, 'probe-only': { type: 'boolean' }, isolated: { type: 'boolean' },
     signer: { type: 'boolean' },
     'natural-play': { type: 'boolean' },
+    // Issue #76: full-campaign reload persistence. Navigates the real artifact,
+    // reaches a checkpoint, reloads the same origin and asserts the profile and
+    // campaign state are retained. Only digests/counts are recorded (no names,
+    // save payloads, credentials or private-origin passwords).
+    'campaign-persistence': { type: 'boolean' },
     'replay-file': { type: 'string' },
     'bind-fetch-diagnostic': { type: 'boolean' }, 'runtime-source': { type: 'string', default: 'HEAD' },
     'join-ticket': { type: 'string' }, 'host-http': { type: 'string', default: 'http://127.0.0.1:18641' },
@@ -469,6 +475,81 @@ async function runJoinFlow() {
 }
 
 const deadline = Date.now() + Number(values.timeout);const timer = setTimeout(() => { void stopChrome(); }, Number(values.timeout) + 10000);
+
+// Issue #76 acceptance: a real page reload of the same origin keeps the player
+// profile and campaign progress, and a corrupt/oversize archive is reported
+// explicitly. Only the runtime's non-sensitive persistence probe is recorded.
+async function runCampaignPersistence() {
+    if (!data) throw new Error('--data is required for the campaign persistence check');
+    const probeExpr = `robinRpc('${PERSISTENCE_ENDPOINT}')`;
+    const waitForProbe = async (label) => {
+        let last = null;
+        while (Date.now() < deadline) {
+            await pause(1500);
+            try {
+                const snapshot = await evaluate(`Promise.race([${probeExpr}, new Promise((_,r)=>setTimeout(()=>r(Error('probe timeout')),10000))])`);
+                if (snapshot && snapshot.profile && snapshot.resume) return snapshot;
+                last = snapshot;
+            } catch (error) { last = { error: error.message }; }
+        }
+        throw new Error(`${label}: campaign-persistence RPC never became available (last: ${JSON.stringify(last)?.slice(0, 300)})`);
+    };
+
+    const query = new URLSearchParams({ 'wasm-log': 'info' });
+    // The private origin boots from /campaign.json; the local fixture uses the
+    // documented developer forced-launch path. Never change the guest protocol.
+    if (values.mission) query.set('mission', values.mission);
+    await cdp('Page.navigate', { url: `${gameOrigin}/?${query}` }, session);
+    const before = await waitForProbe('first boot');
+    record('persistenceBefore', before);
+
+    // Reach a durable checkpoint through the game's own terminal flow: a
+    // mission result drives the terminal autosave and profile synchronization.
+    await evaluate(`robinRpc('set-paused',{paused:true})`).catch(() => {});
+    await evaluate(`robinRpc('step-forward',{n:30,auto_dismiss:true})`).catch(() => {});
+    await evaluate(`robinRpc('set-paused',{paused:false})`).catch(() => {});
+    await evaluate(`robinRpc('mission-result',{result:'won'})`).catch(error => console.log('mission-result:', error.message));
+    await pause(5000);
+    const afterSave = await waitForProbe('after checkpoint');
+    record('persistenceAfterSave', afterSave);
+    const savedState = await evaluate(`robinRpc('state')`).catch(() => null);
+    record('stateAtCheckpoint', savedState ? { map: savedState.map, frame: savedState.frame } : null);
+    await cdp('Page.captureScreenshot', { format: 'png' }, session)
+        .then(shot => writeFileSync(join(evidence, 'campaign-before-reload.png'), Buffer.from(shot.data, 'base64'))).catch(() => {});
+
+    // A genuine reload of the same origin — not the bfcache history restore
+    // used by the generic flow — is what issue #76 is about.
+    await cdp('Page.reload', { ignoreCache: true }, session);
+    const afterReload = await waitForProbe('after reload');
+    record('persistenceAfterReload', afterReload);
+    const reloadedState = await evaluate(`robinRpc('state')`).catch(() => null);
+    record('stateAfterReload', reloadedState ? { map: reloadedState.map, frame: reloadedState.frame } : null);
+    await cdp('Page.captureScreenshot', { format: 'png' }, session)
+        .then(shot => writeFileSync(join(evidence, 'campaign-after-reload.png'), Buffer.from(shot.data, 'base64'))).catch(() => {});
+
+    let summary = null;
+    try { summary = assertPersistenceSurvivesReload(afterSave, afterReload); }
+    catch (error) { result.failures.push(`campaign reload: ${error.message}`); }
+    if (summary) record('campaignReloadProof', summary);
+    if (savedState?.map && reloadedState?.map && savedState.map !== reloadedState.map) {
+        result.failures.push(`campaign resumed on a different mission: ${savedState.map} -> ${reloadedState.map}`);
+    }
+
+    // Corrupt archive: reported explicitly, never silently zeroed.
+    await evaluate(`localStorage.setItem('robin-hood-player-profiles-v1', JSON.stringify({schema_version:999,manager:{}}))`);
+    await cdp('Page.reload', { ignoreCache: true }, session);
+    const corrupt = await waitForProbe('after corrupt injection');
+    try { record('corruptProof', assertCorruptionReported(corrupt, 'corrupt')); }
+    catch (error) { result.failures.push(`corrupt report: ${error.message}`); }
+
+    // Oversize archive: also reported explicitly.
+    await evaluate(`localStorage.setItem('robin-hood-player-profiles-v1', 'x'.repeat(${4 * 1024 * 1024 + 1}))`);
+    await cdp('Page.reload', { ignoreCache: true }, session);
+    const oversize = await waitForProbe('after oversize injection');
+    try { record('oversizeProof', assertCorruptionReported(oversize, 'oversize')); }
+    catch (error) { result.failures.push(`oversize report: ${error.message}`); }
+}
+
 try {
     requireSupervisor();
     const chromeArgv = ['google-chrome', '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
@@ -609,7 +690,10 @@ try {
                 return {domAccessDenied,status,prohibited,gameOriginDatabases:databases.map(d=>d.name),sandbox:frame.getAttribute('sandbox')};
             })()`));
         }
-        if (!values['probe-only']) {
+        if (values['campaign-persistence']) {
+            await runCampaignPersistence();
+        }
+        if (!values['probe-only'] && !values['campaign-persistence']) {
             if (!data) throw new Error('--data is required for game acceptance');
             record('runtimeHash', digest(readFileSync(join(pkg, 'robin_bg.wasm'))));
             record('dataHash', digest(readFileSync(join(data, demoDatadirName))));

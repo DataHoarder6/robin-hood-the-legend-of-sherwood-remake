@@ -709,35 +709,63 @@ fn load_player_profile_manager(save_dir: &Path) -> (PlayerProfileManager, bool) 
                 .and_then(|index| mgr.profiles.get(index))
                 .is_some() =>
         {
+            crate::campaign_persistence::clear_failure();
             let regenerated = mgr.default_profiles;
             (mgr, regenerated)
         }
-        Ok(mgr) => (
-            regenerate_default_player_profiles(
-                save_dir_str,
-                format!(
-                    "archive has {} profiles and active index {:?}",
-                    mgr.profiles.len(),
-                    mgr.active_index
+        Ok(mgr) => {
+            // Issue #76: an archive with no usable active profile is a rejected
+            // archive, not a first launch. Report it and keep the durable bytes
+            // so a later build can recover them; never silently zero progress.
+            crate::campaign_persistence::report_failure(
+                "corrupt",
+                "profile archive has no active profile",
+            );
+            (
+                regenerate_default_player_profiles(
+                    save_dir_str,
+                    format!(
+                        "archive has {} profiles and active index {:?}",
+                        mgr.profiles.len(),
+                        mgr.active_index
+                    ),
+                    true,
                 ),
-            ),
-            true,
-        ),
-        Err(error) => (
-            regenerate_default_player_profiles(save_dir_str, error.to_string()),
-            true,
-        ),
+                true,
+            )
+        }
+        Err(error) => {
+            let kind = classify_profile_rejection(&error.to_string());
+            crate::campaign_persistence::report_failure(kind, "profile archive load");
+            (
+                regenerate_default_player_profiles(save_dir_str, error.to_string(), true),
+                true,
+            )
+        }
+    }
+}
+
+/// Classify a rejected browser archive without echoing its contents into a
+/// log. Only stable kinds are reported to the persistence check.
+pub(crate) fn classify_profile_rejection(message: &str) -> &'static str {
+    if message.contains("limit") {
+        "oversize"
+    } else if message.contains("unavailable") || message.contains("window") {
+        "unavailable"
+    } else {
+        "corrupt"
     }
 }
 
 /// Recreate the Original's first-launch profile after an absent or invalid
-/// archive. Creating default profiles marks the manager
-/// as default-backed and immediately saves it; keeping both details here
-/// prevents a corrupt archive from failing on every launch or skipping the
-/// new-player prompt.
+/// archive. A missing archive is already written by [`PlayerProfileStore::load`]
+/// before this runs; a rejected archive is left untouched (see
+/// `preserve_rejected`) so no durable bytes are silently overwritten. Marking
+/// the manager default-backed keeps the new-player prompt intact.
 fn regenerate_default_player_profiles(
     save_directory: String,
     reason: String,
+    preserve_rejected: bool,
 ) -> PlayerProfileManager {
     tracing::warn!(
         "Failed to load player profiles from {save_directory} ({reason}); creating defaults"
@@ -746,6 +774,12 @@ fn regenerate_default_player_profiles(
     let index = manager.create_profile("Robin".to_owned(), DifficultyLevel::Medium);
     manager.set_active(index);
     manager.default_profiles = true;
+    // When an existing archive was rejected, leave its bytes untouched: writing
+    // defaults over it is exactly the silent reset criterion 4 forbids. The
+    // next explicit player save replaces it with a valid archive.
+    if preserve_rejected {
+        return manager;
+    }
     if let Err(error) =
         crate::player_profile_store::PlayerProfileStore::for_directory(&manager.save_directory)
             .save(&manager)

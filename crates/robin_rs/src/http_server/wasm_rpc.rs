@@ -70,6 +70,11 @@ pub async fn rh_rpc(request: JsValue) -> Result<JsValue, JsValue> {
             let params = browser_json(params)?;
             return reply_to_js(super::diagnostics::observability_reply(&method, params));
         }
+        "campaign-persistence" => {
+            // Answered off the queue so the reload check can probe the durable
+            // storage surface even while the main menu has no live mission.
+            return reply_to_js(Ok(ReplyBody::Json(crate::campaign_persistence::probe())));
+        }
         _ => {}
     }
     let payload = if method == "load-replay" {

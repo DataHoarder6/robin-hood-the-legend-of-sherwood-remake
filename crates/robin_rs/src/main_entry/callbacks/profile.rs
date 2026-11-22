@@ -91,6 +91,8 @@ pub(super) fn synchronize_metrics(
         });
     *credits = staged_credits;
     if let Err(error) = result.persistence {
+        let kind = super::super::init::classify_profile_rejection(&error);
+        crate::campaign_persistence::report_failure(kind, "profile synchronization");
         tracing::error!(
             "Profile synchronization persistence failed; retained in memory and retried on the next profile save/synchronization: {error}"
         );
@@ -135,9 +137,13 @@ impl RustCallbacks {
             #[cfg(not(target_arch = "wasm32"))]
             panic!("failed to persist campaign history: {error}");
             #[cfg(target_arch = "wasm32")]
-            tracing::warn!(
-                "Failed to persist campaign history in browser storage; keeping it in memory for this session: {error}"
-            );
+            {
+                let kind = super::super::init::classify_profile_rejection(&error);
+                crate::campaign_persistence::report_failure(kind, "campaign history promotion");
+                tracing::warn!(
+                    "Failed to persist campaign history in browser storage; keeping it in memory for this session: {error}"
+                );
+            }
         }
     }
 }

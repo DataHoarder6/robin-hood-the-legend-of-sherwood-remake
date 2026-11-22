@@ -1115,6 +1115,38 @@ async fn run_main_menu(
     let mut pending_direct_browser_invite = invite_config.cli.join.as_deref();
     #[cfg(not(target_arch = "wasm32"))]
     let mut pending_direct_browser_invite: Option<&str> = None;
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Issue #76 (criterion 3): a reload of the same origin resumes the last
+        // campaign checkpoint before the main menu appears. This is the same
+        // preflight as the menu's Start entry, applied once at boot rather than
+        // requiring a click. A missing or rejected archive leaves a fresh
+        // campaign; the rejection is reported by the save/profile layers.
+        if let Some(callbacks) =
+            RustCallbacks::new_for_window(menu.application_context.clone(), menu.window).await?
+        {
+            let resume = callbacks
+                .save_manager
+                .find_resume_target()
+                .and_then(|index| {
+                    let slot = callbacks.save_manager.slot_name(index).ok()?;
+                    let mission_id = callbacks.save_manager.slot_mission_id(index)?;
+                    Some((slot, mission_id))
+                });
+            drop(callbacks);
+            if let Some((slot, mission_id)) = resume {
+                tracing::info!("Resuming browser campaign from durable checkpoint at boot");
+                let request = menu.launch_request();
+                let Some(next) = menu
+                    .launch_session(campaign, request, Some((slot, mission_id)))
+                    .await?
+                else {
+                    return Ok(0);
+                };
+                campaign = next;
+            }
+        }
+    }
     loop {
         #[cfg(not(target_arch = "wasm32"))]
         crate::diagnostic_context::main_menu();

@@ -111,4 +111,70 @@ mod tests {
         );
         storage.remove(BROWSER_PROFILE_STORE_KEY).unwrap();
     }
+
+    /// Issue #76: a reload must retain the player's identity/config and every
+    /// campaign attempt, and a rejected archive must be reported explicitly
+    /// rather than silently reset. The probe is the non-sensitive surface the
+    /// browser check asserts; no name or save payload leaves this process.
+    #[wasm_bindgen_test]
+    fn campaign_persistence_probe_distinguishes_retained_progress_from_rejection() {
+        let storage = BrowserLocalStorage::open().unwrap();
+        storage.remove(BROWSER_PROFILE_STORE_KEY).unwrap();
+        crate::campaign_persistence::clear_failure();
+
+        let mut manager = PlayerProfileStore::for_directory("browser-save")
+            .load()
+            .unwrap();
+        manager.default_profiles = false;
+        manager.profiles[0].name = "Campaign Pilot".to_owned();
+        PlayerProfileStore::for_directory("browser-save")
+            .save(&manager)
+            .unwrap();
+
+        // Retain a full campaign attempt without trimming history: the probe
+        // must report it as durable campaign progress, not zero.
+        let encoded = storage
+            .read_text(BROWSER_PROFILE_STORE_KEY)
+            .unwrap()
+            .unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        document["manager"]["profiles"][0]["campaign_history"]["attempts"] =
+            serde_json::json!([{}]);
+        storage
+            .write_text(BROWSER_PROFILE_STORE_KEY, &document.to_string())
+            .unwrap();
+
+        let probe = crate::campaign_persistence::probe();
+        assert!(probe["profile"]["errorKind"].is_null());
+        assert_eq!(probe["profile"]["attemptCount"].as_u64(), Some(1));
+        assert!(probe["profile"]["identityDigest"].as_str().is_some());
+        assert!(probe["profile"]["configDigest"].as_str().is_some());
+
+        // A corrupt archive is reported; it is never treated as a first launch.
+        storage
+            .write_text(
+                BROWSER_PROFILE_STORE_KEY,
+                r#"{"schema_version":999,"manager":{}}"#,
+            )
+            .unwrap();
+        let probe = crate::campaign_persistence::probe();
+        assert_eq!(probe["profile"]["errorKind"].as_str(), Some("corrupt"));
+
+        // An oversized archive is reported with its own kind.
+        storage
+            .write_text(
+                BROWSER_PROFILE_STORE_KEY,
+                &"x".repeat(BROWSER_PROFILE_BYTE_LIMIT + 1),
+            )
+            .unwrap();
+        let probe = crate::campaign_persistence::probe();
+        assert_eq!(probe["profile"]["errorKind"].as_str(), Some("oversize"));
+
+        // Explicit failure reporting is observable through the probe.
+        crate::campaign_persistence::report_failure("oversize", "test");
+        let probe = crate::campaign_persistence::probe();
+        assert_eq!(probe["lastFailure"]["kind"].as_str(), Some("oversize"));
+        crate::campaign_persistence::clear_failure();
+        storage.remove(BROWSER_PROFILE_STORE_KEY).unwrap();
+    }
 }
