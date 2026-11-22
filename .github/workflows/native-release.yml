@@ -390,6 +390,10 @@ jobs:
           # On this runner `origin` is the fork; its `main` is the integration
           # ref the estate calls `fork/main`. fetch-depth: 0 already fetched it.
           git update-ref refs/remotes/origin/fork/main refs/remotes/origin/main
+          # upload-artifact@v7 zips the binary and strips the executable bit;
+          # download-artifact does not restore it at any v4+ version. Restore
+          # it here so verify_release_tag.sh can actually execute the binary.
+          chmod +x version-check/robin
           bash scripts/release/verify_release_tag.sh "${GITHUB_REF_NAME#v}" version-check/robin
 
       - name: Verify and promote recoverable release candidate

@@ -103,4 +103,23 @@ git -C "$work/no-ref" update-ref -d refs/remotes/origin/fork/main
 expect_fail 'missing integration ref' 'origin/fork/main is missing' \
     run_verify "$work/no-ref" 0.3.0 "$binary"
 
+# The release workflow downloads the verification binary from a zipped
+# artifact, which strips its executable bit. Guard the workflow itself so a
+# future edit cannot drop the chmod that makes `verify_release_tag.sh -x`
+# satisfiable — the fixture above chmods its own binary and cannot catch this.
+workflow=$source_root/.github/workflows/native-release.yml
+verify_line=$(grep -n 'bash scripts/release/verify_release_tag.sh' "$workflow" | head -1 | cut -d: -f1)
+if [[ -z "$verify_line" ]]; then
+    printf 'FAIL workflow: no verify_release_tag.sh invocation\n' >&2
+    exit 1
+fi
+# Look for a chmod of the verification binary in the 5 lines before the call.
+before=$((verify_line > 5 ? verify_line - 5 : 1))
+within=$(sed -n "${before},${verify_line}p" "$workflow")
+if [[ "$within" != *'chmod +x version-check/robin'* ]]; then
+    printf 'FAIL workflow: chmod +x version-check/robin missing before verify call (line %s)\n' \
+        "$verify_line" >&2
+    exit 1
+fi
+
 printf 'verify_release_tag: all fixture checks passed\n'

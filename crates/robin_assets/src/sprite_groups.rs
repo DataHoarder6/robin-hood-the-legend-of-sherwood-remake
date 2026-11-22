@@ -24,8 +24,10 @@ pub fn conditional_entropy_bits(
     }
     let mut bits = 0.0;
     for (count, context_count) in counts {
-        // Malformed counts must not crash an offline estimate.
+        // Malformed counts must not crash an offline estimate, but keep the
+        // corruption visible — the upstream assert used to make this loud.
         if count == 0 || context_count == 0 || count > context_count {
+            tracing::debug!(count, context_count, "skipping invalid entropy counts");
             continue;
         }
         bits -= count as f64 * (count as f64 / context_count as f64).log2();

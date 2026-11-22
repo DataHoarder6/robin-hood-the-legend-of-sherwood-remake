@@ -540,6 +540,14 @@ impl EngineInner {
     }
 
     pub fn is_player_aligned_camp(&self, camp: crate::element::Camp) -> bool {
+        // Non-actor entities report `Camp::Error` from `Entity::camp()` by
+        // design. They have no allegiance, so they are never player-aligned;
+        // asking the diplomacy state would hit its invalid-allegiance guard.
+        // Keep that guard strict for authored-allegiance queries and resolve
+        // the sentinel here, where entity semantics are known.
+        if camp == crate::element::Camp::Error {
+            return false;
+        }
         self.mission_domain.diplomacy.is_player_aligned(camp)
     }
 

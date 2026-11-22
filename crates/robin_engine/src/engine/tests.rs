@@ -9,6 +9,7 @@ use crate::game_operation::GameCode;
 
 mod ai_detection;
 mod commands;
+mod diplomacy_camp;
 mod lifecycle;
 mod macros;
 mod messages;
