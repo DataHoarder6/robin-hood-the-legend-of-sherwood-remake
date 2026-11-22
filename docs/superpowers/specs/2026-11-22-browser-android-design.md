@@ -154,6 +154,8 @@ No alternative is reopened here.
 - No APK, WebView wrapper, store listing, or native Android UI work.
 - No browser-side hosting, matchmaking or authority (ADR 0003).
 - No new multiplayer transport, protocol version, or signer operation.
+- No *public* full campaign: the full corpus is access-controlled behind a
+  private link + password on the estate origin, not published on the open web.
 - No offline *full campaign*: full content is large and licensed; first load
   and cross-play stay online.
 - No changes to the v0.4.0 release, gate, tag or artifacts in this stream.
@@ -184,7 +186,9 @@ No alternative is reopened here.
   every attempt (`docs/NEW_FEATURES.md:2158-2164`), so save growth must be
   measured, not guessed.
 - Full web content is licensed data and cannot live in the repo (`README.md:266-268`);
-  a new corpus generation is a publication act on the estate origin.
+  a new corpus generation is a publication act on the estate origin, and per the
+  owner's Q1 answer it is **access-controlled** (private link + password), never
+  published on the open web.
 - The signer is a separate origin with tight CSP; widening it is a
   `nixos-config` change with its own gate.
 
@@ -288,9 +292,20 @@ where the shell touches input:
   operation (§2.3).
 - Publish a **full web-content generation** on the estate origin, built by the
   canonical shipping converter (`README.md:266-283`), with its own manifest and
-  digests, alongside the Demo generation. The shell picks full vs demo by
-  explicit user choice, never by silent substitution; mismatched content is a
-  launch error, as in the multiplayer path.
+  digests, alongside the Demo generation — but under a **private capability URL
+  gated by a password** (owner's Q1 answer), not at the open web root. The shell
+  picks full vs demo by explicit user choice, never by silent substitution;
+  mismatched content is a launch error, as in the multiplayer path.
+- Access control is enforced at the origin, in Caddy, not in the page: a long
+  random path segment identifies the private generation and Caddy `basic_auth`
+  (password hash held as a `nixos-config` secret, never in git) gates the full
+  datadir generation. The browser's native auth prompt supplies credentials on
+  the fetch; no app-level password field that leaves the files publicly
+  retrievable. COOP/COEP/CORP must be preserved on the authenticated responses,
+  and the service worker never caches them (§6.3). This keeps casual discovery
+  off the open web; it is an access gate, not DRM. Scope is two known people
+  (owner and brother), both holding paid copies; share the link and password
+  out-of-band. No account system, self-service registration or broad distribution.
 - Measure campaign save size against the 4 MiB browser envelope. If it exceeds,
   the builder moves the campaign archive to IndexedDB (already used by
   diagnostics and the identity signer) rather than trimming history. Save
@@ -299,8 +314,9 @@ where the shell touches input:
 ### 6.6 Where the build and deploy boundary sits
 
 - Game/wasm changes land in this repo through this stream's worktree; the
-  Caddy/CSP change is a separate `nixos-config` commit on the estate origin.
-  Neither touches v0.4.0.
+  Caddy/CSP and private-link/basic-auth changes are separate `nixos-config`
+  commits on the estate origin, with the password hash supplied as a secret,
+  never committed. Neither touches v0.4.0.
 - Only the build host runs `bash scripts/check-quality.sh wasm`; no gate, tag or
   release is started from here.
 
@@ -320,6 +336,9 @@ where the shell touches input:
   only if save measurement forces an IndexedDB store; otherwise no engine change.
 - `nixos-config hosts/oci-vm/caddy.nix` + `wasm-www/deploy/public-headers.txt` —
   `manifest-src`, service-worker MIME/cache headers, preserving COOP/COEP/CORP.
+- `nixos-config hosts/oci-vm/caddy.nix` — private capability path + `basic_auth`
+  for the full corpus, password hash from a secret; full generation excluded
+  from public indexes.
 
 **Test strategy**
 
@@ -352,7 +371,8 @@ where the shell touches input:
 - Start with localStorage saves and add an explicit oversize error; migrate to
   IndexedDB only if measurement shows the 4 MiB limit is exceeded.
 - Full content is published as a new, digest-pinned corpus generation on the
-  estate origin; no local-folder path for phone players.
+  estate origin behind a private link + Caddy password gate (owner's Q1 answer),
+  for two paid-copy owners only; no local-folder path for phone players.
 - The `nixos-config` CSP change is a separate commit from the game repo work.
 - Cross-play proof uses a full-content playable mission; the Demo first-tick
   defeat is an out-of-scope pre-existing engine defect (§6.4).
@@ -366,7 +386,7 @@ where the shell touches input:
 ## 9. Builder-check triage (fresh reviewer, 2026-11-22)
 
 Four questions came back. Three were answered here or settled as calls above;
-one needs the owner.
+the fourth (Q1) was answered by the owner on 2026-11-22.
 
 1. **Answered already — full-campaign continuation signing.** The reviewer
    asked how campaign continuation is signed. §2.3 answers it: the signer
@@ -384,14 +404,17 @@ one needs the owner.
    and current stable Chrome; no extra device purchase or support matrix.
    Lower-priority leaderboard question: also settled in §8 (out of scope).
 
-### Needs the owner (blocks the full-campaign goal)
+### Owner answer to Q1 (2026-11-22)
 
-**Q1 — Full campaign content: source and permission to publish.** The full
-web-content corpus is licensed data that is explicitly not in the repo
-(`README.md:266-268`). To make G4 real, the builder must run the shipping
-converter on that data and publish a new digest-pinned generation on
-`robin.jautis.lt` (§6.5). Only the owner can say (a) which licensed install is
-the source for the web conversion, and (b) whether it is permitted to publish
-that content on a public estate origin. Without an affirmative answer, the
-browser can ship touch/PWA/relay cross-play but the full campaign cannot be
-completed from the URL, and the G3 proof mission also has no target.
+**Q1 — Full campaign content: source and permission to publish — answered.**
+The owner declined public publication and scoped the corpus to private play by
+two people, himself and his brother, both holding paid copies of the game. The
+full generation therefore goes behind a private link + Caddy password gate
+(§6.5, §6.6), not the open web root. This unblocks G4 and gives the G3 proof
+mission a target. Private, non-commercial use by two licensed owners removes
+the public-redistribution objection that originally blocked this goal.
+
+Still needed from the owner at deploy time — inputs, not design blockers:
+which licensed install is the conversion source, the password value (set as a
+`nixos-config` secret), and the private path/link shared with his brother. The
+content corpus itself never enters this repo.
