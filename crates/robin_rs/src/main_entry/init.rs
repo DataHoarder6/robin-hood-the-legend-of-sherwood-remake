@@ -729,7 +729,9 @@ fn load_player_profile_manager(save_dir: &Path) -> (PlayerProfileManager, bool) 
                         mgr.profiles.len(),
                         mgr.active_index
                     ),
-                    true,
+                    // Browser-only preservation (criterion 4); native keeps its
+                    // self-healing overwrite of a rejected local archive.
+                    cfg!(target_arch = "wasm32"),
                 ),
                 true,
             )
@@ -738,7 +740,14 @@ fn load_player_profile_manager(save_dir: &Path) -> (PlayerProfileManager, bool) 
             let kind = classify_profile_rejection(&error.to_string());
             crate::campaign_persistence::report_failure(kind, "profile archive load");
             (
-                regenerate_default_player_profiles(save_dir_str, error.to_string(), true),
+                // Never log `error.to_string()`: a validate_archive failure can
+                // embed the raw profile name (criterion 6). Log only the stable
+                // classification returned by `classify_profile_rejection`.
+                regenerate_default_player_profiles(
+                    save_dir_str,
+                    format!("archive load rejected ({kind})"),
+                    cfg!(target_arch = "wasm32"),
+                ),
                 true,
             )
         }
@@ -759,9 +768,9 @@ pub(crate) fn classify_profile_rejection(message: &str) -> &'static str {
 
 /// Recreate the Original's first-launch profile after an absent or invalid
 /// archive. A missing archive is already written by [`PlayerProfileStore::load`]
-/// before this runs; a rejected archive is left untouched (see
-/// `preserve_rejected`) so no durable bytes are silently overwritten. Marking
-/// the manager default-backed keeps the new-player prompt intact.
+/// before this runs. In the browser a rejected archive is left untouched (see
+/// `preserve_rejected`, criterion 4); native keeps its original self-healing
+/// overwrite. Marking the manager default-backed keeps the new-player prompt.
 fn regenerate_default_player_profiles(
     save_directory: String,
     reason: String,
@@ -774,9 +783,10 @@ fn regenerate_default_player_profiles(
     let index = manager.create_profile("Robin".to_owned(), DifficultyLevel::Medium);
     manager.set_active(index);
     manager.default_profiles = true;
-    // When an existing archive was rejected, leave its bytes untouched: writing
+    // In the browser, leave a rejected archive's bytes untouched: writing
     // defaults over it is exactly the silent reset criterion 4 forbids. The
-    // next explicit player save replaces it with a valid archive.
+    // next explicit player save replaces it with a valid archive. Native keeps
+    // self-healing so a corrupt local archive still recovers on next launch.
     if preserve_rejected {
         return manager;
     }

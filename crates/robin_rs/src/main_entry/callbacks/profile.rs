@@ -93,8 +93,10 @@ pub(super) fn synchronize_metrics(
     if let Err(error) = result.persistence {
         let kind = super::super::init::classify_profile_rejection(&error);
         crate::campaign_persistence::report_failure(kind, "profile synchronization");
+        // Criterion 6: the error text can embed the raw profile name, so log
+        // only the stable classification (kind/stage), never `error`.
         tracing::error!(
-            "Profile synchronization persistence failed; retained in memory and retried on the next profile save/synchronization: {error}"
+            "Profile synchronization persistence failed ({kind}); retained in memory and retried on the next profile save/synchronization"
         );
     }
 }
@@ -140,8 +142,10 @@ impl RustCallbacks {
             {
                 let kind = super::super::init::classify_profile_rejection(&error);
                 crate::campaign_persistence::report_failure(kind, "campaign history promotion");
+                // Criterion 6: log the stable classification, never the raw
+                // error, which can carry the profile name.
                 tracing::warn!(
-                    "Failed to persist campaign history in browser storage; keeping it in memory for this session: {error}"
+                    "Failed to persist campaign history in browser storage ({kind}); keeping it in memory for this session"
                 );
             }
         }
