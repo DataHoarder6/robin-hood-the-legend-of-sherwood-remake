@@ -1,4 +1,10 @@
-# Full web corpus for the private browser campaign — blocker evidence (2026-11-22)
+# Full web corpus for the private browser campaign — resolved 2026-11-22
+
+**Resolved:** the owner authorised the release converter build; the corpus was
+built on `minipc` and published privately. See
+[`browser-android-private-campaign.md`](browser-android-private-campaign.md)
+for the live link, digests and browser evidence. The notes below are the
+original blocker findings kept for the record.
 
 Read-only findings for the browser/Android stream; no builds were run.
 
