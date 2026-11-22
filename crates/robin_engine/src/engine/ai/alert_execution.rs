@@ -9,6 +9,15 @@ use crate::element::{Element as _, Human as _};
 use crate::engine::TickCtx;
 use crate::profiles::ProfileRank;
 
+/// The alert floor for the off-map summon emitter. A quiet mission keeps its
+/// original encounter; Yellow and Red let the officer call the capped garrison.
+fn offmap_summon_alert_allows(alert: crate::ai::AlertLevel) -> bool {
+    match alert {
+        crate::ai::AlertLevel::Green => false,
+        crate::ai::AlertLevel::Yellow | crate::ai::AlertLevel::Red => true,
+    }
+}
+
 fn officer_report_in_progress(substate: Substate) -> bool {
     matches!(
         substate,
@@ -835,7 +844,7 @@ impl AiOwnerCtx<'_> {
             return;
         }
         let alert = self.enemy().base.current_music_alert_status;
-        if alert == crate::ai::AlertLevel::Green {
+        if !offmap_summon_alert_allows(alert) {
             return;
         }
         // The alert sets the floor, earlier arrivals escalate within the
