@@ -2662,20 +2662,32 @@ impl SherwoodCtx<'_> {
 /// Whether the Sherwood overlay entrance admits this seat to drive a modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SherwoodOverlayEntrance {
+    /// The seat was admitted; the renderer-bound body follows this call.
     Allowed,
-    /// A non-host seat was refused and the host-only message was displayed.
+    /// A non-host seat was refused, the message was published and `on_allowed`
+    /// was never invoked. The caller returns `Proceed` immediately.
     Refused,
 }
 
-/// Gate the Sherwood overlay against non-host seats before any modal can be
-/// advanced. Extracted from the renderer-bound handler so the refusal message
-/// and its no-dispatch contract are assertable in a GPU-free test.
-fn sherwood_overlay_entrance(
+/// Gate the Sherwood overlay against non-host seats and publish the refusal.
+///
+/// `on_allowed` stands for everything the handler does after the gate. A
+/// refused client never reaches it, so no command or save request can enter
+/// `frame`/`callbacks`. The handler passes a no-op because its body follows
+/// the gate; the test passes a command-staging stand-in, which makes the
+/// "nothing reached the frame/callbacks" assertion falsifiable.
+fn run_sherwood_overlay_entrance<P>(
     game: &mut Game,
     host: &Host,
     campaign_map_active: bool,
     flow_is_some: bool,
-) -> SherwoodOverlayEntrance {
+    frame: &mut MissionFrame,
+    callbacks: &mut RustCallbacks,
+    on_allowed: P,
+) -> SherwoodOverlayEntrance
+where
+    P: FnOnce(&mut MissionFrame, &mut RustCallbacks),
+{
     if host.transport.net().is_some()
         && host.transport.local_seat() != engine_player_command::PlayerId::HOST
         && (campaign_map_active || flow_is_some)
@@ -2690,6 +2702,7 @@ fn sherwood_overlay_entrance(
         );
         return SherwoodOverlayEntrance::Refused;
     }
+    on_allowed(frame, callbacks);
     SherwoodOverlayEntrance::Allowed
 }
 
@@ -2705,8 +2718,15 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
 ) -> Result<HandlerAction, super::MissionError> {
     let campaign_map_active = ctx.game.persistent.campaign_map_active;
     let flow_is_some = ctx.flow.is_some();
-    if sherwood_overlay_entrance(ctx.game, ctx.host, campaign_map_active, flow_is_some)
-        == SherwoodOverlayEntrance::Refused
+    if run_sherwood_overlay_entrance(
+        ctx.game,
+        ctx.host,
+        campaign_map_active,
+        flow_is_some,
+        frame,
+        ctx.callbacks,
+        |_, _| {},
+    ) == SherwoodOverlayEntrance::Refused
     {
         return Ok(HandlerAction::Proceed);
     }
@@ -3778,16 +3798,67 @@ mod sherwood_outcome_tests {
         }
     }
 
+    /// Stand-in for the renderer-bound remainder of the handler. It stages a
+    /// real command and a real save request so the refused path's silence is
+    /// observable on both channels rather than trivially true.
+    fn stage_probe(frame: &mut MissionFrame, callbacks: &mut RustCallbacks) {
+        let offline = Host::scratch(800.0, 600.0);
+        dispatch_local_command(
+            &offline.transport,
+            &mut frame.stage_commands(),
+            &PlayerCommand::QuitMissionRequested,
+        );
+        callbacks.queue_operation(SaveLoadRequest::QuickSave { mission_id: 7 });
+    }
+
     /// A networked client cannot drive the overlay: it is refused with the
-    /// host-only message and no command is staged. The host and an offline seat
-    /// stay admitted.
+    /// host-only message and the continuation that would stage commands never
+    /// runs. The admitted cases run it, proving the observation is live.
     #[test]
     fn non_host_cannot_drive_the_sherwood_overlay() {
-        let (mut game, _host, frame, _callbacks) = fresh();
-        let client = net_host(engine_player_command::PlayerId(1));
-
+        // Control: an admitted seat runs the continuation, and both observation
+        // channels really capture what it stages.
+        let (mut game, host, mut frame, mut callbacks) = fresh();
         assert_eq!(
-            sherwood_overlay_entrance(&mut game, &client, true, false),
+            run_sherwood_overlay_entrance(
+                &mut game,
+                &host,
+                true,
+                false,
+                &mut frame,
+                &mut callbacks,
+                stage_probe
+            ),
+            SherwoodOverlayEntrance::Allowed
+        );
+        assert!(
+            matches!(
+                staged(&frame).as_slice(),
+                [PlayerCommand::QuitMissionRequested]
+            ),
+            "the admitted path must stage its command: {:?}",
+            staged(&frame)
+        );
+        assert!(matches!(
+            callbacks.pending_request(),
+            Some(SaveLoadRequest::QuickSave { mission_id: 7 })
+        ));
+        assert!(game.message_text.is_empty());
+
+        // Refused with an active map: same continuation, nothing reaches either
+        // channel, while the host-only message is published.
+        let (mut game, _host, mut frame, mut callbacks) = fresh();
+        let client = net_host(engine_player_command::PlayerId(1));
+        assert_eq!(
+            run_sherwood_overlay_entrance(
+                &mut game,
+                &client,
+                true,
+                false,
+                &mut frame,
+                &mut callbacks,
+                stage_probe
+            ),
             SherwoodOverlayEntrance::Refused,
             "a networked client with the map active is refused"
         );
@@ -3795,33 +3866,74 @@ mod sherwood_outcome_tests {
         assert_eq!(game.message_delay, 100);
         assert!(
             staged(&frame).is_empty(),
-            "a refusal must dispatch no command"
+            "a refusal must not reach the command channel: {:?}",
+            staged(&frame)
+        );
+        assert!(
+            callbacks.pending_request().is_none(),
+            "a refusal must not reach the save-request channel"
         );
 
-        // A live flow alone (no active map) also refuses the client.
-        let (mut game, _host, _frame, _callbacks) = fresh();
+        // A live flow alone (no active map) also refuses the client, and the
+        // continuation is suppressed there too.
+        let (mut game, _host, mut frame, mut callbacks) = fresh();
         assert_eq!(
-            sherwood_overlay_entrance(&mut game, &client, false, true),
+            run_sherwood_overlay_entrance(
+                &mut game,
+                &client,
+                false,
+                true,
+                &mut frame,
+                &mut callbacks,
+                stage_probe
+            ),
             SherwoodOverlayEntrance::Refused,
             "a live flow alone also refuses the client"
         );
+        assert_eq!(game.message_text, NON_HOST_MESSAGE);
+        assert!(staged(&frame).is_empty());
+        assert!(callbacks.pending_request().is_none());
 
-        // The host stays admitted and shows no refusal.
+        // The host stays admitted, runs the continuation, and shows no refusal.
         let host = net_host(engine_player_command::PlayerId::HOST);
-        let (mut game, _host, _frame, _callbacks) = fresh();
+        let (mut game, _host, mut frame, mut callbacks) = fresh();
         assert_eq!(
-            sherwood_overlay_entrance(&mut game, &host, true, true),
+            run_sherwood_overlay_entrance(
+                &mut game,
+                &host,
+                true,
+                true,
+                &mut frame,
+                &mut callbacks,
+                stage_probe
+            ),
             SherwoodOverlayEntrance::Allowed
         );
+        assert!(matches!(
+            staged(&frame).as_slice(),
+            [PlayerCommand::QuitMissionRequested]
+        ));
         assert!(game.message_text.is_empty());
 
         // An offline seat has no host to refuse, so it stays admitted too.
-        let (mut game, host, _frame, _callbacks) = fresh();
+        let (mut game, host, mut frame, mut callbacks) = fresh();
         assert_eq!(
-            sherwood_overlay_entrance(&mut game, &host, true, true),
+            run_sherwood_overlay_entrance(
+                &mut game,
+                &host,
+                true,
+                true,
+                &mut frame,
+                &mut callbacks,
+                stage_probe
+            ),
             SherwoodOverlayEntrance::Allowed,
             "an offline seat has no host to refuse"
         );
+        assert!(matches!(
+            staged(&frame).as_slice(),
+            [PlayerCommand::QuitMissionRequested]
+        ));
         assert!(game.message_text.is_empty());
     }
 }
