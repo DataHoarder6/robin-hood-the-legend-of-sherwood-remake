@@ -411,7 +411,11 @@ impl EngineInner {
             return None;
         }
         let result = self.summon_garrison_authorized(tcx, request);
-        if result.is_none() {
+        if result.is_some() {
+            self.ai.global.offmap_budget.commit(frame);
+        } else {
+            // A failed summon is transient: release the reserved slot without
+            // spending budget or starting a cooldown so it can be retried.
             self.ai.global.offmap_budget.release();
         }
         result

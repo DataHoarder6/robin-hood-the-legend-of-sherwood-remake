@@ -674,23 +674,15 @@ impl Entity {
 
     /// Whether this human is actually in melee right now.
     ///
-    /// That means at least one melee opponent is engaged, or the actor is
-    /// parrying at this instant.  Holding a drawn sword — `WaitingSword`,
-    /// `MovingSword`, `MovingFastSword` — is a *stance*, not a fight: a
-    /// freed peasant or an armed ally walking with a sword in hand is not
-    /// fighting, and the HUD crossed-swords overlay (which the retail game
-    /// shows only for genuine combat) must stay off for it.
+    /// This keys only on an engaged opponent, matching the upstream hero HUD
+    /// path. Holding a drawn sword — `WaitingSword`, `MovingSword`,
+    /// `MovingFastSword` — or parrying with an empty opponent list is a
+    /// *stance*, not a fight: a freed peasant or an armed ally walking with a
+    /// sword in hand, or a fighter between swings, must not light the HUD
+    /// crossed-swords overlay the retail game reserves for genuine combat.
     pub fn is_in_melee_combat(&self) -> bool {
-        let Some(human) = self.human_data() else {
-            return false;
-        };
-        !human.opponents.is_empty()
-            || self.actor_data().is_some_and(|actor| {
-                matches!(
-                    actor.action_state,
-                    ActionState::ParryingSword | ActionState::ParryingSwordLow
-                )
-            })
+        self.human_data()
+            .is_some_and(|human| !human.opponents.is_empty())
     }
 
     /// Whether this entity is a VIP soldier, read from the flag cached on

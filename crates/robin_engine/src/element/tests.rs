@@ -1813,7 +1813,7 @@ fn entity_persisted_projection_matches_json_round_trip_body() {
 }
 
 #[test]
-fn melee_combat_means_opponents_or_a_parry_not_a_drawn_sword() {
+fn melee_combat_requires_a_live_opponent_not_a_parry_or_drawn_sword() {
     use crate::element_kinds::ActionState;
     use crate::engine::test_support::actors::make_test_pc;
 
@@ -1825,9 +1825,12 @@ fn melee_combat_means_opponents_or_a_parry_not_a_drawn_sword() {
     actor.actor_data_mut().unwrap().action_state = ActionState::MovingSword;
     assert!(!actor.is_in_melee_combat());
 
-    // Parrying is combat even before the opponent list is populated.
+    // The hero HUD path keys only on a populated opponent list: parrying with
+    // nobody engaged is a stance, not a fight, and must not show the badge.
     actor.actor_data_mut().unwrap().action_state = ActionState::ParryingSword;
-    assert!(actor.is_in_melee_combat());
+    assert!(!actor.is_in_melee_combat());
+    actor.actor_data_mut().unwrap().action_state = ActionState::ParryingSwordLow;
+    assert!(!actor.is_in_melee_combat());
 
     // A live opponent list is combat whatever the animation is doing.
     actor.actor_data_mut().unwrap().action_state = ActionState::WaitingSword;

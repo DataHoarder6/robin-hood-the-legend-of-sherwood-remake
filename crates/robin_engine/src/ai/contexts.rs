@@ -337,8 +337,10 @@ pub struct OffmapEntry {
 
 /// How many bodies an alarm may bring in from outside the map in one mission.
 ///
-/// Authored from the mission's tactic data. `authorize` is the single gate:
-/// a summon spends one slot, and a failed summon refunds it.
+/// Authored from the mission's tactic data. `authorize` reserves a concurrency
+/// slot; `commit` spends one lifetime slot and starts the cooldown only once a
+/// summon actually succeeds. `release` frees a slot on withdrawal or on a
+/// failed summon, so a transient failure can be retried without burning budget.
 #[derive(
     Debug,
     Default,
@@ -359,16 +361,26 @@ pub struct OffmapReinforcementBudget {
 }
 
 impl OffmapReinforcementBudget {
+    /// Reserve a concurrency slot if the mission still has budget, the
+    /// concurrency cap allows it and the cooldown has elapsed. The lifetime
+    /// slot is not spent until `commit`, so a failed summon can be retried.
     pub fn authorize(&mut self, frame: u32) -> bool {
         if self.remaining == 0 || self.live >= self.concurrent || frame < self.next_allowed_frame {
             return false;
         }
-        self.remaining -= 1;
         self.live += 1;
-        self.next_allowed_frame = frame.saturating_add(self.cooldown_ticks);
         true
     }
 
+    /// Commit a successful summon: spend one lifetime slot and start the
+    /// cooldown so summons cannot be spammed within one alarm.
+    pub fn commit(&mut self, frame: u32) {
+        self.remaining -= 1;
+        self.next_allowed_frame = frame.saturating_add(self.cooldown_ticks);
+    }
+
+    /// Free a reserved or live slot. Called both when a summon fails (the
+    /// lifetime slot was never spent) and when a summoned body leaves the map.
     pub fn release(&mut self) {
         self.live = self.live.saturating_sub(1);
     }

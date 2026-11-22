@@ -227,7 +227,7 @@ impl EngineInner {
                 mission = mission_name,
                 observed = %mission_content_digest(mission_name, loaded.mission.soldiers.len(), patch),
                 expected = %patch.content_digest,
-                "extra-guards patch does not match this mission content; using original roster"
+                "extra-guards content digest mismatch: using the mission's original roster"
             );
             return Ok(Vec::new());
         }
@@ -614,6 +614,82 @@ mod tests {
     }
 
     #[test]
+    fn content_digest_mismatch_is_reported_and_drift_is_not_patched() {
+        use tracing_subscriber::prelude::*;
+
+        /// Captures tracing output so the degrade warning is assertable.
+        #[derive(Clone, Default)]
+        struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+            type Writer = Capture;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let captured = Capture::default();
+        let sink = std::sync::Arc::clone(&captured.0);
+        // The pilot patch reviews 27 authored soldiers; a drifted 26-soldier
+        // roster must run untouched instead of receiving reviewed placements.
+        let mut loaded = crate::level_data::LoadedLevel::empty();
+        loaded.mission.soldiers = vec![raw_soldier(); 26];
+        let mut engine = EngineInner::new();
+        let assets = LevelAssets::new();
+
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(captured),
+        );
+        let additions = tracing::subscriber::with_default(subscriber, || {
+            engine
+                .apply_legendary_reinforcements(
+                    &assets,
+                    &mut loaded,
+                    PILOT_MISSION,
+                    SimConfig {
+                        extra_guards: true,
+                        ..SimConfig::default()
+                    },
+                )
+                .expect("a digest mismatch degrades to the original roster")
+        });
+
+        assert!(
+            additions.is_empty(),
+            "a drifted roster must not receive reviewed placements"
+        );
+        assert_eq!(
+            loaded.mission.soldiers.len(),
+            26,
+            "the original roster runs"
+        );
+        let log = String::from_utf8(
+            sink.lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone(),
+        )
+        .expect("captured log is utf8");
+        assert!(
+            log.contains("content digest mismatch"),
+            "the mismatch must be reported, got: {log}"
+        );
+    }
+
+    #[test]
     fn reviewed_additions_have_a_fixed_order_and_cloned_overrides() {
         let engine = EngineInner::new();
         let authored = vec![authored_soldier(0), authored_soldier(1)];
@@ -872,19 +948,19 @@ mod tests {
         }
         let sim = crate::sim_rng::test_context();
         let assets = engine.test_runtime_assets();
-        assert!(
-            engine
-                .summon_garrison(
-                    TickCtx::new(&sim, &assets),
-                    SummonRequest {
-                        faction: Camp::Lacklandists,
-                        entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
-                        min_tier: 0,
-                    },
-                )
-                .is_none(),
-            "with the option off the staged garrison stays asleep"
-        );
+        let request = SummonRequest {
+            faction: Camp::Lacklandists,
+            entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
+            min_tier: 0,
+        };
+        for _ in 0..2 {
+            assert!(
+                engine
+                    .summon_garrison(TickCtx::new(&sim, &assets), request)
+                    .is_none(),
+                "with the option off the staged garrison stays asleep"
+            );
+        }
         assert!(bodies.iter().all(|id| {
             !engine
                 .get_entity(*id)
@@ -892,10 +968,9 @@ mod tests {
                 .element_data()
                 .active
         }));
-        // Existing budget semantics: authorize() spends the slot before the
-        // flag check and release() never refunds `remaining`. The woken-body
-        // assertion above is the option-off proof; no new draw was added.
-        assert_eq!(engine.ai.global.offmap_budget.remaining, 1);
+        // A failed summon is transient: it consumes neither a lifetime slot
+        // nor a concurrency slot, so two no-ops leave the full pilot budget.
+        assert_eq!(engine.ai.global.offmap_budget.remaining, 2);
         assert_eq!(engine.ai.global.offmap_budget.live, 0);
     }
 }
