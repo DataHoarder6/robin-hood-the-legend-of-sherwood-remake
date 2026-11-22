@@ -2358,6 +2358,119 @@ pub(super) struct SherwoodModalResources<'a> {
     pub(super) campaign_map: &'a mut CampaignMapState,
 }
 
+/// Authoritative side effects of a confirmed Sherwood confirmation modal.
+///
+/// `mission_id` is supplied lazily: only the normal mission start resolves it,
+/// preserving the original requirement (and panic) for a campaign with no
+/// current mission. Extracted from the renderer-bound modal tick so every
+/// confirmation arm can be driven and asserted in a GPU-free test.
+fn dispatch_sherwood_confirmation(
+    action: SherwoodConfirmationAction,
+    mission_id: impl FnOnce() -> u32,
+    game: &mut Game,
+    host: &mut Host,
+    frame: &mut MissionFrame,
+    callbacks: &mut RustCallbacks,
+) -> HandlerAction {
+    match action {
+        SherwoodConfirmationAction::LeaveWonMission => {
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::QuitMissionRequested,
+            );
+            HandlerAction::Proceed
+        }
+        SherwoodConfirmationAction::ReturnToMap => {
+            // The mission stays committed; the map re-opens on
+            // top so another can be picked. Re-selecting here
+            // used to hit the history-replay assertion.
+            game.show_campaign_map();
+            HandlerAction::Proceed
+        }
+        SherwoodConfirmationAction::StartMission {
+            men_to_blazon: true,
+        } => {
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::UnselectAllPcs,
+            );
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::CampaignConvertSelectedPeasantsToBlazons,
+            );
+            game.persistent.campaign_map_active = true;
+            game.persistent.campaign_map_displayed = true;
+            game.set_men_to_blazon_conversion(false);
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::SetMenToBlazonConversionMode { on: false },
+            );
+            HandlerAction::Proceed
+        }
+        SherwoodConfirmationAction::StartMission {
+            men_to_blazon: false,
+        } => {
+            let mission_id = mission_id();
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::CampaignHarvestProductionSectorState,
+            );
+            if defer_multiplayer_campaign_exit(host, mission_id) {
+                return HandlerAction::Proceed;
+            }
+            callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
+            HandlerAction::Exit(GameCode::LevelInterrupted)
+        }
+    }
+}
+
+/// Authoritative side effects of a completed Sherwood mission-description
+/// modal. Extracted beside the confirmation dispatch so every `MissionChoice`
+/// can be driven and asserted without a renderer.
+fn dispatch_sherwood_mission_choice(
+    choice: MissionChoice,
+    mission_index: usize,
+    men_to_blazon: bool,
+    game: &mut Game,
+    host: &Host,
+    frame: &mut MissionFrame,
+    enable: &mut SherwoodButtonEnable,
+) {
+    match choice {
+        MissionChoice::StartMission => {
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::CampaignSelectNextMission {
+                    mission_idx: Some(mission_index),
+                },
+            );
+            game.set_men_to_blazon_conversion(men_to_blazon);
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::SetMenToBlazonConversionMode { on: men_to_blazon },
+            );
+            *enable = SherwoodButtonEnable::post_commit();
+        }
+        MissionChoice::ShowPendingMissions => {
+            dispatch_local_command(
+                &host.transport,
+                &mut frame.stage_commands(),
+                &PlayerCommand::CampaignSwapPendingToAccessibleMissions,
+            );
+            game.show_campaign_map();
+        }
+        MissionChoice::None => game.show_campaign_map(),
+    }
+    game.persistent.campaign_map_displayed = false;
+}
+
 impl SherwoodCtx<'_> {
     /// Advance one non-map Sherwood modal flow (pseudo-mission debriefing,
     /// mission description, or a Yes/No confirmation) by a presentation frame.
@@ -2460,34 +2573,15 @@ impl SherwoodCtx<'_> {
                     for action in admitted_actions {
                         frame.record_applied_external_action(action);
                     }
-                    match choice {
-                        MissionChoice::StartMission => {
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::CampaignSelectNextMission {
-                                    mission_idx: Some(mission_index),
-                                },
-                            );
-                            game.set_men_to_blazon_conversion(men_to_blazon);
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::SetMenToBlazonConversionMode { on: men_to_blazon },
-                            );
-                            *sherwood_enable = SherwoodButtonEnable::post_commit();
-                        }
-                        MissionChoice::ShowPendingMissions => {
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::CampaignSwapPendingToAccessibleMissions,
-                            );
-                            game.show_campaign_map();
-                        }
-                        MissionChoice::None => game.show_campaign_map(),
-                    }
-                    game.persistent.campaign_map_displayed = false;
+                    dispatch_sherwood_mission_choice(
+                        choice,
+                        mission_index,
+                        men_to_blazon,
+                        game,
+                        host,
+                        frame,
+                        sherwood_enable,
+                    );
                     Ok(HandlerAction::Proceed)
                 }
                 SherwoodCampaignFlow::Confirmation { mut state, action } => {
@@ -2506,62 +2600,14 @@ impl SherwoodCtx<'_> {
                     if !confirmed {
                         return Ok(HandlerAction::Proceed);
                     }
-                    match action {
-                        SherwoodConfirmationAction::LeaveWonMission => {
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::QuitMissionRequested,
-                            );
-                            Ok(HandlerAction::Proceed)
-                        }
-                        SherwoodConfirmationAction::ReturnToMap => {
-                            // The mission stays committed; the map re-opens on
-                            // top so another can be picked. Re-selecting here
-                            // used to hit the history-replay assertion.
-                            game.show_campaign_map();
-                            Ok(HandlerAction::Proceed)
-                        }
-                        SherwoodConfirmationAction::StartMission {
-                            men_to_blazon: true,
-                        } => {
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::UnselectAllPcs,
-                            );
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::CampaignConvertSelectedPeasantsToBlazons,
-                            );
-                            game.persistent.campaign_map_active = true;
-                            game.persistent.campaign_map_displayed = true;
-                            game.set_men_to_blazon_conversion(false);
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::SetMenToBlazonConversionMode { on: false },
-                            );
-                            Ok(HandlerAction::Proceed)
-                        }
-                        SherwoodConfirmationAction::StartMission {
-                            men_to_blazon: false,
-                        } => {
-                            let mission_id =
-                                current_mission_id(engine.campaign(), &assets.profile_manager);
-                            dispatch_local_command(
-                                &host.transport,
-                                &mut frame.stage_commands(),
-                                &PlayerCommand::CampaignHarvestProductionSectorState,
-                            );
-                            if defer_multiplayer_campaign_exit(host, mission_id) {
-                                return Ok(HandlerAction::Proceed);
-                            }
-                            callbacks.queue_operation(SaveLoadRequest::Sherwood { mission_id });
-                            Ok(HandlerAction::Exit(GameCode::LevelInterrupted))
-                        }
-                    }
+                    Ok(dispatch_sherwood_confirmation(
+                        action,
+                        || current_mission_id(engine.campaign(), &assets.profile_manager),
+                        game,
+                        host,
+                        frame,
+                        callbacks,
+                    ))
                 }
                 SherwoodCampaignFlow::PerksPanel { mut state } => {
                     if !game.is_sherwood {
@@ -2613,6 +2659,40 @@ impl SherwoodCtx<'_> {
     }
 }
 
+/// Whether the Sherwood overlay entrance admits this seat to drive a modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SherwoodOverlayEntrance {
+    Allowed,
+    /// A non-host seat was refused and the host-only message was displayed.
+    Refused,
+}
+
+/// Gate the Sherwood overlay against non-host seats before any modal can be
+/// advanced. Extracted from the renderer-bound handler so the refusal message
+/// and its no-dispatch contract are assertable in a GPU-free test.
+fn sherwood_overlay_entrance(
+    game: &mut Game,
+    host: &Host,
+    campaign_map_active: bool,
+    flow_is_some: bool,
+) -> SherwoodOverlayEntrance {
+    if host.transport.net().is_some()
+        && host.transport.local_seat() != engine_player_command::PlayerId::HOST
+        && (campaign_map_active || flow_is_some)
+    {
+        // Mission-description ticks can spend blazons through synchronous
+        // external actions, so clients must not even advance their local
+        // campaign modal state. They keep simulating until the host publishes
+        // the exact campaign-exit snapshot.
+        game.display_message(
+            "The multiplayer host is choosing the next campaign action.".to_string(),
+            100,
+        );
+        return SherwoodOverlayEntrance::Refused;
+    }
+    SherwoodOverlayEntrance::Allowed
+}
+
 /// Handle the Sherwood campaign-map overlay modal.
 ///
 /// Returns `HandlerAction::Exit(GameCode::Quit)` when the player
@@ -2623,18 +2703,11 @@ pub(super) fn handle_sherwood_campaign_map_overlay(
     frame: &mut MissionFrame,
     mut modal: SherwoodModalResources<'_>,
 ) -> Result<HandlerAction, super::MissionError> {
-    if ctx.host.transport.net().is_some()
-        && ctx.host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST
-        && (ctx.game.persistent.campaign_map_active || ctx.flow.is_some())
+    let campaign_map_active = ctx.game.persistent.campaign_map_active;
+    let flow_is_some = ctx.flow.is_some();
+    if sherwood_overlay_entrance(ctx.game, ctx.host, campaign_map_active, flow_is_some)
+        == SherwoodOverlayEntrance::Refused
     {
-        // Mission-description ticks can spend blazons through synchronous
-        // external actions, so clients must not even advance their local
-        // campaign modal state. They keep simulating until the host publishes
-        // the exact campaign-exit snapshot.
-        ctx.game.display_message(
-            "The multiplayer host is choosing the next campaign action.".to_string(),
-            100,
-        );
         return Ok(HandlerAction::Proceed);
     }
     if let Some(active_flow) = ctx.flow.take() {
@@ -3483,5 +3556,272 @@ mod box_selection_tests {
             },
             false
         ));
+    }
+}
+
+#[cfg(test)]
+mod sherwood_outcome_tests {
+    use super::*;
+    use crate::application::ApplicationContext;
+
+    const NON_HOST_MESSAGE: &str = "The multiplayer host is choosing the next campaign action.";
+
+    /// Staged pre-simulation commands as borrowed values, for `matches!`.
+    fn staged(frame: &MissionFrame) -> Vec<&PlayerCommand> {
+        frame
+            .commands()
+            .iter()
+            .map(|input| &input.command)
+            .collect()
+    }
+
+    fn fresh() -> (Game, Host, MissionFrame, RustCallbacks) {
+        (
+            Game::default(),
+            Host::scratch(800.0, 600.0),
+            MissionFrame::new(7),
+            RustCallbacks::for_replay(ApplicationContext::default()),
+        )
+    }
+
+    fn net_host(seat: engine_player_command::PlayerId) -> Host {
+        let mut host = Host::scratch(800.0, 600.0);
+        let (net, _incoming, _outgoing, _, _) = crate::multiplayer::NetChannels::new();
+        host.transport = crate::host::HostTransport::test_session(net, seat);
+        host
+    }
+
+    /// Every `SherwoodConfirmationAction` and every `MissionChoice` arm of the
+    /// live driver dispatches its documented command (or queues its save and
+    /// exits), driven through the same seam `drive_sherwood_modal_flow` calls.
+    #[test]
+    fn sherwood_confirmation_arms_dispatch_their_commands() {
+        // LeaveWonMission: quit request and nothing else.
+        {
+            let (mut game, mut host, mut frame, mut callbacks) = fresh();
+            let action = dispatch_sherwood_confirmation(
+                SherwoodConfirmationAction::LeaveWonMission,
+                || unreachable!("leaving does not resolve a mission id"),
+                &mut game,
+                &mut host,
+                &mut frame,
+                &mut callbacks,
+            );
+            assert!(matches!(action, HandlerAction::Proceed));
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [PlayerCommand::QuitMissionRequested]
+                ),
+                "LeaveWonMission dispatches only QuitMissionRequested: {:?}",
+                staged(&frame)
+            );
+        }
+
+        // ReturnToMap: no command, map reopens with the mission still committed.
+        {
+            let (mut game, mut host, mut frame, mut callbacks) = fresh();
+            let action = dispatch_sherwood_confirmation(
+                SherwoodConfirmationAction::ReturnToMap,
+                || unreachable!("returning does not resolve a mission id"),
+                &mut game,
+                &mut host,
+                &mut frame,
+                &mut callbacks,
+            );
+            assert!(matches!(action, HandlerAction::Proceed));
+            assert!(
+                staged(&frame).is_empty(),
+                "ReturnToMap dispatches no command"
+            );
+            assert!(game.persistent.campaign_map_active);
+        }
+
+        // Blazon start: unselect + convert + mirror the mode off, reopen the map.
+        {
+            let (mut game, mut host, mut frame, mut callbacks) = fresh();
+            let action = dispatch_sherwood_confirmation(
+                SherwoodConfirmationAction::StartMission {
+                    men_to_blazon: true,
+                },
+                || unreachable!("blazon start does not resolve a mission id"),
+                &mut game,
+                &mut host,
+                &mut frame,
+                &mut callbacks,
+            );
+            assert!(matches!(action, HandlerAction::Proceed));
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [
+                        PlayerCommand::UnselectAllPcs,
+                        PlayerCommand::CampaignConvertSelectedPeasantsToBlazons,
+                        PlayerCommand::SetMenToBlazonConversionMode { on: false },
+                    ]
+                ),
+                "blazon start dispatches unselect + convert + mode off: {:?}",
+                staged(&frame)
+            );
+            assert!(game.persistent.campaign_map_active);
+            assert!(game.persistent.campaign_map_displayed);
+            assert!(!game.is_men_to_blazon_conversion());
+        }
+
+        // Normal start: harvest, queue the Sherwood save, and leave the level.
+        {
+            let (mut game, mut host, mut frame, mut callbacks) = fresh();
+            let action = dispatch_sherwood_confirmation(
+                SherwoodConfirmationAction::StartMission {
+                    men_to_blazon: false,
+                },
+                || 42,
+                &mut game,
+                &mut host,
+                &mut frame,
+                &mut callbacks,
+            );
+            assert!(
+                matches!(action, HandlerAction::Exit(GameCode::LevelInterrupted)),
+                "normal start exits the level for the Sherwood save: {action:?}"
+            );
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [PlayerCommand::CampaignHarvestProductionSectorState]
+                ),
+                "normal start harvests the production sector: {:?}",
+                staged(&frame)
+            );
+            assert!(
+                matches!(
+                    callbacks.pending_request(),
+                    Some(SaveLoadRequest::Sherwood { mission_id: 42 })
+                ),
+                "normal start queues the Sherwood save for the resolved mission"
+            );
+        }
+
+        // Mission start: select the mission, mirror blazon mode, re-arm the rail.
+        {
+            let (mut game, host, mut frame, _callbacks) = fresh();
+            let mut enable = SherwoodButtonEnable::pre_commit();
+            dispatch_sherwood_mission_choice(
+                MissionChoice::StartMission,
+                3,
+                true,
+                &mut game,
+                &host,
+                &mut frame,
+                &mut enable,
+            );
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [
+                        PlayerCommand::CampaignSelectNextMission {
+                            mission_idx: Some(3)
+                        },
+                        PlayerCommand::SetMenToBlazonConversionMode { on: true },
+                    ]
+                ),
+                "mission start selects the mission and mirrors blazon mode: {:?}",
+                staged(&frame)
+            );
+            assert!(game.is_men_to_blazon_conversion());
+            let post = SherwoodButtonEnable::post_commit();
+            assert_eq!(enable.go_to_exit, post.go_to_exit);
+            assert_eq!(enable.start_mission, post.start_mission);
+            assert_eq!(enable.perks_panel, post.perks_panel);
+            assert!(!game.persistent.campaign_map_displayed);
+        }
+
+        // ShowPendingMissions: swap the pending set and reopen the map.
+        {
+            let (mut game, host, mut frame, _callbacks) = fresh();
+            let mut enable = SherwoodButtonEnable::pre_commit();
+            dispatch_sherwood_mission_choice(
+                MissionChoice::ShowPendingMissions,
+                3,
+                false,
+                &mut game,
+                &host,
+                &mut frame,
+                &mut enable,
+            );
+            assert!(
+                matches!(
+                    staged(&frame).as_slice(),
+                    [PlayerCommand::CampaignSwapPendingToAccessibleMissions]
+                ),
+                "show-pending swaps the mission set: {:?}",
+                staged(&frame)
+            );
+            assert!(game.persistent.campaign_map_active);
+        }
+
+        // None: just reopen the map, dispatch nothing.
+        {
+            let (mut game, host, mut frame, _callbacks) = fresh();
+            let mut enable = SherwoodButtonEnable::pre_commit();
+            dispatch_sherwood_mission_choice(
+                MissionChoice::None,
+                3,
+                false,
+                &mut game,
+                &host,
+                &mut frame,
+                &mut enable,
+            );
+            assert!(staged(&frame).is_empty(), "None dispatches no command");
+            assert!(game.persistent.campaign_map_active);
+        }
+    }
+
+    /// A networked client cannot drive the overlay: it is refused with the
+    /// host-only message and no command is staged. The host and an offline seat
+    /// stay admitted.
+    #[test]
+    fn non_host_cannot_drive_the_sherwood_overlay() {
+        let (mut game, _host, frame, _callbacks) = fresh();
+        let client = net_host(engine_player_command::PlayerId(1));
+
+        assert_eq!(
+            sherwood_overlay_entrance(&mut game, &client, true, false),
+            SherwoodOverlayEntrance::Refused,
+            "a networked client with the map active is refused"
+        );
+        assert_eq!(game.message_text, NON_HOST_MESSAGE);
+        assert_eq!(game.message_delay, 100);
+        assert!(
+            staged(&frame).is_empty(),
+            "a refusal must dispatch no command"
+        );
+
+        // A live flow alone (no active map) also refuses the client.
+        let (mut game, _host, _frame, _callbacks) = fresh();
+        assert_eq!(
+            sherwood_overlay_entrance(&mut game, &client, false, true),
+            SherwoodOverlayEntrance::Refused,
+            "a live flow alone also refuses the client"
+        );
+
+        // The host stays admitted and shows no refusal.
+        let host = net_host(engine_player_command::PlayerId::HOST);
+        let (mut game, _host, _frame, _callbacks) = fresh();
+        assert_eq!(
+            sherwood_overlay_entrance(&mut game, &host, true, true),
+            SherwoodOverlayEntrance::Allowed
+        );
+        assert!(game.message_text.is_empty());
+
+        // An offline seat has no host to refuse, so it stays admitted too.
+        let (mut game, host, _frame, _callbacks) = fresh();
+        assert_eq!(
+            sherwood_overlay_entrance(&mut game, &host, true, true),
+            SherwoodOverlayEntrance::Allowed,
+            "an offline seat has no host to refuse"
+        );
+        assert!(game.message_text.is_empty());
     }
 }
