@@ -70,10 +70,18 @@ changes the runner, never a scenario, so:
   `/state.presentation.kind`, post `ModalDismiss { kind, result }` to it. The
   runner interprets nothing: the kind comes from the game.
 
-## The matrix (rows to add)
+## The matrix (historical sketch — superseded 2026-11-21)
 
-`H21`–`H26`, process layer, `proves.runner` this suite. Every row is two seats
-on one mission, and every row fails by deadline if any seat hangs.
+> **Superseded 2026-11-21.** The live coverage contract is
+> [HARNESS.md](../multiplayer/HARNESS.md) §1 ("Coverage matrix", Corpus table),
+> rows H21–H36. The six-row sketch below is kept as evidence of the original
+> design, not as the current matrix. Two ids changed: the sketch's **H22** is
+> now **H32**, and its **H26** (won/lost) is now **H27** (won) and **H28**
+> (lost). HARNESS.md §1 owns the reasoning and the current assertions. The
+> table's links were left as found: the docs gate checks relative links only in
+> the Markdown a landing changes (`scripts/push-gate.sh`), so the retained
+> historical link rot is a known cost of keeping the evidence, not something
+> this note fixes.
 
 | row | mission ends | host presses | client presses | must assert |
 | --- | --- | --- | --- | --- |

@@ -67,10 +67,27 @@
           # LD_LIBRARY_PATH. Without it winit dies with "Failed to load one of
           # xlib's shared libraries" the moment a window opens.
           runtimeLibs = import ./nix/runtime-libs.nix pkgs;
+
+          # The runtime is not a build host. check-quality.sh alone cannot stop
+          # a raw `nix develop --command cargo build`, so the devShell installs
+          # a `cargo` ahead of the pinned toolchain: build-like subcommands are
+          # refused on either runtime, everything else execs the real cargo.
+          # Install the guard and its host-list helper as siblings: the guard
+          # resolves its own path through the symlink and sources the helper
+          # beside it (a single-file store path would leave no sibling).
+          cargoGuard = pkgs.runCommand "robin-cargo-runtime-guard" { } ''
+            mkdir -p "$out/bin" "$out/lib"
+            install -m 755 "${./scripts/cargo-runtime-guard.sh}" "$out/lib/cargo-runtime-guard.sh"
+            install -m 644 "${./scripts/runtime-hosts.sh}" "$out/lib/runtime-hosts.sh"
+            ln -s "$out/lib/cargo-runtime-guard.sh" "$out/bin/cargo"
+          '';
         in
         {
           default = pkgs.mkShell {
             packages = [
+              # Must precede the rustup proxies: this `cargo` refuses runtime
+              # builds; the shellHook below pins it to the front of PATH.
+              cargoGuard
               # `build-support/robin_build.rs` shells out to `git rev-parse
               # HEAD` and falls back to the literal "unknown" when it cannot:
               # the replay format tags every recording with that hash, so a
@@ -113,6 +130,12 @@
               pkgs.wabt
             ]
             ++ runtimeLibs;
+
+            # Prepend rather than trust `packages` ordering: `nix develop
+            # --command cargo …` must hit the guard before the rustup proxy.
+            shellHook = ''
+              export PATH="${cargoGuard}/bin:$PATH"
+            '';
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
 
             # `pkgs.gcc` above is in `packages`, so its setup hook exports

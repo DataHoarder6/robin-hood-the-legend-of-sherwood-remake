@@ -3345,6 +3345,7 @@ mod tests {
                 mission_profile_id: Some(4),
                 expected_players: 2,
             },
+            crate::multiplayer::join_ticket::InvitationLifetime::Timed,
         )
         .unwrap();
         let code = ticket.encode();

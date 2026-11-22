@@ -19,7 +19,7 @@
 #
 # The suites run under flock, so two agents on one copy queue instead of
 # interleaving, and under systemd-inhibit so an idle build host stays awake.
-# They also take one of the host's build slots (ROBIN_BUILD_SLOTS, default 3),
+# They also take one of the host's build slots (ROBIN_BUILD_SLOTS, default 2),
 # which is what keeps four copies from running forty-eight compilers on twelve
 # cores; each slot hands Cargo its share of the cores.
 set -euo pipefail
@@ -43,12 +43,44 @@ remote_root=build/robin
 gate_root=build/robin-gate
 gate_copy_name=gate-shared
 copy_root=$remote_root
-slots=${ROBIN_BUILD_SLOTS:-3}
+slots=${ROBIN_BUILD_SLOTS:-2}
 slot_dir="~/$remote_root/.slots"
 # A cold copy has no flake to check before sync, so every devShell invocation
 # also proves cargo/rustc can exec as its first command. A GC'd devShell then
 # fails with a named cause instead of deep in a compile.
 gate_toolchain_guard='set -e; if ! cargo --version >/dev/null || ! rustc --version >/dev/null; then printf "remote-check: gate toolchain cannot exec; a Nix GC may have removed a devShell input.\n" >&2; exit 1; fi; '
+
+# minipc powers itself off when idle (nixos-config services.build-host-idle-
+# poweroff). Before the remote heredoc registers systemd-inhibit, a build has no
+# cargo/rustc process and no logind session on the host, so with aged
+# last-activity the timer could power it off mid-rsync into gate-shared. The
+# host's scope-marker directory is the only signal that covers that gap: every
+# caller drops one per-invocation marker from the moment it owns a copy slot
+# until it exits, and the idle predicate treats a non-empty directory as active.
+# The name carries the epoch so a marker left by a killed caller can be retired.
+# The override is a test seam (see scripts/test_remote_check.sh): fixtures stub
+# ssh locally and cannot write /var/lib, so they point this at a temp dir. The
+# idle predicate reads the same path in production, configured by NixOS.
+scope_dir=${ROBIN_BUILD_SCOPE_DIR:-/var/lib/build-host-idle-poweroff/build-active.d}
+scope_marker=
+
+# EXIT cleanup: drop the local queue ticket and the host's scope marker. Both
+# are globals — Bash evaluates EXIT traps after a function's locals are gone.
+cleanup_remote_check() {
+    [ -z "${ticket:-}" ] || rm -f -- "$ticket" 2>/dev/null || true
+    if [ -n "$scope_marker" ]; then
+        ssh -n "$host" "rm -f -- '$scope_marker'" 2>/dev/null || true
+    fi
+}
+trap cleanup_remote_check EXIT
+
+# Called once the copy slot is held: every ssh/rsync before the gate now runs
+# inside the host's idle-poweroff scope. Fail early if the marker cannot be
+# written — an unprotected sync is worse than an aborted one.
+begin_build_scope() {
+    scope_marker="$scope_dir/$(date +%s)-$(hostname)-$$-$RANDOM"
+    ssh "$host" "mkdir -p '$scope_dir' && : > '$scope_marker'"
+}
 
 usage() {
     awk 'NR > 1 && /^[^#]/{exit} NR > 1{sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}" >&2
@@ -72,12 +104,78 @@ copy_name() {
 # verdicts, and a push of a tree the gate never saw. All agents run on this
 # host, so the lock lives here, keyed by the copy's identity; the build host's
 # own flock still serialises the suites against writers from other machines.
+#
+# Admission is FIFO: a ticket per caller, ordered by arrival under the copy's
+# identity. The local flock is only tried when this ticket is first, so twenty
+# gates queue in order instead of racing for the lock and timing out at 2 h.
+# ROBIN_GATE_QUEUE_WAIT_SECS (default 7200) bounds the wait; a killed caller's
+# ticket is reaped by deadline or owner PID.
 lock_copy() {
     local lock_dir=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
     local safe="${host//[^A-Za-z0-9._-]/_}-${name//[^A-Za-z0-9._-]/_}"
-    mkdir -p -- "$lock_dir"
+    local queue_dir="$lock_dir/queue/$safe"
+    local wait=${ROBIN_GATE_QUEUE_WAIT_SECS:-7200}
+    local first position count now old old_name old_deadline old_pid announced=
+    if [[ ! $wait =~ ^[1-9][0-9]*$ ]]; then
+        printf 'remote-check: ROBIN_GATE_QUEUE_WAIT_SECS must be a positive integer, got %s\n' \
+            "$wait" >&2
+        exit 2
+    fi
+    mkdir -p -- "$lock_dir" "$queue_dir"
+    local deadline=$(( $(date +%s) + wait ))
+    # The ticket is global so the EXIT cleanup (set up at the top of this script)
+    # retires it after a finish or a kill; a dead caller must not hold the queue.
+    ticket="$queue_dir/$(printf '%020d' "$deadline")-$(date +%s%N)-$$-$RANDOM"
+    : >"$ticket"
     exec 9>"$lock_dir/$safe.lock"
-    flock -w 7200 9
+
+    while :; do
+        now=$(date +%s)
+
+        # A killed harness leaves its ticket behind; its deadline or its dead
+        # owner retires it, the same way land.sh reaps landing tickets.
+        for old in "$queue_dir"/*; do
+            [ -f "$old" ] || continue
+            old_name=${old##*/}
+            old_deadline=${old_name%%-*}
+            case $old_deadline in
+                *[!0-9]*) continue ;;
+            esac
+            old_pid=${old_name#*-}
+            old_pid=${old_pid#*-}
+            old_pid=${old_pid%%-*}
+            if (( 10#$old_deadline < now )) ||
+               { [[ $old_pid =~ ^[0-9]+$ ]] && ! kill -0 "$old_pid" 2>/dev/null; }; then
+                rm -f -- "$old"
+            fi
+        done
+
+        first=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort | head -1)
+        if [ "$first" = "${ticket##*/}" ]; then
+            if flock -n 9; then
+                printf 'remote-check: gate copy slot acquired for %s\n' "$name" >&2
+                # Cover the pre-gate ssh/rsync work (prepare_cache, toolchain
+                # check, sync_worktree) with the host's idle-poweroff scope.
+                begin_build_scope
+                return 0
+            fi
+        fi
+
+        count=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | wc -l)
+        position=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort |
+            awk -v t="${ticket##*/}" '$0 == t { print NR }')
+        if [ "${position:-?}" != "$announced" ]; then
+            printf 'remote-check: waiting in gate copy queue (%s/%s) for %s\n' \
+                "${position:-?}" "$count" "$name" >&2
+            announced=${position:-?}
+        fi
+        if (( now >= deadline )); then
+            printf 'remote-check: timed out waiting for a gate copy slot after %s seconds\n' \
+                "$wait" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
 }
 
 # Gate copies have no worktree owner, so --prune keeps them only until this old.

@@ -107,6 +107,15 @@ impl PeerSessions {
             .collect()
     }
 
+    /// Snapshot commit detaches every writer together with its seat so the
+    /// host can track commit-frame delivery per participant.
+    pub(super) fn detach_all_writers_with_seats(&mut self) -> Vec<(u8, UnboundedSender<NetMsg>)> {
+        self.seats
+            .iter_mut()
+            .filter_map(|(seat, session)| session.sender.take().map(|sender| (*seat, sender)))
+            .collect()
+    }
+
     #[cfg(test)]
     pub(super) fn sim_connected_seats(&self) -> impl Iterator<Item = &u8> {
         self.seats

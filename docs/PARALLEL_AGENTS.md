@@ -84,6 +84,25 @@ scripts/remote-check.sh --list     # copies and sizes on the build host
 scripts/remote-check.sh --prune    # drop every copy but this one
 ```
 
+## "A raw `nix develop --command cargo build` fills the runtime disk"
+
+Symptom: a `runbg` job compiles a whole worktree on `oci-vm` and fills the root
+disk, even though `scripts/check-quality.sh` refuses to run there. The task-3
+host guard covered only that entry point; the toolchain was still open.
+
+Rule: the refusal lives at the toolchain boundary now. The devShell installs
+`scripts/cargo-runtime-guard.sh` as `cargo` ahead of the pinned toolchain. On
+`oci-vm` it refuses `build`, `test`, `check` and `clippy` and points at
+`scripts/remote-check.sh SUITE`; every other cargo command (`cargo run --example
+…`, `cargo metadata`) and every other host exec the real cargo unchanged.
+`scripts/tests/cargo-runtime-guard.sh` is the fixture; it injects the host with
+`ROBIN_TEST_HOSTNAME` and uses a stub cargo, so it compiles nothing.
+
+```sh
+bash scripts/tests/cargo-runtime-guard.sh   # no cargo, no ssh, no build
+scripts/remote-check.sh engine              # the only way to build from oci-vm
+```
+
 ## "Every agent's gate takes an hour"
 
 Symptom: 3–5 agents each compile the same wasm/LLVM graph; the build host runs
@@ -97,14 +116,15 @@ unchanged artifacts across landings; `rsync --checksum --no-times` preserves
 mtimes and `sync_worktree` purges only the crates whose sources changed. The
 copy lock is held from rsync through the suites, so one copy cannot swap trees
 under a running build. Each gate runs in a bounded user scope, so a killed
-harness leaves no build behind. Queue behind the other agent's `runbg` unit
-instead of starting a competing gate. Gate copies expire after
+harness leaves no build behind. Prefer **one gate in flight** across agents:
+a competing gate now queues in ticket order instead of racing for the copy
+(see "Twenty gates time out on gate-shared" below). Gate copies expire after
 `GATE_COPY_TTL_DAYS` (default 7).
 
 Build slots and the gate are different budgets. `scripts/build-slot.sh`
-arbitrates CPU across build copies with **3 build slots** (`ROBIN_BUILD_SLOTS`,
-default 3 in `scripts/remote-check.sh`); each copy holds one for its build and
-gets `nproc / held` jobs. That is three concurrent builds but still **one gate
+arbitrates CPU across build copies with **2 build slots** (`ROBIN_BUILD_SLOTS`,
+default 2 in `scripts/remote-check.sh`); each copy holds one for its build and
+gets `nproc / held` jobs. That is two concurrent builds but still **one gate
 in flight**. Slots never shard a suite: each suite runs whole on one copy, so a
 slot buys parallelism across trees, not a split test run.
 
@@ -116,6 +136,19 @@ scripts/land.sh                               # rebase, gate, push, read-back
 `minipc` is the code default; no override is needed. Mechanics, primary
 sources and the measurement checklist are in
 [`docs/slop/BUILD_CACHE_AND_QUEUE.md`](slop/BUILD_CACHE_AND_QUEUE.md).
+
+## "A landing from another host replaced `gate-shared` mid-gate"
+
+Symptom: a docs suite fails on files that were present in the source checkout.
+`gate-shared` lives on `minipc`, but `remote-check.sh` takes its lock on the
+calling host; two callers on different hosts never serialize on the one shared
+copy, so the later tree swaps it under the earlier gate.
+
+Rule: run every robin landing from `oci-vm`. Agents there share one lock
+namespace, so the queue and the copy lock actually serialize. From any other
+host, transfer the commits into an `oci-vm` worktree and call `scripts/land.sh`
+there. This routes landings to one host; it adds no lock and leaves the gate
+unchanged.
 
 ## "A suite failed once — I'll rerun it until it's green"
 
@@ -272,3 +305,30 @@ racing retries on a busy integration branch. Queue position is printed while
 waiting; `ROBIN_LAND_QUEUE_WAIT_SECS` (default 7200) bounds it, and a killed
 holder's ticket is reaped by its PID. `bash scripts/test_land.sh` covers FIFO
 admission, the named timeout, and stale-ticket reaping.
+
+## "Twenty gates time out on gate-shared"
+
+Symptom: twenty agents start gates together; nineteen queue on the shared copy
+lock in no particular order and most hit the two-hour `flock` bound with no
+line saying where they are.
+
+Rule: `gate-shared` admission is a FIFO ticket queue under
+`$XDG_STATE_HOME/robin-remote-check/queue/<host>-gate-shared`, the same shape as
+the landing and slot queues. A caller tries the local lock only when its ticket
+is first, and logs `remote-check: waiting in gate copy queue (k/n) for
+gate-shared` while it waits. `ROBIN_GATE_QUEUE_WAIT_SECS` (default 7200, two
+hours) bounds the wait and names itself in the timeout message; a killed
+caller's ticket is reaped by its deadline or owner PID. The build host's own
+per-copy `flock` still serialises the suites against writers from other
+machines. The default `ROBIN_BUILD_SLOTS` is 2. On 2026-11-21 the minipc ran at
+load 14–20 on 12 cores with 3 slots plus a multiplayer e2e test; dropping the
+default to 2 gives each held build 6 jobs and leaves at most two compiler trees
+running at once. It is a tunable (`ROBIN_BUILD_SLOTS=x`), not a measured optimum.
+Gates are still serialized by `gate-shared`, so this changes only interactive
+per-worktree checks; gate throughput is bounded by the one gate copy, not slots.
+`scripts/build-status.sh` prints the local gate-shared waiters beside the
+per-host slot queue depth.
+
+```sh
+bash scripts/tests/gate-shared-fifo.sh   # FIFO order, queue position, timeout
+```

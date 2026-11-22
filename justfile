@@ -14,6 +14,10 @@ prune-worktrees *args:
 check suite="tooling":
     bash scripts/check-quality.sh {{suite}}
 
+# Fixture regression: quality entry points refuse to run on the runtime.
+test-no-local-build:
+    bash scripts/tests/no-local-build.sh
+
 # Build this worktree's dev game on the build host and copy it to the laptop.
 ship-dev:
     scripts/ship-dev.sh

@@ -9,7 +9,7 @@ use super::{
 use crate::multiplayer::{ServerChannels, ServerConfig};
 use robin_engine::multiplayer::{NetEvent, NetOutbound};
 use robin_engine::player_command::PlayerId;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -25,6 +25,7 @@ fn dispatch_test_context() -> (super::ServerContext, Receiver<NetEvent>) {
     let context = super::ServerContext {
         host_left: super::AtomicBool::new(false),
         connections: super::Mutex::new(std::collections::HashMap::new()),
+        commit_drain: super::Mutex::new(None),
         _campaign_lease: campaign.reserve_server().unwrap(),
         campaign: Arc::clone(campaign.state()),
         session_dispatch: super::Mutex::new(()),
@@ -594,6 +595,9 @@ async fn inactive_reader_drains_terminal_frames_after_buffered_input_without_res
                     NetMsg::SnapshotTransitionReady { id },
                 )
                 .unwrap();
+                // The runtime releases the retained commit queues once the
+                // frame is written; model that so the peer writer can finish.
+                context.commit_drain.lock().take();
             } else {
                 let _authority = context.session_dispatch.lock();
                 let mut peers = context.peers.lock();
@@ -695,6 +699,94 @@ async fn inactive_reader_bounds_a_stalled_terminal_writer() {
             .to_string()
             .contains("timed out draining terminal frames")
     );
+}
+
+#[tokio::test]
+async fn commit_frames_are_drained_before_the_endpoint_closes() {
+    let (context, _events) = dispatch_test_context();
+    let id = robin_engine::multiplayer::SnapshotTransitionId {
+        session_id: context.session_id,
+        sequence: 1,
+    };
+    let (tx1, mut rx1) = unbounded_channel();
+    let (tx2, mut rx2) = unbounded_channel();
+    // The host committed: queues are detached with a queued commit frame, but
+    // the runtime has not closed the endpoint yet.
+    super::commit_snapshot_transition(&context, Some((id, vec![(1, tx1), (2, tx2)])));
+    assert!(matches!(
+        rx1.try_recv(),
+        Ok(super::NetMsg::CommitSnapshotTransition { .. })
+    ));
+    assert!(matches!(
+        rx2.try_recv(),
+        Ok(super::NetMsg::CommitSnapshotTransition { .. })
+    ));
+    assert!(!rx1.is_closed(), "writer queue stayed open through commit");
+
+    let context = Arc::new(context);
+    let drain_ctx = Arc::clone(&context);
+    let task = tokio::spawn(async move {
+        super::await_commit_frame_drains(&drain_ctx, Duration::from_secs(5)).await;
+    });
+    // One seat wrote its frame; the drain must still hold the endpoint for the
+    // other seat.
+    super::notify_commit_frame_written(&context, 1);
+    tokio::task::yield_now().await;
+    assert!(
+        !task.is_finished(),
+        "drain released before every seat wrote"
+    );
+    super::notify_commit_frame_written(&context, 2);
+    tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("drain released once every seat notified")
+        .unwrap();
+    assert!(
+        rx1.is_closed(),
+        "retained writer queues close after the drain"
+    );
+    assert!(rx2.is_closed());
+    assert!(context.commit_drain.lock().is_none());
+}
+
+#[tokio::test]
+async fn commit_drain_deadline_releases_a_peer_that_never_writes() {
+    let (context, _events) = dispatch_test_context();
+    let (tx, _rx) = unbounded_channel();
+    *context.commit_drain.lock() = Some(super::CommitDrain {
+        senders: vec![(1, tx)],
+        written: HashMap::from([(1, Arc::new(tokio::sync::Notify::new()))]),
+    });
+    let context = Arc::new(context);
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        super::await_commit_frame_drains(&context, Duration::from_millis(10)),
+    )
+    .await
+    .expect("bounded drain released at its deadline, not indefinitely");
+    assert!(context.commit_drain.lock().is_none());
+}
+
+#[tokio::test]
+async fn disconnected_peer_does_not_stall_the_commit_drain() {
+    let (context, _events) = dispatch_test_context();
+    let (tx, rx) = unbounded_channel();
+    *context.commit_drain.lock() = Some(super::CommitDrain {
+        senders: vec![(1, tx)],
+        written: HashMap::from([(1, Arc::new(tokio::sync::Notify::new()))]),
+    });
+    // The peer writer ended on a lost connection before writing a commit
+    // frame, releasing the drain just like a successful write would.
+    super::notify_commit_frame_written(&context, 1);
+    let context = Arc::new(context);
+    tokio::time::timeout(
+        Duration::from_millis(200),
+        super::await_commit_frame_drains(&context, Duration::from_secs(30)),
+    )
+    .await
+    .expect("a disconnected peer released the drain immediately");
+    assert!(context.commit_drain.lock().is_none());
+    assert!(rx.is_closed());
 }
 
 #[tokio::test]

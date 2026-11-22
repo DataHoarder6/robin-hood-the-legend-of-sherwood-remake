@@ -5,11 +5,29 @@ set -euo pipefail
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
 
+# shellcheck source=runtime-hosts.sh
+source "$repository/scripts/runtime-hosts.sh"
+
+# The runtime is not a build host: compiling the workspace there competes with
+# the agents that live on it. Every suite goes through the build host via
+# scripts/remote-check.sh SUITE. The no-argument call below is the suite listing
+# remote-check.sh reads locally to validate names, so it is not guarded.
+assert_build_host() {
+    local host=${ROBIN_TEST_HOSTNAME:-$(hostname)}
+    if is_non_build_runtime "$host"; then
+        printf 'check-quality: %s is not a build host; run `scripts/remote-check.sh SUITE` instead (build host: minipc by default)\n' \
+            "$host" >&2
+        exit 1
+    fi
+}
+
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
     printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
+
+assert_build_host
 
 case "$1" in
     format)
@@ -189,7 +207,9 @@ case "$1" in
         # Child processes must be OS-supervised, and a browser join must fail
         # at the host when its artifact was never staged.
         node --test scripts/validation/supervised.test.mjs
+        node --experimental-strip-types --test wasm-www/src/content_cache.test.ts
         node --test scripts/validation/browser-boot.test.mjs
+        node --experimental-strip-types --test wasm-www/src/join_ticket.test.ts
         # A published manifest must be same-origin to the page that serves it,
         # not to a hard-coded upstream hostname.
         node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts
@@ -209,6 +229,7 @@ case "$1" in
         python3 -m unittest discover -s scripts/validation -p parity_check_test.py
         python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
         python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py
+        python3 -m unittest discover -s scripts/validation -p display_allocation_test.py
         test -f tools/crash-receiver/test_receiver.py
         python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py
         bash scripts/test_parity_orchestration.sh
@@ -218,6 +239,7 @@ case "$1" in
         bash scripts/test_prune_worktrees.sh
         bash scripts/test_land.sh
         bash scripts/test_push_gate.sh
+        bash scripts/test_release_gate.sh
         bash scripts/test_build_host.sh
         bash scripts/test_remote_check.sh
         ;;

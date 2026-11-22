@@ -41,6 +41,10 @@ class QualitySuitesTests(unittest.TestCase):
         self.environment = dict(os.environ)
         self.environment["PATH"] = str(self.directory) + os.pathsep + os.environ["PATH"]
         self.environment["QUALITY_TEST_CALLS"] = str(self.log)
+        # These fixtures check suite routing, not host admission. Declare the
+        # build host so they stay runnable on the runtime (where the dispatcher
+        # refuses gates and points at remote-check.sh).
+        self.environment["ROBIN_TEST_HOSTNAME"] = "minipc"
         self.gpu_backend = self.directory / "gpu-backend"
         self.environment["QUALITY_TEST_GPU_BACKEND"] = str(self.gpu_backend)
         xvfb = self.directory / "xvfb-run"
@@ -133,6 +137,7 @@ class QualitySuitesTests(unittest.TestCase):
         self.assertEqual([call[0] for call in self.calls()], ["nextest", "test", "build"])
 
     def test_wasm_gate_builds_and_verifies_the_published_release_artifact(self):
+        contract = json.loads((ROOT / "wasm-www/runtime-contract.json").read_text())
         self.run_suite("wasm")
         calls = [json.loads(line) for line in self.node_log.read_text().splitlines()]
         self.assertTrue(any(
@@ -143,7 +148,7 @@ class QualitySuitesTests(unittest.TestCase):
         ), f"wasm suite did not build the shipped plan: {calls}")
         self.assertTrue(any(
             any("verify-runtime-multiplayer.mjs" in arg for arg in call)
-            and call[call.index("--expect-ticket-schema") + 1] == "3"
+            and call[call.index("--expect-ticket-schema") + 1] == str(contract["ticketSchema"])
             for call in calls
         ), f"wasm suite did not verify the artifact schema: {calls}")
 

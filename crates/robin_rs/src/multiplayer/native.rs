@@ -62,6 +62,10 @@ const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const HANDSHAKE_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 /// Finish queued reconnect/commit frames after reader authority is detached.
 const TERMINAL_WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(15);
+/// Bounded host wait for each seat's snapshot commit frame to reach its stream
+/// before the runtime closes the iroh endpoint. A connected peer writes this
+/// tiny frame well within the window; a dead peer is released by the deadline.
+const COMMIT_FRAME_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTENT_TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const CONTENT_DECISION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const CONTENT_READINESS_TIMEOUT: Duration = Duration::from_secs(5 * 60);

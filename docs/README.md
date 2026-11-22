@@ -9,6 +9,7 @@
 - [Game data distributions](DATADIRS.md)
 - [Multiplayer](MULTIPLAYER.md), [campaign history](slop/CAMPAIGN_HISTORY.md), and [Spellforge](slop/SPELLFORGE.md)
 - [Multiplayer harness decisions](multiplayer/HARNESS.md) — coverage matrix, scenario format, layer rules, isolation and bootstrap for the e2e gate
+- [E2e RED diagnosis: connect-string hang vs display race](slop/multiplayer-e2e-display-race.md) — D05 was already fixed; the remaining hang was an X display allocation race
 - [Presentation decisions](PRESENTATION.md) — the zoom ladder and what a viewport larger than the level shows
 - [Defect ledger](DEFECTS.md) — one row per diagnosed defect: class, reproduction, the check that proves it, status
 - [New features and remaining product work](NEW_FEATURES.md)
@@ -16,6 +17,9 @@
 - [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-BLOCKED boundary
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
+- [Finishing and freezing sessions](SESSION_FINISH.md) — definition of done, FIFO landing, and freeze-not-delete for deferred work
+- [Deferred work backlog](BACKLOG.md) — frozen features: target release and why deferred; live state comes from `scripts/backlog-check.sh`
+- [0.3.0 release evidence](releases/0.3.0.md) — candidate, gate counts, the H23 evidence path, and the still-human two-seat check
 - [Authored map compiler design](slop/AUTHORED_MAP_COMPILER.md) — offline bake pattern, the no-runtime-solver ruling, and the first slice
 - [Android build and packaging](../android/README.md)
 

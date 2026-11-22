@@ -33,10 +33,17 @@ tag pushed without it is a bet rather than a release.
    asset replayed under Wine against the native build must produce an identical
    hash chain. It proves the toolchain/FP/locale class; a real Windows seat is
    still the only proof of the OS-layer class (`docs/TESTING.md`).
-4. Build the release binary on the build host, then
-   `ROBIN_E2E_BINARY=<binary> ROBINHOOD_DATA_DIR=<game root> bash
-   scripts/check-quality.sh multiplayer-e2e`; the suite must print `observed`
-   with exit 0 and leave its evidence directory.
+4. Build the release binary on the build host, then run
+   `bash scripts/release-gate.sh <candidate> <release-binary-on-host>` from this
+   checkout (the script ssh-es to `${ROBIN_BUILD_HOST:-minipc}` itself). It is
+   release-time only — `push-gate.sh` never selects `multiplayer-e2e`, so this is
+   the only enforcement of D06's H23 half. The gate checks the candidate against
+   HEAD and the binary's `--version`, runs `check-quality.sh multiplayer-e2e` at
+   `--jobs 2` with no `--only`, and refuses the tag unless the suite exits 0 and
+   `summary.json` reports `.verdict == "observed"`, `.verdicts.H23 == "observed"`
+   and a `.selected` covering every process row. It prints the evidence path;
+   copy that path and the H23 verdict into
+   [releases/0.3.0.md](releases/0.3.0.md). Do not flip D06 until the gate is green.
 5. Run a scriptable `robin --version` preflight before the tag: over SSH on the
    Linux seats and over `win-run` on the Windows seat, compare the 12-hex commit
    on every seat, and reject the tag unless all match. A real two-seat

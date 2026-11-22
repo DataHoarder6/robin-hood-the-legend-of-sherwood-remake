@@ -14,7 +14,7 @@ repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
 
 remote_root=build/robin
-slots=${ROBIN_BUILD_SLOTS:-3}
+slots=${ROBIN_BUILD_SLOTS:-2}
 min_free_gb=${ROBIN_MIN_FREE_GB:-40}
 hosts=("${ROBIN_BUILD_HOST:-minipc}" homelab)
 
@@ -82,6 +82,23 @@ REMOTE
         printf '%s: unreachable (ssh failed)\n' "$host"
     fi
 done
+
+# The copy lock is admitted on this machine, not the build host, so its FIFO
+# tickets are local state — the counterpart of each host's slots/queue above.
+# A count here says who is waiting for gate-shared right now.
+copy_state=${XDG_STATE_HOME:-$HOME/.local/state}/robin-remote-check
+printf '\n===== local gate queue =====\n'
+gate_summary=
+for host in "${hosts[@]}"; do
+    safe=${host//[^A-Za-z0-9._-]/_}-gate-shared
+    queue_dir="$copy_state/queue/$safe"
+    waiting=0
+    if [[ -d $queue_dir ]]; then
+        waiting=$(find "$queue_dir" -maxdepth 1 -type f -print 2>/dev/null | wc -l)
+    fi
+    gate_summary+="${gate_summary:+, }$host: $waiting"
+done
+printf 'gate-shared lock waiters: %s\n' "$gate_summary"
 
 printf '\n===== local doctor =====\n'
 if ! bash "$repository/scripts/doctor.sh" --quiet; then

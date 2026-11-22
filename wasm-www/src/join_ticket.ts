@@ -4,7 +4,7 @@ const JOIN_CODE_PREFIX = runtimeContract.joinCodePrefix;
 const JOIN_TICKET_SCHEMA = runtimeContract.ticketSchema;
 const NET_PROTOCOL_VERSION = runtimeContract.netProtocol;
 const TRANSPORT = "iroh-relay-websocket";
-const SIGNING_DOMAIN = new TextEncoder().encode("robinhood/browser-join-ticket/v3\0");
+const SIGNING_DOMAIN = new TextEncoder().encode("robinhood/browser-join-ticket/v4\0");
 const MAX_JOIN_CODE_BYTES = 16 * 1024;
 const INVITATION_LIFETIME_SECONDS = 30 * 60;
 const MAX_CLOCK_SKEW_SECONDS = 2 * 60;
@@ -20,6 +20,7 @@ const TICKET_KEYS = [
   "session_id",
   "issued_at_epoch_s",
   "expires_at_epoch_s",
+  "expires_never",
   "content_edition",
   "content_identity_sha256",
   "mission_id",
@@ -40,6 +41,7 @@ export type BrowserJoinTicketPayload = {
   readonly session_id: string;
   readonly issued_at_epoch_s: number;
   readonly expires_at_epoch_s: number;
+  readonly expires_never: boolean;
   readonly content_edition: BrowserContentEdition;
   readonly content_identity_sha256: string;
   readonly mission_id: string;
@@ -88,6 +90,11 @@ function encodeBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
+function requireBoolean(label: string, value: unknown): boolean {
+  if (typeof value !== "boolean") fail(`${label} must be a boolean`);
+  return value;
+}
+
 function requireInteger(label: string, value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     fail(`${label} must be a non-negative safe integer`);
@@ -134,6 +141,7 @@ function parseCanonicalPayload(bytes: Uint8Array): BrowserJoinTicketPayload {
   const netProtocol = requireInteger("network protocol", object.net_protocol);
   const issuedAt = requireInteger("issued-at time", object.issued_at_epoch_s);
   const expiresAt = requireInteger("expiry time", object.expires_at_epoch_s);
+  const expiresNever = requireBoolean("expires never", object.expires_never);
   const expectedPlayers = requireInteger("expected player count", object.expected_players);
   const engineVersion = requireString("engine version", object.engine_version, 64);
   const endpointId = requireString("host endpoint id", object.host_endpoint_id, 64);
@@ -153,8 +161,10 @@ function parseCanonicalPayload(bytes: Uint8Array): BrowserJoinTicketPayload {
   }
   decodeBase64Url("session id", sessionId, 32);
   if (/^A+$/.test(sessionId)) fail("session id must be non-zero");
-  if (expiresAt - issuedAt !== INVITATION_LIFETIME_SECONDS) {
-    fail(`invitation lifetime must be exactly ${INVITATION_LIFETIME_SECONDS} seconds`);
+  if (expiresNever) {
+    if (expiresAt !== Number.MAX_SAFE_INTEGER) fail("never-expiring invitation has an expiry");
+  } else if (expiresAt - issuedAt !== INVITATION_LIFETIME_SECONDS) {
+    fail(`invitation lifetime must be exactly ${INVITATION_LIFETIME_SECONDS} seconds or never`);
   }
   if (object.content_edition !== "demo" && object.content_edition !== "full") {
     fail("content edition must be demo or full");
@@ -235,7 +245,11 @@ export function validateBrowserJoinTicketUse(
   if (ticket.payload.issued_at_epoch_s > nowEpochSeconds + MAX_CLOCK_SKEW_SECONDS) {
     fail("invitation was issued too far in the future");
   }
-  if (!redeemed && nowEpochSeconds >= ticket.payload.expires_at_epoch_s) {
+  if (
+    !redeemed &&
+    !ticket.payload.expires_never &&
+    nowEpochSeconds >= ticket.payload.expires_at_epoch_s
+  ) {
     fail("invitation expired before first use");
   }
 }
