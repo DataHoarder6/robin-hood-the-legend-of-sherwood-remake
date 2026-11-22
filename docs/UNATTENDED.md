@@ -15,6 +15,9 @@ the agent files own only their role and permissions.
 Launch the loop explicitly with `opencode run --agent director ...`; no
 `default_agent` is configured here, so a bare `opencode run` does not select it.
 
+The evidence behind these rules, and the mitigation each one adopts, is in
+[unattended-loop-research.md](slop/unattended-loop-research.md).
+
 ## Terminal states
 
 Every iteration ends in exactly one of three states and reports it. There is no
@@ -28,6 +31,19 @@ fourth state and no prompt to the owner to choose, confirm, or continue.
   The row, never another rerun, ends the iteration.
 - **BLOCKED** — the next step needs a capability the loop cannot supply. Name the
   missing capability and stop; do not ask the owner to provide it.
+
+## LANDED requires origin read-back
+
+A `git push` exit status of `0` is not evidence of a landing. `scripts/land.sh`
+gates the tree, pushes to the integration ref, then reads that ref back with
+`git ls-remote` before it reports success. LANDED is claimed only when the
+read-back shows the pushed commit on the integration ref. A green push with no
+read-back is an unverified push, not LANDED; the script owns the remote and ref.
+
+Gate evidence, not agent narration, decides success. A builder, reviewer or
+verifier reporting "tests pass" is not a gate result; only the suite verdict
+and the origin read-back count. [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns
+the gate rule; this section owns the definition of a landed commit.
 
 ## Iteration order
 
@@ -62,7 +78,43 @@ Retries are bounded and quarantine is central.
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the budget (CI retries, no local
 rerun) and the rule; a surviving failure is FILED in [DEFECTS.md](DEFECTS.md)
 with status `deferred` and a row that names its issue. This page does not
-restate the numbers.
+restate the CI retry numbers; the per-item ceiling is in Circuit breaker below.
+
+## Circuit breaker
+
+Two fix attempts per item, then FILED — never a third. The director keeps an
+attempt count for the selected assertion; a second failed attempt ends the
+iteration in FILED with a `deferred` row in [DEFECTS.md](DEFECTS.md). This is a
+per-item ceiling on top of the retry budget, not a replacement for it.
+
+Repeat detection is part of the breaker: never emit the same commit twice for
+the same item. If the builder produces a commit already recorded for that
+assertion, the loop is stuck, not retrying — stop and end the iteration in
+FILED. Two
+failed fixes or one repeat both exhaust the item; the row, not another rerun,
+ends it. An explicit termination contract and a hard ceiling are what keep a
+fresh-context loop from spinning or declaring false success.
+
+## Known flake policy
+
+A corpus row that fails in a full-gate run but passes in isolation is a known
+load flake, not a defect to keep fixing. Record one `deferred` row in
+[DEFECTS.md](DEFECTS.md): class `release`, reproduction = full corpus run on
+the build host, check = isolated row recheck, and an issue link (or "no issue
+yet"). The row is the end of the item — do not retry it indefinitely and do
+not land a "fix" for it. The quarantine rule itself stays with
+[PARALLEL_AGENTS.md](PARALLEL_AGENTS.md).
+
+## Risk routing
+
+The loop never edits `.github/workflows/*`, `scripts/land.sh`,
+`scripts/remote-check.sh`, release scripts (`scripts/release*.sh`), or any
+machine config or secret (`*.nix` included). Those files are CI, deploy and
+landing authority, or host configuration — human capabilities. If an item's fix
+needs one of them, the item is BLOCKED with that capability named: never
+attempted, never asked for. Stable tags stay human work
+([RELEASES.md](RELEASES.md)). The director's `edit` denies enforce the file
+subset ([director.md](../.opencode/agents/director.md)).
 
 ## Windows as BLOCKED
 
@@ -72,3 +124,31 @@ seat is BLOCKED with that capability named, never a question to the owner. Wine
 replay parity ([RELEASES.md](RELEASES.md), [TESTING.md](TESTING.md)) proves only
 the toolchain/FP/locale class; the OS-layer class stays unproven until a real
 Windows seat runs a recorded session ([WINDOWS.md](WINDOWS.md)).
+
+## Kill switch
+
+`systemctl --user stop director-loop.timer` on `oci-vm` stops a running loop
+immediately — the break-glass, not a terminal state. The durable form is a
+commit to `~/nixos-config` setting `agent.director-loop.enable = false`, which
+that host pulls and activates. The loop itself never edits machine config; a
+request to do so is BLOCKED under Risk routing above, with `nixos-config`
+named as the missing capability. Last verified: 2026-11-22.
+
+## One-week pilot metrics
+
+Collect these for one week from the loop's first unattended run. Each row names
+its source; the source is the measurement, not a stored report.
+
+| Metric | Command / source |
+| --- | --- |
+| Tasks attempted, LANDED, FILED, BLOCKED | `journalctl --user -u director-loop.service` — one terminal state per iteration |
+| First-pass gate success | Gate evidence (`scripts/remote-check.sh` verdict / `summary.json`, indexed by [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md)) — first gate versus retries |
+| Revert rate | `git log fork/main --grep=revert -i`; tip confirmed with `git ls-remote fork refs/heads/main` |
+| Review iterations | Director journal, reviewer rounds per item; cross-check `gh issue view 49` |
+| Time-to-land p50/p90 | Director journal timestamps: iteration start → LANDED |
+| Blocked dwell | Director journal timestamps: BLOCKED → clear; capability issue in `gh issue` |
+| Cost per landed task | `opencode stats` (tokens/cost per session) ÷ LANDED count from the journal |
+| False-quarantine count | [DEFECTS.md](DEFECTS.md) `deferred` rows whose check later passes without a fix |
+
+A cost or duration that cannot be produced by one of these sources is not
+reported; do not fill the table with estimates.
