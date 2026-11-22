@@ -87,7 +87,8 @@
 
 - Commit by pathspec, `git commit -- <files>`, in small focused commits — never
   `git add` plus a bare `git commit`, which would carry a co-worker's staged file.
-- Land finished work in the same session: run `scripts/land.sh` (fetch, rebase,
+- Land finished work in the same session: run `runbg run NAME -- bash scripts/land.sh`
+  (fetch, rebase,
   gate, push, remote read-back), then remove worktree and branch. No PRs and no
   parked feature branches here — `docs/adr/0002-finished-work-lands-in-session.md`.
 
