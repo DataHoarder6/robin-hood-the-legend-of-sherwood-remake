@@ -329,7 +329,9 @@ pub(crate) async fn show_main_menu(
         }
     }
 
-    let (buttons, frame) = main_menu_layout(&menu_resources);
+    // Issue #76: the menu frame is built after the save manager exists (below,
+    // after the first-launch prompt) so Continue availability comes from the
+    // authoritative resume target rather than being advertised unconditionally.
 
     // ── First-launch default-profile prompt ──────────────────────────
     //
@@ -397,6 +399,10 @@ pub(crate) async fn show_main_menu(
         return Ok(MainMenuChoice::RedisplayOptions);
     }
 
+    // Issue #76 (criterion 2): build the menu only once the save manager is
+    // available, so Continue is enabled exactly when the authoritative resume
+    // target exists. Presentation reads the save state; it never mutates it.
+    let (buttons, frame) = main_menu_layout(&menu_resources, &save_manager);
     let mut state = MainMenuState::new(frame, buttons, bg, menu_audio);
     let mut io = MainMenuIo {
         window,
@@ -420,8 +426,16 @@ pub(crate) async fn show_main_menu(
 
 /// Main-menu buttons (bottom-right column, `align_bottom_right` spacing=2)
 /// and the widget frame that arms them.
-fn main_menu_layout(resources: &IngameMenuResources) -> (Vec<(String, ClickAction)>, FrameWnd) {
+fn main_menu_layout(
+    resources: &IngameMenuResources,
+    save_manager: &SaveGameManager,
+) -> (Vec<(String, ClickAction)>, FrameWnd) {
     let (btn_w, btn_h) = resources.button_dimensions();
+    // Issue #76 (criterion 2): a Continue entry must only be offered when a
+    // compatible checkpoint actually exists. This is the same read-only source
+    // the click handler consults; a disabled widget cannot be activated by
+    // mouse or keyboard, so the menu never advertises an unavailable action.
+    let continue_enabled = save_manager.find_resume_target().is_some();
 
     let mut buttons: Vec<(String, ClickAction)> = vec![(
         resources.menu_text.get(MT_BTN_START_GAME),
@@ -466,7 +480,10 @@ fn main_menu_layout(resources: &IngameMenuResources) -> (Vec<(String, ClickActio
 
     let labels: Vec<(&str, bool)> = buttons
         .iter()
-        .map(|(label, _)| (label.as_str(), true))
+        .map(|(label, action)| {
+            let enabled = !matches!(action, ClickAction::Continue) || continue_enabled;
+            (label.as_str(), enabled)
+        })
         .collect();
     let positions = align_bottom_right(&labels, btn_w, btn_h);
 
