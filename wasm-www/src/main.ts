@@ -1,4 +1,5 @@
-import { fullGameContentBuild } from "./mission-launch.ts";
+import { campaignRequested, fullGameContentBuild } from "./mission-launch.ts";
+import { resolvePrivateCampaignContent } from "./private_campaign.ts";
 import { installCursorMode } from "./cursor-mode.js";
 import { installTouchControls } from "./touch-controls.ts";
 import { installDiagnostics } from "./diagnostics.js";
@@ -468,16 +469,29 @@ async function main(): Promise<void> {
       prepareContent: (ticket, manifest, signal) =>
         prepareMultiplayerContent(ticket, manifest, requestFullContentFolder, signal),
       loadDefaultContent: async (base, build, signal) => {
-        const fullBuild = fullGameContentBuild(
-          build.short,
+        const pageUrl = new URL(window.location.href);
+        const privateCampaign = campaignRequested(
+          pageUrl,
           pageParams.get("edition"),
-          runReplay,
           replayQuery !== null,
-        );
+        )
+          ? await resolvePrivateCampaignContent(pageUrl, build.short, fetchJson, signal)
+          : undefined;
+        const fullBuild =
+          privateCampaign === undefined
+            ? fullGameContentBuild(
+                build.short,
+                pageParams.get("edition"),
+                runReplay,
+                replayQuery !== null,
+              )
+            : null;
         const demo: { url: string; identity?: DemoDatadirIdentity; parts?: readonly string[] } =
-          fullBuild !== null
-            ? await selectedFullReplayDatadir(fullBuild, signal)
-            : await selectedDemoDatadir(base, build, signal);
+          privateCampaign !== undefined
+            ? privateCampaign
+            : fullBuild !== null
+              ? await selectedFullReplayDatadir(fullBuild, signal)
+              : await selectedDemoDatadir(base, build, signal);
         const urls = demo.parts ?? [demo.url];
         const chunks: Uint8Array<ArrayBuffer>[] = [];
         let completed = 0;
