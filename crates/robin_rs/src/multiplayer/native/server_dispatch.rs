@@ -199,6 +199,16 @@ pub(super) async fn run_server_outgoing_pump(
                     super::fail_server(&context, error);
                 }
             }
+            NetOutbound::CoopPauseAck(ack) => {
+                // The host acknowledges its own decision locally. Echo the ack
+                // into our own event loop as the host seat so the bounded pause
+                // barrier records it, exactly as a peer's wire ack is routed in
+                // server.rs. Without it every pause evicts all peers.
+                let _ = context.incoming_tx.send(NetEvent::CoopPauseAck {
+                    seat: PlayerId::HOST,
+                    ack,
+                });
+            }
             NetOutbound::ReconnectForSnapshot { player_id, reason } => {
                 drop_peer_for_snapshot(&context, player_id, reason);
             }
@@ -383,6 +393,7 @@ pub(super) fn validate_server_gameplay_outbound(
         | NetOutbound::ReadyToSim { .. }
         | NetOutbound::ModalDecision { .. }
         | NetOutbound::CoopPauseDecision { .. }
+        | NetOutbound::CoopPauseAck(_)
         | NetOutbound::ModalProgress(_)
         | NetOutbound::ReconnectForSnapshot { .. }
         | NetOutbound::ReconnectAllForSnapshot { .. }
@@ -599,6 +610,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_coop_pause_ack_is_accepted_as_local_outbound() {
+        // The host authors its own ack into the outgoing pump; validation must
+        // accept it or the pause barrier never sees seat 0 and evicts peers.
+        let ack = robin_engine::multiplayer::CoopPauseAck {
+            decision_id: 7,
+            frame: 512,
+        };
+        let outbound = NetOutbound::CoopPauseAck(ack);
+        assert!(validate_server_gameplay_outbound(&outbound).is_ok());
+    }
+
+    #[test]
     fn only_snapshot_reconstructible_messages_are_reconnect_recoverable() {
         assert_eq!(
             Delivery::for_message(&NetMsg::BeginSim {
@@ -627,6 +650,17 @@ mod tests {
             }),
             Delivery::Required
         );
+    }
+
+    #[test]
+    fn host_coop_pause_ack_is_a_valid_local_outbound() {
+        // The host authors its own pause ack into the outgoing pump; the
+        // validator must accept it or the host barrier never releases.
+        let ack = robin_engine::multiplayer::CoopPauseAck {
+            decision_id: 1,
+            frame: 2,
+        };
+        assert!(validate_server_gameplay_outbound(&NetOutbound::CoopPauseAck(ack)).is_ok());
     }
 
     #[test]
