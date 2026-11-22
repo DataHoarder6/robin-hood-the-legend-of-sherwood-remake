@@ -505,6 +505,12 @@ impl EngineInner {
 
             HeroSpeak { pc_id, expression } => self.hero_speaking(tcx.assets, *pc_id, *expression),
 
+            // Double-click centring re-seeds the native selection fade so the
+            // outline shows again once the camera has moved. This is a pure
+            // presentation follow-up; it does not change selection or replay
+            // state beyond the (deterministic) hulk animation counters.
+            ReseedSelectionHulk { pc_id } => self.apply_select_hulk(*pc_id, 1.0),
+
             // Host-side record of a drained modal. The actual
             // dismissal happens in the game session loop; the engine
             // has no state to mutate for this variant — carrying it in

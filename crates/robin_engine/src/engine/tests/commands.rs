@@ -2250,6 +2250,41 @@ fn minimap_command_rejects_center_outside_required_level_bounds() {
     );
 }
 
+#[test]
+fn reseed_selection_hulk_command_restarts_the_native_outline_fade() {
+    use crate::element::{Entity, HULK_LENGTH};
+
+    let sim = crate::sim_rng::test_context();
+    let assets = LevelAssets::new();
+    let mut engine = EngineInner::new();
+    let mut display = HostDisplayState::default();
+    let mut input = InputState::default();
+    let pc = engine.add_test_entity(crate::engine::test_support::actors::make_test_pc(
+        crate::element::Posture::Upright,
+    ));
+    let Some(Entity::Pc(pc_entity)) = engine.get_entity_mut(pc) else {
+        panic!("test PC must be a PC");
+    };
+    pc_entity.human.running_hulk = 0;
+    pc_entity.human.time_hulk = 0;
+    pc_entity.pc.already_selected = true;
+
+    engine.apply_command(
+        &sim,
+        &mut display,
+        &mut input,
+        &assets,
+        &PlayerCommand::ReseedSelectionHulk { pc_id: pc },
+    );
+
+    let Some(Entity::Pc(pc_entity)) = engine.get_entity(pc) else {
+        panic!("test PC must still be a PC");
+    };
+    assert_eq!(pc_entity.human.time_hulk, HULK_LENGTH);
+    assert_eq!(pc_entity.human.running_hulk, HULK_LENGTH);
+    assert!(pc_entity.human.hulk_direction);
+}
+
 // ── Scroll hourglass / IsTaken dispatch ──────────────────────
 
 /// Without a mission script, the per-scroll Hourglass dispatcher

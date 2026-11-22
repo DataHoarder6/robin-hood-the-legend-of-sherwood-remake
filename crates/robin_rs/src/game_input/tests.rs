@@ -1940,6 +1940,69 @@ fn allied_only_repeat_click_requires_a_hero_for_noncombat_interactions() {
 }
 
 #[test]
+fn double_click_on_world_pc_centers_and_reseeds_hulk() {
+    let (mut engine, assets, mut host) = fixture();
+    let selected = add_pc(&mut engine, 10.0, 10.0, Posture::Upright);
+    select(&mut engine, &assets, selected);
+    let target = add_pc(&mut engine, 500.0, 400.0, Posture::Upright);
+    host.frontend.input.gestures.element_old_click = Some(target);
+    host.frontend
+        .viewport
+        .center_on_point(MapPoint::new(0.0, 0.0));
+    let before = host.frontend.viewport.view_position;
+
+    let cmds = resolve_left_click_with_planning(
+        &mut host,
+        &engine,
+        &assets,
+        MapPoint::new(500.0, 400.0),
+        DOUBLE,
+    );
+
+    let point = engine
+        .get_entity(target)
+        .expect("target PC exists")
+        .position_iface()
+        .map_position();
+    assert_cmds!(
+        cmds,
+        vec![
+            PlayerCommand::CenterCameraOnPoint { point },
+            PlayerCommand::ReseedSelectionHulk { pc_id: target },
+        ]
+    );
+    assert_ne!(host.frontend.viewport.view_position, before);
+}
+
+#[test]
+fn single_click_selection_does_not_hard_center_an_onscreen_pc() {
+    let (mut engine, assets, mut host) = fixture();
+    let pc = add_pc(&mut engine, 50.0, 50.0, Posture::Upright);
+    host.frontend.presentation.draw_order.ids.push(pc);
+    host.frontend
+        .viewport
+        .center_on_point(MapPoint::new(400.0, 300.0));
+    let before = host.frontend.viewport.view_position;
+
+    let cmds = resolve_left_click_with_planning(
+        &mut host,
+        &engine,
+        &assets,
+        MapPoint::new(50.0, 50.0),
+        NO_MODS,
+    );
+
+    assert_cmds!(
+        cmds,
+        vec![PlayerCommand::SelectPc {
+            pc_id: pc,
+            append: false
+        }]
+    );
+    assert_eq!(host.frontend.viewport.view_position, before);
+}
+
+#[test]
 fn double_click_repeat_on_missing_target_is_noop() {
     let (mut engine, assets, host) = fixture();
     let pc = add_pc(&mut engine, 10.0, 10.0, Posture::Upright);
