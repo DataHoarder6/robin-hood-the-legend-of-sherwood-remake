@@ -1,7 +1,7 @@
 # 0010 — Linux-first unattended goal
 
 - **Status:** Accepted
-- **Date:** 2026-11-23
+- **Date:** 2026-11-22
 - **Related:** [issue #49](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/49), [UNATTENDED.md](../UNATTENDED.md), [GAPS.md](../GAPS.md)
 
 ## Context

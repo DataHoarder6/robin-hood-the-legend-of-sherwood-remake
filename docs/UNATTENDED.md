@@ -149,12 +149,11 @@ BLOCKED by this rule, not by a permission. Stable tags: see
 ## Windows as a human gate
 
 Cross-play needs a real Windows machine to run one seat — issue #49's "one human
-step". The owner does that check themselves and expects Windows to work if the
-build runs; it is not a capability the loop provisions or waits on. The scope
-decision is [ADR 0010](adr/0010-linux-first-unattended-goal.md): the loop targets
-the Linux↔Linux campaign, records the Windows directions and the Windows
-installer as `HUMAN_GATE` items, and continues with Linux work. Wine replay
-parity ([RELEASES.md](RELEASES.md), [TESTING.md](TESTING.md)) proves only the
+step". The scope decision is
+[ADR 0010](adr/0010-linux-first-unattended-goal.md); `HUMAN_GATE` is the
+annotation used for the deferred items, defined under
+[Terminal states](#terminal-states). Wine replay parity
+([RELEASES.md](RELEASES.md), [TESTING.md](TESTING.md)) proves only the
 toolchain/FP/locale class; the OS-layer class stays unproven until a real
 Windows seat runs a recorded session ([WINDOWS.md](WINDOWS.md)).
 
