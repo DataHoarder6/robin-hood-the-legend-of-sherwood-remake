@@ -644,7 +644,7 @@ function installRpcClient(wasm: RobinWasmModule): RobinRpc {
   return rpc;
 }
 
-main().catch((e: unknown) => {
+function onBootFailure(e: unknown): void {
   // Navigation deliberately cancels boot work. Preserve unrelated errors,
   // including AbortErrors from operations we did not cancel ourselves.
   if (bootAbort.signal.aborted && e === bootAbort.signal.reason) return;
@@ -654,4 +654,15 @@ main().catch((e: unknown) => {
   diagnostics.failure(e);
   bootProgressError(`boot failed: ${msg}`);
   logErr(`[boot failed] ${msg}`);
-});
+}
+
+function registerServiceWorker(): void {
+  if (!("serviceWorker" in navigator)) return;
+  void navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
+    logErr(`[service worker registration failed] ${String(error)}`);
+  });
+}
+
+const boot = main();
+if (import.meta.env.PROD) void boot.then(registerServiceWorker).catch(onBootFailure);
+else void boot.catch(onBootFailure);
