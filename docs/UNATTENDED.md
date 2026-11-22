@@ -38,7 +38,7 @@ fourth state and no prompt to the owner to choose, confirm, or continue.
 
 `HUMAN_GATE` is an annotation on items deferred to a human, not a fourth
 terminal state: the iteration still ends LANDED or FILED for the Linux work it
-completes. The scope decision and the gated items are in
+completes. The scope decision and the gated items are in ADR 0010 — see
 [Windows as a human gate](#windows-as-a-human-gate). Other capabilities can
 still be BLOCKED under [Risk routing](#risk-routing).
 
