@@ -17,13 +17,9 @@ test("full-game mission launch selects matching hosted content without overridin
   );
 });
 
-test("only an explicit campaign request on a private path boots the full campaign", () => {
-  const path = (value: string) => new URL(`https://robin.jautis.lt${value}`);
-  const token = `/play/${"a".repeat(32)}/`;
-  assert.equal(campaignRequested(path(token), null, false), true);
-  assert.equal(campaignRequested(path("/"), "campaign", false), false);
-  assert.equal(campaignRequested(path("/"), null, false), false);
-  assert.equal(campaignRequested(path(token), null, true), false);
-  assert.equal(campaignRequested(path("/play/not-a-token/"), "campaign", false), false);
-  assert.equal(campaignRequested(path(token), "demo", false), false);
+test("the private origin defaults to the full campaign unless a replay or demo is requested", () => {
+  assert.equal(campaignRequested(null, false), true);
+  assert.equal(campaignRequested("campaign", false), true);
+  assert.equal(campaignRequested(null, true), false);
+  assert.equal(campaignRequested("demo", false), false);
 });

@@ -470,11 +470,7 @@ async function main(): Promise<void> {
         prepareMultiplayerContent(ticket, manifest, requestFullContentFolder, signal),
       loadDefaultContent: async (base, build, signal) => {
         const pageUrl = new URL(window.location.href);
-        const privateCampaign = campaignRequested(
-          pageUrl,
-          pageParams.get("edition"),
-          replayQuery !== null,
-        )
+        const privateCampaign = campaignRequested(pageParams.get("edition"), replayQuery !== null)
           ? await resolvePrivateCampaignContent(pageUrl, build.short, fetchJson, signal)
           : undefined;
         const fullBuild =

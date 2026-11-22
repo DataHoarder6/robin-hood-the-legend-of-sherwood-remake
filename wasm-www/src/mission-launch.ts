@@ -1,14 +1,11 @@
-const PRIVATE_CAMPAIGN_PATH = /^\/play\/[0-9a-f]{32}\/$/u;
-
-/** A replay never selects the private campaign, nor does an ordinary page
- * without an explicit request. The capability path is itself a request. */
+/** This origin is private, so the full campaign is the default. A replay or
+ * an explicit `?edition=demo` still selects its own content. */
 export function campaignRequested(
-  pageUrl: URL,
   requestedEdition: string | null,
   hasSharedReplay: boolean,
 ): boolean {
   if (hasSharedReplay || requestedEdition === "demo") return false;
-  return PRIVATE_CAMPAIGN_PATH.test(pageUrl.pathname);
+  return true;
 }
 
 /** A replay's edition takes precedence over ordinary game-launch options. */

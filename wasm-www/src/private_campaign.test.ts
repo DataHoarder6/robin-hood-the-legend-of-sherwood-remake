@@ -36,8 +36,21 @@ test("a valid private capability URL resolves a digest-pinned full campaign", as
   });
 });
 
+test("the site root resolves the same digest-pinned generation", async () => {
+  const { fetchJson, urls } = fakeFetch(BINDING);
+  const result = await resolvePrivateCampaignContent(
+    new URL("https://robin.jautis.lt/"),
+    "abc1234",
+    fetchJson,
+    new AbortController().signal,
+  );
+  assert.deepEqual(urls, [`/campaign.json?build=abc1234`]);
+  assert.equal(result?.sha256, SHA);
+  assert.equal(result?.byteLength, 1024);
+});
+
 test("the ordinary page and a malformed token never fetch private content", async () => {
-  for (const path of ["/", `/play/${"a".repeat(31)}/`, "/play/not-a-token/"]) {
+  for (const path of ["/demo", `/play/${"a".repeat(31)}/`, "/play/not-a-token/"]) {
     const { fetchJson, urls } = fakeFetch(BINDING);
     const result = await resolvePrivateCampaignContent(
       new URL(`https://robin.jautis.lt${path}`),
