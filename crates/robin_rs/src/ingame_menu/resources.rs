@@ -1570,7 +1570,7 @@ impl IngameMenuResources {
     /// fonts.  Used by tests in sibling modules that only exercise
     /// pure state-machine logic (button layouts, keyboard navigation).
     #[cfg(test)]
-    pub(super) fn stub() -> Self {
+    pub(crate) fn stub() -> Self {
         Self {
             res: ResourceManager::new(),
             button: SpriteBank {

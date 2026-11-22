@@ -316,6 +316,19 @@ pub(super) enum TerminalDebriefingProgress {
 /// transition as valid.
 const SNAPSHOT_CONFIRM_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// What the leaderboard handoff asks its caller to do after the phase moves.
+enum LeaderboardPreparationStep {
+    Pending,
+    Started(super::leaderboard_runtime::MissionEndPreparation),
+}
+
+enum LeaderboardCompletionStep {
+    Pending,
+    BeginExit,
+    WaitForSnapshot,
+    Settled(SettledDebriefingOutcome),
+}
+
 /// Wait budget for the commit that confirms the mission end.
 ///
 /// The host publishes the transition as it finishes its debriefing and commits
@@ -558,15 +571,91 @@ impl TerminalDebriefingState {
         })
     }
 
+    /// The phase half of accepting the final debriefing decision.
+    ///
+    /// The frame command and game operation stay in `finish_final_decision`.
+    /// Keeping the phase choice here lets the phase chain be driven without a
+    /// window or renderer; `tick` calls the same method.
+    ///
+    /// `Some` is the emergency end, which has no leaderboard phase. `None`
+    /// means the phase now waits for the mission-end leaderboard.
+    fn settle_final_decision(
+        &mut self,
+        result: engine_player_command::DialogResult,
+    ) -> Option<SettledDebriefingOutcome> {
+        self.decisions
+            .accept(&self.page.kind)
+            .unwrap_or_else(|error| panic!("terminal final admission: {error}"));
+        self.final_dismissal.retire();
+        let outcome = final_debriefing_outcome_from_replay(result);
+        if matches!(&outcome, SettledDebriefingOutcome::EmergencyEnd) {
+            return Some(outcome);
+        }
+        self.phase = TerminalDebriefingPhase::LeaderboardPendingStart { outcome };
+        None
+    }
+
+    /// Hand presentation to the mission-end leaderboard once no other UI task
+    /// owns the screen. The returned preparation is the same one-shot value
+    /// `tick` installs as the leaderboard UI task.
+    fn start_leaderboard(&mut self, ui_task_active: bool) -> LeaderboardPreparationStep {
+        if ui_task_active {
+            return LeaderboardPreparationStep::Pending;
+        }
+        let preparation = self.leaderboard_preparation.take().unwrap_or_else(|| {
+            panic!("terminal leaderboard preparation disappeared before presentation")
+        });
+        let TerminalDebriefingPhase::LeaderboardPendingStart { outcome } = std::mem::replace(
+            &mut self.phase,
+            TerminalDebriefingPhase::AwaitingFinalAuthority,
+        ) else {
+            unreachable!()
+        };
+        self.phase = TerminalDebriefingPhase::AwaitingLeaderboard { outcome };
+        LeaderboardPreparationStep::Started(preparation)
+    }
+
+    /// Decide what the leaderboard handoff settles into. A host that won a
+    /// networked mission begins the campaign-exit transition and holds in
+    /// `AwaitingSnapshot`; the commit itself is applied by the outer frame
+    /// loop, not by this phase machine.
+    fn finish_leaderboard(
+        &mut self,
+        leaderboard_active: bool,
+        playing_back: bool,
+        local_seat: engine_player_command::PlayerId,
+        net_available: bool,
+    ) -> LeaderboardCompletionStep {
+        if leaderboard_active {
+            return LeaderboardCompletionStep::Pending;
+        }
+        let TerminalDebriefingPhase::AwaitingLeaderboard { outcome } = std::mem::replace(
+            &mut self.phase,
+            TerminalDebriefingPhase::AwaitingFinalAuthority,
+        ) else {
+            unreachable!()
+        };
+        if !playing_back
+            && matches!(outcome, SettledDebriefingOutcome::Ok)
+            && local_seat == engine_player_command::PlayerId::HOST
+            && net_available
+        {
+            self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
+            self.snapshot_wait_since = Some(std::time::Instant::now());
+            return LeaderboardCompletionStep::BeginExit;
+        }
+        if self.await_remote_snapshot(&outcome, playing_back, local_seat) {
+            return LeaderboardCompletionStep::WaitForSnapshot;
+        }
+        LeaderboardCompletionStep::Settled(outcome)
+    }
+
     fn finish_final_decision(
         &mut self,
         context: &mut TerminalDebriefingContext<'_>,
         result: engine_player_command::DialogResult,
     ) -> TerminalDebriefingProgress {
-        self.decisions
-            .accept(&self.page.kind)
-            .unwrap_or_else(|error| panic!("terminal final admission: {error}"));
-        self.final_dismissal.retire();
+        let emergency = self.settle_final_decision(result);
         context
             .frame
             .modal_dismissals
@@ -574,8 +663,7 @@ impl TerminalDebriefingState {
                 kind: self.page.kind.clone(),
                 result,
             });
-        let outcome = final_debriefing_outcome_from_replay(result);
-        if matches!(&outcome, SettledDebriefingOutcome::EmergencyEnd) {
+        if let Some(outcome) = emergency {
             context.game.operation.set(self.exit_code);
             return if apply_terminal_debriefing_action(
                 context,
@@ -588,7 +676,6 @@ impl TerminalDebriefingState {
                 TerminalDebriefingProgress::Complete
             };
         }
-        self.phase = TerminalDebriefingPhase::LeaderboardPendingStart { outcome };
         TerminalDebriefingProgress::Pending
     }
 
@@ -641,18 +728,17 @@ impl TerminalDebriefingState {
                 }
             }
             TerminalDebriefingPhase::LeaderboardPendingStart { .. } => {
-                if context.ui.active_ui_task.is_some() {
+                let LeaderboardPreparationStep::Started(preparation) =
+                    self.start_leaderboard(context.ui.active_ui_task.is_some())
+                else {
                     return TerminalDebriefingProgress::Pending;
-                }
+                };
                 tracing::debug!(
                     active_scripted_modal = context.ui.active_modal.is_some(),
                     pending_scripted_modals = ?context.host.effects.pending_modal_kinds(),
                     pending_mission_state = context.host.effects.has_signal(crate::host::HostSignal::MissionStatePopup),
                     "terminal flow handing presentation to mission-end leaderboard"
                 );
-                let preparation = self.leaderboard_preparation.take().unwrap_or_else(|| {
-                    panic!("terminal leaderboard preparation disappeared before presentation")
-                });
                 context.ui.active_ui_task =
                     Some(super::ui_task_state::ActiveUiTask::MissionEndLeaderboard(
                         super::leaderboard_runtime::MissionEndLeaderboardTaskState::new(
@@ -660,76 +746,61 @@ impl TerminalDebriefingState {
                             context.callbacks.application_context(),
                         ),
                     ));
-                let TerminalDebriefingPhase::LeaderboardPendingStart { outcome } =
-                    std::mem::replace(
-                        &mut self.phase,
-                        TerminalDebriefingPhase::AwaitingFinalAuthority,
-                    )
-                else {
-                    unreachable!()
-                };
-                self.phase = TerminalDebriefingPhase::AwaitingLeaderboard { outcome };
                 TerminalDebriefingProgress::Pending
             }
             TerminalDebriefingPhase::AwaitingLeaderboard { .. } => {
-                if context
-                    .ui
-                    .active_ui_task
-                    .as_ref()
-                    .is_some_and(|task| task.is_mission_end_leaderboard())
-                {
-                    return TerminalDebriefingProgress::Pending;
-                }
-                let TerminalDebriefingPhase::AwaitingLeaderboard { outcome } = std::mem::replace(
-                    &mut self.phase,
-                    TerminalDebriefingPhase::AwaitingFinalAuthority,
-                ) else {
-                    unreachable!()
-                };
-                if !context.playing_back
-                    && matches!(outcome, SettledDebriefingOutcome::Ok)
-                    && context.host.transport.local_seat() == engine_player_command::PlayerId::HOST
-                    && let Some(net) = context.host.transport.net()
-                {
-                    let engine_bytes = context.manager.engine.encode_native_snapshot();
-                    let wire_bytes = engine_bytes.len() as u64;
-                    let id = net
-                        .begin_campaign_exit_transition(self.exit_code, engine_bytes)
-                        .expect("failed to begin multiplayer mission completion");
-                    context.host.transport.prepare_snapshot_transition(
-                        crate::host::PendingSnapshotTransition::new(
-                            id,
-                            crate::host::PendingSnapshotTransitionPayload::CampaignExit {
-                                exit_code: self.exit_code,
-                                engine: None,
-                            },
-                            wire_bytes,
-                        ),
-                    );
-                    self.phase = TerminalDebriefingPhase::AwaitingSnapshot;
-                    self.snapshot_confirm_budget = snapshot_confirm_budget(wire_bytes);
-                    self.snapshot_wait_since = Some(std::time::Instant::now());
-                    context.game.operation.set(GameCode::LevelInProgress);
-                    return TerminalDebriefingProgress::Pending;
-                }
-                if self.await_remote_snapshot(
-                    &outcome,
+                match self.finish_leaderboard(
+                    context
+                        .ui
+                        .active_ui_task
+                        .as_ref()
+                        .is_some_and(|task| task.is_mission_end_leaderboard()),
                     context.playing_back,
                     context.host.transport.local_seat(),
+                    context.host.transport.net().is_some(),
                 ) {
-                    context.game.operation.set(GameCode::LevelInProgress);
-                    return TerminalDebriefingProgress::Pending;
-                }
-                context.game.operation.set(self.exit_code);
-                if apply_terminal_debriefing_action(
-                    context,
-                    &outcome,
-                    self.page.mission_id,
-                    self.local_load.take(),
-                ) {
-                    TerminalDebriefingProgress::EmergencyExit
-                } else {
-                    TerminalDebriefingProgress::Complete
+                    LeaderboardCompletionStep::Pending => TerminalDebriefingProgress::Pending,
+                    LeaderboardCompletionStep::BeginExit => {
+                        let engine_bytes = context.manager.engine.encode_native_snapshot();
+                        let wire_bytes = engine_bytes.len() as u64;
+                        let id = context
+                            .host
+                            .transport
+                            .net()
+                            .expect("host net checked by the leaderboard phase step")
+                            .begin_campaign_exit_transition(self.exit_code, engine_bytes)
+                            .expect("failed to begin multiplayer mission completion");
+                        context.host.transport.prepare_snapshot_transition(
+                            crate::host::PendingSnapshotTransition::new(
+                                id,
+                                crate::host::PendingSnapshotTransitionPayload::CampaignExit {
+                                    exit_code: self.exit_code,
+                                    engine: None,
+                                },
+                                wire_bytes,
+                            ),
+                        );
+                        self.snapshot_confirm_budget = snapshot_confirm_budget(wire_bytes);
+                        context.game.operation.set(GameCode::LevelInProgress);
+                        TerminalDebriefingProgress::Pending
+                    }
+                    LeaderboardCompletionStep::WaitForSnapshot => {
+                        context.game.operation.set(GameCode::LevelInProgress);
+                        TerminalDebriefingProgress::Pending
+                    }
+                    LeaderboardCompletionStep::Settled(outcome) => {
+                        context.game.operation.set(self.exit_code);
+                        if apply_terminal_debriefing_action(
+                            context,
+                            &outcome,
+                            self.page.mission_id,
+                            self.local_load.take(),
+                        ) {
+                            TerminalDebriefingProgress::EmergencyExit
+                        } else {
+                            TerminalDebriefingProgress::Complete
+                        }
+                    }
                 }
             }
             TerminalDebriefingPhase::AwaitingSnapshot => {
@@ -1871,5 +1942,114 @@ mod tests {
         assert!(!terminal_campaign_update_applied(41, 41));
         assert!(!terminal_campaign_update_applied(40, 41));
         assert!(terminal_campaign_update_applied(42, 41));
+    }
+
+    fn phase_name(phase: &TerminalDebriefingPhase) -> &'static str {
+        match phase {
+            TerminalDebriefingPhase::Debriefing(_) => "Debriefing",
+            TerminalDebriefingPhase::LoadPicker { .. } => "LoadPicker",
+            TerminalDebriefingPhase::AwaitingFinalAuthority => "AwaitingFinalAuthority",
+            TerminalDebriefingPhase::LeaderboardPendingStart { .. } => "LeaderboardPendingStart",
+            TerminalDebriefingPhase::AwaitingLeaderboard { .. } => "AwaitingLeaderboard",
+            TerminalDebriefingPhase::AwaitingSnapshot => "AwaitingSnapshot",
+        }
+    }
+
+    /// The live debriefing's phase chain. `tick` feeds the same three
+    /// observations to the phase methods this drives (decision, leaderboard
+    /// finished, host with net); only the renderer-bound work is outside them.
+    #[test]
+    fn terminal_phase_chain_reaches_complete_through_leaderboard_and_snapshot() {
+        use crate::ingame_menu::{DebriefingContent, DebriefingModalState, IngameMenuResources};
+        use robin_engine::player_command::{DialogResult, PlayerId};
+
+        // Board-endpoint stand-in: the real one-shot preparation the runtime
+        // hands a terminal debriefing, captured exactly as
+        // `settle_terminal_debriefing` captures it. The leaderboard screen
+        // itself is owned by the UI task and needs a renderer; its completion
+        // is an observation the phase machine consumes, supplied below.
+        let mission = robin_engine::profiles::MissionProfile {
+            mission_filename: crate::leaderboard::test_fixtures::MISSION_ID.into(),
+            ..Default::default()
+        };
+        let mut runtime = super::super::leaderboard_runtime::MissionLeaderboardRuntime::new();
+        let preparation = runtime
+            .capture_terminal(
+                crate::leaderboard_mission_end::MissionEndOutcome::Won,
+                PlayerId::HOST,
+                &mission,
+                robin_engine::engine::SimConfig::default(),
+            )
+            .expect("board endpoint preparation");
+
+        let mut state = terminal_state();
+        state.exit_code = GameCode::LevelSucceeded;
+        state.leaderboard_preparation = Some(preparation);
+        let resources = IngameMenuResources::stub();
+        state.phase = TerminalDebriefingPhase::Debriefing(DebriefingModalState::new(
+            &resources,
+            DebriefingContent::default(),
+        ));
+        let mut observed = vec![phase_name(&state.phase)];
+
+        assert!(
+            state
+                .settle_final_decision(DialogResult::Completed)
+                .is_none(),
+            "a completed debriefing hands its outcome to the leaderboard"
+        );
+        observed.push(phase_name(&state.phase));
+
+        let LeaderboardPreparationStep::Started(_board_preparation) =
+            state.start_leaderboard(false)
+        else {
+            panic!("the leaderboard UI task must receive the board preparation")
+        };
+        observed.push(phase_name(&state.phase));
+
+        let LeaderboardCompletionStep::BeginExit =
+            state.finish_leaderboard(false, false, PlayerId::HOST, true)
+        else {
+            panic!("a won host mission must begin the campaign-exit transition")
+        };
+        observed.push(phase_name(&state.phase));
+
+        // The commit is outside this phase machine: the outer frame loop
+        // consumes it and exits the mission. The host echo that releases the
+        // debriefing is bound by
+        // `host_completion_echo_releases_debriefing_without_running_gameplay`;
+        // stage the same campaign command here to observe that the handoff is
+        // live, then record completion.
+        let host = Host::scratch(800.0, 600.0);
+        let mut frame = MissionFrame::new(10);
+        stage_terminal_campaign_update(
+            false,
+            &host.transport,
+            &mut frame,
+            GameCode::LevelSucceeded,
+            Default::default(),
+            41,
+        );
+        assert!(frame.post_commands().iter().any(|input| matches!(
+            input.command,
+            PlayerCommand::ApplyQuitMissionUpdates {
+                exit_code: GameCode::LevelSucceeded,
+                ..
+            }
+        )));
+        assert!(state.awaiting_snapshot());
+        assert!(state.snapshot_wait_since.is_some());
+        observed.push("Complete");
+
+        assert_eq!(
+            observed,
+            [
+                "Debriefing",
+                "LeaderboardPendingStart",
+                "AwaitingLeaderboard",
+                "AwaitingSnapshot",
+                "Complete",
+            ]
+        );
     }
 }
