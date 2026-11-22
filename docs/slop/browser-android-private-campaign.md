@@ -31,14 +31,20 @@ Stream: browser/WASM Android client. Companion spec:
   edition, AVIF q60, Opus, zstd window 30. No lossless remaster drop was
   available, so `--lossless-music-dir` was omitted and the converter encoded
   music from the game's own WAVs (the documented fallback).
-- The converter ran without Git metadata, so its manifest's `engine_version`
-  was `unknown`; that field was patched byte-for-byte to the deployed wasm
-  commit `95ab7b9dbdf25725789086ea83fd6a78a4479e1b` before publication.
+- The first conversion used a converter built from a different commit and
+  produced `native bitcode mission decode: Error("bitcode error")` on the first
+  map. It was replaced: the converter was rebuilt from the deployed wasm commit
+  `95ab7b9dbdf25725789086ea83fd6a78a4479e1b` with
+  `ROBIN_PACKAGE_COMMIT` set, so the manifest carries that exact engine version.
 - Published generation:
-  `datadirs/full/3fe317b9984e85f23a7f77f97c39a076866f8053f88823bb39626b62f614f381/`,
-  manifest digest `e7363aea…73c`; `datadir.bin` 118,779,443 bytes,
-  SHA-256 `c5519a11…d8`, chunked into five `.partN` files as the shell expects.
-  Binding: `/play/<token>/campaign.json`.
+  `datadirs/full/ada1a6ff9d36a620f7a2094d67ad5a1886091639bce451a485ff3daffe3d3607/`,
+  `datadir.bin` 118,781,741 bytes, SHA-256 `4fb3cdff…d5`, chunked into five
+  `.partN` files as the shell expects. Binding: `/campaign.json`. The old
+  generation and the legacy capability path were deleted.
+- Verified in Chrome with `?mission=H01_Lin_VL`: `mission started`, no bitcode
+  error, no game-loop failure; `robinRpc('state')` answered with `frame = 2`,
+  `presentation = null` after the level finished loading. Screenshots:
+  `/tmp/opencode/first-map-fixed.png`, `/tmp/opencode/first-map-loaded.png`.
 - The service worker rejects every `/datadirs/full/*` URL, so the private
   corpus is never cached.
 
