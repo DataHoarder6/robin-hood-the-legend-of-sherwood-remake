@@ -16,6 +16,10 @@ mod modal_session;
 use modal_session::ModalSyncState;
 pub use modal_session::{ModalEffectAdmission, ModalPublication, ModalRecoveryState};
 
+#[path = "multiplayer/coop_pause.rs"]
+mod coop_pause;
+pub use coop_pause::{CoopPauseBarrier, PauseBarrierOutcome};
+
 use crate::engine::Engine;
 use crate::player_command::{DialogResult, ModalKind, PlayerCommand, PlayerId, PlayerInput};
 use serde::{Deserialize, Serialize};
@@ -448,6 +452,41 @@ pub struct ModalDecision {
     pub decision_frame: u32,
 }
 
+/// Host-authoritative cooperative pause decision.
+///
+/// `frame` is the exact host simulation frame at which the toggle takes
+/// effect. `decision_id` is a host-local monotonic nonce that keeps two
+/// toggles distinct even across reconnects, so a replayed or duplicated decision
+/// cannot halt a session twice. Only the host may author this; every seat
+/// applies it at `frame` and gates through the engine's simulation gate. It is
+/// distinct from the local-only `manual_pause` presentation flag.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bitcode::Encode, bitcode::Decode,
+)]
+pub struct CoopPauseDecision {
+    pub decision_id: u64,
+    pub frame: u32,
+    pub paused: bool,
+}
+
+/// Client → host: this seat adopted [`CoopPauseDecision`] at its exact frame.
+/// The authenticated seat is stamped by the server; the nonce and frame stop a
+/// late acknowledgement from releasing a different pause at the same boundary.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bitcode::Encode, bitcode::Decode,
+)]
+pub struct CoopPauseAck {
+    pub decision_id: u64,
+    pub frame: u32,
+}
+
+/// How long the host waits for every seat to acknowledge a pause decision's
+/// boundary before evicting the missing seats and auto-resuming. Bounded so a
+/// frozen or departed peer can never halt the whole session indefinitely
+/// (the same rule as `MODAL_ACK_BUDGET_MS` and the snapshot-transition
+/// deadline, [`crate::engine::transition_budget`]).
+pub const COOP_PAUSE_BARRIER_MS: u64 = 60_000;
+
 /// Story surfaces are opened by the host, including after client rollback.
 /// Whether the session owns this modal's identity and acknowledgements, so the
 /// host's decision is the only way to close it. Terminal mission-end pages are
@@ -564,6 +603,10 @@ pub enum NetMsg {
     ModalProposal(ModalProposal),
     /// Server → clients, see [`ModalDecision`].
     ModalDecision(ModalDecision),
+    /// Server → clients, see [`CoopPauseDecision`]. Host-only authorship.
+    CoopPauseDecision(CoopPauseDecision),
+    /// Client → server, see [`CoopPauseAck`]. Never authored by the host.
+    CoopPauseAck(CoopPauseAck),
     /// Server → peer: abandon the current prediction future and perform a
     /// complete transport handshake. The next session starts from the host's
     /// latest authoritative full snapshot.
@@ -694,6 +737,14 @@ pub enum NetEvent {
     },
     /// The host chose the result for one exact modal occurrence.
     ModalDecision(ModalDecision),
+    /// The host's authoritative cooperative-pause toggle, ready for the game
+    /// loop to commit at `frame` into the canonical command stream.
+    CoopPauseDecision(CoopPauseDecision),
+    /// A seat confirmed it reached the decision boundary. Host game loop only.
+    CoopPauseAck {
+        seat: PlayerId,
+        ack: CoopPauseAck,
+    },
     ModalProgress(ModalProgress),
     PrepareSnapshotTransition {
         id: SnapshotTransitionId,
@@ -743,6 +794,10 @@ pub enum NetOutbound {
     },
     ModalProposal(ModalProposal),
     ModalDecision(ModalDecision),
+    /// Host-only: publish a cooperative-pause toggle to every seat.
+    CoopPauseDecision(CoopPauseDecision),
+    /// Client-only: confirm adoption of a host decision at its exact frame.
+    CoopPauseAck(CoopPauseAck),
     ModalProgress(ModalProgress),
     /// The retained rollback horizon cannot incorporate an input from this
     /// seat. A client drops its whole live QUIC session and re-handshakes; the
@@ -840,6 +895,8 @@ pub struct NetChannels {
     /// Seats in this session's simulation, published by the host transport.
     session_seats: SessionSeats,
     modal_sync: Arc<Mutex<ModalSyncState>>,
+    /// Host-only bounded barrier for cooperative-pause acknowledgements.
+    coop_pause_barrier: Arc<Mutex<CoopPauseBarrier>>,
     next_transition_sequence: AtomicU64,
     command_worker_closed: AtomicBool,
     gameplay_input_enabled: AtomicBool,
@@ -871,6 +928,7 @@ impl NetChannels {
                 initial_snapshot: Arc::clone(&snapshot),
                 session_seats: session_seats.clone(),
                 modal_sync: Arc::new(Mutex::new(ModalSyncState::new(session_seats))),
+                coop_pause_barrier: Arc::new(Mutex::new(CoopPauseBarrier::new())),
                 next_transition_sequence: AtomicU64::new(0),
                 command_worker_closed: AtomicBool::new(false),
                 gameplay_input_enabled: AtomicBool::new(true),
@@ -886,6 +944,44 @@ impl NetChannels {
     /// transport so a page never awaits a seat that cannot see it.
     pub fn session_seats(&self) -> &SessionSeats {
         &self.session_seats
+    }
+
+    /// Host-only: begin the bounded pause-acknowledgement barrier for a
+    /// decision, awaiting every seat currently in the simulation.
+    pub fn begin_coop_pause_barrier(&self, decision: CoopPauseDecision, now_ms: u64) {
+        self.coop_pause_barrier
+            .lock()
+            .expect("coop-pause barrier lock poisoned")
+            .begin(decision, self.session_seats.mask(), now_ms);
+    }
+
+    /// Host-only: a seat acknowledged reaching the decision boundary.
+    pub fn acknowledge_coop_pause(&self, seat: PlayerId, ack: CoopPauseAck) {
+        self.coop_pause_barrier
+            .lock()
+            .expect("coop-pause barrier lock poisoned")
+            .acknowledge(seat, ack.decision_id, ack.frame);
+    }
+
+    /// Host-only: advance the barrier deadline. Returns a resume decision when
+    /// the deadline passed and seats were evicted.
+    pub fn tick_coop_pause_barrier(
+        &self,
+        now_ms: u64,
+        next_frame: u32,
+    ) -> coop_pause::PauseBarrierOutcome {
+        self.coop_pause_barrier
+            .lock()
+            .expect("coop-pause barrier lock poisoned")
+            .tick(now_ms, next_frame)
+    }
+
+    /// Forget any pending pause barrier (session teardown / snapshot restore).
+    pub fn clear_coop_pause_barrier(&self) {
+        self.coop_pause_barrier
+            .lock()
+            .expect("coop-pause barrier lock poisoned")
+            .clear();
     }
 
     /// Cache an initial-state snapshot the host will offer to every
@@ -1714,6 +1810,42 @@ mod tests {
                 result: DialogResult::Completed,
                 decision_frame: 125,
             }) if decoded == instance
+        ));
+    }
+
+    #[test]
+    fn coop_pause_decision_roundtrips_through_wire_codec() {
+        let decision = CoopPauseDecision {
+            decision_id: 7,
+            frame: 512,
+            paused: true,
+        };
+        let decoded = decode_msg(&encode_msg(&NetMsg::CoopPauseDecision(decision)))
+            .expect("decode coop pause decision");
+        assert!(matches!(
+            decoded,
+            NetMsg::CoopPauseDecision(CoopPauseDecision {
+                decision_id: 7,
+                frame: 512,
+                paused: true,
+            })
+        ));
+    }
+
+    #[test]
+    fn coop_pause_ack_roundtrips_through_wire_codec() {
+        let ack = CoopPauseAck {
+            decision_id: 7,
+            frame: 512,
+        };
+        let decoded =
+            decode_msg(&encode_msg(&NetMsg::CoopPauseAck(ack))).expect("decode coop pause ack");
+        assert!(matches!(
+            decoded,
+            NetMsg::CoopPauseAck(CoopPauseAck {
+                decision_id: 7,
+                frame: 512,
+            })
         ));
     }
 

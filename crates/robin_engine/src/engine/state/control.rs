@@ -168,6 +168,23 @@ impl SimulationControl {
         self.simulation_gates.consume_fade_freeze_frame()
     }
 
+    pub(crate) fn set_coop_pause(&mut self, paused: bool, frame: u32, decision_id: u64) {
+        self.simulation_gates
+            .set_coop_pause(paused, frame, decision_id);
+    }
+
+    pub(crate) fn coop_pause_active(&self) -> bool {
+        self.simulation_gates.coop_pause_active()
+    }
+
+    pub(crate) fn coop_pause_frame(&self) -> u32 {
+        self.simulation_gates.coop_pause_frame()
+    }
+
+    pub(crate) fn coop_pause_decision_id(&self) -> u64 {
+        self.simulation_gates.coop_pause_decision_id()
+    }
+
     /// Record one completed popup-scroll display and report whether its menu
     /// background takes Original's nested-Refresh path.
     pub(crate) fn begin_popup_scroll_display(&mut self) -> bool {

@@ -3005,3 +3005,13 @@ Evidence, the strings and the ids are in
   lobby advertised. `--mp-campaign` starts the same session from the command
   line, and a lobby whose rules cannot be advertised names the reason in its
   status line instead of sitting there as if it were open.
+
+- **P pauses the whole party, not just the presser's screen.** In multiplayer
+  only the host's P commits a cooperative pause: the decision enters the
+  canonical replay stream at an exact simulated frame, lands in the hashed gate
+  that every seat reads before its next tick, and reaches late joiners through
+  the authoritative snapshot. A client's P is ignored, as it is for every other
+  host-authoritative decision. Seats acknowledge the boundary; the host's bounded
+  barrier evicts and auto-resumes past a peer that never does, so one frozen
+  install cannot hold the session. P is reserved for this toggle and Esc keeps
+  its local menu: that menu still cannot stop a shared clock.

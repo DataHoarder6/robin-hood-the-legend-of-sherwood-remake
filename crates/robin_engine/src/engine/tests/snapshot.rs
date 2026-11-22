@@ -220,6 +220,31 @@ fn simulation_gate_aggregate_roundtrips_without_hash_drift() {
 }
 
 #[test]
+fn coop_pause_survives_authoritative_snapshot_for_late_joiners() {
+    let mut original = EngineInner::new();
+    original.control.set_coop_pause(true, 987, 11);
+    let expected_hash = crate::replay::state_hash(&original);
+
+    // A late joiner installs the host's native bitcode snapshot. The pause
+    // decision must arrive with the state, hash-identically, so the joiner
+    // halts at the same boundary without replaying the whole mission.
+    let joined = native_round_trip(&original);
+    assert_eq!(joined.coop_pause_state(), (true, 987, 11));
+    assert_eq!(crate::replay::state_hash(&joined), expected_hash);
+
+    // A resume decision is equally durable: a joiner adopting a running state
+    // must not inherit a stale halt.
+    original.control.set_coop_pause(false, 1000, 12);
+    let resumed = native_round_trip(&original);
+    assert_eq!(resumed.coop_pause_state(), (false, 1000, 12));
+    assert!(!resumed.coop_pause_active());
+    assert_eq!(
+        crate::replay::state_hash(&resumed),
+        crate::replay::state_hash(&original)
+    );
+}
+
+#[test]
 fn simulation_gates_survive_rollback_restore_and_replay() {
     let assets = LevelAssets::new();
     let mut original = EngineInner::new();

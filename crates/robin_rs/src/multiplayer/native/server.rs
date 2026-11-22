@@ -1828,6 +1828,14 @@ pub(super) fn apply_authenticated_peer_message(
                 "peer {seat:?} attempted an authoritative modal decision"
             )));
         }
+        NetMsg::CoopPauseAck(ack) => {
+            // The seat comes from the authenticated session, never the frame:
+            // a peer cannot acknowledge on behalf of another player.
+            context
+                .incoming_tx
+                .send(NetEvent::CoopPauseAck { seat, ack })
+                .map_err(|_| closed("host coop-pause acknowledgement channel is closed"))?;
+        }
         NetMsg::ReadyToSim { frame } => {
             let begin = {
                 let mut p = context.peers.lock();
@@ -1877,6 +1885,7 @@ pub(super) fn validate_server_gameplay_wire_msg(message: &NetMsg) -> Result<(), 
         | NetMsg::Input { .. }
         | NetMsg::Note(_)
         | NetMsg::ModalProposal { .. }
+        | NetMsg::CoopPauseAck { .. }
         | NetMsg::ReadyToSim { .. }
         | NetMsg::SnapshotTransitionReady { .. } => Ok(()),
         NetMsg::ContentRequest { .. }

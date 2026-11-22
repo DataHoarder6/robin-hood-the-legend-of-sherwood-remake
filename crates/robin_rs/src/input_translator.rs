@@ -79,6 +79,9 @@ pub enum GameKey {
     AiInfo,
     /// Built-in Sherwood-only shortcut for the post-port trading panel.
     SherwoodTrading,
+    /// Non-rebindable cooperative pause toggle (P). Host-authoritative in
+    /// multiplayer; Esc/DisplayMenu stays the local modal binding.
+    CoopPause,
 }
 
 // The persisted key-config rows occupy the prefix before reserved/debug keys.
@@ -153,6 +156,8 @@ pub enum GameAction {
 
     // System
     SwitchTask,
+    /// Toggle the host-authoritative cooperative pause (P).
+    CoopPause,
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +266,7 @@ impl InputTranslator {
         self.bindings[GameKey::PrintScreen] = Some(PrintScreen);
         self.bindings[GameKey::DisplayMenu] = Some(Escape);
         self.bindings[GameKey::SherwoodTrading] = Some(KeyT);
+        self.bindings[GameKey::CoopPause] = Some(KeyP);
 
         // Debug keys (only in non-shipping builds)
         self.bindings[GameKey::SlowMotion] = Some(Pause);
@@ -503,6 +509,9 @@ impl InputTranslator {
         if flags.contains(TranslationFlags::MISSION) {
             if key_released(keys, prev, self.key(GameKey::DisplayConsole)) {
                 actions.push(GameAction::DisplayConsole);
+            }
+            if key_released(keys, prev, self.key(GameKey::CoopPause)) {
+                actions.push(GameAction::CoopPause);
             }
 
             // Alt+Tab or Ctrl+Esc -> SwitchTask (physical keys, not bindings).
@@ -963,6 +972,23 @@ mod tests {
         // Reserved bindings survive
         assert_eq!(t.get_binding(GameKey::DisplayMenu), Some(KeyCode::Escape));
         assert_eq!(t.get_binding(GameKey::SherwoodTrading), Some(KeyCode::KeyT));
+    }
+
+    #[test]
+    fn p_key_is_reserved_for_coop_pause_without_touching_esc_modal() {
+        let mut t = InputTranslator::new(1024.0, 768.0, &KeyConfig::default_preset());
+        assert_eq!(t.get_binding(GameKey::CoopPause), Some(KeyCode::KeyP));
+        assert_eq!(t.get_binding(GameKey::DisplayMenu), Some(KeyCode::Escape));
+
+        let pressed = keys_down(&[KeyCode::KeyP]);
+        assert!(
+            !t.translate_keyboard(&pressed, TranslationFlags::ALL)
+                .contains(&GameAction::CoopPause)
+        );
+        let released = keys_down(&[]);
+        let actions = t.translate_keyboard(&released, TranslationFlags::ALL);
+        assert!(actions.contains(&GameAction::CoopPause));
+        assert!(!actions.contains(&GameAction::DisplayMenu));
     }
 
     #[test]

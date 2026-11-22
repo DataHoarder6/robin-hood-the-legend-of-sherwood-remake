@@ -94,6 +94,84 @@ fn campaign_mutations_are_host_authoritative() {
 }
 
 #[test]
+fn coop_pause_non_host_cannot_halt_but_host_can() {
+    let (mut engine, assets, _) = setup_pc_engine(&[]);
+    let sim = crate::sim_rng::test_context();
+    let command = PlayerCommand::SetCoopPause {
+        paused: true,
+        frame: 7,
+        decision_id: 1,
+    };
+    assert!(!engine.coop_pause_active());
+
+    engine.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &assets),
+        &[PlayerInput::new(
+            crate::player_command::PlayerId(1),
+            command.clone(),
+        )],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(
+        !engine.coop_pause_active(),
+        "a client seat must not halt the shared timeline"
+    );
+
+    engine.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &assets),
+        &[PlayerInput::host(command)],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(engine.coop_pause_active(), "the host decision must halt");
+    assert_eq!(engine.coop_pause_state(), (true, 7, 1));
+}
+
+#[test]
+fn coop_pause_boundary_frame_hash_equality_is_exact_and_frame_sensitive() {
+    let (mut host, host_assets, _) = setup_pc_engine(&[]);
+    let (mut peer, peer_assets, _) = setup_pc_engine(&[]);
+    let sim = crate::sim_rng::test_context();
+    let decision = PlayerCommand::SetCoopPause {
+        paused: true,
+        frame: 42,
+        decision_id: 5,
+    };
+
+    host.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &host_assets),
+        &[PlayerInput::host(decision.clone())],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    peer.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &peer_assets),
+        &[PlayerInput::host(decision)],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(host.coop_pause_active() && peer.coop_pause_active());
+    assert_eq!(
+        crate::replay::state_hash(&host),
+        crate::replay::state_hash(&peer),
+        "the same decision at the same frame must hash identically on every seat"
+    );
+
+    let (mut late, late_assets, _) = setup_pc_engine(&[]);
+    late.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &late_assets),
+        &[PlayerInput::host(PlayerCommand::SetCoopPause {
+            paused: true,
+            frame: 43,
+            decision_id: 5,
+        })],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert_ne!(
+        crate::replay::state_hash(&host),
+        crate::replay::state_hash(&late),
+        "committing one frame off the boundary must diverge the authoritative hash"
+    );
+}
+
+#[test]
 fn deterministic_settings_and_seat_lifecycle_are_host_authoritative() {
     let (mut engine, assets, _pc) = setup_pc_engine(&[]);
     let sim = crate::sim_rng::test_context();

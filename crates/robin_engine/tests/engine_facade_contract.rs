@@ -210,6 +210,11 @@ fn engine_public_mutation_surface_is_an_exact_capability_allowlist() {
         // Calculation itself remains deterministic engine state; this opener
         // attaches eligibility before profile-history promotion.
         "promote_mission_achievement_results",
+        // Host-authoritative cooperative-pause capability opener: the only
+        // caller is the host's bounded barrier timeout, which auto-resumes a
+        // session a frozen peer would otherwise hold paused. The decision is a
+        // deterministic gate field; this opener commits it at the exact frame.
+        "commit_coop_pause",
         "test_add_entity",
         "test_launch_sequence",
         "test_seed_achievement_persistence",

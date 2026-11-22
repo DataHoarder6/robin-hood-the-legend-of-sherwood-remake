@@ -34,6 +34,15 @@ pub(crate) struct SimulationGateState {
     /// The triggering tick presents the first frame, hence a `2 * speed` fade
     /// stores `2 * speed - 1` here.
     fade_freeze_frames_remaining: u32,
+    /// Host-authoritative cooperative pause, committed by the host alone at an
+    /// exact simulation frame through the canonical command stream. Every seat
+    /// applies the same decision at `coop_pause_frame`, so this aggregate is
+    /// hashed, bitcoded and snapshot-persisted with the other gates and late
+    /// joiners inherit it with the authoritative state. It is distinct from
+    /// the local-only `manual_pause` presentation flag.
+    coop_pause_active: bool,
+    coop_pause_frame: u32,
+    coop_pause_decision_id: u64,
 }
 
 impl SimulationGateState {
@@ -69,5 +78,26 @@ impl SimulationGateState {
         }
         self.fade_freeze_frames_remaining -= 1;
         true
+    }
+
+    /// Commit the host's cooperative-pause decision. The frame and decision id
+    /// are stored so the pause is self-describing in a snapshot and can be
+    /// compared for late-joiner consistency.
+    pub(crate) fn set_coop_pause(&mut self, paused: bool, frame: u32, decision_id: u64) {
+        self.coop_pause_active = paused;
+        self.coop_pause_frame = frame;
+        self.coop_pause_decision_id = decision_id;
+    }
+
+    pub(crate) fn coop_pause_active(&self) -> bool {
+        self.coop_pause_active
+    }
+
+    pub(crate) fn coop_pause_frame(&self) -> u32 {
+        self.coop_pause_frame
+    }
+
+    pub(crate) fn coop_pause_decision_id(&self) -> u64 {
+        self.coop_pause_decision_id
     }
 }

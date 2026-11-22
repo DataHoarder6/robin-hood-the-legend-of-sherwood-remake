@@ -124,7 +124,9 @@ pub const FRAME_TIME_MS: u32 = 40;
 /// instead of being misdecoded by the new campaign type.
 /// Version 79 adds the authoritative extra-guards option to `SimConfig`, so
 /// earlier recordings are rejected rather than decoded with a shifted layout.
-pub const REPLAY_SCHEMA_VERSION: u32 = 79;
+/// Version 80 records the host-authoritative cooperative-pause decision in the
+/// canonical command stream, so a pause boundary is reproduced on replay.
+pub const REPLAY_SCHEMA_VERSION: u32 = 80;
 
 /// Wire-format protocol version shared by the engine and the leaderboard wire
 /// protocol. Bump on any breaking change to `NetMsg` or
@@ -183,7 +185,9 @@ pub const REPLAY_SCHEMA_VERSION: u32 = 79;
 /// Protocol 73 carries presentation-only teammate cursor state.
 /// Protocol 74 carries the authoritative extra-guards option and its command
 /// in peer snapshots and the deterministic command stream.
-pub const NET_PROTOCOL_VERSION: u32 = 74;
+/// Protocol 75 carries the host-authoritative cooperative-pause decision and
+/// the seat acknowledgements that bound its barrier.
+pub const NET_PROTOCOL_VERSION: u32 = 75;
 
 pub use artifact::ArtifactRefV1;
 pub use canonical::{

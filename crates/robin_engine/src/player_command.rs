@@ -1501,6 +1501,15 @@ pub enum PlayerCommand {
     SetExtraGuards {
         enabled: bool,
     },
+    /// Commit the host's cooperative-pause toggle at `frame`. Appended last to
+    /// preserve every existing wire/bitcode variant index; only the host may
+    /// author it. The engine stores it in the hashed simulation gate so every
+    /// seat halts at the same exact frame and replays reproduce the boundary.
+    SetCoopPause {
+        paused: bool,
+        frame: u32,
+        decision_id: u64,
+    },
 }
 
 impl PlayerCommand {
@@ -1568,6 +1577,7 @@ impl PlayerCommand {
                 | Self::CampaignPurchasePerk { .. }
                 | Self::SetNoFriendlyFireDamage { .. }
                 | Self::SetNoFriendlyFireKnockback { .. }
+                | Self::SetCoopPause { .. }
                 | Self::SetItemGameplayConfig { .. }
                 | Self::SetNoiseDistractionFeedback { .. }
                 | Self::SetTimedMissionsEnabled { .. }
@@ -1951,6 +1961,30 @@ mod tests {
         assert!(matches!(
             bitcode::decode::<PlayerCommand>(&bytes).expect("decode fog command"),
             PlayerCommand::SetFogOfWar { enabled: false }
+        ));
+    }
+
+    #[test]
+    fn coop_pause_command_is_host_only_and_roundtrips_through_canonical_codecs() {
+        let command = PlayerCommand::SetCoopPause {
+            paused: true,
+            frame: 321,
+            decision_id: 9,
+        };
+        assert!(command.requires_host_authority());
+        assert_eq!(command.ranked_simulation_setting_mutation(), None);
+
+        let json = serde_json::to_string(&command).expect("serialize coop-pause command");
+        let decoded_json: PlayerCommand =
+            serde_json::from_str(&json).expect("deserialize coop-pause command");
+        let bytes = bitcode::encode(&decoded_json);
+        assert!(matches!(
+            bitcode::decode::<PlayerCommand>(&bytes).expect("decode coop-pause command"),
+            PlayerCommand::SetCoopPause {
+                paused: true,
+                frame: 321,
+                decision_id: 9,
+            }
         ));
     }
 

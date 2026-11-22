@@ -97,6 +97,60 @@ fn toggle_pause_menu(context: &mut LiveGameplayContext<'_>, pause_closed: &mut b
     }
 }
 
+/// Toggle the host-authoritative cooperative pause (P). Only the host may
+/// author the decision; a client's P is ignored so a peer can never halt the
+/// shared timeline. The host commits the toggle into its own canonical command
+/// stream at the exact current sim frame (replays reproduce the boundary), then
+/// publishes the identical decision to every peer, which adopts it at the same
+/// frame through the deterministic network input path. Esc's local menu is
+/// deliberately untouched.
+fn toggle_coop_pause(context: &mut LiveGameplayContext<'_>) {
+    let LiveGameplayContext {
+        host,
+        engine,
+        commands,
+        ..
+    } = context;
+    if host.transport.local_seat() != engine_player_command::PlayerId::HOST {
+        tracing::debug!("cooperative pause is host-authoritative; client P ignored");
+        return;
+    }
+    let frame = engine.frame_counter();
+    let decision = robin_engine::multiplayer::CoopPauseDecision {
+        decision_id: u64::from(frame) + 1,
+        frame,
+        paused: !engine.coop_pause_active(),
+    };
+    commands.push(PlayerCommand::SetCoopPause {
+        paused: decision.paused,
+        frame: decision.frame,
+        decision_id: decision.decision_id,
+    });
+    if let Some(net) = host.transport.net() {
+        // Only a pause opens the bounded barrier; a resume releases seats, so
+        // it needs no acknowledgement wait.
+        if decision.paused {
+            net.begin_coop_pause_barrier(decision, u64::from(crate::window::process_uptime_ms()));
+        } else {
+            net.clear_coop_pause_barrier();
+        }
+        if let Err(error) =
+            net.outgoing
+                .send(robin_engine::multiplayer::NetOutbound::CoopPauseDecision(
+                    decision,
+                ))
+        {
+            tracing::warn!(%error, "cooperative pause decision broadcast failed");
+        }
+    }
+    tracing::info!(
+        frame,
+        paused = decision.paused,
+        decision_id = decision.decision_id,
+        "cooperative pause toggled by host"
+    );
+}
+
 fn portrait_selection_command(
     portrait_index: u8,
     ctrl_held: bool,
@@ -407,6 +461,9 @@ pub(super) async fn drive_live_gameplay_input(
             }
             GameAction::DisplayMenu => {
                 toggle_pause_menu(&mut context, pause_closed_this_frame);
+            }
+            GameAction::CoopPause => {
+                toggle_coop_pause(&mut context);
             }
             _ if !keyboard_player
                 || context.ui.pause_menu.is_some()
