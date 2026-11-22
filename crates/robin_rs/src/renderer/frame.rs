@@ -260,6 +260,13 @@ impl FrameState {
         self.present_impl(gpu, pipelines, resources, false)
     }
 
+    /// True once a composited frame is available for `present_cached` to
+    /// re-present. The first modal page can appear before any world frame has
+    /// been composed, so the pacing loop must compose one before reusing it.
+    pub(super) fn has_cached_presentation(&self) -> bool {
+        self.cached_present.is_some()
+    }
+
     fn present_impl(
         &mut self,
         gpu: &GpuContext,

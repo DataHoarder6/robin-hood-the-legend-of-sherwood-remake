@@ -908,6 +908,13 @@ impl Renderer {
             .present_cached(&self.gpu, &mut self.pipelines, &self.resources)
     }
 
+    /// True when `present_cached` has a composited frame to re-present. A
+    /// modal page before the first world frame has none, so the caller must
+    /// compose one once before entering the cached presentation loop.
+    pub fn has_cached_presentation(&self) -> bool {
+        self.frame.has_cached_presentation()
+    }
+
     pub fn configure_surface_size(&mut self, width: u32, height: u32) {
         self.frame.configure_surface_size(&self.gpu, width, height);
     }
