@@ -28,6 +28,15 @@
 # bounds the wait; a dead holder's ticket is reaped by its PID.
 set -euo pipefail
 
+# A landing holds the FIFO queue lock for ~30-60 min and must outlive the
+# agent's tool shell. runbg sets RUNBG_STATE in its units; a bare ssh/sshd-scope
+# caller does not. Refuse before any ticket or lock is created. Test fixtures
+# opt in explicitly with ROBIN_LAND_ALLOW_BARE=1; production never sets it.
+if [[ -z ${RUNBG_STATE:-} ]] && [[ -z ${ROBIN_LAND_ALLOW_BARE:-} ]]; then
+    printf 'land: run me as: runbg run NAME -- bash scripts/land.sh\n' >&2
+    exit 2
+fi
+
 exec </dev/null
 
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

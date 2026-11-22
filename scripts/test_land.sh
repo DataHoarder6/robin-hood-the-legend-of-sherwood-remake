@@ -14,6 +14,12 @@ else
 fi
 export work
 
+# land.sh refuses unsupervised runs (they hold the queue lock for ~30-60 min and
+# a bare ssh/sshd-scope caller cannot outlive the agent's tool shell). These
+# offline fixtures are supervised by this harness, so opt in for the suite;
+# the bare-run case below clears it explicitly to prove the guard.
+export ROBIN_LAND_ALLOW_BARE=1
+
 export HOME=$work/home
 export GIT_CONFIG_GLOBAL=$work/gitconfig
 export GIT_CONFIG_NOSYSTEM=1
@@ -345,6 +351,34 @@ if [ ! -e "$stale_dir/$stale_name" ]; then
 else
     fail 'the dead holder ticket was left behind'
 fi
+
+# A bare land.sh is never correct: it would hold the landing FIFO for the whole
+# gate with no supervisor to outlive the agent's tool shell. Refuse before a
+# ticket is created, and print the exact remedy.
+case_repo bare
+commit_file bare 'my work' mine.txt mine
+ticket_dir=$HOME/.local/state/robin-land-queue/tickets
+before=$(find "$ticket_dir" -type f 2>/dev/null | wc -l)
+unset ROBIN_LAND_ALLOW_BARE
+status=0
+output=$(cd "$work/bare" && env -u RUNBG_STATE bash scripts/land.sh 2>&1) || status=$?
+export ROBIN_LAND_ALLOW_BARE=1
+after=$(find "$ticket_dir" -type f 2>/dev/null | wc -l)
+expect_status 2 'a bare land.sh is refused'
+expect_contains 'the refusal prints the runbg remedy' 'runbg run NAME -- bash scripts/land.sh'
+if [ "$before" = "$after" ]; then
+    pass 'the refusal creates no queue ticket'
+else
+    fail "the refusal changed the ticket count ($before -> $after)"
+fi
+
+# A genuine runbg job carries RUNBG_STATE; that landing proceeds unchanged.
+case_repo supervised
+commit_file supervised 'my work' mine.txt mine
+export FAKE_GATE_LOG=$work/supervised.gate.log
+status=0
+output=$(cd "$work/supervised" && ROBIN_LAND_REMOTE=$work/supervised.git RUNBG_STATE=$work/runbg-state bash scripts/land.sh 2>&1) || status=$?
+expect_status 0 'a supervised land.sh proceeds'
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
