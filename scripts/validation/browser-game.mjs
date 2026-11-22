@@ -785,15 +785,31 @@ try {
             record('page', pageInfo);
             if (values.mission) {
                 const gameLog = pageInfo.log ?? '';
+                const runtime = await evaluate(`(async () => {
+                    const queued = await new Promise((resolve, reject) => {
+                        const open = indexedDB.open('robin-diagnostics', 1);
+                        open.onerror = () => reject(new Error('diagnostics database unavailable'));
+                        open.onsuccess = () => {
+                            const request = open.result.transaction('reports', 'readonly').objectStore('reports').count();
+                            request.onsuccess = () => resolve(request.result);
+                            request.onerror = () => reject(request.error);
+                        };
+                    });
+                    return { crossOriginIsolated, diagnosticsQueued: queued };
+                })()`);
                 const firstMap = {
                     mission: values.mission,
                     started: /mission started:/u.test(gameLog),
                     decodeFailure: /native bitcode mission decode|load mission assets for/u.test(gameLog),
+                    terminalDebrief: /FinalDebriefing|mission failed|mission lost/u.test(gameLog),
                     frame: state?.frame ?? null,
+                    crossOriginIsolated: runtime.crossOriginIsolated,
+                    diagnosticsQueued: runtime.diagnosticsQueued,
                 };
                 record('firstMapLoads', firstMap);
-                if (!firstMap.started || firstMap.decodeFailure) {
-                    result.failures.push(`First map ${values.mission} did not load (started=${firstMap.started}, decodeFailure=${firstMap.decodeFailure}).`);
+                if (!firstMap.started || firstMap.decodeFailure || firstMap.terminalDebrief ||
+                    !firstMap.crossOriginIsolated || firstMap.diagnosticsQueued !== 0) {
+                    result.failures.push(`First map ${values.mission} did not load cleanly: ${JSON.stringify(firstMap)}.`);
                 }
             }
             if (state) {
