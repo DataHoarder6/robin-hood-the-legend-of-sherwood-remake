@@ -309,6 +309,8 @@ pub struct ScreenshotFlags {
     /// feet.  Useful for correlating `/state` entries with what is
     /// visible on screen.
     pub entity_ids: Option<bool>,
+    /// Draw dotted outlines of every occluded ground zone without a key held.
+    pub hidden_areas: Option<bool>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

@@ -523,4 +523,8 @@ pub struct DebugFlags {
     /// Draw sprite occlusion-mask debug geometry for masked/flying sprites.
     /// Rust-only dev overlay for renderer parity investigations.
     pub sprite_masks_display: bool,
+    /// Outline every ground zone occluded by an opaque building volume,
+    /// without needing a key held. Driven by the `/screenshot?hidden_areas`
+    /// HTTP flag.
+    pub hidden_areas: bool,
 }

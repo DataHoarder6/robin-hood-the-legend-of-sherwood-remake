@@ -1010,4 +1010,13 @@ mod dispatch_tests {
         assert!(req.hide_ui);
         assert_eq!(req.flags.entity_ids, Some(false));
     }
+
+    #[cfg(all(feature = "script-rpc", not(target_arch = "wasm32")))]
+    #[test]
+    fn screenshot_query_parses_hidden_areas_override() {
+        let req = crate::http_server::query::screenshot("hidden_areas=1").unwrap();
+        assert_eq!(req.flags.hidden_areas, Some(true));
+        let req = crate::http_server::query::screenshot("").unwrap();
+        assert_eq!(req.flags.hidden_areas, None);
+    }
 }

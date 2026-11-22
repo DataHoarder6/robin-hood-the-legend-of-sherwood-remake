@@ -11,9 +11,10 @@ use crate::game_render::{
     render_debug_animation_lines, render_debug_doors, render_debug_motion_graph,
     render_debug_surfaces_fill, render_debug_surfaces_outline, render_debug_whatsup_overlay,
     render_door_overlays, render_entities_gpu, render_fog_of_war, render_ground_marks,
-    render_item_effect_preview, render_listen_ping, render_minimap, render_mission_countdown,
-    render_noise_display, render_ransom_amulet_overlay, render_selection_outlines_gpu,
-    render_shadow_polygon_sphere_debug, render_trajectory_preview, render_view_cone_overlay,
+    render_hidden_area_outlines, render_item_effect_preview, render_listen_ping, render_minimap,
+    render_mission_countdown, render_noise_display, render_ransom_amulet_overlay,
+    render_selection_outlines_gpu, render_shadow_polygon_sphere_debug, render_trajectory_preview,
+    render_view_cone_overlay,
 };
 use crate::host::PrintScreenRequest;
 use crate::host::{Host, HostDraw, HostPresentation};
@@ -1715,6 +1716,19 @@ fn render_world_pass(
     // ── GPU phase: per-NPC "whatsup" debug overlay ──
     // Gated on `GlobalOptions::whatsup` so it is off by default.
     render_debug_whatsup_overlay(host, engine, renderer);
+
+    // ── GPU phase: dotted outlines of occluded ground ──
+    // Entirely presentation-local: the modifier comes from the live key
+    // state, feet from this frame's entities, and the debug flag from the
+    // (possibly screenshot-overridden) DevState. No latch, no replay state.
+    render_hidden_area_outlines(
+        host,
+        engine,
+        assets,
+        dev,
+        &threaded_input.keyboard_state().keys,
+        renderer,
+    );
 
     // ── GPU phase: noise-display debug overlay ──
     // Dispatched when the noise-display debug flag is set via the

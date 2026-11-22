@@ -135,6 +135,7 @@ pub(crate) fn screenshot(query: &str) -> Result<ScreenshotRequest, RpcError> {
             sprite_masks: query.flag("sprite_masks")?,
             // Preserve the native endpoint's existing default-on ID overlay.
             entity_ids: Some(query.flag("entity_ids")?.unwrap_or(true)),
+            hidden_areas: query.flag("hidden_areas")?,
         },
     };
     query.finish()?;

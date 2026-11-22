@@ -53,6 +53,7 @@ pub fn apply_screenshot_flags(debug: &mut engine_api::DebugFlags, flags: &Screen
     set!(fps, fps_display);
     set!(sprite_masks, sprite_masks_display);
     set!(entity_ids, entity_ids);
+    set!(hidden_areas, hidden_areas);
 }
 
 /// Apply optional crop + resize, then encode as PNG.  Nearest-neighbour
@@ -172,6 +173,23 @@ fn screenshot_target_dimensions(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hidden_areas_flag_reaches_a_cloned_debug_state_only() {
+        let live = engine_api::DevState::default();
+        let on = ScreenshotFlags {
+            hidden_areas: Some(true),
+            ..Default::default()
+        };
+        let snapshot = super::screenshot_dev_state(&live, &on);
+        assert!(snapshot.debug.hidden_areas);
+        assert!(!live.debug.hidden_areas);
+        let off = ScreenshotFlags {
+            hidden_areas: Some(false),
+            ..Default::default()
+        };
+        assert!(!super::screenshot_dev_state(&live, &off).debug.hidden_areas);
+    }
+
     #[test]
     fn screenshot_state_borrows_without_overrides_and_isolates_explicit_false() {
         let mut live = engine_api::DevState::default();

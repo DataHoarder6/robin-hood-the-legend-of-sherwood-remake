@@ -1,5 +1,20 @@
 # Post-port Features
 
+- **Dotted outlines reveal ground hidden behind buildings.** The fixed
+  isometric camera can hide the ground immediately behind a building, where a
+  stationary enemy could stand unseen. Holding a free modifier — either Super
+  key (Windows/Command), because Shift is already bound to doors and quick
+  planning in both key presets — draws a dotted outline around every occluded
+  ground zone on the level. Without it, a zone is outlined only while a
+  character's feet stand in that zone; the modifier is the superset. Zones are
+  derived from existing opaque `SightObstacle` data (the footprint-to-top
+  projection sweep minus the footprint), not from an invented building
+  footprint. The lines vanish on the frame the key is released or the feet
+  leave the zone; no toggle, replay state or save data is involved. This is a
+  reveal, not fog of war — the whole map stays visible. Screenshots can force
+  it with `/screenshot?hidden_areas=1` via the `DebugFlags::hidden_areas`
+  override.
+
 - **Opt-in teammate cursors.** In co-op, a profile preference under Options →
   Multiplayer / Privacy ("Show Teammate Cursors") shows other seats' cursors in
   real time, smaller and tinted in that seat's colour, and broadcasts your own

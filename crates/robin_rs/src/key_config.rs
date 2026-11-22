@@ -80,6 +80,12 @@ pub const GO_BEHIND_BUILDINGS_INDEX: u16 = 16;
 pub const PLAN_QUICK_ACTIONS_INDEX: u16 = 28;
 /// Stable row/index of the reusable-cloak action.
 pub const TOGGLE_CLOAK_INDEX: u16 = 29;
+/// Free modifier keys that reveal the dotted outlines of occluded ground.
+///
+/// Both presets bind Shift to `GoBehindBuildings` and `PlanQuickActions`, and
+/// every other modifier is bound too; the Super keys are reserved from
+/// rebinding (`is_reserved_shortcut_key`) and unbound in both presets.
+pub const HIDDEN_AREAS_MODIFIER_KEYS: [KeyCode; 2] = [KeyCode::SuperLeft, KeyCode::SuperRight];
 
 impl KeyConfig {
     /// Add the reusable-cloak action to a key profile written before the
@@ -367,6 +373,25 @@ mod tests {
     fn get_action_for_key_missing() {
         let cfg = KeyConfig::default();
         assert!(cfg.get_action_for_key(KeyCode::F24).is_none());
+    }
+
+    #[test]
+    fn shift_is_bound_in_both_presets_so_reveal_uses_a_free_modifier() {
+        for (preset, shift) in [
+            (KeyConfig::default_preset(), KeyCode::ShiftLeft),
+            (KeyConfig::alternate_preset(), KeyCode::ShiftRight),
+        ] {
+            assert!(
+                preset.get_action_for_key(shift).is_some(),
+                "Shift is not free: the whole-map reveal must not overload it"
+            );
+            for key in HIDDEN_AREAS_MODIFIER_KEYS {
+                assert!(
+                    preset.get_action_for_key(key).is_none(),
+                    "the reveal modifier must be unbound in both presets"
+                );
+            }
+        }
     }
 
     #[test]
