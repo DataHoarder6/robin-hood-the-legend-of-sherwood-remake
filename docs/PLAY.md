@@ -96,3 +96,17 @@ His PC is off when he is not using it and sits behind CGNAT. It dials the
 `hosts/relay-vm/core.nix`), which appears there on `localhost:2222`; the
 `player-b-pc` alias reaches it. A live tunnel means the PC is awake — there is no
 WOL path to his LAN, so waking it is his action.
+
+## Reporting a bug from the game
+
+Pause menu → **Report a bug**, `/BUG <description>` in the console, or
+`POST /bug-report` all take the same route. The report screen names the bundle
+directory it reserved; the bundle is written at the next frame boundary.
+
+The receiver is operator-provided, not part of a seat's install. Without
+`ROBIN_BUG_ENDPOINT`, the evidence stays on disk, no GitHub issue is filed and
+nothing is uploaded — the modal stays open with that status so it can be read.
+Set the endpoint and file again to send a new report; there is no default and no
+automatic upload. The full contract, the receiver variables and the live smoke
+are in [BUG_REPORTS.md](BUG_REPORTS.md) and [CRASHES.md](CRASHES.md); release
+runners record the opt-in smoke result in [RELEASES.md](RELEASES.md).

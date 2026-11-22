@@ -109,9 +109,10 @@ pub(crate) fn decide_submit(
         },
         SubmitAttempt::Queued(path) if !endpoint_configured => SubmitDecision::Failed {
             error: format!(
-                "Report evidence was saved to {path}, but {} is not set: nothing was uploaded. \
-                 The bundle stays on disk; set the endpoint and file again to send it.",
-                "ROBIN_BUG_ENDPOINT"
+                "Evidence was saved locally at {path}. No GitHub issue was filed: \
+                 {} is not set, so the report was not uploaded. Ask the operator to set \
+                 {} to the bug-receiver URL, then file again.",
+                "ROBIN_BUG_ENDPOINT", "ROBIN_BUG_ENDPOINT"
             ),
             directory: Some(path),
         },
@@ -826,6 +827,33 @@ mod tests {
         assert!(
             state.status.contains(crate::bug_bundle::ENDPOINT_ENV),
             "the status must name the missing configuration, got {:?}",
+            state.status
+        );
+        assert!(
+            state.status.contains("Evidence was saved locally at"),
+            "the status must say where the evidence is, got {:?}",
+            state.status
+        );
+        assert!(
+            state.status.contains("No GitHub issue was filed"),
+            "the status must say that no issue was filed, got {:?}",
+            state.status
+        );
+        assert!(
+            state.status.contains("not uploaded"),
+            "the status must say that nothing was uploaded, got {:?}",
+            state.status
+        );
+        assert!(
+            state
+                .status
+                .contains("Ask the operator to set ROBIN_BUG_ENDPOINT"),
+            "the status must name the provisioning step, got {:?}",
+            state.status
+        );
+        assert!(
+            state.status.contains("file again"),
+            "the status must tell the player what to do next, got {:?}",
             state.status
         );
     }

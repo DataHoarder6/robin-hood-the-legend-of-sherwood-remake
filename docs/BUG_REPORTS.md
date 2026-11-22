@@ -106,6 +106,27 @@ Nothing is uploaded unless `ROBIN_BUG_ENDPOINT` is set. A failed upload leaves
 the bundle where it is, and the path is printed in the console and on the report
 screen: the evidence is never the part that is lost.
 
+### Provisioning the endpoint (operator)
+
+`ROBIN_BUG_ENDPOINT` is the full URL of the receiver's `POST /bug-report` route,
+for example `https://<host>:8099/bug-report`. It has no default and no local
+mode: a player who files a report without it sees "Evidence was saved locally …
+No GitHub issue was filed", the modal stays open with the bundle path, and
+nothing is sent. That is intentional; see the test named
+`a_missing_endpoint_keeps_the_modal_open_and_surfaces_the_error`.
+
+The operator runs the same receiver as crashes and sets its required variables
+(`CRASH_TOKEN`, `GITHUB_TOKEN`, `GITHUB_REPO`, state directory and bind address)
+as documented in [CRASHES.md](CRASHES.md#the-receiver). The game process then
+needs `ROBIN_BUG_ENDPOINT` and `ROBIN_CRASH_TOKEN` (the receiver's `CRASH_TOKEN`)
+in its environment; the token is sent as a bearer token and is never shipped in
+the binary. Point players at [PLAY.md](PLAY.md#reporting-a-bug-from-the-game)
+for the in-game entrances.
+
+A filled endpoint is not proof that an issue was filed. The opt-in live smoke
+(`ROBIN_ISSUE_SMOKE=1`, #51) is the proof and its result belongs with the
+release; see [RELEASES.md](RELEASES.md).
+
 ## Endpoint contract
 
 `POST /bug-report`, `Content-Type: application/json`, `Authorization: Bearer

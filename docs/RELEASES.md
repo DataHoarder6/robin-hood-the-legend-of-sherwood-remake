@@ -60,11 +60,18 @@ tag pushed without it is a bet rather than a release.
    multiplayer session (`docs/PLAY.md`) is an explicit opt-out of this automated
    step — a runner skips it unless a human asks for one. The concrete
    `robin --version` / `win-run` check is in [PLAY.md](PLAY.md).
-6. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
+6. Record the opt-in live issue-smoke result with the release (#51). A normal
+   gate never sets `ROBIN_ISSUE_SMOKE=1`: the smoke writes to the tracker, so a
+   runner opts in deliberately, files one report against the real receiver and
+   records the issue number, its labels and the reproduction facts/bundle link
+   it contains. When the harness is not yet available, record that instead of
+   claiming a pass; the contract and endpoint are in
+   [BUG_REPORTS.md](BUG_REPORTS.md#provisioning-the-endpoint-operator).
+7. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's
    assets against the previous tag before announcing it.
-7. Pin the tag's commit in the machine repo: change `?rev=` on the `robin-hood`
+8. Pin the tag's commit in the machine repo: change `?rev=` on the `robin-hood`
    flake input in `flake.nix` to the tag's commit, land that change through
    `land`, then run `just apps-sync` on every seat. That pin — not a channel
    option — is how the seats receive the release.

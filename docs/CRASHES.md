@@ -99,7 +99,11 @@ python3 tools/crash-receiver/receiver.py --host 127.0.0.1 --port 8099
 | `CRASH_BIND_HOST`, `CRASH_BIND_PORT` | defaults for `--host` / `--port` |
 
 The GitHub credential lives only on the server: the shipped binary needs a URL
-and, when the receiver asks for one, an upload token.
+and, when the receiver asks for one, an upload token. The same process and the
+same environment serve voluntary reports; their extra endpoint and state paths
+are owned by [BUG_REPORTS.md](BUG_REPORTS.md#provisioning-the-endpoint-operator).
+Neither side has a default endpoint: without one, the bundle stays local and no
+issue is filed.
 
 Under `CRASH_STATE_DIR` the receiver keeps `bundles/<fingerprint>/<received>.json`
 for every upload and `occurrences/<fingerprint>.json` for the count and the
