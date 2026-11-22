@@ -1,22 +1,30 @@
-# Releases and channels
+# Releases
 
-Two channels, one tag each. A branch is never a channel.
+A release is a tag in this repo. Seats do not select a channel: they install
+whatever commit the machine repo's `robin-hood` flake input pins. There is no
+`services.robin-hood.channel` option — the machine repo's `services.robin-hood`
+options are only `enable` and `browserUrl`. Do not add a channel option to the
+machine repo; the pin is the whole delivery mechanism.
 
-| Channel | Source | Published as | Nix pin |
+| Release | Source | Published as | How a seat receives it |
 | --- | --- | --- | --- |
-| `stable` | a `v*` tag | GitHub release, Velopack packages on the `win` and `linux` package channels, update feed = that tag | the tag's commit, `services.robin-hood.channel = "stable"` |
-| `dev` | the nightly schedule in `.github/workflows/native-release.yml` | rolling prerelease tagged `nightly-<date>`, version `<base>-nightly.<timestamp>+<sha>`, same package shape | a `fork/main` commit, `services.robin-hood.channel = "dev"` |
+| stable | a `vX.Y.Z` tag on `fork/main` | GitHub release, Velopack packages on the `win` and `linux` package channels, update feed = that tag | set the tag's commit as `?rev=` on `inputs.robin-hood` in the machine repo's `flake.nix`, land that change through `land`, then run `just apps-sync` on each seat |
+| dev | the nightly schedule in `.github/workflows/native-release.yml` | rolling prerelease tagged `nightly-<date>`, version `<base>-nightly.<timestamp>+<sha>`, same package shape | a `fork/main` commit in that same `?rev=` pin; the nightly workflow publishes a package, it does not install anything on a seat |
 
 The daily run first compares the current commit with the last published
 nightly and stops when they match, so an unchanged tree never replaces the
 rolling release. `workflow_dispatch` takes an optional explicit version for a
 release candidate.
 
-The nix pin is always a commit, never a branch: a rebuild reproduces exactly the
-build the launcher names, and the launcher prints the channel word beside the
-short commit so two installs can be told apart. Nightly packages live in their
-own release, so a stable install is never offered a nightly update and the
-reverse holds too.
+The pin is always a commit, never a branch: `apps.txt` lists `robin`, and
+`just apps-sync` installs it by flake reference from that input, reading the
+installed store path back after the install (ADR 0026). A rebuild therefore
+reproduces exactly the build the launcher names. `robin --version` prints
+`<version>+<12-hex commit>`; the commit is what distinguishes two installs —
+there is no channel word in the output. Nightly packages live in their own
+release, so a stable install is never offered a nightly update and the reverse
+holds too. To read the current pin, open `flake.nix` in the machine repo rather
+than copying a commit into a doc.
 
 ## Before a stable tag
 
@@ -42,8 +50,10 @@ tag pushed without it is a bet rather than a release.
    `--jobs 2` with no `--only`, and refuses the tag unless the suite exits 0 and
    `summary.json` reports `.verdict == "observed"`, `.verdicts.H23 == "observed"`
    and a `.selected` covering every process row. It prints the evidence path;
-   copy that path and the H23 verdict into
-   [releases/0.3.0.md](releases/0.3.0.md). Do not flip D06 until the gate is green.
+   fetch that `summary.json` and generate the note with
+   `scripts/release-notes.sh <summary.json> <version>`, which writes
+   `docs/releases/<version>.md` ([0.3.0](releases/0.3.0.md) is one instance).
+   Do not hand-write the note, and do not flip D06 until the gate is green.
 5. Run a scriptable `robin --version` preflight before the tag: over SSH on the
    Linux seats and over `win-run` on the Windows seat, compare the 12-hex commit
    on every seat, and reject the tag unless all match. A real two-seat
@@ -54,11 +64,11 @@ tag pushed without it is a bet rather than a release.
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's
    assets against the previous tag before announcing it.
-7. Pin the tag's commit in the machine repo (`services.robin-hood.channel =
-   "stable"`), which is how the seats receive it.
+7. Pin the tag's commit in the machine repo: change `?rev=` on the `robin-hood`
+   flake input in `flake.nix` to the tag's commit, land that change through
+   `land`, then run `just apps-sync` on every seat. That pin — not a channel
+   option — is how the seats receive the release.
 
 Cross-OS replay parity is covered for one class only (step 3): Wine is not
 Windows, so MSVC runtime, WinDivert, Known-Folder APIs and the Windows scheduler
 remain unproven until a real Windows seat runs a recorded session.
-
-
