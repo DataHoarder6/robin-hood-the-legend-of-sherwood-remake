@@ -472,6 +472,9 @@ impl CursorRenderer {
         if let Some(color) = frame.color.as_ref() {
             renderer.render_gpu_image(color, Some(&src_box), Some(&dst_box), BlendMode::Blend);
         }
+        // Close the layer so overlays drawn after the cursor (rewind glyph,
+        // scripted fade-to-black) are captured in the logical frame again.
+        renderer.end_cursor_layer();
     }
 
     /// Render the current cursor tinted and scaled, without a shadow layer.

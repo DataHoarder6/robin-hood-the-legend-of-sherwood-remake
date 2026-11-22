@@ -839,6 +839,13 @@ impl Renderer {
         self.frame.begin_cursor_layer();
     }
 
+    /// Close the cursor layer. Overlays queued afterwards (rewind glyph,
+    /// scripted fade-to-black) return to the logical frame used for modal
+    /// backdrops and captures.
+    pub fn end_cursor_layer(&mut self) {
+        self.frame.end_cursor_layer();
+    }
+
     /// Present this whole logical frame with the sharp UI scaler, bypassing
     /// gameplay upscalers and post-effects. Top-level menus use this instead
     /// of splitting a transparent UI layer so their rendered frame remains

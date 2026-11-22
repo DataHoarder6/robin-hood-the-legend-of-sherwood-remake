@@ -77,6 +77,38 @@ enum CompositionPass {
     SnapshotFramebuffer,
 }
 
+/// Ranges of the queued UI draws that belong in the logical (capturable)
+/// frame. The cursor layer is excluded; every other UI draw — including
+/// overlays queued after the cursor (rewind glyph, scripted fade-to-black) —
+/// is included.
+fn logical_ui_ranges(
+    len: usize,
+    ui_start: Option<usize>,
+    cursor_start: Option<usize>,
+    cursor_end: Option<usize>,
+) -> Vec<(usize, usize)> {
+    let Some(start) = ui_start else {
+        return Vec::new();
+    };
+    let start = start.min(len);
+    let cursor_start = cursor_start.unwrap_or(len).clamp(start, len);
+    // No explicit end means the cursor renderer has not finished marking its
+    // layer. Keep the conservative legacy boundary: drop everything from the
+    // first cursor draw onwards.
+    let Some(cursor_end) = cursor_end else {
+        return vec![(start, cursor_start)];
+    };
+    let cursor_end = cursor_end.clamp(cursor_start, len);
+    let mut ranges = Vec::with_capacity(2);
+    if start < cursor_start {
+        ranges.push((start, cursor_start));
+    }
+    if cursor_end < len {
+        ranges.push((cursor_end, len));
+    }
+    ranges
+}
+
 fn composition_plan(draws: &[QueuedDraw]) -> Vec<CompositionPass> {
     let mut plan = Vec::new();
     let mut start = 0;
@@ -152,6 +184,9 @@ pub(super) struct FrameState {
     /// excluded from the logical render target that modal backdrops snapshot,
     /// so the software cursor is never baked into a frozen scene.
     cursor_layer_start: Option<usize>,
+    /// End of the cursor draws. Overlays queued after this point (rewind glyph,
+    /// scripted fade-to-black) belong to the logical frame again.
+    cursor_layer_end: Option<usize>,
     pub(super) frame_texture_bgs: Vec<wgpu::BindGroup>,
     /// Atlas layer → its index in `frame_texture_bgs` for this frame.
     /// Small and dense (a mission uses a handful of layers), so a Vec
@@ -802,6 +837,15 @@ impl FrameState {
     pub(super) fn begin_cursor_layer(&mut self) {
         if self.cursor_layer_start.is_none() {
             self.cursor_layer_start = Some(self.queued.len());
+            self.cursor_layer_end = None;
+        }
+    }
+
+    /// Close the cursor layer after its quads are queued. Draws from here to
+    /// the end of the frame belong to the logical target again.
+    pub(super) fn end_cursor_layer(&mut self) {
+        if self.cursor_layer_start.is_some() {
+            self.cursor_layer_end = Some(self.queued.len());
         }
     }
 
@@ -939,6 +983,7 @@ impl FrameState {
             queued: Vec::new(),
             ui_layer_start: None,
             cursor_layer_start: None,
+            cursor_layer_end: None,
             frame_texture_bgs: Vec::new(),
             atlas_bg_slots: Vec::new(),
             blit_vbo: None,
@@ -975,6 +1020,9 @@ impl FrameState {
             }
             if let Some(start) = &mut self.cursor_layer_start {
                 *start += 1;
+            }
+            if let Some(end) = &mut self.cursor_layer_end {
+                *end += 1;
             }
         }
     }
@@ -1084,6 +1132,7 @@ impl FrameState {
         self.gpu_phase_active = false;
         self.ui_layer_start = None;
         self.cursor_layer_start = None;
+        self.cursor_layer_end = None;
         self.ui_only_frame = false;
     }
 
@@ -1300,15 +1349,18 @@ impl FrameState {
         pipelines: &PipelineStore,
         resources: &GpuResources,
     ) {
-        if let Some(start) = self.ui_layer_start {
-            // Stop before the final cursor layer. The software cursor is shown
-            // on the swapchain through the UI target, but must stay out of the
-            // logical render target so a frozen modal backdrop never bakes in
-            // a second, stationary copy of the pointer.
-            let end = self
-                .cursor_layer_start
-                .unwrap_or(self.queued.len())
-                .max(start);
+        // The software cursor is shown on the swapchain through the UI target
+        // but must stay out of the logical render target so a frozen modal
+        // backdrop never bakes in a second, stationary copy of the pointer.
+        // Only the cursor's own bounded range is dropped: overlays queued after
+        // it (rewind glyph, scripted fade-to-black) are part of the frame and
+        // must survive into backdrops and captures.
+        for (start, end) in logical_ui_ranges(
+            self.queued.len(),
+            self.ui_layer_start,
+            self.cursor_layer_start,
+            self.cursor_layer_end,
+        ) {
             self.encode_pass_range_to_target(
                 encoder,
                 pipelines,
@@ -1607,6 +1659,29 @@ mod presentation_tests {
             tint: [1.0; 4],
             operation,
         }
+    }
+
+    #[test]
+    fn logical_ui_ranges_keep_overlays_drawn_after_the_cursor() {
+        // world(0..3), HUD(3..5), cursor(5..7), rewind + fade(7..9).
+        // Only the cursor range may be dropped; the post-cursor overlays must
+        // survive into the logical frame used for backdrops and captures.
+        assert_eq!(
+            logical_ui_ranges(9, Some(3), Some(5), Some(7)),
+            vec![(3, 5), (7, 9)],
+            "post-cursor overlays must be part of the logical frame"
+        );
+    }
+
+    #[test]
+    fn logical_ui_ranges_without_an_end_marker_keep_the_legacy_boundary() {
+        assert_eq!(logical_ui_ranges(9, Some(3), None, None), vec![(3, 9)]);
+        assert_eq!(logical_ui_ranges(9, Some(3), Some(5), None), vec![(3, 5)]);
+        assert_eq!(logical_ui_ranges(9, None, Some(5), Some(7)), vec![]);
+        assert_eq!(
+            logical_ui_ranges(7, Some(3), Some(5), Some(7)),
+            vec![(3, 5)]
+        );
     }
 
     #[test]

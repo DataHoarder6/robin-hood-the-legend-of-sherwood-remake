@@ -1340,14 +1340,19 @@ fn verify_deferred_menu_surfaces(renderer: &mut Renderer) {
 /// Sherwood map icon and declining a mission via the red button.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn verify_modal_backdrop_excludes_cursor(renderer: &mut Renderer) {
-    // 3x2 logical frame. World = green, HUD = blue, cursor = white at (0,0).
-    // After the split world/UI composite and freeze, only green/blue may be
-    // present in the backdrop; white would be the leaked, frozen cursor.
+    // 3x2 logical frame. World = green, HUD = blue, cursor = white at (0,0),
+    // post-cursor overlay = magenta at (1,0). After the split world/UI
+    // composite and freeze, green/blue/magenta may be present in the backdrop;
+    // white would be the leaked, frozen cursor.
     renderer.render_gpu_rect(0, 0, 3, 2, [0, 255, 0, 255]);
     renderer.begin_ui_layer();
     renderer.render_gpu_rect(2, 0, 1, 2, [0, 0, 255, 255]);
     renderer.begin_cursor_layer();
     renderer.render_gpu_rect(0, 0, 1, 1, [255, 255, 255, 255]);
+    renderer.end_cursor_layer();
+    // The rewind glyph and scripted fade-to-black are queued after the cursor
+    // in a gameplay frame. They must survive into the frozen backdrop.
+    renderer.render_gpu_rect(1, 0, 1, 1, [255, 0, 255, 255]);
 
     // Compose exactly the way a gameplay frame builds the logical target for
     // a subsequent modal freeze: world first, then UI without the cursor layer.
@@ -1379,6 +1384,11 @@ fn verify_modal_backdrop_excludes_cursor(renderer: &mut Renderer) {
         &backdrop[0..4],
         &[0, 255, 0, 255],
         "software cursor was baked into the frozen modal backdrop"
+    );
+    assert_eq!(
+        &backdrop[4..8],
+        &[255, 0, 255, 255],
+        "post-cursor overlay was dropped from the frozen backdrop"
     );
     assert_eq!(
         &backdrop[8..12],
