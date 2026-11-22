@@ -312,6 +312,84 @@ impl DebriefingModalState {
     }
 }
 
+/// Build the seal-button row for one debriefing page.
+///
+/// Geometry is passed in so this stays pure and testable without a renderer;
+/// [`DebriefingPageState::new`] supplies the real seal dimensions and virtual
+/// positions. Every widget id here is one [`outcome_for_seal`] can resolve.
+///
+/// The Restart seal needs both the flow's permission and a real restart
+/// snapshot. With only `restart_allowed`, clicking it falls through to the
+/// stat panel instead of restarting — a control that lies to the player.
+fn seal_button_frame(
+    flow: &DebriefingModalState,
+    ok: (i32, i32, i32, i32),
+    restart: (i32, i32, i32, i32),
+    load: (i32, i32, i32, i32),
+) -> FrameWnd {
+    let mut frame = FrameWnd::interactive();
+    frame.add_widget_absolute(widget_bridge::make_button_with_resource(
+        BTN_OK,
+        "",
+        true,
+        robin_engine::resource_ids::RHID_OK,
+        ok.0,
+        ok.1,
+        ok.2,
+        ok.3,
+    ));
+    if flow.restart_allowed {
+        if flow.restart_snapshot_exists {
+            frame.add_widget_absolute(widget_bridge::make_button_with_resource(
+                BTN_RESTART,
+                "",
+                true,
+                robin_engine::resource_ids::RHID_RESTART,
+                restart.0,
+                restart.1,
+                restart.2,
+                restart.3,
+            ));
+        }
+        frame.add_widget_absolute(widget_bridge::make_button_with_resource(
+            BTN_LOAD,
+            "",
+            true,
+            robin_engine::resource_ids::RHID_LOAD,
+            load.0,
+            load.1,
+            load.2,
+            load.3,
+        ));
+    }
+    frame
+}
+
+/// Resolve one activated seal into a page outcome.
+///
+/// Restart keeps a defensive guard: the seal is not drawn without a restart
+/// snapshot, so reaching this arm with no snapshot is unreachable. It falls
+/// through to `Ok` (skip the body, show the stat panel) rather than queueing
+/// a load request that would do nothing.
+fn outcome_for_seal(id: u32, restart_snapshot_exists: bool) -> PageOutcome {
+    match id {
+        BTN_OK => PageOutcome::Ok,
+        BTN_RESTART => {
+            if restart_snapshot_exists {
+                PageOutcome::Restart
+            } else {
+                tracing::warn!(
+                    "Debriefing Restart clicked but no restart snapshot exists; \
+                     falling through to stat panel"
+                );
+                PageOutcome::Ok
+            }
+        }
+        BTN_LOAD => PageOutcome::LoadClicked,
+        _ => PageOutcome::Ok,
+    }
+}
+
 /// Append template text, replacing printf placeholders with successive values from
 /// `values`.  Handles `%u` / `%lu` / `%i` / `%d` (integer) and `%s` /
 /// `%ls` (string) — these are the specs that appear in the menu-text
@@ -514,7 +592,6 @@ impl DebriefingPageState {
         let resources = io.resources;
         let renderer = &*io.renderer;
         let title = flow.title.clone();
-        let restart_allowed = flow.restart_allowed;
         let restart_snapshot_exists = flow.restart_snapshot_exists;
         let quick_load_key = flow.active_quick_load;
         let transform = MenuTransform::for_renderer(renderer);
@@ -527,43 +604,16 @@ impl DebriefingPageState {
         let (restart_w, restart_h) = resources.seal_button_dimensions(SealButton::Restart);
         let (load_w, load_h) = resources.seal_button_dimensions(SealButton::Load);
 
-        let mut frame = FrameWnd::interactive();
         let btn_y = virt_y + OK_BTN_Y;
         let restart_x = virt_x + 50;
         let load_x = virt_x + 100;
         let ok_x = virt_x + (WIN_W - ok_w) / 2;
-        frame.add_widget_absolute(widget_bridge::make_button_with_resource(
-            BTN_OK,
-            "",
-            true,
-            robin_engine::resource_ids::RHID_OK,
-            ok_x,
-            btn_y,
-            ok_w,
-            ok_h,
-        ));
-        if restart_allowed {
-            frame.add_widget_absolute(widget_bridge::make_button_with_resource(
-                BTN_RESTART,
-                "",
-                true,
-                robin_engine::resource_ids::RHID_RESTART,
-                restart_x,
-                btn_y,
-                restart_w,
-                restart_h,
-            ));
-            frame.add_widget_absolute(widget_bridge::make_button_with_resource(
-                BTN_LOAD,
-                "",
-                true,
-                robin_engine::resource_ids::RHID_LOAD,
-                load_x,
-                btn_y,
-                load_w,
-                load_h,
-            ));
-        }
+        let mut frame = seal_button_frame(
+            flow,
+            (ok_x, btn_y, ok_w, ok_h),
+            (restart_x, btn_y, restart_w, restart_h),
+            (load_x, btn_y, load_w, load_h),
+        );
         // Per-pixel hit masks so the transparent corners around each
         // round seal don't capture clicks.
         widget_bridge::attach_alpha_masks(&mut frame, resources, renderer);
@@ -673,22 +723,7 @@ impl DebriefingPageState {
 
         let (_, activated) = ScreenFrame::dispatch(&mut self.input_state, &mut self.frame);
         if let Some(id) = activated {
-            outcome = Some(match id {
-                BTN_OK => PageOutcome::Ok,
-                BTN_RESTART => {
-                    if self.restart_snapshot_exists {
-                        PageOutcome::Restart
-                    } else {
-                        tracing::warn!(
-                            "Debriefing Restart clicked but no restart snapshot exists; \
-                             falling through to stat panel"
-                        );
-                        PageOutcome::Ok
-                    }
-                }
-                BTN_LOAD => PageOutcome::LoadClicked,
-                _ => PageOutcome::Ok,
-            });
+            outcome = Some(outcome_for_seal(id, self.restart_snapshot_exists));
         }
 
         self.render(io, &screen, font, &lines);
@@ -841,6 +876,38 @@ mod tests {
             assert_eq!(matches!(state.phase, DebriefingPhase::Stat), was_on_stat);
             state.finish_page(PageOutcome::Ok);
         }
+    }
+
+    #[test]
+    fn restart_button_without_snapshot_does_not_offer_restart() {
+        let mut state = flow("body");
+        state.restart_allowed = true;
+        state.restart_snapshot_exists = false;
+
+        // The seal row this flow actually draws has no Restart control when
+        // there is no restart save to restore.
+        let geometry = ((0, 0, 10, 10), (20, 0, 10, 10), (40, 0, 10, 10));
+        let frame = seal_button_frame(&state, geometry.0, geometry.1, geometry.2);
+        assert!(
+            frame.widget(BTN_RESTART).is_none(),
+            "Restart seal must not be offered without a restart snapshot"
+        );
+        assert!(frame.widget(BTN_OK).is_some());
+        assert!(frame.widget(BTN_LOAD).is_some(), "Load stays available");
+
+        // Even if a Restart activation reached the handler, it cannot
+        // restart without a snapshot.
+        assert_eq!(
+            outcome_for_seal(BTN_RESTART, state.restart_snapshot_exists),
+            PageOutcome::Ok
+        );
+        assert_ne!(
+            outcome_for_seal(BTN_RESTART, state.restart_snapshot_exists),
+            PageOutcome::Restart
+        );
+
+        // A real snapshot keeps the working path intact.
+        assert_eq!(outcome_for_seal(BTN_RESTART, true), PageOutcome::Restart);
     }
 
     #[test]
