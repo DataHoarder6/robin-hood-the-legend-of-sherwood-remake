@@ -133,28 +133,31 @@ impl ViewportState {
     }
 
     /// Rotate by whole sprite-view steps, clamped to ±45°.
-    pub fn rotate_by(&mut self, steps: i8) {
+    pub fn rotate_by(&mut self, steps: i8) -> bool {
         let next = (self.camera_angle + f32::from(steps) * FRAC_PI_8).clamp(-FRAC_PI_4, FRAC_PI_4);
         if (next - self.camera_angle).abs() < f32::EPSILON {
-            return;
+            return false;
         }
         if self.level_size.x <= 0.0
             || self.level_size.y <= 0.0
             || !rotation_step_allowed(self.screen_size, self.level_size, next)
         {
-            return;
+            return false;
         }
         self.camera_angle = next;
         self.apply_rotation_constraints();
+        true
     }
 
-    pub fn reset_rotation(&mut self) {
+    pub fn reset_rotation(&mut self) -> bool {
+        let changed = self.camera_angle != 0.0 || self.display_angle != 0.0;
         self.camera_angle = 0.0;
         self.display_angle = 0.0;
         self.saved_camera_angle = None;
         self.last_rotation_ms = None;
         self.readout_until_ms = None;
         self.apply_rotation_constraints();
+        changed
     }
 
     /// Show the angle readout for a short time after a rotation input.

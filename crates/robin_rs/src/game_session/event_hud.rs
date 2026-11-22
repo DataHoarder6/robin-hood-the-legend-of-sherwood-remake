@@ -456,25 +456,28 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
             .translator
             .was_key_released(KeyCode::BracketLeft, keys)
         {
-            host.frontend.viewport.rotate_by(-1);
-            host.frontend
-                .viewport
-                .set_rotation_readout(frame.started_at_ms);
+            if host.frontend.viewport.rotate_by(-1) {
+                host.frontend
+                    .viewport
+                    .set_rotation_readout(frame.started_at_ms);
+            }
         }
         if input
             .translator
             .was_key_released(KeyCode::BracketRight, keys)
         {
-            host.frontend.viewport.rotate_by(1);
-            host.frontend
-                .viewport
-                .set_rotation_readout(frame.started_at_ms);
+            if host.frontend.viewport.rotate_by(1) {
+                host.frontend
+                    .viewport
+                    .set_rotation_readout(frame.started_at_ms);
+            }
         }
         if input.translator.was_key_released(KeyCode::Backslash, keys) {
-            host.frontend.viewport.reset_rotation();
-            host.frontend
-                .viewport
-                .set_rotation_readout(frame.started_at_ms);
+            if host.frontend.viewport.reset_rotation() {
+                host.frontend
+                    .viewport
+                    .set_rotation_readout(frame.started_at_ms);
+            }
         }
     }
     let step_shortcuts = plan_step_shortcuts(

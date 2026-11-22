@@ -206,7 +206,8 @@ mod tests {
         let screen = ScreenSize::new(800.0, 680.0);
         let small = MapSize::new(200.0, 200.0);
         let normal = MapSize::new(1000.0, 1000.0);
-        assert!(rotation_step_allowed(screen, small, 0.0));
+        // A 200x200 level needs zoom 4.0 even unrotated, so no step is allowed.
+        assert!(!rotation_step_allowed(screen, small, 0.0));
         assert!(!rotation_step_allowed(screen, small, FRAC_PI_4));
         assert!(rotation_step_allowed(screen, normal, 0.0));
         assert!(rotation_step_allowed(screen, normal, FRAC_PI_4));
