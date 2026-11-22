@@ -195,10 +195,10 @@ pub(super) async fn run_server_outgoing_pump(
                 }
             }
             NetOutbound::CoopPauseAck(ack) => {
-                // The host acknowledges its own decision locally. Echo the ack
-                // into our own event loop as the host seat so the bounded pause
-                // barrier records it, exactly as a peer's wire ack is routed in
-                // server.rs. Without it every pause evicts all peers.
+                // The host authors its own ack into this pump after adopting
+                // the decision. Its barrier awaits seat 0 too, so echo the ack
+                // into our own event loop as the host seat, exactly as a peer's
+                // wire ack is routed in server.rs. Without it pause evicts peers.
                 let _ = context.incoming_tx.send(NetEvent::CoopPauseAck {
                     seat: PlayerId::HOST,
                     ack,
@@ -604,12 +604,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_coop_pause_ack_is_a_valid_local_outbound() {
+    fn host_coop_pause_ack_is_accepted_as_local_outbound() {
+        // Host-authored ack must pass validation or the pause barrier never
+        // sees seat 0 and every pause evicts all peers at the deadline.
         let ack = robin_engine::multiplayer::CoopPauseAck {
             decision_id: 7,
             frame: 512,
         };
-        assert!(validate_server_gameplay_outbound(&NetOutbound::CoopPauseAck(ack)).is_ok());
+        let outbound = NetOutbound::CoopPauseAck(ack);
+        assert!(validate_server_gameplay_outbound(&outbound).is_ok());
     }
 
     #[test]
