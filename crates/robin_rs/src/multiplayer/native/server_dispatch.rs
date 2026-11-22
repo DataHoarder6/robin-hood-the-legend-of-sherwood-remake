@@ -160,11 +160,6 @@ pub(super) async fn run_server_outgoing_pump(
             NetOutbound::ModalProposal { .. } => {
                 tracing::error!("multiplayer host attempted to send a client-only modal proposal");
             }
-            NetOutbound::CoopPauseAck { .. } => {
-                tracing::error!(
-                    "multiplayer host attempted to send a client-only coop-pause acknowledgement"
-                );
-            }
             NetOutbound::ModalProgress(progress) => {
                 broadcast_modal_progress(&context, progress)?;
             }
@@ -399,7 +394,6 @@ pub(super) fn validate_server_gameplay_outbound(
         | NetOutbound::ReconnectAllForSnapshot { .. }
         | NetOutbound::BeginSnapshotTransition { .. } => Ok(()),
         NetOutbound::ModalProposal { .. }
-        | NetOutbound::CoopPauseAck { .. }
         | NetOutbound::SnapshotTransitionReady { .. }
         | NetOutbound::ContentRequest { .. }
         | NetOutbound::ContentReject { .. }
@@ -610,15 +604,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_coop_pause_ack_is_accepted_as_local_outbound() {
-        // The host authors its own ack into the outgoing pump; validation must
-        // accept it or the pause barrier never sees seat 0 and evicts peers.
+    fn host_coop_pause_ack_is_a_valid_local_outbound() {
         let ack = robin_engine::multiplayer::CoopPauseAck {
             decision_id: 7,
             frame: 512,
         };
-        let outbound = NetOutbound::CoopPauseAck(ack);
-        assert!(validate_server_gameplay_outbound(&outbound).is_ok());
+        assert!(validate_server_gameplay_outbound(&NetOutbound::CoopPauseAck(ack)).is_ok());
     }
 
     #[test]
@@ -650,17 +641,6 @@ mod tests {
             }),
             Delivery::Required
         );
-    }
-
-    #[test]
-    fn host_coop_pause_ack_is_a_valid_local_outbound() {
-        // The host authors its own pause ack into the outgoing pump; the
-        // validator must accept it or the host barrier never releases.
-        let ack = robin_engine::multiplayer::CoopPauseAck {
-            decision_id: 1,
-            frame: 2,
-        };
-        assert!(validate_server_gameplay_outbound(&NetOutbound::CoopPauseAck(ack)).is_ok());
     }
 
     #[test]
