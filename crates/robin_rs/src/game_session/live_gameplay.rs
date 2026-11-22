@@ -192,6 +192,15 @@ fn dispatch_gameplay_action(
         }
         GameAction::SelectCharacter { portrait_index } => {
             let index = *portrait_index as usize;
+            // Number-key selection is ordinary selection: at most an
+            // ensure-on-screen pan, never a hard-centre (XAG 117).
+            if let Some(pc_id) = engine.character_for_portrait_index(*portrait_index)
+                && let Some(entity) = engine.get_entity(pc_id)
+            {
+                host.frontend
+                    .viewport
+                    .ensure_on_screen(entity.position_iface().map_position());
+            }
             let command = portrait_selection_command(
                 *portrait_index,
                 ctrl_held,

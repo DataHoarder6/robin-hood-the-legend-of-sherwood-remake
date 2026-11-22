@@ -19,6 +19,9 @@ pub struct ViewportState {
     director_slide: Option<DirectorSlide>,
     /// Presentation state captured the frame a cutscene takes the camera.
     cutscene_view: Option<(MapPoint, f32)>,
+    /// Whether ordinary selection may pan the view to reveal an off-screen
+    /// PC (XAG 117). Enabled by default; players can switch it off.
+    ensure_selection_on_screen: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +70,7 @@ impl ViewportState {
             touch_motion: TouchCameraMotion::default(),
             director_slide: None,
             cutscene_view: None,
+            ensure_selection_on_screen: true,
         }
     }
 
@@ -86,6 +90,45 @@ impl ViewportState {
             (point.y - self.screen_size.y / (2.0 * self.zoom_factor)).floor(),
         );
         self.clip_view();
+    }
+
+    /// Pan just enough to bring `point` inside the visible view, leaving the
+    /// camera untouched when it is already on screen.
+    ///
+    /// This is the selection-driven motion allowed by XAG 117: never a
+    /// hard-centre, always disable-able, and a no-op for an on-screen
+    /// target.  The bottom panel is excluded from the visible height to
+    /// match [`Self::clip_view`].
+    pub fn ensure_on_screen(&mut self, point: MapPoint) {
+        if !self.ensure_selection_on_screen {
+            return;
+        }
+        let view_w = self.screen_size.x / self.zoom_factor;
+        let view_h = (self.screen_size.y - PANNEL_HEIGHT) / self.zoom_factor;
+        let right = self.view_position.x + view_w;
+        let bottom = self.view_position.y + view_h;
+
+        let mut x = self.view_position.x;
+        if point.x < x {
+            x = point.x;
+        } else if point.x > right {
+            x = point.x - view_w;
+        }
+        let mut y = self.view_position.y;
+        if point.y < y {
+            y = point.y;
+        } else if point.y > bottom {
+            y = point.y - view_h;
+        }
+        if x != self.view_position.x || y != self.view_position.y {
+            self.view_position = MapPoint::new(x, y);
+            self.clip_view();
+        }
+    }
+
+    /// Enable or disable selection-driven ensure-on-screen panning.
+    pub fn set_ensure_selection_on_screen(&mut self, enabled: bool) {
+        self.ensure_selection_on_screen = enabled;
     }
 
     /// Apply scripted motion from the local view. Merely locking input must
@@ -430,6 +473,43 @@ mod viewport_touch_tests {
             (actual - expected).abs() < 0.001,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn ensure_on_screen_leaves_the_view_unchanged_when_the_target_is_visible() {
+        let mut viewport = ViewportState::new(800.0, 600.0);
+        viewport.set_level_size(2000.0, 2000.0);
+        viewport.center_on_point(MapPoint::new(1000.0, 1000.0));
+        let before = viewport.view_position;
+
+        viewport.ensure_on_screen(MapPoint::new(1000.0, 1000.0));
+        assert_eq!(viewport.view_position, before);
+        viewport.ensure_on_screen(MapPoint::new(1100.0, 950.0));
+        assert_eq!(viewport.view_position, before);
+    }
+
+    #[test]
+    fn ensure_on_screen_pans_minimally_for_an_off_screen_target() {
+        let mut viewport = ViewportState::new(800.0, 600.0);
+        viewport.set_level_size(2000.0, 2000.0);
+        viewport.center_on_point(MapPoint::new(1000.0, 1000.0));
+        let before = viewport.view_position;
+
+        viewport.ensure_on_screen(MapPoint::new(before.x - 10.0, before.y + 10.0));
+        close(viewport.view_position.x, before.x - 10.0);
+        close(viewport.view_position.y, before.y);
+    }
+
+    #[test]
+    fn ensure_on_screen_can_be_disabled() {
+        let mut viewport = ViewportState::new(800.0, 600.0);
+        viewport.set_level_size(2000.0, 2000.0);
+        viewport.center_on_point(MapPoint::new(1000.0, 1000.0));
+        let before = viewport.view_position;
+        viewport.set_ensure_selection_on_screen(false);
+
+        viewport.ensure_on_screen(MapPoint::new(before.x - 100.0, before.y));
+        assert_eq!(viewport.view_position, before);
     }
 
     #[test]

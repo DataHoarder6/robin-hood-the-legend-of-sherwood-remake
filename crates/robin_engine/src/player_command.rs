@@ -1501,6 +1501,13 @@ pub enum PlayerCommand {
     SetExtraGuards {
         enabled: bool,
     },
+    /// Re-seed the native selection-outline fade on a PC. Issued when the
+    /// player double-clicks that PC in the world so the outline reappears
+    /// after the camera centres on it. Appended last to keep every earlier
+    /// bitcode variant index stable.
+    ReseedSelectionHulk {
+        pc_id: EntityId,
+    },
 }
 
 impl PlayerCommand {

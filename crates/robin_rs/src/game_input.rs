@@ -140,6 +140,17 @@ pub(crate) fn resolve_left_click_for_seat(
     {
         let cmds = resolve_double_click_repeat(engine, assets, cached, ctx.local_seat);
         if !cmds.is_empty() {
+            // Double-clicking a PC is the explicit "centre on this
+            // character" gesture. Mirror the host-side viewport move done
+            // when an already-selected portrait is re-clicked; the engine
+            // camera is centred by the returned command.
+            if matches!(engine.get_entity(cached), Some(Entity::Pc(_)))
+                && let Some(entity) = engine.get_entity(cached)
+            {
+                host.frontend
+                    .viewport
+                    .center_on_point(entity.position_iface().map_position());
+            }
             return cmds;
         }
     }
@@ -374,6 +385,16 @@ fn click_unselected_pc(
     ) && !ctx.selected(engine).contains(&pc_id)
     {
         host.frontend.input.gestures.element_old_click = Some(pc_id);
+        // Ordinary selection only ever *ensures* the PC is on screen; it
+        // never hard-centres. When the target is already visible this is a
+        // no-op, and the player can disable it (XAG 117).
+        if !ctx.modifiers.double
+            && let Some(entity) = engine.get_entity(pc_id)
+        {
+            host.frontend
+                .viewport
+                .ensure_on_screen(entity.position_iface().map_position());
+        }
         if ctx.modifiers.control {
             return Some(vec![PlayerCommand::TogglePcSelection { pc_id }]);
         } else {
@@ -1037,7 +1058,22 @@ fn resolve_double_click_repeat(
         Some(Entity::Bonus(_) | Entity::Scroll(_) | Entity::Projectile(_) | Entity::Net(_)) => {
             Kind::Object
         }
-        Some(Entity::Pc(_)) => return vec![], // no-op
+        Some(Entity::Pc(_)) => {
+            // The world-space double-click on a PC is the explicit centre
+            // gesture (the portrait re-click already does this). Re-seed
+            // the native hulk fade so the outline is visible right after
+            // the camera moves — no new ~1s pulse effect.
+            let entity = engine
+                .get_entity(cached_target)
+                .expect("matched PC target must still exist");
+            let point = entity.position_iface().map_position();
+            return vec![
+                PlayerCommand::CenterCameraOnPoint { point },
+                PlayerCommand::ReseedSelectionHulk {
+                    pc_id: cached_target,
+                },
+            ];
+        }
         Some(_) | None => return vec![],
     };
 
