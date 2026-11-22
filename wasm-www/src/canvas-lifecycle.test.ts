@@ -38,6 +38,27 @@ test("canvas lifecycle preserves HiDPI/aspect/fullscreen sizing and ignores call
   assert.equal(canvas.width, 800);
 });
 
+test("safe-area insets shrink the canvas box but never the fullscreen box", (t) => {
+  const dom = new JSDOM("<canvas></canvas>");
+  t.after(() => dom.window.close());
+  const canvas = dom.window.document.querySelector("canvas")!;
+  canvas.getBoundingClientRect = () => ({ width: 800, height: 600 }) as DOMRect;
+  let viewport = {
+    innerWidth: 1200,
+    innerHeight: 900,
+    fullscreen: false,
+    devicePixelRatio: 1,
+    insets: { top: 40, right: 20, bottom: 30, left: 10 },
+  };
+  const lifecycle = installCanvasBackingStore(canvas, { viewport: () => viewport, subscribe: () => () => {} });
+  assert.equal(canvas.style.width, "1154px");
+  assert.equal(canvas.style.height, "814px");
+  viewport = { ...viewport, fullscreen: true };
+  lifecycle.sync();
+  assert.equal(canvas.style.width, "1200px");
+  assert.equal(canvas.style.height, "900px");
+});
+
 test("browser resize delivery defers layout writes and cancels queued work on disposal", (t) => {
   const dom = new JSDOM("<canvas></canvas>");
   const previous = ["window", "document", "ResizeObserver"].map(

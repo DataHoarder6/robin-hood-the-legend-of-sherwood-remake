@@ -4,17 +4,40 @@ export type CanvasEnvironment = {
     readonly innerWidth: number;
     readonly innerHeight: number;
     readonly devicePixelRatio: number;
+    readonly insets?: {
+      readonly top: number;
+      readonly right: number;
+      readonly bottom: number;
+      readonly left: number;
+    };
   };
   subscribe: (sync: () => void) => () => void;
 };
 
+const NO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 } as const;
+
 function browserEnvironment(canvas: HTMLCanvasElement): CanvasEnvironment {
+  const inset = (side: "top" | "right" | "bottom" | "left"): number => {
+    const view = canvas.ownerDocument.defaultView;
+    const raw = view
+      ?.getComputedStyle(canvas.ownerDocument.documentElement)
+      .getPropertyValue(`--safe-${side}`)
+      .trim();
+    const parsed = raw === undefined || raw === "" ? 0 : Number.parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   return {
     viewport: () => ({
       fullscreen: document.fullscreenElement === canvas,
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio,
+      insets: {
+        top: inset("top"),
+        right: inset("right"),
+        bottom: inset("bottom"),
+        left: inset("left"),
+      },
     }),
     subscribe: (sync) => {
       // Changing layout during ResizeObserver delivery starts another
@@ -53,9 +76,14 @@ export function installCanvasBackingStore(
   let disposed = false;
   const sync = (): void => {
     if (disposed) return;
-    const { fullscreen, innerWidth, innerHeight, devicePixelRatio } = environment.viewport();
-    const availableWidth = Math.max(1, innerWidth - (fullscreen ? 0 : 16));
-    const availableHeight = Math.max(1, innerHeight - (fullscreen ? 0 : 16));
+    const { fullscreen, innerWidth, innerHeight, devicePixelRatio, insets } =
+      environment.viewport();
+    const safe = fullscreen ? NO_INSETS : (insets ?? NO_INSETS);
+    const availableWidth = Math.max(1, innerWidth - (fullscreen ? 0 : 16) - safe.left - safe.right);
+    const availableHeight = Math.max(
+      1,
+      innerHeight - (fullscreen ? 0 : 16) - safe.top - safe.bottom,
+    );
     const availableAspect = availableWidth / availableHeight;
     const targetAspect = fullscreen
       ? availableAspect

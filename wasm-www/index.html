@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss: http://127.0.0.1:* http://localhost:*; frame-src %VITE_ROBIN_IDENTITY_SIGNER_ORIGIN%; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; base-uri 'none'; form-action 'self'; object-src 'none'">
@@ -16,6 +16,12 @@
             color: #eee;
             font-family: monospace;
         }
+        :root {
+            --safe-top: env(safe-area-inset-top);
+            --safe-bottom: env(safe-area-inset-bottom);
+            --safe-left: env(safe-area-inset-left);
+            --safe-right: env(safe-area-inset-right);
+        }
         #canvas {
             display: block;
             margin: 8px auto;
@@ -23,6 +29,32 @@
             height: min(calc(100dvh - 16px), calc((100vw - 16px) * 9 / 16));
             background: #000;
             image-rendering: pixelated;
+            touch-action: none;
+            -webkit-touch-callout: none;
+        }
+        .touch-controls {
+            display: none;
+            position: fixed;
+            z-index: 10;
+            left: var(--safe-left);
+            right: var(--safe-right);
+            bottom: var(--safe-bottom);
+            align-items: end;
+            justify-content: space-around;
+            pointer-events: none;
+        }
+        .touch-controls:not([hidden]) { display: flex; }
+        .touch-controls button {
+            pointer-events: auto;
+            min-width: 64px;
+            min-height: 48px;
+            margin: 6px;
+            color: #eee;
+            background: #222c;
+            border: 1px solid #888;
+            border-radius: 8px;
+            font: 14px system-ui, sans-serif;
+            touch-action: manipulation;
         }
         .embedded-replay { height: 100%; }
         .embedded-replay body { height: 100%; overflow: hidden; }
@@ -75,7 +107,7 @@
         #toolbar {
             display: flex;
             gap: 8px;
-            padding: 6px 8px;
+            padding: 6px calc(8px + var(--safe-right)) calc(6px + var(--safe-bottom)) calc(8px + var(--safe-left));
             border-top: 1px solid #333;
             background: #1a1a1a;
         }

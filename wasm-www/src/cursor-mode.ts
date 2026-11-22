@@ -28,6 +28,9 @@ export function installCursorMode(
     }
   };
   const captureDrag = (event: PointerEvent) => {
+    // Pointer capture on a touch pointer steals the other fingers from winit,
+    // so the engine's multi-touch gesture classifier would never see them.
+    if (event.pointerType === "touch") return;
     if (event.button === 0 && document.pointerLockElement === null)
       canvas.setPointerCapture(event.pointerId);
   };
