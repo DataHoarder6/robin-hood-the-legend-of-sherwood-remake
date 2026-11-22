@@ -139,6 +139,8 @@ pub(crate) const fn net_frame_class(message: &NetMsg) -> NetFrameClass {
         | NetMsg::BeginSim { .. }
         | NetMsg::ModalProposal { .. }
         | NetMsg::ModalDecision { .. }
+        | NetMsg::CoopPauseDecision { .. }
+        | NetMsg::CoopPauseAck { .. }
         | NetMsg::ModalProgress(_)
         | NetMsg::Cursor { .. }
         | NetMsg::ReconnectRequired { .. }

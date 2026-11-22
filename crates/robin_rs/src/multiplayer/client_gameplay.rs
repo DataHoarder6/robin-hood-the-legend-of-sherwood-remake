@@ -67,6 +67,7 @@ pub(super) fn decode(message: NetMsg) -> Result<NetEvent, NetMsg> {
         },
         NetMsg::ModalProgress(progress) => NetEvent::ModalProgress(progress),
         NetMsg::ModalDecision(decision) => NetEvent::ModalDecision(decision),
+        NetMsg::CoopPauseDecision(decision) => NetEvent::CoopPauseDecision(decision),
         NetMsg::PrepareSnapshotTransition { id, payload } => {
             NetEvent::PrepareSnapshotTransition { id, payload }
         }

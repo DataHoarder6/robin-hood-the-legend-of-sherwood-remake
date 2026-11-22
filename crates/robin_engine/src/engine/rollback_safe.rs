@@ -1661,6 +1661,16 @@ impl Engine {
             .apply_commands(&sim, display, input, assets, cmds);
     }
 
+    /// Host-authoritative direct commit of a cooperative-pause decision. Used
+    /// by the host's barrier timeout to auto-resume at the current frame. The
+    /// same decision is broadcast to peers, which commit it via the canonical
+    /// command stream at that frame.
+    pub fn commit_coop_pause(&mut self, decision: crate::multiplayer::CoopPauseDecision) {
+        self.inner
+            .control
+            .set_coop_pause(decision.paused, decision.frame, decision.decision_id);
+    }
+
     /// Read-only predicate used by the host to choose between its view-cone
     /// selection and an admitted `EzekielInstakill` frame action.
     pub fn can_ezekiel_instakill(&self, id: EntityId) -> bool {

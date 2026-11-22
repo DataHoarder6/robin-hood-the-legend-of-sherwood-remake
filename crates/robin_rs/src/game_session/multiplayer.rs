@@ -815,6 +815,74 @@ impl NetDrain<'_> {
                     state,
                 );
             }
+            NetEvent::CoopPauseDecision(decision) => {
+                // The host alone authored this toggle. Reuse the ordinary input
+                // path so every seat commits it at the exact frame with the same
+                // rollback/late handling, tagged host so the engine's authority
+                // check accepts it on peers. A decision already applied locally
+                // (or retransmitted after reconnect) is a no-op.
+                let (_, _, applied_id) = self.manager.engine.coop_pause_state();
+                if applied_id == decision.decision_id {
+                    tracing::debug!(
+                        decision_id = decision.decision_id,
+                        "coop-pause decision already committed; ignoring duplicate"
+                    );
+                    return Ok(());
+                }
+                tracing::info!(
+                    decision_id = decision.decision_id,
+                    frame = decision.frame,
+                    paused = decision.paused,
+                    "multiplayer: adopting host cooperative-pause decision"
+                );
+                let adopted = self.handle_event(NetEvent::Input {
+                    server_frame: decision.frame,
+                    origin_frame: decision.frame,
+                    target_frame: decision.frame,
+                    input: PlayerInput::host(PlayerCommand::SetCoopPause {
+                        paused: decision.paused,
+                        frame: decision.frame,
+                        decision_id: decision.decision_id,
+                    }),
+                });
+                if adopted.is_ok() {
+                    // The host's barrier waits for this exact nonce and frame;
+                    // without it every pause would evict all peers at deadline.
+                    let net = self
+                        .host
+                        .transport
+                        .net()
+                        .expect("admitted session retains its channels");
+                    if let Err(error) =
+                        net.outgoing
+                            .send(robin_engine::multiplayer::NetOutbound::CoopPauseAck(
+                                robin_engine::multiplayer::CoopPauseAck {
+                                    decision_id: decision.decision_id,
+                                    frame: decision.frame,
+                                },
+                            ))
+                    {
+                        return Err(channel_failure(
+                            "cooperative-pause acknowledgement queue closed",
+                            error.to_string(),
+                        ));
+                    }
+                }
+                return adopted;
+            }
+            NetEvent::CoopPauseAck { seat, ack } => {
+                // Only the host owns the barrier. A client can neither receive
+                // an ack (the server never sends one to clients) nor release it.
+                if self.host.transport.local_seat() != robin_engine::player_command::PlayerId::HOST
+                {
+                    return Ok(());
+                }
+                self.host
+                    .transport
+                    .net()
+                    .expect("admitted session retains its channels")
+                    .acknowledge_coop_pause(seat, ack);
+            }
             event @ (NetEvent::ModalProposal { .. }
             | NetEvent::ModalDecision { .. }
             | NetEvent::ModalProgress(_)) => {
@@ -1465,6 +1533,41 @@ pub(super) fn drain_mission_network(
     if let Some(net) = host.transport.net() {
         // Publish an adopted snapshot's cursor before permitting its first input.
         net.publish_frame(timeline.frame_number());
+        // Host-only: bound the cooperative-pause acknowledgement wait. A seat
+        // that never confirms the pause boundary is evicted and the session
+        // auto-resumes with a fresh host decision, so one frozen peer cannot
+        // halt every seat indefinitely.
+        if host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST {
+            if let robin_engine::multiplayer::PauseBarrierOutcome::TimedOut { evicted, resume } =
+                net.tick_coop_pause_barrier(
+                    u64::from(crate::window::process_uptime_ms()),
+                    timeline.frame_number(),
+                )
+            {
+                tracing::warn!(
+                    ?evicted,
+                    frame = resume.frame,
+                    "multiplayer: coop-pause barrier expired; evicting and auto-resuming"
+                );
+                for seat in &evicted {
+                    let _ = net.outgoing.send(
+                        robin_engine::multiplayer::NetOutbound::ReconnectForSnapshot {
+                            player_id: *seat,
+                            reason: "cooperative pause barrier expired".into(),
+                        },
+                    );
+                }
+                // The host is authoritative: it commits the resume into
+                // its own gate at this exact frame and broadcasts the same
+                // decision to peers, which adopt it via the command stream.
+                manager.engine.commit_coop_pause(resume);
+                let _ =
+                    net.outgoing
+                        .send(robin_engine::multiplayer::NetOutbound::CoopPauseDecision(
+                            resume,
+                        ));
+            }
+        }
         net.service_modal_session(
             host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST,
             u64::from(crate::window::process_uptime_ms()),

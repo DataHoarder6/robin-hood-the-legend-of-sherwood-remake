@@ -122,7 +122,9 @@ pub const FRAME_TIME_MS: u32 = 40;
 /// Version 78 re-binds the campaign bitcode layout after prepared off-map
 /// reinforcements; schema-77 recordings are rejected by the version check
 /// instead of being misdecoded by the new campaign type.
-pub const REPLAY_SCHEMA_VERSION: u32 = 78;
+/// Version 79 records the host-authoritative cooperative-pause decision in the
+/// canonical command stream, so a pause boundary is reproduced on replay.
+pub const REPLAY_SCHEMA_VERSION: u32 = 79;
 
 /// Wire-format protocol version shared by the engine and the leaderboard wire
 /// protocol. Bump on any breaking change to `NetMsg` or
@@ -179,7 +181,8 @@ pub const REPLAY_SCHEMA_VERSION: u32 = 78;
 /// Protocol 71 carries the per-PC "no friendly-fire damage" flag.
 /// Protocol 72 carries the per-PC "no friendly-fire knockback" flag.
 /// Protocol 73 carries presentation-only teammate cursor state.
-pub const NET_PROTOCOL_VERSION: u32 = 73;
+/// Protocol 74 carries the host-authoritative cooperative-pause decision.
+pub const NET_PROTOCOL_VERSION: u32 = 74;
 
 pub use artifact::ArtifactRefV1;
 pub use canonical::{

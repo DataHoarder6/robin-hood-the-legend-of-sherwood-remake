@@ -34,6 +34,7 @@ pub(super) fn prepare(outgoing: NetOutbound) -> Result<NetMsg, ClientProtocolErr
         },
         NetOutbound::ReadyToSim { frame } => NetMsg::ReadyToSim { frame },
         NetOutbound::ModalProposal(proposal) => NetMsg::ModalProposal(proposal),
+        NetOutbound::CoopPauseAck(ack) => NetMsg::CoopPauseAck(ack),
         NetOutbound::SnapshotTransitionReady { id } => NetMsg::SnapshotTransitionReady { id },
         NetOutbound::ReconnectForSnapshot { reason, .. }
         | NetOutbound::ReconnectAllForSnapshot { reason } => {
@@ -42,6 +43,7 @@ pub(super) fn prepare(outgoing: NetOutbound) -> Result<NetMsg, ClientProtocolErr
         NetOutbound::StateHash { .. }
         | NetOutbound::InitialSnapshot { .. }
         | NetOutbound::ModalDecision { .. }
+        | NetOutbound::CoopPauseDecision { .. }
         | NetOutbound::ModalProgress(_)
         | NetOutbound::BeginSnapshotTransition { .. } => {
             return Err(ClientProtocolError::HostOnly);
@@ -76,6 +78,28 @@ mod tests {
                 engine_bytes: vec![]
             }),
             Err(ClientProtocolError::HostOnly)
+        ));
+        // A client can never halt the shared timeline by faking a pause
+        // decision; only the host's dispatch path may publish one.
+        assert!(matches!(
+            prepare(NetOutbound::CoopPauseDecision(
+                robin_engine::multiplayer::CoopPauseDecision {
+                    decision_id: 1,
+                    frame: 9,
+                    paused: true,
+                }
+            )),
+            Err(ClientProtocolError::HostOnly)
+        ));
+        // Acknowledging a host decision is a client's job; it must reach the
+        // server, or the bounded barrier evicts every seat at its deadline.
+        let ack = robin_engine::multiplayer::CoopPauseAck {
+            decision_id: 1,
+            frame: 9,
+        };
+        assert!(matches!(
+            prepare(NetOutbound::CoopPauseAck(ack)),
+            Ok(NetMsg::CoopPauseAck(decoded)) if decoded == ack
         ));
     }
 }

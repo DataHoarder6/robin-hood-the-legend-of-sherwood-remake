@@ -882,6 +882,22 @@ impl EngineInner {
         self.simulation_tick().number()
     }
 
+    /// Whether the host-authoritative cooperative pause currently gates the
+    /// simulation. Read by every seat's pre-tick and by the pause barrier.
+    pub fn coop_pause_active(&self) -> bool {
+        self.control.coop_pause_active()
+    }
+
+    /// The exact sim frame and decision id of the last committed coop-pause
+    /// toggle, for boundary-hash and late-joiner consistency checks.
+    pub fn coop_pause_state(&self) -> (bool, u32, u64) {
+        (
+            self.control.coop_pause_active(),
+            self.control.coop_pause_frame(),
+            self.control.coop_pause_decision_id(),
+        )
+    }
+
     /// Sim-state portion of the sound system (source list + finished
     /// exclamation queue).  Host sound pipeline reads this when
     /// flushing sources.

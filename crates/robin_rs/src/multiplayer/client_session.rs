@@ -1019,6 +1019,9 @@ pub(super) fn handle_client_wire_msg(
         NetMsg::SnapshotTransitionReady { .. } => Err(remote(
             "server sent a client-only snapshot transition acknowledgement",
         )),
+        NetMsg::CoopPauseAck { .. } => Err(remote(
+            "server sent a client-only cooperative-pause acknowledgement",
+        )),
         NetMsg::Reject { reason } => Err(MultiplayerError::HostRejected {
             stage: "session",
             reason,

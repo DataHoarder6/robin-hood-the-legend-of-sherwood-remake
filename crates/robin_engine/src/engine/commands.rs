@@ -298,6 +298,20 @@ impl EngineInner {
             SetNoFriendlyFireKnockback { pcs, enabled } => {
                 self.set_no_friendly_fire_knockback(pcs, *enabled)
             }
+            SetCoopPause {
+                paused,
+                frame,
+                decision_id,
+            } => {
+                // The authoritative dispatcher above already refuses this
+                // command from non-host seats. Keep the defence in depth so a
+                // future caller cannot bypass `requires_host_authority`.
+                if seat != usize::from(crate::player_command::PlayerId::HOST.0) {
+                    tracing::warn!(seat, "ignored non-host cooperative-pause command");
+                } else {
+                    self.control.set_coop_pause(*paused, *frame, *decision_id);
+                }
+            }
             CampaignPurchasePerk {
                 character_idx,
                 perk,

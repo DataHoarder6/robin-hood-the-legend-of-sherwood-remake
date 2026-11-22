@@ -193,6 +193,9 @@ struct PreTickPauseSources {
     manual: bool,
     multiplayer_clock: bool,
     modal: bool,
+    /// Host-authoritative cooperative pause committed into the engine's
+    /// hashed gate. Gates every seat at the exact frame, live and in replay.
+    coop_pause: bool,
 }
 
 fn pre_tick_is_paused(sources: PreTickPauseSources, replaying: bool) -> bool {
@@ -210,7 +213,7 @@ fn local_pause_stops_timeline(menu_open: bool, multiplayer: bool) -> bool {
 /// open, including the later record carrying its dismissal. Explicit user or
 /// network pauses still freeze playback entirely.
 fn replay_cursor_is_paused(sources: PreTickPauseSources) -> bool {
-    sources.pause_menu || sources.manual || sources.multiplayer_clock
+    sources.pause_menu || sources.manual || sources.multiplayer_clock || sources.coop_pause
 }
 
 /// Rewind and pause facts admitted for this frame before timeline work.
@@ -439,6 +442,9 @@ pub(super) fn finalize_pre_tick(
         manual: *manual_pause,
         multiplayer_clock: mp_clock_pause,
         modal: modal_pause,
+        // Every seat reads the host's committed decision from authoritative
+        // engine state, never from local input or the local-only manual flag.
+        coop_pause: manager.engine.coop_pause_active(),
     };
     let paused = pre_tick_is_paused(pause_sources, runtime.replay().playback().is_some());
     let replay_cursor_paused = replay_cursor_is_paused(pause_sources);
@@ -1368,6 +1374,7 @@ mod tests {
             manual: false,
             multiplayer_clock: false,
             modal: false,
+            coop_pause: false,
         };
         assert!(!pre_tick_is_paused(clear, false));
 
@@ -1388,9 +1395,21 @@ mod tests {
                 modal: true,
                 ..clear
             },
+            PreTickPauseSources {
+                coop_pause: true,
+                ..clear
+            },
         ] {
             assert!(pre_tick_is_paused(paused, false));
         }
+        // Cooperative pause is authoritative: it gates live and replay.
+        assert!(pre_tick_is_paused(
+            PreTickPauseSources {
+                coop_pause: true,
+                ..clear
+            },
+            true
+        ));
     }
 
     #[test]
@@ -1400,6 +1419,7 @@ mod tests {
             manual: false,
             multiplayer_clock: false,
             modal: true,
+            coop_pause: false,
         };
         assert!(pre_tick_is_paused(modal_only, false));
         assert!(!pre_tick_is_paused(modal_only, true));
@@ -1416,6 +1436,10 @@ mod tests {
             },
             PreTickPauseSources {
                 multiplayer_clock: true,
+                ..modal_only
+            },
+            PreTickPauseSources {
+                coop_pause: true,
                 ..modal_only
             },
         ] {

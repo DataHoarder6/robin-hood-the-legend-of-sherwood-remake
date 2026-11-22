@@ -183,6 +183,17 @@ pub(super) async fn run_server_outgoing_pump(
                     super::fail_server(&context, error);
                 }
             }
+            NetOutbound::CoopPauseDecision(decision) => {
+                // Only the host drives this channel; clients are refused in
+                // `client_outgoing::prepare`. Broadcast the exact decision so
+                // every seat commits it at the same sim frame.
+                if let Err(error) =
+                    broadcast_msg_required(&context, NetMsg::CoopPauseDecision(decision))
+                {
+                    tracing::error!(%error, "authoritative coop-pause broadcast failed");
+                    super::fail_server(&context, error);
+                }
+            }
             NetOutbound::ReconnectForSnapshot { player_id, reason } => {
                 drop_peer_for_snapshot(&context, player_id, reason);
             }
@@ -366,6 +377,7 @@ pub(super) fn validate_server_gameplay_outbound(
         | NetOutbound::InitialSnapshot { .. }
         | NetOutbound::ReadyToSim { .. }
         | NetOutbound::ModalDecision { .. }
+        | NetOutbound::CoopPauseDecision { .. }
         | NetOutbound::ModalProgress(_)
         | NetOutbound::ReconnectForSnapshot { .. }
         | NetOutbound::ReconnectAllForSnapshot { .. }

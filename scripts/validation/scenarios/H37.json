@@ -1,0 +1,32 @@
+{
+  "schema": 4,
+  "id": "H37",
+  "proves": {
+    "layer": "core",
+    "tests": [
+      "robin_engine::engine::commands::tests::coop_pause_boundary_frame_hash_equality_is_exact_and_frame_sensitive",
+      "robin_engine::engine::commands::tests::coop_pause_non_host_cannot_halt_but_host_can",
+      "robin_engine::multiplayer::coop_pause::tests::deadline_evicts_missing_seats_and_auto_resumes"
+    ]
+  },
+  "peers": [
+    {
+      "seat": 0,
+      "role": "host"
+    },
+    {
+      "seat": 1,
+      "role": "client"
+    }
+  ],
+  "expect": [
+    {
+      "assert": "hash-equal",
+      "peers": [
+        0,
+        1
+      ],
+      "every": 25
+    }
+  ]
+}
