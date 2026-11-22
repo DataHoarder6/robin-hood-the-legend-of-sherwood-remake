@@ -36,6 +36,12 @@ fourth state and no prompt to the owner to choose, confirm, or continue.
 - **BLOCKED** — the next step needs a capability the loop cannot supply. Name the
   missing capability and stop; do not ask the owner to provide it.
 
+`HUMAN_GATE` is an annotation on items deferred to a human, not a fourth
+terminal state: the iteration still ends LANDED or FILED for the Linux work it
+completes. The scope decision and the gated items are in
+[Windows as a human gate](#windows-as-a-human-gate). Other capabilities can
+still be BLOCKED under [Risk routing](#risk-routing).
+
 ## LANDED requires origin read-back
 
 A `git push` exit status of `0` is not evidence of a landing. `scripts/land.sh`
@@ -140,13 +146,16 @@ anything a deny does not cover — a path outside this repo, for example — is
 BLOCKED by this rule, not by a permission. Stable tags: see
 [Gate and land path](#gate-and-land-path) and [RELEASES.md](RELEASES.md).
 
-## Windows as BLOCKED
+## Windows as a human gate
 
 Cross-play needs a real Windows machine to run one seat — issue #49's "one human
-step". The loop cannot provision one, so any item whose check requires a Windows
-seat is BLOCKED with that capability named, never a question to the owner. Wine
-replay parity ([RELEASES.md](RELEASES.md), [TESTING.md](TESTING.md)) proves only
-the toolchain/FP/locale class; the OS-layer class stays unproven until a real
+step". The owner does that check themselves and expects Windows to work if the
+build runs; it is not a capability the loop provisions or waits on. The scope
+decision is [ADR 0010](adr/0010-linux-first-unattended-goal.md): the loop targets
+the Linux↔Linux campaign, records the Windows directions and the Windows
+installer as `HUMAN_GATE` items, and continues with Linux work. Wine replay
+parity ([RELEASES.md](RELEASES.md), [TESTING.md](TESTING.md)) proves only the
+toolchain/FP/locale class; the OS-layer class stays unproven until a real
 Windows seat runs a recorded session ([WINDOWS.md](WINDOWS.md)).
 
 ## Kill switch

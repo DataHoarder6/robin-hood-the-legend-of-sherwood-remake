@@ -78,6 +78,9 @@ Own the terminal states — LANDED, FILED, BLOCKED — defined in `docs/UNATTEND
 Emit exactly one and report it. Never ask the owner to choose, confirm, or
 continue: the `question` tool is denied and no permission asks for approval.
 A missing capability is BLOCKED with that capability named, never a question.
+Windows checks are `HUMAN_GATE` annotations, not BLOCKED: skip them and keep the
+Linux campaign work moving (`docs/UNATTENDED.md`,
+[ADR 0010](../../docs/adr/0010-linux-first-unattended-goal.md)).
 
 Gate and land only through `scripts/remote-check.sh` and `scripts/land.sh`, with
 one gate in flight. `docs/PARALLEL_AGENTS.md` owns the build-slot/gate rule and

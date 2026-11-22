@@ -30,8 +30,12 @@ and [issue #47](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwoo
 
 - Matchmaking announcements are not signed with the game identity key —
   [NEW_FEATURES.md, Todo](NEW_FEATURES.md#todo).
-- Whole-campaign co-op with Windows/Linux cross-play —
-  [issue #49](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/49).
+- Linux↔Linux full campaign co-op is the automated target
+  ([issue #77](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/77));
+  Windows cross-play is a human gate
+  ([ADR 0010](adr/0010-linux-first-unattended-goal.md)).
+  [Issue #49](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/49)
+  remains the standing goal.
 - Bug reports do not yet carry browser replay attachments or a native form —
   [NEW_FEATURES.md, crash and bug reporting](NEW_FEATURES.md#crash-and-bug-reporting).
 - Bug reports do not name the UI element under the cursor —

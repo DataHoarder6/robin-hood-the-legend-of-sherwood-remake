@@ -15,7 +15,7 @@
 - [New features and remaining product work](NEW_FEATURES.md)
 - [What's new in each stable release](RELEASE_NOTES.md) — generated per-tag notes the GitHub release body pastes; sources in [releases/whats-new.json](releases/whats-new.json)
 - [Known capability gaps](GAPS.md) — the one-page index of what is unfinished and where the detail lives
-- [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-BLOCKED boundary
+- [Unattended orchestration](UNATTENDED.md) — terminal states, fixed iteration order, gate/land path, retry/quarantine, and the Windows-as-human-gate boundary ([ADR 0010](adr/0010-linux-first-unattended-goal.md))
 - [Nix package and cross-host install](NIX.md)
 - [Working in parallel: symptoms, rules, commands](PARALLEL_AGENTS.md) — shared-checkout rules, stale-main recovery, build copies, disk levers, and `just doctor`
 - [Finishing and freezing sessions](SESSION_FINISH.md) — definition of done, FIFO landing, and freeze-not-delete for deferred work
