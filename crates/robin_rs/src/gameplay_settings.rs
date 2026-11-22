@@ -79,4 +79,5 @@ settings! {
     PreventVictoryInCombat,
     ExcludeStartingDeadSoldiersFromPreservedLives,
     ExcludeRequiredKillsFromPreservedLives,
+    ExtraGuards,
 }

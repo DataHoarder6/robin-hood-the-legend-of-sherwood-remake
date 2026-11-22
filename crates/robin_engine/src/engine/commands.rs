@@ -484,7 +484,8 @@ impl EngineInner {
             | SetSherwoodTrading { .. }
             | SetDiplomacyEnabled { .. }
             | SetNpcFactionWars { .. }
-            | SetDiplomacyRelationship { .. } => {
+            | SetDiplomacyRelationship { .. }
+            | SetExtraGuards { .. } => {
                 self.dispatch_camera_control_command(tcx, seat, cmd);
             }
 
@@ -1065,6 +1066,16 @@ impl EngineInner {
                     .unwrap_or_else(|error| panic!("invalid diplomacy command: {error}"));
                 self.reconcile_diplomacy_runtime();
                 self.refresh_fog_of_war(tcx.assets, true);
+            }
+            SetExtraGuards { enabled } => {
+                if seat != usize::from(PlayerId::HOST.0) {
+                    tracing::warn!(seat, "ignored non-host extra-guards setting command");
+                } else if self.control.rng.original_replay_cursor().is_some() && *enabled {
+                    tracing::warn!("Original parity playback cannot enable extra guards");
+                    self.control.sim_config.extra_guards = false;
+                } else {
+                    self.control.sim_config.extra_guards = *enabled;
+                }
             }
             _ => unreachable!("command routed to the wrong dispatch_camera_control_command family"),
         }

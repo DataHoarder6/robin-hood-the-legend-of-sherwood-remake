@@ -233,6 +233,8 @@ impl TraceSimConfig {
             // Shared-vision fog is also a post-port gameplay rule.
             fog_of_war: false,
             prevent_victory_in_combat: false,
+            // Original traces always run the shipped roster.
+            extra_guards: false,
             reversible_background_patches: false,
             script_enabled: self.script_enabled,
             highlander: self.highlander,

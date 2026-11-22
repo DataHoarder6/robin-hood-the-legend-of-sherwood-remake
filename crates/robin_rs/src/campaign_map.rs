@@ -2741,11 +2741,19 @@ fn render_mission_details(
             robin_engine::campaign_history::MissionAttemptKind::Campaign => "Campaign",
             robin_engine::campaign_history::MissionAttemptKind::HistoryReplay => "Practice",
         };
+        let enhanced = play
+            .attempt
+            .enhanced_encounter_marker()
+            .map(|marker| format!(" / {marker}"))
+            .unwrap_or_default();
         progress_text(
             renderer,
             font,
             transform,
-            &format!("{:?} / {duration} / {kind}", play.attempt.outcome()),
+            &format!(
+                "{:?} / {duration} / {kind}{enhanced}",
+                play.attempt.outcome()
+            ),
             572,
             y + 6,
             history_view.content_width() - 24,

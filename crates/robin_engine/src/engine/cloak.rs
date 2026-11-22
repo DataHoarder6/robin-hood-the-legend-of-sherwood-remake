@@ -267,6 +267,9 @@ pub(crate) fn preserve_original_gameplay_behavior(
     config.gesture_quality_damage = false;
     config.fog_of_war = false;
     config.prevent_victory_in_combat = false;
+    // Extra guards change the authored roster, so Original-RNG traces always
+    // run the shipped encounter regardless of the profile's opt-in.
+    config.extra_guards = false;
     config.difficulty = config.difficulty.original_parity_preset();
     config
 }
@@ -339,6 +342,13 @@ mod tests {
         assert!(!normalized_default.gesture_quality_damage);
         assert!(!normalized_default.fog_of_war);
         assert!(!normalized_default.prevent_victory_in_combat);
+        assert!(!normalized_default.extra_guards);
+
+        let enhanced = super::super::SimConfig {
+            extra_guards: true,
+            ..Default::default()
+        };
+        assert!(!preserve_original_gameplay_behavior(enhanced).extra_guards);
 
         let legendary = super::super::SimConfig {
             difficulty: crate::player_profile::DifficultyLevel::Legendary,

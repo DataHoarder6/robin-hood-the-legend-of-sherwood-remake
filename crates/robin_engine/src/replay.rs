@@ -91,6 +91,19 @@ pub struct ReplayHeader {
     pub campaign: Vec<u8>,
 }
 
+impl ReplayHeader {
+    /// User-visible label carried by the recording's authoritative config.
+    /// Derived rather than stored so the marker can never disagree with the
+    /// roster the replay actually reproduces.
+    pub const fn enhanced_encounter_marker(&self) -> Option<&'static str> {
+        if self.sim_config.extra_guards {
+            Some(crate::gameplay_config::ENHANCED_ENCOUNTER_MARKER)
+        } else {
+            None
+        }
+    }
+}
+
 pub use robin_run_types::REPLAY_SCHEMA_VERSION;
 
 /// Identity of the next lockstep/history transaction to be admitted.
@@ -1737,6 +1750,44 @@ mod tests {
         header.as_object_mut().unwrap().remove("rankability");
         let error = serde_json::from_value::<ReplayHeader>(header).unwrap_err();
         assert!(error.to_string().contains("missing field `rankability`"));
+    }
+
+    #[test]
+    fn enhanced_encounter_marker_round_trips_in_the_replay_header() {
+        let header = ReplayHeader {
+            mission_profiles: None,
+            mission_id: "Emb01_FoA_EC".into(),
+            mission_assets: test_mission_assets("Emb01_FoA_EC"),
+            rng_seed: 7,
+            sim_config: crate::engine::SimConfig {
+                extra_guards: true,
+                ..crate::engine::SimConfig::default()
+            },
+            spellforge_package: None,
+            version: REPLAY_SCHEMA_VERSION,
+            total_frames: 0,
+            rankability: ReplayRankability::rankable(),
+            campaign: bitcode::encode(&crate::campaign::Campaign::default()),
+        };
+        let json = serde_json::to_string(&header).unwrap();
+        assert!(json.contains("extra_guards"));
+        let restored: ReplayHeader = serde_json::from_str(&json).unwrap();
+        assert!(restored.sim_config.extra_guards);
+        assert_eq!(
+            restored.enhanced_encounter_marker(),
+            Some(crate::gameplay_config::ENHANCED_ENCOUNTER_MARKER)
+        );
+
+        let original = ReplayHeader {
+            sim_config: crate::engine::SimConfig::default(),
+            ..header
+        };
+        assert_eq!(original.enhanced_encounter_marker(), None);
+        assert!(
+            !serde_json::to_string(&original)
+                .unwrap()
+                .contains("extra_guards")
+        );
     }
 
     #[test]

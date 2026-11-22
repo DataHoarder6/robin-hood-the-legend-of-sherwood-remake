@@ -2984,6 +2984,16 @@ used to sit there asked Yes/No and ran the same transition either way.
 Evidence, the strings and the ids are in
 [mission-end pages](slop/MISSION_END_PAGES.md).
 
+- **Extra guards are opt-in.** The Gameplay options screen has an "Extra
+  guards (Enhanced encounter)" checkbox, default off. Enabling it appends the
+  hand-reviewed guard placements to compatible original-campaign missions at
+  load, after every authored soldier so legacy handles stay stable. The option
+  is independent of difficulty, host-authoritative, ranked-pinned and forced
+  off for Original-parity traces. Each patch is bound to the mission by a
+  domain-separated content digest; a mismatch logs a warning and runs the
+  original roster, while a malformed manifest is a hard error. Enhanced
+  attempts and replays are labelled "Enhanced encounter" in campaign history.
+
 - **Campaign co-op is one session.** A campaign host advertises a joinable
   lobby — `campaign` plus the fixed party size and no explicit roster — so a
   second seat joins from its own install and needs no local save. The host owns

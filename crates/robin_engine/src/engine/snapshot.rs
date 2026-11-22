@@ -18,7 +18,8 @@ const NATIVE_SNAPSHOT_MAGIC: &[u8; 4] = b"RHNS";
 /// Version 14 adds the purchased-perk flags to campaign PC status.
 /// Version 15 adds the per-PC "no friendly-fire damage" flag.
 /// Version 16 adds the per-PC "no friendly-fire knockback" flag.
-const NATIVE_SNAPSHOT_VERSION: u32 = 16;
+/// Version 17 adds the authoritative extra-guards option to `SimConfig`.
+const NATIVE_SNAPSHOT_VERSION: u32 = 17;
 const NATIVE_SNAPSHOT_HEADER_BYTES: usize = 8;
 
 /// Native codec form of the current nested [`EngineInner`] snapshot.

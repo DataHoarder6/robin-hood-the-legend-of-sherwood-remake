@@ -475,6 +475,12 @@ en_tooltip = "Wait until every player character has left combat before accepting
 de_label = "Kein Sieg im Kampf (nächster Start)"
 de_tooltip = "Missionssiege erst zulassen, wenn keine Spielerfigur mehr kämpft. Gilt ab dem nächsten Missionsstart."
 
+[gameplay.ExtraGuards]
+en_label = "Extra guards (Enhanced encounter)"
+en_tooltip = "Append the reviewed extra guards to compatible original-campaign missions when they load. Off by default; the original roster and every recording stay unchanged. Changing this applies from the next mission launch."
+de_label = "Zusätzliche Wachen (Verbessertes Gefecht)"
+de_tooltip = "Fügt geprüfte zusätzliche Wachen beim Laden passender Missionen der Originalkampagne hinzu. Standardmäßig aus; die ursprüngliche Truppe und alle Aufzeichnungen bleiben unverändert. Die Änderung gilt ab dem nächsten Missionsstart."
+
 [basic.PreservedLivesSummary]
 en = "{percentage}% (saved {saved} of {total})"
 de = "{percentage}% ({saved} von {total} gerettet)"

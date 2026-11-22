@@ -1496,6 +1496,11 @@ pub enum PlayerCommand {
         pcs: Vec<EntityId>,
         enabled: bool,
     },
+    /// Opt into the reviewed extra guards at the next mission load. Appended
+    /// last so every existing bitcode variant index stays stable.
+    SetExtraGuards {
+        enabled: bool,
+    },
 }
 
 impl PlayerCommand {
@@ -1572,6 +1577,7 @@ impl PlayerCommand {
                 | Self::SetDiplomacyEnabled { .. }
                 | Self::SetNpcFactionWars { .. }
                 | Self::SetDiplomacyRelationship { .. }
+                | Self::SetExtraGuards { .. }
         )
     }
 
@@ -1607,6 +1613,7 @@ impl PlayerCommand {
             Self::SetDiplomacyEnabled { .. } => Some(Field::Diplomacy),
             Self::SetNpcFactionWars { .. } => Some(Field::NpcFactionWars),
             Self::SetDiplomacyRelationship { .. } => Some(Field::DiplomacyRelationshipGraph),
+            Self::SetExtraGuards { .. } => Some(Field::ExtraGuards),
             _ => None,
         }
     }
@@ -2292,5 +2299,22 @@ mod tests {
         let decoded: PlayerCommand =
             serde_json::from_str(&encoded).expect("deserialize legacy tactical tag");
         assert!(matches!(decoded, PlayerCommand::ClearTacticalSelection));
+    }
+
+    #[test]
+    fn extra_guards_command_is_host_only_ranked_pinned_and_appended_last() {
+        let command = PlayerCommand::SetExtraGuards { enabled: true };
+        assert!(command.requires_host_authority());
+        assert_eq!(
+            command.ranked_simulation_setting_mutation(),
+            Some(crate::engine::RankedSimulationConfigField::ExtraGuards)
+        );
+        // Appended at the very end: every earlier bitcode variant index is
+        // untouched and the new command round-trips on the current build.
+        let bytes = bitcode::encode(&command);
+        assert!(matches!(
+            bitcode::decode::<PlayerCommand>(&bytes).expect("decode extra-guards command"),
+            PlayerCommand::SetExtraGuards { enabled: true }
+        ));
     }
 }

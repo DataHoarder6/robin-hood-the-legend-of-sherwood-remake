@@ -1125,6 +1125,11 @@ impl InteractiveFrameSimulation {
                 enabled: result.gameplay_config.fog_of_war,
             });
         }
+        if result.gameplay_config.extra_guards != result.original_gameplay_config.extra_guards {
+            dispatch(PlayerCommand::SetExtraGuards {
+                enabled: result.gameplay_config.extra_guards,
+            });
+        }
     }
 
     /// Local pause-side work runs before authoritative scripted/terminal lanes.

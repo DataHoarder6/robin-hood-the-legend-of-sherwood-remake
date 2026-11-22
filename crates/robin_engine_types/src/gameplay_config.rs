@@ -390,7 +390,23 @@ pub struct GameplayConfig {
     /// predate the setting; an explicitly saved choice remains authoritative.
     #[serde(default)]
     pub fog_of_war: bool,
+
+    /// Append the hand-reviewed extra guards to compatible original-campaign
+    /// missions at load. Default off for fresh and migrated profiles; omitted
+    /// from serialized profiles while off so an untouched install keeps exactly
+    /// the shipped profile bytes. The choice is authoritative simulation state
+    /// and travels in replays and peer snapshots.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extra_guards: bool,
 }
+
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Marker shown on campaign history attempts and replays recorded with extra
+/// guards enabled, so enhanced runs are never mistaken for original ones.
+pub const ENHANCED_ENCOUNTER_MARKER: &str = "Enhanced encounter";
 
 impl Default for GameplayConfig {
     fn default() -> Self {
@@ -433,6 +449,7 @@ impl Default for GameplayConfig {
             diplomacy: true,
             npc_faction_wars: true,
             fog_of_war: false,
+            extra_guards: false,
         }
     }
 }
@@ -482,6 +499,7 @@ impl GameplayConfig {
             diplomacy: false,
             npc_faction_wars: true,
             fog_of_war: false,
+            extra_guards: false,
         }
     }
 }
@@ -508,6 +526,32 @@ mod tests {
                 .unwrap()
                 .reversible_background_patches
         );
+    }
+
+    #[test]
+    fn extra_guards_are_default_off_and_leave_profile_bytes_unchanged() {
+        use robin_util::state_hash::compute;
+
+        assert!(!GameplayConfig::default().extra_guards);
+        assert!(!GameplayConfig::migrated().extra_guards);
+        assert!(
+            !serde_json::from_str::<GameplayConfig>("{}")
+                .unwrap()
+                .extra_guards
+        );
+
+        // A default-off profile serializes exactly as before the field existed.
+        let json = serde_json::to_string(&GameplayConfig::default()).unwrap();
+        assert!(!json.contains("extra_guards"));
+
+        let enabled = GameplayConfig {
+            extra_guards: true,
+            ..GameplayConfig::default()
+        };
+        let round_trip: GameplayConfig =
+            serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
+        assert!(round_trip.extra_guards);
+        assert_ne!(compute(&enabled), compute(&GameplayConfig::default()));
     }
 
     #[test]

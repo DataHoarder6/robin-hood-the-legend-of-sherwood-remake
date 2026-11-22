@@ -164,6 +164,14 @@ pub struct MissionAttemptRules {
     pub highlander2: bool,
     pub golden_eye: bool,
     pub ignore_default_loss: bool,
+    /// Whether this attempt ran the reviewed extra guards. Defaulted so an
+    /// older history record still describes the shipped encounter.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extra_guards: bool,
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl From<SimConfig> for MissionAttemptRules {
@@ -175,6 +183,7 @@ impl From<SimConfig> for MissionAttemptRules {
             highlander2: config.highlander2,
             golden_eye: config.golden_eye,
             ignore_default_loss: config.ignore_default_loose,
+            extra_guards: config.extra_guards,
         }
     }
 }
@@ -351,6 +360,17 @@ impl MissionAttempt {
 
     pub const fn rules(&self) -> Option<MissionAttemptRules> {
         self.rules
+    }
+
+    /// User-visible label for an enhanced attempt; original attempts have no
+    /// marker so existing campaign history stays byte-identical.
+    pub const fn enhanced_encounter_marker(&self) -> Option<&'static str> {
+        match self.rules {
+            Some(rules) if rules.extra_guards => {
+                Some(crate::gameplay_config::ENHANCED_ENCOUNTER_MARKER)
+            }
+            _ => None,
+        }
     }
 
     pub const fn stats(&self) -> &MissionAttemptStats {
@@ -1311,6 +1331,53 @@ mod tests {
         profile_json["schema_version"] = serde_json::json!(1);
         let profile_history: ProfileCampaignHistory = serde_json::from_value(profile_json).unwrap();
         assert_eq!(profile_history.validate_schema(), Err(1));
+    }
+
+    #[test]
+    fn enhanced_encounter_marker_survives_campaign_history_round_trip() {
+        let enhanced = SimConfig {
+            extra_guards: true,
+            ..SimConfig::default()
+        };
+        let attempt = MissionAttempt::native(
+            1,
+            MissionAttemptOutcome::Won,
+            MissionAttemptKind::Campaign,
+            Some(1_700_000_000),
+            42,
+            enhanced,
+            &MissionStat::default(),
+            None,
+        );
+        assert_eq!(
+            attempt.enhanced_encounter_marker(),
+            Some(crate::gameplay_config::ENHANCED_ENCOUNTER_MARKER)
+        );
+        let json = serde_json::to_string(&attempt).unwrap();
+        assert!(json.contains("extra_guards"));
+        let restored: MissionAttempt = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, attempt);
+        assert_eq!(
+            restored.enhanced_encounter_marker(),
+            Some(crate::gameplay_config::ENHANCED_ENCOUNTER_MARKER)
+        );
+
+        let original = MissionAttempt::native(
+            2,
+            MissionAttemptOutcome::Won,
+            MissionAttemptKind::Campaign,
+            Some(1_700_000_001),
+            42,
+            SimConfig::default(),
+            &MissionStat::default(),
+            None,
+        );
+        assert_eq!(original.enhanced_encounter_marker(), None);
+        assert!(
+            !serde_json::to_string(&original)
+                .unwrap()
+                .contains("extra_guards")
+        );
     }
 
     #[test]

@@ -60,6 +60,7 @@ impl GameplaySetting {
                 | Self::MoreCombatGestures
                 | Self::GestureQualityDamage
                 | Self::FogOfWar
+                | Self::ExtraGuards
         )
     }
 }
@@ -680,6 +681,7 @@ pub(crate) fn apply_setting(config: &mut GameplayConfig, setting: GameplaySettin
         Setting::EnableSpellforgeMissions => {
             config.enable_spellforge_missions = !config.enable_spellforge_missions
         }
+        Setting::ExtraGuards => config.extra_guards = !config.extra_guards,
     }
 }
 
@@ -748,6 +750,7 @@ impl GameplaySetting {
             Setting::PlanQuickActions => config.plan_quick_actions,
             Setting::FogOfWar => config.fog_of_war,
             Setting::EnableSpellforgeMissions => config.enable_spellforge_missions,
+            Setting::ExtraGuards => config.extra_guards,
         }
     }
 }
@@ -839,7 +842,7 @@ mod tests {
         assert_eq!(standalone_visible_option_range(1), 12..24);
         assert_eq!(standalone_visible_option_range(2), 24..36);
         assert_eq!(standalone_visible_option_range(3), 36..48);
-        assert_eq!(standalone_visible_option_range(4), 48..50);
+        assert_eq!(standalone_visible_option_range(4), 48..51);
 
         let covered: Vec<_> = (0..standalone_page_count())
             .flat_map(standalone_visible_option_range)
@@ -1274,5 +1277,23 @@ mod tests {
         assert_eq!(config.more_combat_gestures, before.more_combat_gestures);
         assert_eq!(config.gesture_quality_damage, before.gesture_quality_damage);
         assert_eq!(config.item_gameplay, before.item_gameplay);
+    }
+
+    #[test]
+    fn extra_guards_has_an_independent_default_off_checkbox() {
+        let mut config = GameplayConfig::default();
+        let index = GameplaySetting::ExtraGuards.index();
+        assert!(!is_option_selected(&config, index));
+        assert!(!config.extra_guards);
+        assert!(super::GameplaySetting::ExtraGuards.requires_host_authority());
+        assert_eq!(english_labels()[index], "Extra guards (Enhanced encounter)");
+        apply_option_toggle(&mut config, index);
+        assert!(is_option_selected(&config, index));
+        assert!(config.extra_guards);
+        assert_eq!(config.fog_of_war, GameplayConfig::default().fog_of_war);
+        assert_eq!(
+            config.prevent_victory_in_combat,
+            GameplayConfig::default().prevent_victory_in_combat
+        );
     }
 }

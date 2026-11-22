@@ -112,6 +112,16 @@ pub struct SimConfig {
     /// Defer script-reported victory while any PC has active combat opponents.
     #[serde(default = "enabled_by_default")]
     pub prevent_victory_in_combat: bool,
+    /// Append the reviewed extra guards at mission load. Independent of
+    /// difficulty; default off so every existing recording, save and parity
+    /// trace keeps the original roster. Authoritative: it changes the state
+    /// hash and is carried in replays and peer snapshots.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extra_guards: bool,
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 const fn default_enabled() -> bool {
@@ -168,6 +178,7 @@ pub enum RankedSimulationConfigField {
     EnableTimedMissions,
     EnableDynamicAmbience,
     PreventVictoryInCombat,
+    ExtraGuards,
 }
 
 impl RankedSimulationConfigField {
@@ -207,6 +218,7 @@ impl RankedSimulationConfigField {
             Self::EnableTimedMissions => "sim_config.enable_timed_missions",
             Self::EnableDynamicAmbience => "sim_config.enable_dynamic_ambience",
             Self::PreventVictoryInCombat => "sim_config.prevent_victory_in_combat",
+            Self::ExtraGuards => "sim_config.extra_guards",
         }
     }
 }
@@ -407,6 +419,7 @@ profile_gameplay_projection! {
     enable_timed_missions,
     enable_dynamic_ambience,
     prevent_victory_in_combat,
+    extra_guards,
     diplomacy,
     npc_faction_wars,
     more_combat_gestures,
@@ -455,6 +468,7 @@ impl SimConfig {
             enable_timed_missions: true,
             enable_dynamic_ambience: true,
             prevent_victory_in_combat: true,
+            extra_guards: false,
         }
     }
 
@@ -477,6 +491,7 @@ impl SimConfig {
         config.enable_timed_missions = false;
         config.enable_dynamic_ambience = false;
         config.prevent_victory_in_combat = false;
+        config.extra_guards = false;
         config.exclude_starting_dead_soldiers_from_preserved_lives = false;
         config.exclude_required_kills_from_preserved_lives = false;
         config
@@ -512,6 +527,7 @@ impl SimConfig {
             enable_timed_missions,
             enable_dynamic_ambience,
             prevent_victory_in_combat,
+            extra_guards,
         } = self;
         let Self {
             coop: expected_coop,
@@ -544,6 +560,7 @@ impl SimConfig {
             enable_timed_missions: expected_enable_timed_missions,
             enable_dynamic_ambience: expected_enable_dynamic_ambience,
             prevent_victory_in_combat: expected_prevent_victory_in_combat,
+            extra_guards: expected_extra_guards,
         } = expected;
 
         [
@@ -601,6 +618,8 @@ impl SimConfig {
                 .then_some(RankedSimulationConfigField::EnableDynamicAmbience),
             (prevent_victory_in_combat != expected_prevent_victory_in_combat)
                 .then_some(RankedSimulationConfigField::PreventVictoryInCombat),
+            (extra_guards != expected_extra_guards)
+                .then_some(RankedSimulationConfigField::ExtraGuards),
         ]
         .into_iter()
         .flatten()
@@ -640,6 +659,7 @@ impl SimConfig {
             enable_timed_missions: true,
             enable_dynamic_ambience: true,
             prevent_victory_in_combat: true,
+            extra_guards: false,
         }
     }
 
@@ -1014,5 +1034,48 @@ mod tests {
         ));
         config.coop.players = 6;
         assert!(RankedSimulationPolicy::from_config(identity, config).is_err());
+    }
+
+    #[test]
+    fn extra_guards_are_default_off_ranked_pinned_and_byte_parity_preserving() {
+        use robin_util::state_hash::compute;
+
+        let standard = SimConfig::standard_ranked(DifficultyLevel::Medium);
+        assert!(!standard.extra_guards);
+        assert!(!SimConfig::default().extra_guards);
+        assert!(!SimConfig::original_parity_ranked(DifficultyLevel::Medium).extra_guards);
+        // An older deterministic state without the additive field stays off.
+        let mut legacy = serde_json::to_value(standard).unwrap();
+        legacy.as_object_mut().unwrap().remove("extra_guards");
+        assert!(
+            !serde_json::from_value::<SimConfig>(legacy)
+                .unwrap()
+                .extra_guards
+        );
+
+        // An untouched default config serializes exactly as before this field.
+        let json = serde_json::to_string(&standard).unwrap();
+        assert!(!json.contains("extra_guards"));
+
+        let enabled = SimConfig {
+            extra_guards: true,
+            ..standard
+        };
+        assert_eq!(
+            enabled.first_ranked_difference(standard),
+            Some(RankedSimulationConfigField::ExtraGuards)
+        );
+        assert_ne!(compute(&enabled), compute(&standard));
+        let round_trip: SimConfig =
+            serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
+        assert!(round_trip.extra_guards);
+
+        // The GameplayConfig projection is bidirectional and includes the option.
+        let mut gameplay = crate::gameplay_config::GameplayConfig::default();
+        enabled.copy_gameplay_to_profile(&mut gameplay);
+        assert!(gameplay.extra_guards);
+        let mut projected = standard;
+        projected.apply_profile_gameplay(&gameplay);
+        assert!(projected.extra_guards);
     }
 }

@@ -7384,3 +7384,39 @@ fn minimap_commands_only_change_the_issuing_players_display() {
     assert!(host_input.controls.has_focus);
     assert!(!client_input.controls.has_focus);
 }
+
+#[test]
+fn extra_guards_command_is_host_authoritative_and_refused_in_original_playback() {
+    let (mut engine, assets, _pc) = setup_pc_engine(&[]);
+    let sim = crate::sim_rng::test_context();
+    assert!(!engine.control.sim_config.extra_guards);
+
+    engine.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &assets),
+        &[PlayerInput::new(
+            crate::player_command::PlayerId(1),
+            PlayerCommand::SetExtraGuards { enabled: true },
+        )],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(!engine.control.sim_config.extra_guards);
+
+    engine.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &assets),
+        &[PlayerInput::host(PlayerCommand::SetExtraGuards {
+            enabled: true,
+        })],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(engine.control.sim_config.extra_guards);
+
+    engine.control.rng = crate::engine::SimulationRng::with_original_replay(Vec::new());
+    engine.apply_frame_commands_with_mode(
+        TickCtx::new(&sim, &assets),
+        &[PlayerInput::host(PlayerCommand::SetExtraGuards {
+            enabled: true,
+        })],
+        SelectionCommandBatchMode::InferNestedSelection,
+    );
+    assert!(!engine.control.sim_config.extra_guards);
+}
