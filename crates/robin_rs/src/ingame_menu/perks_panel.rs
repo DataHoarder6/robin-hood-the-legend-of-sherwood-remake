@@ -70,7 +70,9 @@ impl PerksPanelOutcome {
 /// `PcStatus::name` is only populated for spawned PCs, so a campaign roster
 /// entry that never entered a mission would otherwise render blank.  Every
 /// campaign character is created from a profile, so its display label lives
-/// there: the localized hero name, or the mod profile's own label.
+/// there: the localized hero name, or the mod profile's own label. A malformed
+/// modded save (missing or dangling profile link) yields a stable index label
+/// and a warning rather than a panic — see the tests below.
 pub fn character_names(
     campaign: &Campaign,
     profiles: &ProfileManager,
@@ -80,17 +82,38 @@ pub fn character_names(
     campaign
         .characters
         .iter()
-        .map(|character| {
+        .enumerate()
+        .map(|(index, character)| {
             let status_name = character.status.display_name(menu_text);
             if !status_name.is_empty() {
                 return status_name.into_owned();
             }
-            let profile_index = character
-                .character_profile_idx
-                .expect("campaign character is not linked to a profile");
-            crate::hud_text::profile_character_display_name(profiles, portraits, profile_index)
-                .expect("campaign character references a missing profile")
-                .into_owned()
+            // A modded save can carry a roster entry with no profile link, or
+            // one pointing at a profile removed between sessions. The engine's
+            // level loader treats both as fallible; keep this panel open with a
+            // stable index label instead of panicking the UI thread.
+            let Some(profile_index) = character.character_profile_idx else {
+                tracing::warn!(
+                    character_index = index,
+                    "campaign character has no linked profile; using index label"
+                );
+                return format!("Character {}", index + 1);
+            };
+            match crate::hud_text::profile_character_display_name(
+                profiles,
+                portraits,
+                profile_index,
+            ) {
+                Some(name) => name.into_owned(),
+                None => {
+                    tracing::warn!(
+                        character_index = index,
+                        profile_index = profile_index.0,
+                        "campaign character references a missing profile; using index label"
+                    );
+                    format!("Character {}", index + 1)
+                }
+            }
         })
         .collect()
 }
@@ -675,6 +698,55 @@ mod tests {
         assert!(
             !text.contains("%i"),
             "the balance must not leak the loaded %i token: {text:?}"
+        );
+    }
+
+    #[test]
+    fn character_names_survive_malformed_modded_saves() {
+        use robin_engine::campaign::Campaign;
+        use robin_engine::profiles::{CharacterProfile, CharacterProfileIdx, ProfileManager};
+
+        let profiles = ProfileManager {
+            characters: vec![CharacterProfile {
+                filename: "RobinHood".to_owned(),
+                profile_name: "Robin des bois".to_owned(),
+                ..CharacterProfile::default()
+            }],
+            ..ProfileManager::default()
+        };
+        let portraits = crate::ui_panel::PortraitCache::new();
+        let menu_text = crate::ingame_menu::resources::MenuText::default();
+
+        let mut campaign = Campaign::default();
+        // A modded save can carry a roster entry with no profile link, or a
+        // link to a profile that was removed/renamed between sessions. A valid
+        // third entry proves one bad row does not poison the whole panel.
+        campaign.characters.push(PcDescription {
+            character_profile_idx: None,
+            ..PcDescription::default()
+        });
+        campaign.characters.push(PcDescription {
+            character_profile_idx: Some(CharacterProfileIdx(999)),
+            ..PcDescription::default()
+        });
+        campaign.characters.push(PcDescription {
+            character_profile_idx: Some(CharacterProfileIdx(0)),
+            ..PcDescription::default()
+        });
+
+        let names = super::character_names(&campaign, &profiles, &portraits, &menu_text);
+        assert_eq!(names.len(), 3);
+        assert_eq!(
+            names[2], "Robin des bois",
+            "a valid entry must still resolve normally"
+        );
+        assert_eq!(
+            names[0], "Character 1",
+            "a missing profile link needs a stable index fallback"
+        );
+        assert_eq!(
+            names[1], "Character 2",
+            "a dangling profile link needs a stable index fallback"
         );
     }
 
