@@ -94,6 +94,8 @@
 
 ## Repo structure
 
+- `GLOSSARY.md` — the port's vocabulary. Use its terms; do not redefine one in a
+  doc.
 - `crates/` — the workspace, gated by `docs/TESTING.md`; `assets/`, `datadirs/`,
   `mods/` — icons and fonts, game-data symlinks, mods.
 - `docs/README.md` indexes the maintained guides; `docs/slop/` keeps subsystem
