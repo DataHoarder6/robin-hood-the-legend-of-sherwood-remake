@@ -1785,3 +1785,43 @@ fn campaign_endpoint_survives_mission_rotation_and_frozen_addr_reconnects() {
     client.shutdown();
     second.shutdown();
 }
+
+/// Finding 2: a failed thread spawn must not leave a dead context installed as
+/// the accept loop's dispatch (which would route every opening to a corpse).
+#[test]
+fn failed_mission_spawn_never_installs_dispatch() {
+    let (context, _events) = dispatch_test_context();
+    let dispatch = super::Mutex::new(None);
+    let failed = super::install_mission_dispatch(
+        &dispatch,
+        Arc::new(context),
+        Err(std::io::Error::other("spawn failed")),
+    );
+    assert!(failed.is_err());
+    assert!(dispatch.lock().is_none());
+
+    let (context, _events) = dispatch_test_context();
+    let spawned = std::thread::spawn(|| {});
+    let handle = super::install_mission_dispatch(&dispatch, Arc::new(context), Ok(spawned))
+        .expect("successful spawn installs dispatch");
+    assert!(dispatch.lock().is_some());
+    handle.join().unwrap();
+}
+
+/// Finding 3: an in-flight connection must not claim a seat on a mission that
+/// shutdown has already retired, even while its commit drain is still running.
+#[test]
+fn retired_generation_refuses_stale_admission() {
+    let (context, _events) = dispatch_test_context();
+    let dispatch = super::Mutex::new(None);
+    let context = Arc::new(context);
+    *dispatch.lock() = Some(Arc::clone(&context));
+
+    super::retire_dispatch(&dispatch, &context.cancellation);
+    assert!(dispatch.lock().is_none());
+    assert!(context.cancellation.load(super::Ordering::Acquire));
+
+    let error = super::prepare_peer_session(&context, PeerOwner::Native([3; 32]), "stale")
+        .expect_err("a retired generation admits no new seats");
+    assert!(error.to_string().contains("shutting down"));
+}

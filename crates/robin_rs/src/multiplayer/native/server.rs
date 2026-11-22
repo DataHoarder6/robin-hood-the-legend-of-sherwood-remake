@@ -111,6 +111,31 @@ pub(super) fn bind_campaign_endpoint(
     Ok((id, addr, runtime_thread, shutdown_tx))
 }
 
+/// Install this mission as the campaign accept loop's dispatch only once its
+/// runtime thread exists. A failed spawn must leave no dead context installed
+/// and must not retain the campaign lease through a stale dispatch.
+pub(super) fn install_mission_dispatch(
+    dispatch: &Mutex<Option<Arc<ServerContext>>>,
+    context: Arc<ServerContext>,
+    spawned: std::io::Result<JoinHandle<()>>,
+) -> std::io::Result<JoinHandle<()>> {
+    let handle = spawned?;
+    *dispatch.lock() = Some(context);
+    Ok(handle)
+}
+
+/// Retire this mission's admission authority. Called at the very start of
+/// `shutdown`, before the commit drain or thread joins, so an in-flight
+/// `handle_incoming_peer` cannot admit a frozen-address reconnect into a
+/// generation that is already ending. Live generations keep H17 reconnect.
+pub(super) fn retire_dispatch(
+    dispatch: &Mutex<Option<Arc<ServerContext>>>,
+    cancellation: &AtomicBool,
+) {
+    cancellation.store(true, Ordering::Release);
+    *dispatch.lock() = None;
+}
+
 /// Accept loop for the campaign's one endpoint. Each opening is handed to the
 /// mission whose dispatch is currently installed; with no active mission the
 /// connection is dropped rather than admitted into a stale generation.
@@ -209,13 +234,15 @@ impl ServerHandle {
     }
 
     pub fn shutdown(&mut self) {
+        // Retire admission before the commit drain or any join: a connection
+        // already in flight must not claim a seat on this dying mission.
+        retire_dispatch(&self.dispatch, &self.cancellation);
         if self.preserve_on_shutdown {
             publish_context_continuation(&self.context);
             self.preserve_on_shutdown = false;
         } else {
             self.context.host_left.store(true, Ordering::Release);
         }
-        self.cancellation.store(true, Ordering::Release);
         let _ = self.shutdown_tx.send(true);
         if let Some(handle) = self.runtime_thread.take()
             && handle.join().is_err()
@@ -227,10 +254,9 @@ impl ServerHandle {
         {
             tracing::error!("multiplayer server outgoing bridge panicked during shutdown");
         }
-        // Rotate the campaign accept loop away from this mission. The socket
-        // itself stays bound until campaign teardown so the joiner's frozen
-        // connect string remains valid across the handoff (D07 / H36).
-        *self.dispatch.lock() = None;
+        // The socket stays bound until campaign teardown so the joiner's frozen
+        // connect string remains valid across the handoff (D07 / H36). Admission
+        // was already retired at the top of this method.
     }
 
     pub(in crate::multiplayer) fn preserve_session_for_next_mission(&mut self) {
@@ -883,17 +909,18 @@ pub(super) fn start_server_inner(
             )));
         }
     };
-    // Publish this mission as the accept loop's current dispatch only after
-    // its runtime and context exist; shutdown clears it before the next one.
-    *dispatch.lock() = Some(Arc::clone(&context));
     let cancellation_for_thread = Arc::clone(&cancellation);
-    let runtime_thread = match thread::Builder::new().name("mp-server".into()).spawn({
-        let context = Arc::clone(&context);
-        move || {
-            rt.block_on(run_mission_runtime(context, outgoing_async_rx, shutdown_rx));
-            cancellation_for_thread.store(true, Ordering::Release);
-        }
-    }) {
+    let runtime_thread = match install_mission_dispatch(
+        &dispatch,
+        Arc::clone(&context),
+        thread::Builder::new().name("mp-server".into()).spawn({
+            let context = Arc::clone(&context);
+            move || {
+                rt.block_on(run_mission_runtime(context, outgoing_async_rx, shutdown_rx));
+                cancellation_for_thread.store(true, Ordering::Release);
+            }
+        }),
+    ) {
         Ok(handle) => handle,
         Err(error) => {
             cancellation.store(true, Ordering::Release);
@@ -1283,6 +1310,14 @@ pub(super) fn prepare_peer_session(
     owner: PeerOwner,
     nickname: &str,
 ) -> Result<(SeatClaim, UnboundedReceiver<NetMsg>), MultiplayerError> {
+    // A connection that was in flight when shutdown retired this generation
+    // must not claim a seat on a mission whose accept loop is already closed
+    // to new admissions. Live generations are unaffected (H17 reconnect).
+    if context.cancellation.load(Ordering::Acquire) {
+        return Err(MultiplayerError::LocalState(
+            "mission transport is shutting down".into(),
+        ));
+    }
     let _authority = context.session_dispatch.lock();
     // Claim/reclaim a seat by authenticated owner, never by editable nickname.
     let seat_claim = {
