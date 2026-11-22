@@ -5,6 +5,11 @@ use sha2::{Digest as _, Sha256};
 
 use super::*;
 
+/// Issue #61 content pilot: the one mission whose placement additions are
+/// staged garrison bodies with a nonzero budget. Every other mission keeps its
+/// original, non-staged content.
+const PILOT_MISSION: &str = "Emb01_FoA_EC";
+
 const PATCH_DATA: &str = include_str!("legendary_enemy_patches.json");
 
 /// Domain separator for reviewed mission-content identities. Changing it
@@ -32,6 +37,10 @@ struct LegendaryMissionPatch {
     additions: Vec<LegendarySoldierAddition>,
     existing_officer_links: Vec<ExistingOfficerLink>,
     new_patrol_groups: Vec<NewPatrolGroup>,
+    /// Off-map garrison budget for this mission. Zero means no summons, which
+    /// is the default for every mission outside the issue #61 content pilot.
+    #[serde(default)]
+    reinforcement_budget: crate::level_data::RawReinforcementBudget,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,6 +52,10 @@ struct LegendarySoldierAddition {
     direction: u32,
     path_behavior: AddedPathBehavior,
     proposal_id: String,
+    /// Wait off-map until an alarm wakes the body. Default false keeps every
+    /// original placement active as before.
+    #[serde(default)]
+    staged: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -141,6 +154,37 @@ fn patch_manifest() -> &'static LegendaryPatchManifest {
     MANIFEST.get_or_init(|| {
         parse_patch_manifest(PATCH_DATA).expect("embedded Legendary patch manifest must be valid")
     })
+}
+
+/// Apply the content-only fields of a reviewed patch: stage the selected
+/// additions and install the mission's off-map budget. Kept separate from the
+/// gated loader so the pilot content can be proved through the live path in
+/// tests while production stays byte-identical until the director lands.
+fn install_pilot_content(
+    patch: &LegendaryMissionPatch,
+    additions: &mut [crate::level_data::RawSoldier],
+    loaded: &mut crate::level_data::LoadedLevel,
+) {
+    if !patch.mission.eq_ignore_ascii_case(PILOT_MISSION) {
+        return;
+    }
+    for (raw, addition) in additions.iter_mut().zip(&patch.additions) {
+        raw.staged = addition.staged;
+    }
+    if patch.reinforcement_budget.total > 0 {
+        match loaded.mission.tactic_data.as_mut() {
+            Some(tactic) => tactic.reinforcement_budget = patch.reinforcement_budget,
+            None => {
+                loaded.mission.tactic_data = Some(crate::level_data::RawTacticData {
+                    reinforcement_points: Vec::new(),
+                    reinforcement_budget: patch.reinforcement_budget,
+                    ambush_points: Vec::new(),
+                    seek_points: Vec::new(),
+                    archery_sectors: Vec::new(),
+                });
+            }
+        }
+    }
 }
 
 impl EngineInner {
@@ -265,6 +309,8 @@ impl EngineInner {
                 .collect::<Result<Vec<_>, _>>()?;
             additions[commander_global - authored_count].subordinate_ids = subordinate_ids;
         }
+
+        install_pilot_content(patch, &mut additions, loaded);
 
         tracing::info!(
             mission = mission_name,
@@ -436,6 +482,7 @@ mod tests {
                     direction: 18,
                     path_behavior: AddedPathBehavior::Stationary,
                     proposal_id: "P1".to_owned(),
+                    staged: false,
                 },
                 LegendarySoldierAddition {
                     source_index: 1,
@@ -445,10 +492,12 @@ mod tests {
                     direction: 2,
                     path_behavior: AddedPathBehavior::Inherit,
                     proposal_id: "P1".to_owned(),
+                    staged: false,
                 },
             ],
             existing_officer_links: Vec::new(),
             new_patrol_groups: Vec::new(),
+            reinforcement_budget: Default::default(),
         };
         let digest = mission_content_digest(&patch.mission, count, &patch);
         patch.content_digest = digest;
@@ -589,5 +638,264 @@ mod tests {
         assert_eq!(first[1].layer, 1);
         assert_eq!(first[1].path_id, 7);
         assert!(first[1].subordinate_ids.is_empty());
+    }
+
+    fn pilot_patch() -> &'static LegendaryMissionPatch {
+        patch_manifest()
+            .missions
+            .iter()
+            .find(|patch| patch.mission.eq_ignore_ascii_case(PILOT_MISSION))
+            .expect("the pilot mission must be in the embedded manifest")
+    }
+
+    fn raw_soldier() -> crate::level_data::RawSoldier {
+        crate::level_data::RawSoldier {
+            position_x: 0,
+            position_y: 0,
+            direction: 0,
+            action: 0,
+            obstacle_index: 0,
+            sector: 0,
+            layer: 0,
+            material: 0,
+            profile_number: 0,
+            profile_id: None,
+            allegiance: None,
+            command_interface: crate::human_control::CommandInterface::None,
+            mission_role: crate::human_control::MissionRole::Combatant,
+            combat_stance: crate::human_control::CombatStance::Aggressive,
+            revealed: false,
+            staged: false,
+            tower_guard: false,
+            company_number: 0,
+            drunk_level: 0,
+            money: 0,
+            subordinate_ids: Vec::new(),
+            path_id: 0,
+            alert_path_id: 0,
+            script_class: None,
+        }
+    }
+
+    #[test]
+    fn pilot_is_the_only_mission_with_staged_content() {
+        let manifest = patch_manifest();
+        assert_eq!(
+            manifest.missions.len(),
+            34,
+            "the reviewed placement set still has 34 missions"
+        );
+        let pilot = pilot_patch();
+        assert_eq!(pilot.additions.len(), 6);
+        assert!(pilot.additions.iter().all(|addition| addition.staged));
+        assert_eq!(pilot.reinforcement_budget.total, 2);
+        assert_eq!(pilot.reinforcement_budget.concurrent, 1);
+        assert_eq!(pilot.reinforcement_budget.cooldown_ticks, 30);
+        for patch in &manifest.missions {
+            if patch.mission.eq_ignore_ascii_case(PILOT_MISSION) {
+                continue;
+            }
+            assert!(
+                patch.additions.iter().all(|addition| !addition.staged),
+                "{} must keep its original non-staged placements",
+                patch.mission
+            );
+            assert_eq!(
+                patch.reinforcement_budget.total, 0,
+                "{} must keep a zero reinforcement budget",
+                patch.mission
+            );
+        }
+    }
+
+    #[test]
+    fn pilot_content_stages_bodies_and_installs_budget() {
+        let patch = pilot_patch();
+        let mut additions = vec![raw_soldier(); patch.additions.len()];
+        let mut loaded = crate::level_data::LoadedLevel::empty();
+
+        install_pilot_content(patch, &mut additions, &mut loaded);
+
+        assert!(additions.iter().all(|raw| raw.staged));
+        let budget = loaded
+            .mission
+            .tactic_data
+            .as_ref()
+            .expect("the pilot installs tactic data")
+            .reinforcement_budget;
+        assert_eq!(budget.total, 2);
+        assert_eq!(budget.concurrent, 1);
+        assert_eq!(budget.cooldown_ticks, 30);
+
+        // finish.rs installs that authored budget into the live AI state.
+        let mut engine = EngineInner::new();
+        engine.install_reinforcement_doors_stage(&LevelAssets::new(), &loaded);
+        let live = engine.ai.global.offmap_budget;
+        assert_eq!(live.total, 2);
+        assert_eq!(live.remaining, 2);
+        assert_eq!(live.concurrent, 1);
+        assert_eq!(live.cooldown_ticks, 30);
+    }
+
+    fn pilot_garrison_engine() -> (EngineInner, Vec<crate::element::EntityId>) {
+        use crate::ai::{Position, ReinforcementDoorInfo};
+        use crate::coordinates::MapBBox;
+        use crate::coordinates::MapPoint;
+        use crate::element::{Camp, Entity};
+        use crate::gate::DoorIndex;
+
+        let patch = pilot_patch();
+        let mut engine = EngineInner::new();
+        let mut bbox = MapBBox::new();
+        bbox.expand_point(MapPoint::new(0.0, 0.0));
+        bbox.expand_point(MapPoint::new(1000.0, 1000.0));
+        engine.world.fast_grid_mut().level_mut().map_bbox = bbox;
+
+        let bodies = (0..patch.additions.len())
+            .map(|_| {
+                let mut actor =
+                    crate::engine::test_support::actors::make_test_ai_soldier(Camp::Lacklandists);
+                actor.element_data_mut().active = false;
+                actor.position_iface_mut().configure_for_actor(
+                    crate::position_interface::PathfinderIndex::new(0).expect("pathfinder index"),
+                    crate::coordinates::MoveBoxHalfDiagonal::new(20.0, 20.0),
+                    MapPoint::new(40.0, 100.0),
+                );
+                let Entity::Soldier(soldier) = &mut actor else {
+                    unreachable!("fixture is a soldier");
+                };
+                soldier.soldier.staged = true;
+                engine.add_test_entity(actor)
+            })
+            .collect();
+
+        engine
+            .ai
+            .global
+            .reinforcement_doors
+            .push(ReinforcementDoorInfo {
+                position_in: Position {
+                    x: 100.0,
+                    y: 100.0,
+                    sector: None,
+                    level: 0,
+                },
+                door_index: DoorIndex::new(0).expect("door index"),
+                point_out: MapPoint::new(40.0, 100.0),
+                point_mid: MapPoint::new(70.0, 100.0),
+                point_in: MapPoint::new(100.0, 100.0),
+                layer_out: 0,
+                sector_out: None,
+            });
+
+        let mut loaded = crate::level_data::LoadedLevel::empty();
+        let mut additions = vec![raw_soldier(); patch.additions.len()];
+        install_pilot_content(patch, &mut additions, &mut loaded);
+        engine.install_reinforcement_doors_stage(&LevelAssets::new(), &loaded);
+
+        (engine, bodies)
+    }
+
+    #[test]
+    fn pilot_content_wakes_a_guard_under_alert_without_new_rng_draws() {
+        use crate::element::Camp;
+        use crate::engine::reinforcement::{SummonEntry, SummonRequest};
+        use crate::gate::DoorIndex;
+
+        let (mut engine, bodies) = pilot_garrison_engine();
+        assert!(
+            bodies.iter().all(|id| !engine
+                .get_entity(*id)
+                .expect("staged body")
+                .element_data()
+                .active),
+            "staged bodies start inactive at level load (entities.rs)"
+        );
+        for id in &bodies {
+            engine.enemy_mut(*id).base.current_music_alert_status = crate::ai::AlertLevel::Yellow;
+        }
+
+        // The pilot adds no new RNG site. The existing summon consumes only
+        // two already-reviewed sites: ReinforcementJitter for the arrival
+        // walk (bounded 10-step loop) and ReinforcementDoor on the Any path.
+        // Seed enough draws for that loop so the replay does not panic.
+        let replay = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::sim_rng::OriginalRngReplay::new(vec![0; 24]),
+        ));
+        #[allow(clippy::disallowed_methods)]
+        let rng_state = std::sync::Arc::new(std::sync::Mutex::new(fastrand::Rng::with_seed(1)));
+        let sim = crate::sim_rng::SimulationContext::new(
+            std::sync::Arc::clone(&rng_state),
+            Some(std::sync::Arc::clone(&replay)),
+            crate::engine::SimConfig::default(),
+        );
+        let assets = engine.test_runtime_assets();
+        let woken = engine
+            .summon_garrison(
+                TickCtx::new(&sim, &assets),
+                SummonRequest {
+                    faction: Camp::Lacklandists,
+                    entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
+                    min_tier: 0,
+                },
+            )
+            .expect("a Yellow alert wakes one staged pilot body");
+
+        assert!(bodies.contains(&woken));
+        let entity = engine.get_entity(woken).expect("woken body");
+        assert!(entity.element_data().active);
+        assert!(!entity.soldier_data().expect("soldier data").staged);
+        assert_eq!(engine.ai.global.offmap_budget.remaining, 1);
+        assert_eq!(engine.ai.global.offmap_budget.live, 1);
+        let replay = replay.lock().expect("replay lock");
+        let used_sites = replay.sites(0..replay.cursor());
+        assert!(
+            used_sites.iter().all(|site| matches!(
+                site,
+                crate::sim_rng::RngSite::ReinforcementJitter
+                    | crate::sim_rng::RngSite::ReinforcementDoor
+            )),
+            "the pilot summon must use only pre-reviewed reinforcement RNG sites, got {used_sites:?}"
+        );
+    }
+
+    #[test]
+    fn pilot_content_is_inert_when_the_option_is_off() {
+        use crate::element::Camp;
+        use crate::engine::reinforcement::{SummonEntry, SummonRequest};
+        use crate::gate::DoorIndex;
+
+        let (mut engine, bodies) = pilot_garrison_engine();
+        engine.control.sim_config.enable_offmap_reinforcements = false;
+        for id in &bodies {
+            engine.enemy_mut(*id).base.current_music_alert_status = crate::ai::AlertLevel::Red;
+        }
+        let sim = crate::sim_rng::test_context();
+        let assets = engine.test_runtime_assets();
+        assert!(
+            engine
+                .summon_garrison(
+                    TickCtx::new(&sim, &assets),
+                    SummonRequest {
+                        faction: Camp::Lacklandists,
+                        entry: SummonEntry::Door(DoorIndex::new(0).expect("door index")),
+                        min_tier: 0,
+                    },
+                )
+                .is_none(),
+            "with the option off the staged garrison stays asleep"
+        );
+        assert!(bodies.iter().all(|id| {
+            !engine
+                .get_entity(*id)
+                .expect("staged body")
+                .element_data()
+                .active
+        }));
+        // Existing budget semantics: authorize() spends the slot before the
+        // flag check and release() never refunds `remaining`. The woken-body
+        // assertion above is the option-off proof; no new draw was added.
+        assert_eq!(engine.ai.global.offmap_budget.remaining, 1);
+        assert_eq!(engine.ai.global.offmap_budget.live, 0);
     }
 }

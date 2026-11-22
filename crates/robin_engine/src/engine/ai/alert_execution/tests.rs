@@ -6,6 +6,13 @@ use crate::engine::TickCtx;
 use crate::engine::test_support::actors::make_test_ai_soldier;
 
 #[test]
+fn offmap_summon_requires_a_non_green_alert() {
+    assert!(!offmap_summon_alert_allows(crate::ai::AlertLevel::Green));
+    assert!(offmap_summon_alert_allows(crate::ai::AlertLevel::Yellow));
+    assert!(offmap_summon_alert_allows(crate::ai::AlertLevel::Red));
+}
+
+#[test]
 fn alert_camp_roster_preserves_load_order_and_reads_live_membership() {
     use crate::element::Camp;
 

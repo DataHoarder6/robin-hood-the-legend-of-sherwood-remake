@@ -4,8 +4,13 @@
   "missions": [
     {
       "mission": "Emb01_FoA_EC",
-      "content_digest": "bb8893925e6c7712ae88529f7cec4f1f56d59fa680ae7d46f755430de987f62d",
+      "content_digest": "facfdeeef420fad4292dce61222e050d7fa90337dd84ad5f9a76c02aeabfeedb",
       "authored_soldier_count": 27,
+      "reinforcement_budget": {
+        "total": 2,
+        "concurrent": 1,
+        "cooldown_ticks": 30
+      },
       "selected_proposal_ids": [
         "P1",
         "P3",
@@ -19,7 +24,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P1"
+          "proposal_id": "P1",
+          "staged": true
         },
         {
           "source_index": 15,
@@ -28,7 +34,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P1"
+          "proposal_id": "P1",
+          "staged": true
         },
         {
           "source_index": 15,
@@ -37,7 +44,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P3"
+          "proposal_id": "P3",
+          "staged": true
         },
         {
           "source_index": 15,
@@ -46,7 +54,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P3"
+          "proposal_id": "P3",
+          "staged": true
         },
         {
           "source_index": 15,
@@ -55,7 +64,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P4"
+          "proposal_id": "P4",
+          "staged": true
         },
         {
           "source_index": 15,
@@ -64,7 +74,8 @@
           "layer": 0,
           "direction": 2,
           "path_behavior": "stationary",
-          "proposal_id": "P4"
+          "proposal_id": "P4",
+          "staged": true
         }
       ],
       "existing_officer_links": [],
@@ -72,7 +83,7 @@
     },
     {
       "mission": "Emb02_FoC_MK",
-      "content_digest": "0019f1489e94fdace7ddade47c47906c5b7bd24c134e0375545a2eb7f8cf35bf",
+      "content_digest": "c92ec264b6fca4f1b1770b4b65985b5981a3396b3fa60494563e5d3517de66de",
       "authored_soldier_count": 27,
       "selected_proposal_ids": [
         "P1",
@@ -148,7 +159,7 @@
     },
     {
       "mission": "Emb03_FoC_MP",
-      "content_digest": "4362e30e3f145b8a14c6eafbbebb3f739ebcff66ab745d7af6918556bffb242f",
+      "content_digest": "4a31610e9c45bcdc30bc4c17540ab6d950cf03322a067b832a5fdd6d462473ec",
       "authored_soldier_count": 34,
       "selected_proposal_ids": [
         "P1",
@@ -197,7 +208,7 @@
     },
     {
       "mission": "Emb04_FoA_MP",
-      "content_digest": "4b707928b5e981e0c514e21b245c65b8b2ac87b4d7273bde3b5c003512f5216a",
+      "content_digest": "865a7a6fc4b122180ee154e8a26229f0a3f64c45b4c475799612af97aad59f4a",
       "authored_soldier_count": 30,
       "selected_proposal_ids": [
         "P1"
@@ -227,7 +238,7 @@
     },
     {
       "mission": "Emb05_FoB_MP",
-      "content_digest": "f956b8dc918cf39c97297e68945542c1a6453705ba254da8849a98295fb770c3",
+      "content_digest": "468c4c91b27ea0bd68a8c341310a8cfe15b6738da5bbb0a57220ab72fd673364",
       "authored_soldier_count": 38,
       "selected_proposal_ids": [
         "P1",
@@ -276,7 +287,7 @@
     },
     {
       "mission": "Emb06_FoC_EC",
-      "content_digest": "f27e787ebd2690b43e84a24943da1430709b2d0ae16922a73aebff25989d423a",
+      "content_digest": "a76065a8a79cbba95c5e64bb21e6d1962eb1deb54da619191db0f9474303dec7",
       "authored_soldier_count": 33,
       "selected_proposal_ids": [
         "P1",
@@ -325,7 +336,7 @@
     },
     {
       "mission": "Emb08_FoA_JMS",
-      "content_digest": "276d7794ec63f6f00196da200ec9e0ecb4a9d781ac8f244ca4c62dca5b0c9759",
+      "content_digest": "4a48f08588869e3e091abc013e76398f2dc2d063ae63bb7cd81daf68ed533082",
       "authored_soldier_count": 18,
       "selected_proposal_ids": [
         "P1",
@@ -393,7 +404,7 @@
     },
     {
       "mission": "EmbTut_FoC_EC",
-      "content_digest": "85737d33c381b9b45afeedd3b1c334ec5d29b79bfcc9a875549375c24a03aae7",
+      "content_digest": "dace1f24c9d630df78e08e4e62ba57ac97c3ec25117d145aa93810deb80dd3b8",
       "authored_soldier_count": 22,
       "selected_proposal_ids": [
         "P1",
@@ -442,7 +453,7 @@
     },
     {
       "mission": "H01_Lin_VL",
-      "content_digest": "0bac983300e73f1c9af66bff79f5d5be1d943f3a713bb6244c9b804cedd37b7f",
+      "content_digest": "92fe8f5ebd5b0e051eb8866bd97461bacd47193ace0784c0758069967c16d969",
       "authored_soldier_count": 38,
       "selected_proposal_ids": [
         "P3",
@@ -491,7 +502,7 @@
     },
     {
       "mission": "H02_Not_EC",
-      "content_digest": "9bad260f00ecb872036a6bff3d9105efa13034cce7c497a06c8cda8249695ee0",
+      "content_digest": "d4c5dff1ef701ab237d5bb40315022d18553abc969aa734f1f99278d0c46ba8c",
       "authored_soldier_count": 111,
       "selected_proposal_ids": [
         "P1",
@@ -730,7 +741,7 @@
     },
     {
       "mission": "H03_Der_MK",
-      "content_digest": "3ada754bdfe245fa7a6cff4760d31d2d95ab63370e5195b2ecc87422b1b1f675",
+      "content_digest": "1060ae6a1cc71ed789ea05e71db5cf5e2de339ee491635cf4a4238ac94e7dad6",
       "authored_soldier_count": 96,
       "selected_proposal_ids": [
         "P1",
@@ -901,7 +912,7 @@
     },
     {
       "mission": "H04_Lei_VL",
-      "content_digest": "4c446f64e8e0103393e4cb968bf8ca2082f15462ace8ca0eed44a0a30b68c1da",
+      "content_digest": "47ccd9907883477667afc345f09fb50ec906dacaaaaf2b6b81ccb77e5dc635dc",
       "authored_soldier_count": 56,
       "selected_proposal_ids": [
         "P1",
@@ -1033,7 +1044,7 @@
     },
     {
       "mission": "H05_Lin_EC",
-      "content_digest": "323181d46904a998ab057d98dd439c7b89083c8aef24f40edfbe8979eb05730c",
+      "content_digest": "32c55a664f2d1602603760582178a20c571d674d7df3464e569b9d6a28e17089",
       "authored_soldier_count": 91,
       "selected_proposal_ids": [
         "P1",
@@ -1281,7 +1292,7 @@
     },
     {
       "mission": "H07_Not_MK",
-      "content_digest": "9d8f48b3047a2359d082b56261be274a118f673e4f3c1942e0234cecdb4415b9",
+      "content_digest": "b65a612cb119a9877c62c85d9cd70ee87f64a97e9e96e8b5f9fc73bccb41b513",
       "authored_soldier_count": 108,
       "selected_proposal_ids": [
         "P1",
@@ -1459,7 +1470,7 @@
     },
     {
       "mission": "H09_Not_VL",
-      "content_digest": "987132370dbcb843209f69a91354a195ee875ae55a7d4a5282b39fd032ab46c5",
+      "content_digest": "6cb6c9d5ad77e39048aa93c8b353bd053c7818f2518f7e29c60f07a52afe3927",
       "authored_soldier_count": 117,
       "selected_proposal_ids": [
         "P2",
@@ -1736,7 +1747,7 @@
     },
     {
       "mission": "H10_Yor_VL",
-      "content_digest": "c18810ca3b3b126ccc721054eb161d22b8e438b7cb917f906a91bc601b142460",
+      "content_digest": "fb0bd2c9fb82658dc69f3a5e673a9d4061c6fc88730b22b37283e4b3d3921f40",
       "authored_soldier_count": 106,
       "selected_proposal_ids": [
         "P1",
@@ -1995,7 +2006,7 @@
     },
     {
       "mission": "H12_Not_MP",
-      "content_digest": "33efa18532255cbbe625de4533b8b2762bf2b7208fd3eb253556a7529aab58a9",
+      "content_digest": "349aee69cf63be51a366b7b614aa2187ada37c383d84a5f41580bdea65caa91b",
       "authored_soldier_count": 159,
       "selected_proposal_ids": [
         "P1",
@@ -2242,7 +2253,7 @@
     },
     {
       "mission": "S01_Not_VL",
-      "content_digest": "86d6a614980704668f67c8dfb78b57cc1284aca98a767f8450b9f2b345661bdc",
+      "content_digest": "b171449fab88d3481084aaf091f52ff9638df80798ef2bee215ebaac4ccb72df",
       "authored_soldier_count": 88,
       "selected_proposal_ids": [
         "P1",
@@ -2524,7 +2535,7 @@
     },
     {
       "mission": "S02_Lei_MP",
-      "content_digest": "0eb6171d539ef8d29edb4a0e4ad2410b5af237e55d7363844641846aba36c8e1",
+      "content_digest": "8acd95f9d5937606dd375338809893e8e8921b6119a3533567d56d9672c7b8f0",
       "authored_soldier_count": 74,
       "selected_proposal_ids": [
         "P1",
@@ -2800,7 +2811,7 @@
     },
     {
       "mission": "S03_FoB_MP",
-      "content_digest": "e38fb38acc81e02bd0060d54271e69a52edf3cedac2be9433db00be8b7563559",
+      "content_digest": "3bd0ed652e167d6c4071ecac5c5c7bb64abef3ded5e45a4db9f56e3325508de1",
       "authored_soldier_count": 60,
       "selected_proposal_ids": [
         "P1",
@@ -2895,7 +2906,7 @@
     },
     {
       "mission": "S04_Der_EC",
-      "content_digest": "489a2c6aa008f60b60eb123a2d35c71a5920dc7a9bc56e76b6068602d35cad8b",
+      "content_digest": "ee3d33ebe7793e3464932c5a5408d3726ee91d3ce8e0b7263ea0a4dfb214c33f",
       "authored_soldier_count": 86,
       "selected_proposal_ids": [
         "P1",
@@ -3020,7 +3031,7 @@
     },
     {
       "mission": "S05_Yrk_EC",
-      "content_digest": "befd8513427b6b1aed2e94b12e1883228e35b09378351681a8f29b83efc37541",
+      "content_digest": "af19e0a1389a03168d11fc95704dea1f80cd012c97ca3ef4047e0a855a67f3dd",
       "authored_soldier_count": 129,
       "selected_proposal_ids": [
         "P1",
@@ -3259,7 +3270,7 @@
     },
     {
       "mission": "Str01_Lin_EC",
-      "content_digest": "7e9c6426387576fd09821b09ab4a9f0ba3e57ae8e9174198945e15d31245978d",
+      "content_digest": "6121c8af6c3a58b090979bfaef32a27c6d39461b8ab25bdfccc18ff4619bb366",
       "authored_soldier_count": 134,
       "selected_proposal_ids": [
         "P1",
@@ -3459,7 +3470,7 @@
     },
     {
       "mission": "Str02_Der_MP",
-      "content_digest": "450bdc8da5028fc9015be131186641f581b3fe221053ce909b61d74fe7a0fccf",
+      "content_digest": "51a00c3127683305cc5d2b0ce8d1a78cc7e5aca08a681c378e205e2b2324cf3a",
       "authored_soldier_count": 130,
       "selected_proposal_ids": [
         "P1",
@@ -3660,7 +3671,7 @@
     },
     {
       "mission": "Str03_Yor_MK",
-      "content_digest": "6510c79f674c455f2e073bab7e13f18be0c53ebaf6150edaaee0498a25b9cd6e",
+      "content_digest": "e9b41712eef02e2c0b229326fe398a85104cb9c13d674c881549eca89ef8353d",
       "authored_soldier_count": 184,
       "selected_proposal_ids": [
         "P1",
@@ -3921,7 +3932,7 @@
     },
     {
       "mission": "Tac01_FoA_MP",
-      "content_digest": "ca0233727ea31af6b8a4c3ac870f2b020f1fde25685c0c6cf69f1eec4064d3ae",
+      "content_digest": "767409f56ee0444a2cad82c895ef782de7cd4f3d867e6874074def4c3b30847f",
       "authored_soldier_count": 45,
       "selected_proposal_ids": [
         "P1"
@@ -3951,7 +3962,7 @@
     },
     {
       "mission": "Tac02_FoB_EC",
-      "content_digest": "3e9ddc7c445d4d19241e583ed3e78b8d56c6039e320ffc386d964580a77d750e",
+      "content_digest": "169bed65c4d179253ffb5b69e491e6f2fc6e623640d1d34d2d9abefbe84bac27",
       "authored_soldier_count": 77,
       "selected_proposal_ids": [
         "P1",
@@ -4000,7 +4011,7 @@
     },
     {
       "mission": "Tac03_FoC_MP",
-      "content_digest": "a57686f0634ad7ace2f3f9039f7667f7f102fb345be61b74a87dc8505a50fcca",
+      "content_digest": "f10e73c8bba6a4d0806c153815d1ad812f2369532ec32f52d664861d63917e89",
       "authored_soldier_count": 58,
       "selected_proposal_ids": [
         "P1"
@@ -4030,7 +4041,7 @@
     },
     {
       "mission": "Tac05_FoC_MP",
-      "content_digest": "9387a1fccef0fcc314ebb5dd60972b1467683f02d5b9a998a26f22a1d19249b1",
+      "content_digest": "81ac947a4a9cfb04b0642733605848dc420adab7842c9b20008cfcd477d40cc3",
       "authored_soldier_count": 15,
       "selected_proposal_ids": [
         "P1"
@@ -4060,7 +4071,7 @@
     },
     {
       "mission": "Tac06_FoB_EC",
-      "content_digest": "23934c0548b734216ea304b2ef5a46595899d3d528100e853ea138c1438cc4bb",
+      "content_digest": "b5a0ea5ebe56bb6c03173c222027d98d0a6e751790238f1b6174f9b7fa244dc7",
       "authored_soldier_count": 47,
       "selected_proposal_ids": [
         "P1"
@@ -4090,7 +4101,7 @@
     },
     {
       "mission": "Tac17_FoC_EC",
-      "content_digest": "b7c803525ec1d0639287c5099dc310518e3e56224d68ba56c17fbd0ec6e70b17",
+      "content_digest": "8283f603887b5b9ba6bec0749878e19f02f7eff96769b839159841b75dad4be6",
       "authored_soldier_count": 40,
       "selected_proposal_ids": [
         "P1",
@@ -4158,7 +4169,7 @@
     },
     {
       "mission": "Tac18_FoA_EC",
-      "content_digest": "840a1af3f9aacbf74bc9c46101a2b5a0f95f80f23012cd54b239b5eabff48966",
+      "content_digest": "4866e55a83ecca9b428e26c3efd61adafe2010b4bd2583298803b9e896da939f",
       "authored_soldier_count": 30,
       "selected_proposal_ids": [
         "P1"
@@ -4188,7 +4199,7 @@
     },
     {
       "mission": "Tac19_FoB_EC",
-      "content_digest": "033544f11791fb654b367599bc663c600d6d76349d432ca4d3590c891a9b782c",
+      "content_digest": "b6c187d796879dc97855568b2f35ba17d3919680cb0817084064092236444450",
       "authored_soldier_count": 32,
       "selected_proposal_ids": [
         "P1",
@@ -4237,7 +4248,7 @@
     },
     {
       "mission": "Tac21_FoB_EC",
-      "content_digest": "27a363d7034ac23860728731b8b0e27b3517b55a18cb2407765ed9ec5531f954",
+      "content_digest": "dd49772e2759b11fce6f8216b832a519bf277f54465e96e0893156f08bfdec03",
       "authored_soldier_count": 28,
       "selected_proposal_ids": [
         "P1"
