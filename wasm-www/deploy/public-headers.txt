@@ -1,6 +1,6 @@
 /*
   Cache-Control: public, max-age=0, must-revalidate
-  Content-Security-Policy: default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; frame-src %ROBIN_SIGNER_ORIGIN%; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src %ROBIN_SIGNER_ORIGIN%; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
