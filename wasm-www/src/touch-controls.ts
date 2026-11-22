@@ -17,7 +17,9 @@ export function installTouchControls(
   if (previous !== undefined) return previous;
 
   const bound: [HTMLButtonElement, () => void][] = [];
-  for (const button of container.querySelectorAll<HTMLButtonElement>("button[data-robin-command]")) {
+  for (const button of container.querySelectorAll<HTMLButtonElement>(
+    "button[data-robin-command]",
+  )) {
     const raw = button.getAttribute("data-robin-command");
     if (raw === null) continue;
     let command: unknown;

@@ -37,7 +37,9 @@ test("web manifest declares an installable standalone app with real icons", () =
 });
 
 test("deploy headers allow the manifest and keep cross-origin isolation", () => {
-  const csp = headers.split("\n").find((line) => line.trimStart().startsWith("Content-Security-Policy:"));
+  const csp = headers
+    .split("\n")
+    .find((line) => line.trimStart().startsWith("Content-Security-Policy:"));
   assert.ok(csp, "public headers must declare a CSP");
   assert.match(csp, /manifest-src 'self'/u);
   assert.match(csp, /worker-src 'self' blob:/u);

@@ -50,7 +50,10 @@ test("safe-area insets shrink the canvas box but never the fullscreen box", (t) 
     devicePixelRatio: 1,
     insets: { top: 40, right: 20, bottom: 30, left: 10 },
   };
-  const lifecycle = installCanvasBackingStore(canvas, { viewport: () => viewport, subscribe: () => () => {} });
+  const lifecycle = installCanvasBackingStore(canvas, {
+    viewport: () => viewport,
+    subscribe: () => () => {},
+  });
   assert.equal(canvas.style.width, "1154px");
   assert.equal(canvas.style.height, "814px");
   viewport = { ...viewport, fullscreen: true };
