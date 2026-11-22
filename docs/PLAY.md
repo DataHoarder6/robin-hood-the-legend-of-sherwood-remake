@@ -8,7 +8,7 @@ stays on one commit. Build and test commands live in `AGENTS.md` and
 
 - **stable** — an annotated `vX.Y.Z` tag on `fork/main`, published as a
   non-prerelease GitHub release. This is the only build people play together.
-- **dev** — a worktree build. Runs on the build-host and the laptop, never on the
+- **dev** — a worktree build. Runs on minipc and the laptop, never on the
   Windows seat.
 - `fork/main` is the integration branch, and a nightly prerelease is a snapshot
   of it. Neither is a seat's build.
@@ -31,13 +31,13 @@ release assets (`.github/workflows/native-release.yml`).
 
 | Host | OS | stable | dev |
 | --- | --- | --- | --- |
-| `build-host` | NixOS (the Windows 11 side is unused) | installed in the profile | run from a worktree's store path; is the build host |
-| `laptop` | NixOS | installed in the profile | a store path copied from the build-host; never compiles |
+| `minipc` | NixOS (the Windows 11 side is unused) | installed in the profile | run from a worktree's store path; is the build host |
+| `laptop` | NixOS | installed in the profile | a store path copied from minipc; never compiles |
 | `player-b-pc` | Windows 11, behind CGNAT | Velopack stable install | none; reached through the reverse tunnel |
 
-### The build-host is the build host
+### minipc is the build host
 
-It is often off. Wake it with `wake-host build-host` before a build; the relay, the
+It is often off. Wake it with `wake-host minipc` before a build; the relay, the
 MAC and the WOL arming live in nixos-config (`agent/core.nix`, `wake-host`).
 `scripts/remote-check.sh` wakes it itself when the host does not answer and
 fails if it stays unreachable. Builds do not happen on the laptop or the
@@ -45,11 +45,11 @@ runtime.
 
 ### Install stable on NixOS
 
-From a checkout of the stable tag, on the build-host:
+From a checkout of the stable tag, on minipc:
 
     nix build .#robin
 
-On the build-host:
+On minipc:
 
     nix profile install ./result
 

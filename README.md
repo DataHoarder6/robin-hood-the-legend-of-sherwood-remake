@@ -432,7 +432,7 @@ Logging verbosity is controlled by `RUST_LOG` (`info`, `debug`,
 
 ### Developer tools
 
-The native release packages include four command-line [modding tools](docs/MODDING_TOOLS.md)
+The native release packages include four command-line [modding tools](docs/slop/MODDING_TOOLS.md)
 alongside the game executable: `cpf_to_json`, `encode_mod_sprites`, `disasm_scb`,
 and `dump_res`. Build them with `cargo build -p robin_modding_tools --bins`.
 

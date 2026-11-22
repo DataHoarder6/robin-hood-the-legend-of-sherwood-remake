@@ -1,7 +1,7 @@
 # Nix package and cross-host install
 
 Last verified: 2026-11-17, `nix build .#robin` and a headless mission in the packaged
-binary on the build host (build-host).
+binary on the build host (minipc).
 
 `flake.nix` exposes `packages.<system>.robin` (also `default`) and
 `apps.<system>.robin` for `nix run`. One host builds it; consumers receive the store
