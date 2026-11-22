@@ -770,6 +770,10 @@ impl CampaignMapModalState {
     }
 
     fn watch_selected_play(&mut self) {
+        if !crate::mission_replays::replay_playback_available() {
+            self.replay_status = "Replay playback requires the desktop game.".into();
+            return;
+        }
         let Some(play) = self
             .graph
             .nodes
@@ -2643,6 +2647,17 @@ fn detail_sections(
         ])
 }
 
+/// Watch control for the selected play: its label and whether it is active.
+/// The control is only meaningful when a recording exists and this build can
+/// actually open one.
+fn watch_replay_control(has_recording: bool, playback_available: bool) -> (&'static str, bool) {
+    match (has_recording, playback_available) {
+        (true, true) => ("Watch replay", true),
+        (false, true) => ("No recording", false),
+        (_, false) => ("Replay unavailable", false),
+    }
+}
+
 fn render_mission_details(
     renderer: &mut Renderer,
     transform: MenuTransform,
@@ -2782,19 +2797,17 @@ fn render_mission_details(
             history_view.content_width() - 24,
         );
     }
-    let can_watch = node
-        .plays
-        .get(selected_play)
-        .is_some_and(|play| play.recording.is_some());
+    let (watch_label, can_watch) = watch_replay_control(
+        node.plays
+            .get(selected_play)
+            .is_some_and(|play| play.recording.is_some()),
+        crate::mission_replays::replay_playback_available(),
+    );
     progress_button(
         renderer,
         font,
         transform,
-        if can_watch {
-            "Watch replay"
-        } else {
-            "No recording"
-        },
+        watch_label,
         (560, 630, 208, 36),
         can_watch,
     );
@@ -4180,6 +4193,18 @@ mod browser_tests {
         }
     }
 
+    /// A browser build has no local viewer: even with a linked recording the
+    /// detail pane must not offer an active Watch control that can only fail.
+    #[test]
+    fn watch_replay_not_offered_in_browser() {
+        let (label, active) = watch_replay_control(true, false);
+        assert!(!active, "a browser Watch button cannot open a viewer");
+        assert_ne!(
+            label, "Watch replay",
+            "the disabled button must not promise playback"
+        );
+    }
+
     #[test]
     fn browser_navigates_same_views_but_cannot_launch() {
         let mut state = browser();
@@ -4942,6 +4967,50 @@ mod availability_tests {
             ),
             Some(CampaignMapChoice::SelectMission(items[ready].mission_idx))
         );
+    }
+
+    /// The completed pin is the map's replay entry. Selecting it runs the
+    /// engine's practice-replay path, whose terminal update restores the exact
+    /// pre-selection rewards instead of banking the practice run's earnings.
+    #[test]
+    fn completed_mission_replay_leaves_rewards_unchanged() {
+        use robin_engine::campaign::CampaignValue;
+        use robin_engine::campaign_history::MissionAttemptOutcome;
+        let (mut campaign, profiles) = availability_fixture();
+        let items = items(&campaign, &profiles);
+        let replay = items
+            .iter()
+            .find(|item| item.availability == MissionAvailability::Completed)
+            .expect("completed pin");
+        let idx = replay.mission_idx;
+        assert!(campaign.is_mission_replayable(idx));
+
+        campaign.set_value(CampaignValue::Ransom, 321);
+        campaign.set_value(CampaignValue::Score, 17);
+        let rewards = bitcode::encode(&campaign.values);
+
+        // This is the selection the map dispatches for a completed pin: the
+        // engine captures its return snapshot before the practice run starts.
+        campaign.select_next_mission(Some(idx), &profiles);
+        assert_eq!(campaign.history_replay_mission(), Some(idx));
+        campaign.current_mission_idx = Some(idx);
+
+        // Rewards earned inside the practice run must not reach the campaign.
+        campaign.set_value(CampaignValue::Ransom, 0);
+        campaign.set_value(CampaignValue::Score, 9_999);
+        campaign.record_mission_attempt(
+            idx,
+            MissionAttemptOutcome::Won,
+            Some(123_456),
+            Some(987_654),
+            80,
+            Default::default(),
+            &Default::default(),
+            None,
+        );
+
+        assert_eq!(bitcode::encode(&campaign.values), rewards);
+        assert_eq!(campaign.history_replay_mission(), None);
     }
 }
 

@@ -39,6 +39,11 @@ impl RecordingIndex {
     }
 }
 
+/// Playback cannot work in a browser, so the campaign map must not offer Watch.
+pub(crate) const fn replay_playback_available() -> bool {
+    false
+}
+
 pub(crate) fn watch(
     _path: &std::path::Path,
     _expected: (MissionAttemptKey, Option<i64>),

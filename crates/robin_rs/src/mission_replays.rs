@@ -14,7 +14,7 @@ pub(crate) use native::{default_directory, replay_attempt_identity};
 mod browser;
 #[cfg(target_arch = "wasm32")]
 use browser as platform;
-pub(crate) use platform::watch;
+pub(crate) use platform::{replay_playback_available, watch};
 
 /// Application-owned recording links and background scan. Runtime ownership cannot
 /// be restored from a diagnostic serialization.

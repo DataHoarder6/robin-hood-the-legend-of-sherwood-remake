@@ -370,9 +370,25 @@ fn find_in(
     None
 }
 
+/// Native builds open recordings in a separate replay viewer.
+pub(crate) const fn replay_playback_available() -> bool {
+    true
+}
+
 pub(crate) fn watch(
     path: &std::path::Path,
     expected: (MissionAttemptKey, Option<i64>),
+) -> Result<(), String> {
+    watch_with(path, expected, spawn_replay_viewer)
+}
+
+/// Validate the recording against the play before handing it to `launch`.
+/// Keeping the launch injectable lets a test prove the success path without
+/// starting a second copy of the game.
+fn watch_with(
+    path: &std::path::Path,
+    expected: (MissionAttemptKey, Option<i64>),
+    launch: impl FnOnce(&std::path::Path) -> Result<(), String>,
 ) -> Result<(), String> {
     if !path.is_file() && !path.join("mission.json").is_file() {
         return Err("The recording file is no longer available.".into());
@@ -383,13 +399,21 @@ pub(crate) fn watch(
     if replay_attempt_identity(&data)? != Some(expected) {
         return Err("The recording file does not match this play.".into());
     }
+    launch(path)
+}
+
+fn replay_viewer_command(path: &std::path::Path) -> Result<std::process::Command, String> {
     // A separate viewer preserves the live session, recorder and paused state.
     let mut command =
         std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     command.arg("--replay").arg(path);
     #[cfg(feature = "script-rpc")]
     command.args(["--http-server", "0"]);
-    let mut child = command
+    Ok(command)
+}
+
+fn spawn_replay_viewer(path: &std::path::Path) -> Result<(), String> {
+    let mut child = replay_viewer_command(path)?
         .spawn()
         .map_err(|e| format!("Cannot open replay: {e}"))?;
     std::thread::spawn(move || match child.wait() {
@@ -894,5 +918,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn native_watch_success_opens_viewer() {
+        use std::ffi::OsStr;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("success.rhrec.jsonl");
+        write_recording(&path, 41);
+        let expected = (
+            MissionAttemptKey {
+                campaign_run_id: 41,
+                sequence: 1,
+            },
+            Some(100),
+        );
+        let launched = std::cell::RefCell::new(None);
+        watch_with(&path, expected, |launched_path| {
+            *launched.borrow_mut() = Some(launched_path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(launched.borrow().as_deref(), Some(path.as_path()));
+
+        // The launcher `watch` hands to builds a viewer for this exact file.
+        let command = replay_viewer_command(&path).unwrap();
+        assert_eq!(
+            command.get_program(),
+            std::env::current_exe().unwrap().as_os_str()
+        );
+        let args = command.get_args().collect::<Vec<_>>();
+        assert_eq!(args.first().copied(), Some(OsStr::new("--replay")));
+        assert_eq!(args.get(1).copied(), Some(path.as_os_str()));
+        #[cfg(feature = "script-rpc")]
+        assert_eq!(&args[2..], &[OsStr::new("--http-server"), OsStr::new("0")]);
     }
 }
