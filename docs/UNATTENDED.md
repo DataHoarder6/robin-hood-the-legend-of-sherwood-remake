@@ -24,10 +24,15 @@ Every iteration ends in exactly one of three states and reports it. There is no
 fourth state and no prompt to the owner to choose, confirm, or continue.
 
 - **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`.
-  What a landing requires is defined in LANDED requires origin read-back below.
-- **FILED** — the failure survived its bounded retry budget and was filed in
-  [DEFECTS.md](DEFECTS.md) with status `deferred`: the row names its issue.
-  The row, never another rerun, ends the iteration.
+  What a landing requires is defined in
+  [LANDED requires origin read-back](#landed-requires-origin-read-back).
+- **FILED** — a `deferred` row in [DEFECTS.md](DEFECTS.md) names its issue and
+  ends the iteration. Three entries reach it: the bounded retry budget is
+  exhausted ([Retry and quarantine](#retry-and-quarantine)); the circuit breaker
+  hits two failed fixes or one repeated commit
+  ([Circuit breaker](#circuit-breaker)); or a full-corpus row fails under load
+  but passes in isolation ([Known flake policy](#known-flake-policy)). The row,
+  never another rerun, ends the iteration.
 - **BLOCKED** — the next step needs a capability the loop cannot supply. Name the
   missing capability and stop; do not ask the owner to provide it.
 
@@ -69,14 +74,15 @@ repo, never committed, no git churn. It is state, not a second source of rules.
 Write the file at selection and after every state transition. It records exactly
 five fields: selected item, worktree path, gate unit/result, current terminal
 state or `pending`, and next action. An absent file means no prior selection was
-recorded; start from Iteration order. The rules stay here and in the agent
-files; the artifact records only where this loop stopped.
+recorded; start from [Iteration order](#iteration-order). The rules stay here
+and in the agent files; the artifact records only where this loop stopped.
 
 ## Gate and land path
 
 `scripts/remote-check.sh` and `scripts/land.sh` are the only paths: the first
-runs the build-host gate, the second gates and lands the tree — see LANDED
-requires origin read-back above for what a landing requires.
+runs the build-host gate, the second gates and lands the tree — see
+[LANDED requires origin read-back](#landed-requires-origin-read-back) for what a
+landing requires.
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the
 build-slot/gate rule and the FIFO landing queue; one gate is in flight across
 agents, and a competing gate queues behind the running one. Suite names live in
@@ -91,7 +97,8 @@ Retries are bounded and quarantine is central.
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns the budget (CI retries, no local
 rerun) and the rule; a surviving failure is FILED in [DEFECTS.md](DEFECTS.md)
 with status `deferred` and a row that names its issue. This page does not
-restate the CI retry numbers; the per-item ceiling is in Circuit breaker below.
+restate the CI retry numbers; the per-item ceiling is in
+[Circuit breaker](#circuit-breaker).
 
 ## Circuit breaker
 
@@ -114,21 +121,24 @@ A corpus row that fails in a full-gate run but passes in isolation is a known
 load flake, not a defect to keep fixing. Record one `deferred` row in
 [DEFECTS.md](DEFECTS.md): class `release`, reproduction = full corpus run on
 the build host, check = isolated row recheck, and a link to the issue that owns
-the discussion. The row is the end of the item — do not retry it indefinitely
-and do not land a "fix" for it. The quarantine rule itself stays with
+the discussion. This is an exception to the two-attempt
+[circuit breaker](#circuit-breaker): a known flake is deferred on
+identification, not after two attempts, and is never retried indefinitely or
+"fixed". The quarantine rule itself stays with
 [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md).
 
 ## Risk routing
 
-The loop never edits `.github/workflows/*`, `scripts/land.sh`,
-`scripts/remote-check.sh`, release scripts (`scripts/release*.sh`), or any
-machine config or secret (`*.nix` included). Those files are CI, deploy and
-landing authority, or host configuration — human capabilities. If an item's fix
-needs one of them, the item is BLOCKED with that capability named: never
-attempted, never asked for. Stable tags: see
-[Gate and land path](#gate-and-land-path) and [RELEASES.md](RELEASES.md). The
-director's `edit` denies enforce the file subset
-([director.md](../.opencode/agents/director.md)).
+The loop never edits CI, deploy or landing authority, or host configuration:
+`.github/workflows/*`, `scripts/land.sh`, `scripts/remote-check.sh`,
+`scripts/release*.sh`, Nix files (`*.nix`, `**/*.nix`) and secret paths
+(`.env*`, `**/*.env`, `**/.env*`, `**/*secret*`, `**/secrets/**`). An item that
+needs one of them is BLOCKED with that capability named: never attempted, never
+asked for. The director's
+[`edit` denies](../.opencode/agents/director.md) enforce this path subset;
+anything a deny does not cover — a path outside this repo, for example — is
+BLOCKED by this rule, not by a permission. Stable tags: see
+[Gate and land path](#gate-and-land-path) and [RELEASES.md](RELEASES.md).
 
 ## Windows as BLOCKED
 
@@ -145,8 +155,8 @@ Windows seat runs a recorded session ([WINDOWS.md](WINDOWS.md)).
 immediately — the break-glass, not a terminal state. The durable form is a
 commit to `~/nixos-config` setting `agent.director-loop.enable = false`, which
 that host pulls and activates. The loop itself never edits machine config; a
-request to do so is BLOCKED under Risk routing above, with `nixos-config`
-named as the missing capability. Last verified: 2026-11-22.
+request to do so is BLOCKED under [Risk routing](#risk-routing), with
+`nixos-config` named as the missing capability. Last verified: 2026-11-22.
 
 ## One-week pilot metrics
 
@@ -155,14 +165,14 @@ its source; the source is the measurement, not a stored report.
 
 | Metric | Command / source |
 | --- | --- |
-| Tasks attempted, LANDED, FILED, BLOCKED | `journalctl --user -u director-loop.service` — one terminal state per iteration |
+| Tasks attempted, LANDED, FILED, BLOCKED | `journalctl --user -u director-loop.service` — one terminal state per iteration; a tick that ends `pending` in the handoff artifact is not a completed iteration and is not counted |
 | First-pass gate success | Gate evidence (`scripts/remote-check.sh` verdict / `summary.json`, indexed by [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md)) — first gate versus retries |
 | Revert rate | `git log fork/main --grep=revert -i`; tip confirmed with `git ls-remote fork refs/heads/main` |
 | Review iterations | Director journal, reviewer rounds per item; cross-check `gh issue view 49` |
 | Time-to-land p50/p90 | Director journal timestamps: iteration start → LANDED |
-| Blocked dwell | Director journal timestamps: BLOCKED → clear; capability issue in `gh issue` |
+| Blocked dwell | Director journal timestamps: BLOCKED → next tick re-queues the item or escalates a capability issue (`gh issue`) |
 | Cost per landed task | `opencode stats` (tokens/cost per session) ÷ LANDED count from the journal |
-| False-quarantine count | [DEFECTS.md](DEFECTS.md) `deferred` rows whose check later passes without a fix |
+| False-quarantine count | [DEFECTS.md](DEFECTS.md) `deferred` rows whose check later passes without a fix; the verdict comes from gate evidence (`summary.json`), not the row text |
 
 A cost or duration that cannot be produced by one of these sources is not
 reported; do not fill the table with estimates.
