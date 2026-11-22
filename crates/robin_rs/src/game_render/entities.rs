@@ -806,6 +806,56 @@ pub(super) fn draw_map_cross(
 
 // ─── GPU selection outline pass ──────────────────────────────────
 
+/// Facts that decide whether an entity gets an outline and at what alpha.
+/// Kept pure so the accessibility rules (constant alpha, fog wins, no
+/// pulsing) can be checked without a renderer or a live engine.
+#[derive(Debug, Clone, Copy)]
+struct OutlineDecision {
+    is_active: bool,
+    hidden_in_building: bool,
+    npc_in_building: bool,
+    carried: bool,
+    fog_visible: bool,
+    controlled_or_allied: bool,
+    reveal_hidden: bool,
+    is_focused: bool,
+    is_action_marked: bool,
+    hulk_running: bool,
+    hulk_level: u16,
+}
+
+/// Outline alpha percentage (0..=100), or `None` when no outline is drawn.
+///
+/// Hidden-in-building characters use a constant alpha of 100 — persistent
+/// for the player's own/allied characters, and only after the reveal key
+/// for hostiles/NPCs. Fog always takes priority. No pulsing (XAG 118).
+fn outline_alpha_pct(d: OutlineDecision) -> Option<u16> {
+    if !d.fog_visible {
+        return None;
+    }
+
+    if d.hidden_in_building {
+        if d.carried || (!d.controlled_or_allied && !d.reveal_hidden) {
+            return None;
+        }
+        return Some(100);
+    }
+
+    if !d.is_active {
+        return None;
+    }
+
+    let indoor_outline = d.npc_in_building && !d.carried;
+    if !d.is_focused && !d.is_action_marked && !d.hulk_running && !indoor_outline {
+        return None;
+    }
+    if d.is_focused || d.is_action_marked || indoor_outline {
+        Some(100)
+    } else {
+        Some(d.hulk_level)
+    }
+}
+
 /// Render coloured outlines for selected PCs and the hovered entity.
 ///
 /// The selection-outline pass runs after all entity sprites are drawn
@@ -832,34 +882,22 @@ pub(crate) fn render_selection_outlines_gpu(
             Some(e) => e,
             None => continue,
         };
-        if !entity.is_active() || entity.element_data().hidden_in_building {
-            continue;
-        }
-        if !engine.fog_entity_visible(entity_id) {
-            continue;
-        }
-        let variant = engine.resolve_render_variant_for_ambiance(
-            entity,
-            apply_fog_to_all_sprites,
-            presentation.ambiance,
-        );
-
         let elem = entity.element_data();
 
-        // The outline is blitted only when the PC is mouse-marked or
-        // its `running_hulk` is positive.  The selection set on its
-        // own does NOT draw the outline — `refresh_pc_selection_hulk`
-        // seeds `running_hulk` on the first frame of selection and
-        // decrements it each tick, so the glow naturally fades from
-        // 100 down to 40 over `HULK_LENGTH` frames and then vanishes.
-        //
-        // `is_focused` stands in for the mouse-hover mark.
-        // `is_action_marked` covers the requirement-bar action flag,
-        // which marks every PC matching the hovered action.  Either
-        // forces `hulk_level = 100` for one frame.
-        // Mark contributions are prepared between the entity and outline
-        // passes. Borrow this phase's completed selection through immutable
-        // Host access, rather than snapshotting last frame's marks early.
+        // Whether this character belongs to the player, either as a
+        // directly controlled unit or an allied camp. Hidden characters in
+        // this set keep a persistent outline; hostiles need the reveal key.
+        let controlled_or_allied = engine.hero_selection(host.local_seat).contains(&entity_id)
+            || engine
+                .tactical_selection(host.local_seat)
+                .contains(&entity_id)
+            || engine.is_player_aligned_camp(entity.camp());
+
+        // The selection set on its own does NOT draw the outline —
+        // `refresh_pc_selection_hulk` seeds `running_hulk` on the first
+        // frame of selection and it decays 100 -> 40 over `HULK_LENGTH`
+        // frames. `is_focused` stands in for the mouse-hover mark and
+        // `is_action_marked` covers the requirements-bar hover flag.
         let is_focused = host.frontend.input.feedback.focused_entity_id == Some(entity_id);
         let is_action_marked = host
             .frontend
@@ -869,16 +907,35 @@ pub(crate) fn render_selection_outlines_gpu(
             .contains(&entity_id);
         let hulk_running = entity.human_data().is_some_and(|h| h.running_hulk > 0);
 
-        let indoor_outline =
-            npc_in_building(engine, entity) && entity.element_data().posture() != Posture::Carried;
-        if !is_focused && !is_action_marked && !hulk_running && !indoor_outline {
+        let decision = OutlineDecision {
+            is_active: entity.is_active(),
+            hidden_in_building: elem.hidden_in_building,
+            npc_in_building: npc_in_building(engine, entity),
+            carried: elem.posture() == Posture::Carried,
+            fog_visible: engine.fog_entity_visible(entity_id),
+            controlled_or_allied,
+            reveal_hidden: host.frontend.input.feedback.reveal_hidden,
+            is_focused,
+            is_action_marked,
+            hulk_running,
+            hulk_level: entity.human_data().map(|h| h.hulk_level).unwrap_or(100),
+        };
+        let Some(alpha_pct) = outline_alpha_pct(decision) else {
             continue;
-        }
+        };
+
+        let variant = engine.resolve_render_variant_for_ambiance(
+            entity,
+            apply_fog_to_all_sprites,
+            presentation.ambiance,
+        );
 
         let is_selected_tactical = host.frontend.preferences().control_tactical_units()
             && engine
                 .tactical_selection(host.local_seat)
                 .contains(&entity_id);
+        // TODO(XAG 102): the outline colour should be player-configurable
+        // and verified at 4.5:1/3:1 against every in-game background.
         let outline_color_565 = if is_selected_tactical && hulk_running && !is_focused {
             robin_engine::element_kinds::outline_colors::pc_default()
         } else if is_focused || is_action_marked {
@@ -890,15 +947,9 @@ pub(crate) fn render_selection_outlines_gpu(
             continue;
         }
 
-        // Alpha: focused/marked/action-marked force 100 (override any
-        // in-flight fade); otherwise use `hulk_level` (40..=100) from
-        // the fade state machine. The percentage (0-100) is converted
-        // to the renderer's 0-255 alpha range.
-        let alpha_pct = if is_focused || is_action_marked || indoor_outline {
-            100u16
-        } else {
-            entity.human_data().map(|h| h.hulk_level).unwrap_or(100)
-        };
+        // `alpha_pct` comes from `outline_alpha_pct`: a constant 100 for
+        // focused/marked/indoor outlines, otherwise the native hulk fade.
+        // Convert the 0-100 percentage to the renderer's 0-255 alpha range.
         let alpha_255 = ((alpha_pct as u32) * 255 / 100).min(255) as u8;
 
         // Resolve sprite frame (same calculation as render_entities_gpu).
@@ -1113,5 +1164,70 @@ pub(super) fn render_fx_entities_gpu<I>(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod outline_decision_tests {
+    use super::*;
+
+    fn decision() -> OutlineDecision {
+        OutlineDecision {
+            is_active: true,
+            hidden_in_building: false,
+            npc_in_building: false,
+            carried: false,
+            fog_visible: true,
+            controlled_or_allied: false,
+            reveal_hidden: false,
+            is_focused: false,
+            is_action_marked: false,
+            hulk_running: false,
+            hulk_level: 100,
+        }
+    }
+
+    #[test]
+    fn controlled_hidden_character_gets_a_constant_alpha_outline() {
+        let mut d = decision();
+        d.hidden_in_building = true;
+        d.is_active = false;
+        d.controlled_or_allied = true;
+        assert_eq!(outline_alpha_pct(d), Some(100));
+
+        // Without either condition the hidden character stays invisible.
+        let mut uncontrolled = d;
+        uncontrolled.controlled_or_allied = false;
+        assert_eq!(outline_alpha_pct(uncontrolled), None);
+    }
+
+    #[test]
+    fn hostile_hidden_character_is_outlined_only_after_reveal() {
+        let mut d = decision();
+        d.hidden_in_building = true;
+        d.is_active = false;
+        assert_eq!(outline_alpha_pct(d), None);
+
+        d.reveal_hidden = true;
+        assert_eq!(outline_alpha_pct(d), Some(100));
+    }
+
+    #[test]
+    fn fog_hidden_character_has_no_outline_even_when_revealed() {
+        let mut d = decision();
+        d.hidden_in_building = true;
+        d.is_active = false;
+        d.reveal_hidden = true;
+        d.fog_visible = false;
+        assert_eq!(outline_alpha_pct(d), None);
+    }
+
+    #[test]
+    fn carried_hidden_body_never_gets_an_outline() {
+        let mut d = decision();
+        d.hidden_in_building = true;
+        d.controlled_or_allied = true;
+        d.carried = true;
+        assert_eq!(outline_alpha_pct(d), None);
     }
 }

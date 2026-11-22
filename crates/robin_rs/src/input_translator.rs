@@ -66,6 +66,10 @@ pub enum GameKey {
 
     // --- Non-rebindable / debug ---
     StartMission,
+    /// Player-triggered reveal of hostiles/NPCs hidden in buildings.
+    /// CapsLock is taken by `SwitchHiddenDisplay` (`draw_hidden`, a
+    /// different mechanism), so this uses its own reserved key.
+    RevealHiddenCharacters,
     DisplayMenu,
 
     RecordMovie,
@@ -128,6 +132,8 @@ pub enum GameAction {
     /// Ask the host presentation to open the Sherwood trading panel.
     OpenSherwoodTrading,
     SwitchMaskedDisplay,
+    /// Toggle constant-alpha outlines for hidden hostiles/NPCs.
+    RevealHiddenCharacters,
     PrintScreen,
 
     // Game control
@@ -261,6 +267,9 @@ impl InputTranslator {
         self.bindings[GameKey::PrintScreen] = Some(PrintScreen);
         self.bindings[GameKey::DisplayMenu] = Some(Escape);
         self.bindings[GameKey::SherwoodTrading] = Some(KeyT);
+        // CapsLock already drives SwitchMaskedDisplay (masked sprite
+        // edges), so the reveal key is a distinct, unused binding.
+        self.bindings[GameKey::RevealHiddenCharacters] = Some(KeyO);
 
         // Debug keys (only in non-shipping builds)
         self.bindings[GameKey::SlowMotion] = Some(Pause);
@@ -555,6 +564,9 @@ impl InputTranslator {
                 if key_released(keys, prev, self.key(GameKey::SwitchHiddenDisplay)) {
                     actions.push(GameAction::SwitchMaskedDisplay);
                 }
+                if key_released(keys, prev, self.key(GameKey::RevealHiddenCharacters)) {
+                    actions.push(GameAction::RevealHiddenCharacters);
+                }
                 if key_released(keys, prev, self.key(GameKey::AiInfo)) {
                     actions.push(GameAction::DisplayAiInfo);
                 }
@@ -779,6 +791,25 @@ mod tests {
         let frame2 = keys_down(&[]);
         let actions = t.translate_keyboard(&frame2, TranslationFlags::ALL);
         assert!(actions.contains(&GameAction::ZoomIn));
+    }
+
+    #[test]
+    fn reveal_hidden_uses_a_distinct_key_from_the_masked_display_switch() {
+        let mut t = make_translator();
+        let reveal = t.get_binding(GameKey::RevealHiddenCharacters);
+        let masked = t.get_binding(GameKey::SwitchHiddenDisplay);
+        assert_eq!(reveal, Some(KeyCode::KeyO));
+        assert_ne!(reveal, masked, "CapsLock must stay on draw_hidden");
+
+        let pressed = keys_down(&[KeyCode::KeyO]);
+        assert!(
+            !t.translate_keyboard(&pressed, TranslationFlags::ALL)
+                .contains(&GameAction::RevealHiddenCharacters)
+        );
+        assert!(
+            t.translate_keyboard(&BTreeSet::new(), TranslationFlags::ALL)
+                .contains(&GameAction::RevealHiddenCharacters)
+        );
     }
 
     #[test]
