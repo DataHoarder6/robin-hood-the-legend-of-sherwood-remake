@@ -1277,6 +1277,64 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_notice_requires_acknowledgement() {
+        const REASON: &str = "ranked uploads disabled for this mission";
+        let calls = Arc::new(Mutex::new(BackendCalls::default()));
+        let mut bundle = fixture(MissionEndOutcome::Won).bundle;
+        bundle.eligible_submission = None;
+        bundle.submission_unavailable_reason = Some(REASON.to_owned());
+        let page = board_page(&bundle.boards[0].query);
+        let mut controller = MissionEndLeaderboardController::new(
+            bundle,
+            compact_replay_bytes().into(),
+            LeaderboardPreferences::default(),
+            Box::new(TestBackend {
+                page,
+                calls: Arc::clone(&calls),
+                upload_delay_polls: 0,
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            controller.submission_state(),
+            &MissionSubmissionState::Unavailable(REASON.to_owned())
+        );
+        assert!(
+            controller
+                .apply_action(MissionEndLeaderboardAction::SubmitThisRun)
+                .is_err(),
+            "an unavailable notice has no silent submit path"
+        );
+        assert!(
+            controller
+                .apply_action(MissionEndLeaderboardAction::RetrySubmission)
+                .is_err(),
+            "an unavailable notice is not a failed submission"
+        );
+        assert_eq!(
+            controller
+                .apply_action(MissionEndLeaderboardAction::SetAlwaysSubmitRuns(true))
+                .unwrap(),
+            MissionEndLeaderboardEvent::PreferencesChanged
+        );
+        assert_eq!(
+            controller.submission_state(),
+            &MissionSubmissionState::Unavailable(REASON.to_owned())
+        );
+        assert_eq!(calls.lock().unwrap().uploads, 0);
+        controller.poll();
+        assert!(matches!(controller.board_state(), BoardLoadState::Ready(_)));
+        assert_eq!(
+            controller
+                .apply_action(MissionEndLeaderboardAction::Close)
+                .unwrap(),
+            MissionEndLeaderboardEvent::Closed
+        );
+        assert!(controller.is_closed());
+    }
+
+    #[test]
     fn boards_open_for_failed_missions_but_submission_never_does() {
         let calls = Arc::new(Mutex::new(BackendCalls::default()));
         let mut controller = controller(

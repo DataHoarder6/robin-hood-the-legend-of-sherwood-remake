@@ -514,6 +514,318 @@ fn participant_text<'a>(
 }
 
 #[cfg(test)]
+mod widget_tests {
+    use super::*;
+    use crate::ingame_menu::resources::IngameMenuResources;
+    use crate::leaderboard::test_fixtures::{MISSION_ID, compact_replay_bytes};
+    use crate::leaderboard_mission_end::{
+        MissionEndBoard, MissionEndLeaderboardBackend, MissionEndOutcome, MissionEndRunBundle,
+        MissionEndSubmissionInput, MissionEndTask, QueuedSubmission, canonical_replay_artifact,
+    };
+    use crate::leaderboard_preferences::{LeaderboardPreferences, LeaderboardTab};
+    use crate::leaderboard_registration::Registration;
+    use robin_run_protocol::{
+        BoardMetricV1, Digest32, LeaderboardPageV2, LeaderboardQueryV2, OpaqueId,
+        ParticipantPublicDisclosureV1, PublicKey32, SCHEMA_VERSION_V1, SCHEMA_VERSION_V2,
+        SubmissionAcceptedV1, SubmissionLifecycleV1,
+    };
+    use std::marker::PhantomData;
+    use std::sync::Arc;
+
+    struct ReadyTask<T>(Option<Result<T, String>>);
+
+    impl<T> MissionEndTask<T> for ReadyTask<T> {
+        fn try_take(&mut self) -> Option<Result<T, String>> {
+            self.0.take()
+        }
+    }
+
+    struct PendingTask<T>(PhantomData<T>);
+
+    impl<T> MissionEndTask<T> for PendingTask<T> {
+        fn try_take(&mut self) -> Option<Result<T, String>> {
+            None
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Upload {
+        Pending,
+        Accepted,
+    }
+
+    struct WidgetBackend {
+        board_error: Option<String>,
+        registration_error: Option<String>,
+        upload: Upload,
+    }
+
+    fn query() -> LeaderboardQueryV2 {
+        LeaderboardQueryV2 {
+            schema_version: SCHEMA_VERSION_V2,
+            board_id: OpaqueId::new("demo-standard-normal").unwrap(),
+            mission_id: MISSION_ID.to_owned(),
+            metric: BoardMetricV1::OriginalScore,
+            max_concurrent_players: Some(1),
+            player_public_key: None,
+            include_metrics: None,
+            limit: 50,
+            cursor: None,
+        }
+    }
+
+    fn page() -> LeaderboardPageV2 {
+        LeaderboardPageV2 {
+            schema_version: SCHEMA_VERSION_V2,
+            filter: query().filter(),
+            accepted_sequence_watermark: 0,
+            previous_cursor: None,
+            entries: Vec::new(),
+            next_cursor: None,
+        }
+    }
+
+    fn queued() -> QueuedSubmission {
+        QueuedSubmission {
+            accepted: SubmissionAcceptedV1 {
+                schema_version: SCHEMA_VERSION_V1,
+                submission_id: OpaqueId::new("submission-1").unwrap(),
+                state: SubmissionLifecycleV1::Queued,
+                retry_after_ms: 250,
+            },
+            uploader_public_key: PublicKey32::from_bytes([7; 32]),
+        }
+    }
+
+    impl MissionEndLeaderboardBackend for WidgetBackend {
+        fn registration(&mut self) -> Result<Registration, String> {
+            match &self.registration_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(Registration::test_result(Ok(true))),
+            }
+        }
+
+        fn board(
+            &mut self,
+            _query: LeaderboardQueryV2,
+        ) -> Result<Box<dyn MissionEndTask<LeaderboardPageV2>>, String> {
+            match &self.board_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(Box::new(ReadyTask(Some(Ok(page()))))),
+            }
+        }
+
+        fn submit(
+            &mut self,
+            _input: MissionEndSubmissionInput,
+            _replay: Arc<[u8]>,
+        ) -> Result<Box<dyn MissionEndTask<QueuedSubmission>>, String> {
+            match self.upload {
+                Upload::Pending => Ok(Box::new(PendingTask(PhantomData))),
+                Upload::Accepted => Ok(Box::new(ReadyTask(Some(Ok(queued()))))),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum SubmissionCase {
+        Awaiting,
+        WonRequired,
+        Unavailable,
+        Submitting,
+        Queued,
+        Failed,
+    }
+
+    struct Setup {
+        submission: SubmissionCase,
+        board_failure: bool,
+    }
+
+    fn assert_submission_state(case: SubmissionCase, state: &MissionSubmissionState) {
+        match case {
+            SubmissionCase::Awaiting => {
+                assert_eq!(state, &MissionSubmissionState::AwaitingConsent);
+            }
+            SubmissionCase::WonRequired => {
+                assert_eq!(state, &MissionSubmissionState::WonMissionRequired);
+            }
+            SubmissionCase::Unavailable => assert!(
+                matches!(state, MissionSubmissionState::Unavailable(reason) if reason == "ranked uploads disabled")
+            ),
+            SubmissionCase::Submitting => {
+                assert_eq!(state, &MissionSubmissionState::Submitting);
+            }
+            SubmissionCase::Queued => {
+                assert!(matches!(state, MissionSubmissionState::Queued(_)));
+            }
+            SubmissionCase::Failed => assert!(
+                matches!(state, MissionSubmissionState::Failed(reason) if reason == "registration offline")
+            ),
+        }
+    }
+
+    /// Builds a real screen over a real controller whose backend drives it into
+    /// the requested state. The widget sync is applied exactly as `tick` does.
+    fn screen(setup: Setup) -> MissionEndLeaderboardScreen {
+        const UNAVAILABLE: &str = "ranked uploads disabled";
+        const REGISTRATION_ERROR: &str = "registration offline";
+        const BOARD_ERROR: &str = "board offline";
+
+        let (outcome, eligible, unavailable) = match setup.submission {
+            SubmissionCase::WonRequired => (MissionEndOutcome::Lost, false, None),
+            SubmissionCase::Unavailable => (MissionEndOutcome::Won, false, Some(UNAVAILABLE)),
+            _ => (MissionEndOutcome::Won, true, None),
+        };
+        let preferences = LeaderboardPreferences {
+            always_submit_eligible_runs: matches!(
+                setup.submission,
+                SubmissionCase::Submitting | SubmissionCase::Queued | SubmissionCase::Failed
+            ),
+            ..LeaderboardPreferences::default()
+        };
+        let backend = WidgetBackend {
+            board_error: setup.board_failure.then(|| BOARD_ERROR.to_owned()),
+            registration_error: matches!(setup.submission, SubmissionCase::Failed)
+                .then(|| REGISTRATION_ERROR.to_owned()),
+            upload: if matches!(setup.submission, SubmissionCase::Submitting) {
+                Upload::Pending
+            } else {
+                Upload::Accepted
+            },
+        };
+        let compact: Arc<[u8]> = compact_replay_bytes().into();
+        let eligible_submission = eligible.then(|| MissionEndSubmissionInput {
+            board_id: OpaqueId::new("demo-standard-normal").unwrap(),
+            mission_id: MISSION_ID.to_owned(),
+            requested_metrics: vec![BoardMetricV1::OriginalScore],
+            public_disclosure: ParticipantPublicDisclosureV1::NamedProfile,
+            replay: canonical_replay_artifact(&compact, MISSION_ID).unwrap(),
+            replay_session_id: Digest32::from_bytes([9; 32]),
+        });
+        let bundle = MissionEndRunBundle {
+            outcome,
+            multiplayer: false,
+            tick_duration: TickDurationV1 {
+                numerator_micros: 40_000,
+                denominator: 1,
+            },
+            boards: vec![MissionEndBoard {
+                tab: LeaderboardTab::Score,
+                label: "Score".to_owned(),
+                query: query(),
+            }],
+            eligible_submission,
+            submission_unavailable_reason: unavailable.map(str::to_owned),
+        };
+        let mut controller =
+            MissionEndLeaderboardController::new(bundle, compact, preferences, Box::new(backend))
+                .unwrap();
+        if matches!(setup.submission, SubmissionCase::Queued) {
+            controller.poll();
+        }
+        assert_submission_state(setup.submission, controller.submission_state());
+        let mut screen = MissionEndLeaderboardScreen::new(controller, &IngameMenuResources::stub());
+        screen.sync_widget_enabled();
+        screen
+    }
+
+    fn enabled(screen: &MissionEndLeaderboardScreen, id: u32) -> bool {
+        screen
+            .frame
+            .widget(id)
+            .expect("widget exists")
+            .base()
+            .enabled
+    }
+
+    const ALL_CASES: [SubmissionCase; 6] = [
+        SubmissionCase::Awaiting,
+        SubmissionCase::WonRequired,
+        SubmissionCase::Unavailable,
+        SubmissionCase::Submitting,
+        SubmissionCase::Queued,
+        SubmissionCase::Failed,
+    ];
+
+    #[test]
+    fn submit_enabled_only_awaiting_consent() {
+        for submission in ALL_CASES {
+            let screen = screen(Setup {
+                submission,
+                board_failure: false,
+            });
+            assert_eq!(
+                enabled(&screen, SUBMIT_ID),
+                matches!(submission, SubmissionCase::Awaiting),
+                "{submission:?}"
+            );
+            assert_eq!(
+                screen.widget_action(SUBMIT_ID),
+                Some(MissionEndLeaderboardAction::SubmitThisRun)
+            );
+        }
+    }
+
+    #[test]
+    fn retry_dispatches_board_or_submission_by_state() {
+        let board_failed = screen(Setup {
+            submission: SubmissionCase::Awaiting,
+            board_failure: true,
+        });
+        assert!(
+            matches!(board_failed.controller.board_state(), BoardLoadState::Failed(reason) if reason == "board offline")
+        );
+        assert!(enabled(&board_failed, RETRY_ID));
+        assert_eq!(
+            board_failed.widget_action(RETRY_ID),
+            Some(MissionEndLeaderboardAction::RetryBoard)
+        );
+
+        let submission_failed = screen(Setup {
+            submission: SubmissionCase::Failed,
+            board_failure: false,
+        });
+        assert!(matches!(
+            submission_failed.controller.submission_state(),
+            MissionSubmissionState::Failed(_)
+        ));
+        assert!(enabled(&submission_failed, RETRY_ID));
+        assert_eq!(
+            submission_failed.widget_action(RETRY_ID),
+            Some(MissionEndLeaderboardAction::RetrySubmission)
+        );
+
+        let healthy = screen(Setup {
+            submission: SubmissionCase::Awaiting,
+            board_failure: false,
+        });
+        assert!(!enabled(&healthy, RETRY_ID));
+    }
+
+    #[test]
+    fn close_always_available() {
+        for submission in ALL_CASES {
+            let mut screen = screen(Setup {
+                submission,
+                board_failure: false,
+            });
+            assert!(enabled(&screen, CLOSE_ID), "{submission:?}");
+            assert_eq!(
+                screen.widget_action(CLOSE_ID),
+                Some(MissionEndLeaderboardAction::Close)
+            );
+            assert_eq!(
+                screen.apply(MissionEndLeaderboardAction::Close),
+                Some(MissionEndLeaderboardEvent::Closed),
+                "{submission:?}"
+            );
+            assert!(screen.controller.is_closed(), "{submission:?}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
