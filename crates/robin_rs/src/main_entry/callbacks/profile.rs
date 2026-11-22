@@ -302,7 +302,7 @@ mod tests {
         }
         conflicting_campaign.record_mission_attempt(
             1,
-            robin_engine::campaign_history::MissionAttemptOutcome::Failed,
+            robin_engine::campaign_history::MissionAttemptOutcome::Lost,
             Some(100),
             Some(RUN_ID),
             70,
