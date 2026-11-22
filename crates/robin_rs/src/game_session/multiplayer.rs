@@ -1537,36 +1537,35 @@ pub(super) fn drain_mission_network(
         // that never confirms the pause boundary is evicted and the session
         // auto-resumes with a fresh host decision, so one frozen peer cannot
         // halt every seat indefinitely.
-        if host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST {
-            if let robin_engine::multiplayer::PauseBarrierOutcome::TimedOut { evicted, resume } =
+        if host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST
+            && let robin_engine::multiplayer::PauseBarrierOutcome::TimedOut { evicted, resume } =
                 net.tick_coop_pause_barrier(
                     u64::from(crate::window::process_uptime_ms()),
                     timeline.frame_number(),
                 )
-            {
-                tracing::warn!(
-                    ?evicted,
-                    frame = resume.frame,
-                    "multiplayer: coop-pause barrier expired; evicting and auto-resuming"
+        {
+            tracing::warn!(
+                ?evicted,
+                frame = resume.frame,
+                "multiplayer: coop-pause barrier expired; evicting and auto-resuming"
+            );
+            for seat in &evicted {
+                let _ = net.outgoing.send(
+                    robin_engine::multiplayer::NetOutbound::ReconnectForSnapshot {
+                        player_id: *seat,
+                        reason: "cooperative pause barrier expired".into(),
+                    },
                 );
-                for seat in &evicted {
-                    let _ = net.outgoing.send(
-                        robin_engine::multiplayer::NetOutbound::ReconnectForSnapshot {
-                            player_id: *seat,
-                            reason: "cooperative pause barrier expired".into(),
-                        },
-                    );
-                }
-                // The host is authoritative: it commits the resume into
-                // its own gate at this exact frame and broadcasts the same
-                // decision to peers, which adopt it via the command stream.
-                manager.engine.commit_coop_pause(resume);
-                let _ =
-                    net.outgoing
-                        .send(robin_engine::multiplayer::NetOutbound::CoopPauseDecision(
-                            resume,
-                        ));
             }
+            // The host is authoritative: it commits the resume into
+            // its own gate at this exact frame and broadcasts the same
+            // decision to peers, which adopt it via the command stream.
+            manager.engine.commit_coop_pause(resume);
+            let _ = net
+                .outgoing
+                .send(robin_engine::multiplayer::NetOutbound::CoopPauseDecision(
+                    resume,
+                ));
         }
         net.service_modal_session(
             host.transport.local_seat() == robin_engine::player_command::PlayerId::HOST,

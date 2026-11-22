@@ -160,6 +160,11 @@ pub(super) async fn run_server_outgoing_pump(
             NetOutbound::ModalProposal { .. } => {
                 tracing::error!("multiplayer host attempted to send a client-only modal proposal");
             }
+            NetOutbound::CoopPauseAck(_) => {
+                tracing::error!(
+                    "multiplayer host attempted to send a client-only coop-pause acknowledgement"
+                );
+            }
             NetOutbound::ModalProgress(progress) => {
                 broadcast_modal_progress(&context, progress)?;
             }
@@ -383,6 +388,7 @@ pub(super) fn validate_server_gameplay_outbound(
         | NetOutbound::ReconnectAllForSnapshot { .. }
         | NetOutbound::BeginSnapshotTransition { .. } => Ok(()),
         NetOutbound::ModalProposal { .. }
+        | NetOutbound::CoopPauseAck(_)
         | NetOutbound::SnapshotTransitionReady { .. }
         | NetOutbound::ContentRequest { .. }
         | NetOutbound::ContentReject { .. }
