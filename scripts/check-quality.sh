@@ -239,6 +239,7 @@ case "$1" in
         bash scripts/test_reconcile_main.sh
         bash scripts/test_prune_worktrees.sh
         bash scripts/test_land.sh
+        bash scripts/test_session_gate_check.sh
         bash scripts/test_push_gate.sh
         bash scripts/test_release_gate.sh
         bash scripts/test_build_host.sh
