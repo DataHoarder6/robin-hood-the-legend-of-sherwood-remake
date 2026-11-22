@@ -419,7 +419,7 @@ fn every_directional_row_remaps_with_wraparound() {
             let expected = 10 + (direction as i16 + i16::from(steps)).rem_euclid(16) as u16;
             assert_eq!(
                 current_render_frame(&sprite, steps).map(|(_, _, bank)| bank),
-                Some(1000 + expected),
+                Some(1000 + u32::from(expected)),
                 "row {} with steps {steps} must map to {expected}",
                 10 + direction
             );
