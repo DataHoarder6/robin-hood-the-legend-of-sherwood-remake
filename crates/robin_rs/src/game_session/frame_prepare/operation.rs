@@ -5,8 +5,12 @@ use crate::game_session::flow::MissionExit;
 use crate::game_session::interactive::MissionInput;
 use crate::game_session::runtime::{FrameContractStage, TimelineRuntime};
 
-/// Browser startup may defer only the nonurgent initial autosave thumbnail.
-#[cfg(any(target_arch = "wasm32", test))]
+/// The mission-entry autosave is the only nonurgent checkpoint on the first
+/// frame. Its GPU thumbnail capture can cost ~1 s and its payload publish
+/// ~330 ms on a cold client (issue #63), so the game thread must not await it
+/// before the first input/simulation frame. Browser startup already deferred
+/// only the thumbnail completion; native now defers the whole checkpoint to
+/// the next frame, where the GPU is warm and the tick budget is not starved.
 fn can_defer_initial_autosave(
     frame: u32,
     reason: Option<crate::autosave::AutosaveReason>,
@@ -19,6 +23,18 @@ fn can_defer_initial_autosave(
         && !pending_save_load
         && !backgrounded
         && !exiting
+}
+
+/// Whether the game thread may compose/await a save thumbnail on this frame.
+/// False on the first mission frame for the nonurgent entry autosave.
+fn should_capture_thumbnail_on_game_thread(
+    frame: u32,
+    reason: Option<crate::autosave::AutosaveReason>,
+    pending_save_load: bool,
+    backgrounded: bool,
+    exiting: bool,
+) -> bool {
+    !can_defer_initial_autosave(frame, reason, pending_save_load, backgrounded, exiting)
 }
 
 /// Apply process-side input and banner effects produced by save/load I/O.
@@ -201,20 +217,36 @@ pub(super) async fn process_operation_and_save(
         lifecycle_autosave,
         exit_code.is_some(),
     );
-    #[cfg(target_arch = "wasm32")]
-    let defer_initial_thumbnail = can_defer_initial_autosave(
+    // The mission-entry checkpoint is nonurgent. On native the whole save
+    // (GPU thumbnail + payload publish) is deferred to the next frame; on wasm
+    // only the thumbnail completion is deferred, since all work shares the
+    // page thread and the writer drains on the next microtask.
+    let defer_initial_autosave = can_defer_initial_autosave(
         runtime.frame_number(),
         autosave_reason,
         callbacks.pending_request().is_some(),
         lifecycle_autosave,
         exit_code.is_some(),
-    ) && startup_save_query_allows_deferral();
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    let skip_initial_autosave = !should_capture_thumbnail_on_game_thread(
+        runtime.frame_number(),
+        autosave_reason,
+        callbacks.pending_request().is_some(),
+        lifecycle_autosave,
+        exit_code.is_some(),
+    );
+    #[cfg(target_arch = "wasm32")]
+    let skip_initial_autosave = false;
+    #[cfg(target_arch = "wasm32")]
+    let defer_initial_thumbnail = defer_initial_autosave && startup_save_query_allows_deferral();
     #[cfg(target_arch = "wasm32")]
     let mut deferred_thumbnail = None;
-    let pending_thumbnail = if (callbacks
-        .pending_request()
-        .is_some_and(|request| request.writes_save_payload())
-        || autosave_reason.is_some())
+    let pending_thumbnail = if !skip_initial_autosave
+        && (callbacks
+            .pending_request()
+            .is_some_and(|request| request.writes_save_payload())
+            || autosave_reason.is_some())
         && !host.frontend.presentation.skip_render
         && !modal_rendered_this_frame
     {
@@ -298,17 +330,28 @@ pub(super) async fn process_operation_and_save(
             )
         };
         #[cfg(not(target_arch = "wasm32"))]
-        let accepted = callbacks.enqueue_autosave(
-            crate::autosave::AutosaveRequest {
-                host,
-                game,
-                engine: &manager.engine,
-                mission_id,
-                profiles,
-            },
-            pending_thumbnail.clone(),
-            reason,
-        );
+        let accepted = if defer_initial_autosave {
+            // Leave the schedule uncommitted so the next frame re-plans the
+            // same mission-entry checkpoint with a warm renderer. The first
+            // mission frame never waits on the GPU capture or the publish.
+            tracing::info!(
+                ?reason,
+                "deferring initial mission autosave past the first frame"
+            );
+            Ok(())
+        } else {
+            callbacks.enqueue_autosave(
+                crate::autosave::AutosaveRequest {
+                    host,
+                    game,
+                    engine: &manager.engine,
+                    mission_id,
+                    profiles,
+                },
+                pending_thumbnail.clone(),
+                reason,
+            )
+        };
         match accepted {
             Ok(()) if lifecycle_autosave => window.acknowledge_lifecycle_autosave_request(),
             Ok(()) => {}
@@ -476,6 +519,51 @@ mod tests {
             save_banner_text(SaveBannerKind::Saved, None, german),
             "Game saved."
         );
+    }
+
+    #[test]
+    fn first_mission_frame_does_not_wait_on_the_thumbnail() {
+        use super::{can_defer_initial_autosave, should_capture_thumbnail_on_game_thread};
+        use crate::autosave::AutosaveReason;
+        // The initial mission-entry checkpoint is nonurgent: on the first
+        // mission frame the game thread must not await the ~1 s GPU capture
+        // or publish the payload inline.
+        assert!(can_defer_initial_autosave(
+            0,
+            Some(AutosaveReason::MissionTransition),
+            false,
+            false,
+            false
+        ));
+        assert!(!should_capture_thumbnail_on_game_thread(
+            0,
+            Some(AutosaveReason::MissionTransition),
+            false,
+            false,
+            false
+        ));
+        // Urgent writes and later frames keep the original inline behaviour.
+        assert!(should_capture_thumbnail_on_game_thread(
+            1,
+            Some(AutosaveReason::MissionTransition),
+            false,
+            false,
+            false
+        ));
+        assert!(should_capture_thumbnail_on_game_thread(
+            0,
+            Some(AutosaveReason::Periodic),
+            false,
+            false,
+            false
+        ));
+        assert!(should_capture_thumbnail_on_game_thread(
+            0,
+            Some(AutosaveReason::MissionTransition),
+            false,
+            true,
+            false
+        ));
     }
 
     #[test]
