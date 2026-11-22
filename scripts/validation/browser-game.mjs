@@ -781,7 +781,21 @@ try {
             await pause(2000);
             const screenshot = await cdp('Page.captureScreenshot', { format: 'png' }, session);
             writeFileSync(join(evidence, 'game.png'), Buffer.from(screenshot.data, 'base64'));
-            record('page', await evaluate(`({title:document.title, canvas:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height})),log:document.querySelector('#log')?.textContent})`));
+            const pageInfo = await evaluate(`({title:document.title, canvas:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height})),log:document.querySelector('#log')?.textContent})`);
+            record('page', pageInfo);
+            if (values.mission) {
+                const gameLog = pageInfo.log ?? '';
+                const firstMap = {
+                    mission: values.mission,
+                    started: /mission started:/u.test(gameLog),
+                    decodeFailure: /native bitcode mission decode|load mission assets for/u.test(gameLog),
+                    frame: state?.frame ?? null,
+                };
+                record('firstMapLoads', firstMap);
+                if (!firstMap.started || firstMap.decodeFailure) {
+                    result.failures.push(`First map ${values.mission} did not load (started=${firstMap.started}, decodeFailure=${firstMap.decodeFailure}).`);
+                }
+            }
             if (state) {
                 try {
                     if (values['natural-play']) {
