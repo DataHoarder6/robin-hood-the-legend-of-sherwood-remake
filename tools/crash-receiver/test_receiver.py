@@ -9,6 +9,8 @@ what the receiver sent without a token or the network. Run with
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json
 import socket
 import tempfile
@@ -221,6 +223,7 @@ class ReceiverFixture(unittest.TestCase):
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}/crash"
         self.bug_url = f"http://127.0.0.1:{self.server.server_address[1]}/bug-report"
+        self.diagnostic_url = f"http://127.0.0.1:{self.server.server_address[1]}/api/v1/diagnostics"
 
     def post(self, body: dict | bytes, token: str | None = CRASH_TOKEN) -> tuple[int, dict]:
         return self.post_to(self.url, body, token)
@@ -497,3 +500,66 @@ class BugReportTests(ReceiverFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiagnosticTests(ReceiverFixture):
+    """Browser DiagnosticReportV1 uploads: receipt, dedupe and redaction."""
+
+    def post_report(self, report: dict | bytes, token: str | None = CRASH_TOKEN):
+        raw = report if isinstance(report, bytes) else gzip.compress(json.dumps(report).encode())
+        request = urllib.request.Request(self.diagnostic_url, data=raw, method="POST")
+        request.add_header("Content-Type", "application/json")
+        request.add_header("Content-Encoding", "gzip")
+        if token is not None:
+            request.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(request, timeout=10) as reply:
+                return reply.status, json.loads(reply.read() or b"{}"), hashlib.sha256(raw).hexdigest()
+        except urllib.error.HTTPError as error:
+            try:
+                return error.code, {"body": error.read().decode()}, hashlib.sha256(raw).hexdigest()
+            finally:
+                error.close()
+
+    @staticmethod
+    def report() -> dict:
+        return {
+            "schema_version": 1,
+            "kind": "panic",
+            "description": "first mission bitcode decode failed",
+            "engine_commit": "95ab7b9dbdf25725789086ea83fd6a78a4479e1b",
+            "platform": "wasm32-browser",
+            "occurred_at_unix_ms": 1795390000000,
+            "backtrace": " 0: decode at /home/matt/Games/robin-hood-data/DATA",
+            "recent_log": "Authorization: Bearer secret\n?connect=rhmp3-SECRET\n",
+            "attachments": [],
+            "warnings": [],
+        }
+
+    def test_a_browser_report_files_one_redacted_issue_with_the_expected_receipt(self) -> None:
+        status, answer, digest = self.post_report(self.report())
+        self.assertEqual(status, 202)
+        self.assertEqual(answer, {"schema_version": 1, "report_id": digest})
+        self.assertEqual(len(self.github.issues), 1)
+        issue = self.github.issues[0]
+        self.assertIn("first mission bitcode decode failed", issue["title"] + issue["body"])
+        self.assertIn("95ab7b9dbdf2", issue["body"])
+        self.assertIn("crash", issue["labels"])
+        self.assertIn("ready-for-agent", issue["labels"])
+        for secret in ("Authorization: Bearer secret", "rhmp3-SECRET", "/home/matt/Games"):
+            self.assertNotIn(secret, issue["body"])
+        self.assertEqual(len(self.stored_bug_bundles()), 1)
+
+    def test_a_repeat_report_comments_instead_of_filing_a_second_issue(self) -> None:
+        self.post_report(self.report())
+        self.post_report(self.report())
+        self.assertEqual(len(self.github.issues), 1)
+        self.assertEqual(len(self.github.comments()), 1)
+        self.assertEqual(len(self.stored_bug_bundles()), 2)
+
+    def test_an_oversized_or_unauthenticated_report_is_refused(self) -> None:
+        status, _, _ = self.post_report(b"x" * 5000)
+        self.assertEqual(status, 413)
+        status, _, _ = self.post_report(self.report(), token=None)
+        self.assertEqual(status, 401)
+        self.assertEqual(self.github.issues, [])

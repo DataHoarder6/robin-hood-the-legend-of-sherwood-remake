@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import gzip
+import hashlib
 import hmac
 import json
 import os
@@ -27,12 +29,14 @@ import re
 import sys
 import threading
 import urllib.error
+import zlib
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 CRASH_PATH = "/crash"
+DIAGNOSTIC_PATH = "/api/v1/diagnostics"
 BUG_REPORT_PATH = "/bug-report"
 BUG_REPORT_DOWNLOAD_PREFIX = "/bug-reports/"
 HEALTH_PATH = "/healthz"
@@ -48,6 +52,9 @@ GITHUB_TIMEOUT_SECONDS = 20
 # Every bug report is labelled; the second label separates voluntary reports
 # from crashes in one issue list.
 BUG_LABELS = ("bug", "bug-report")
+# Browser crashes are filed on a public fork: only facts go in the body, and
+# the full bundle stays behind the existing token-gated download route.
+DIAGNOSTIC_LABELS = ("bug", "crash", "ready-for-agent")
 
 # The fields a bundle must carry to be worth filing. Everything else is quoted
 # when present and reported as "not captured" when absent.
@@ -593,6 +600,74 @@ def bug_comment_body(bundle: dict, bundle_id: str, occurrences: int) -> str:
     )
 
 
+def redact_diagnostic(text: object) -> str:
+    """Remove credentials and connection tickets before a public issue is filed."""
+    value = bounded(text, 12000)
+    value = re.sub(r"(?i)authorization\s*:\s*\S+", "Authorization: <redacted>", value)
+    value = re.sub(r"(\?connect=)[^\s&]+", r"\1<redacted>", value)
+    value = re.sub(r"(https?://)[^/\s:@]+:[^/\s@]+@", r"\1<redacted>@", value)
+    value = re.sub(r"(?:[A-Za-z]:)?[/\\](?:home|Users|var|tmp|mnt)\S*", "<redacted-path>", value)
+    return value
+
+
+def diagnostic_bundle(report: dict, compressed: bytes) -> dict:
+    """Map DiagnosticReportV1 onto the receiver's bundle contract.
+
+    The fingerprint binds the normalized message to the engine commit so one
+    crash per published build is filed, while a repeat on that build comments.
+    """
+    message = " ".join(str(report.get("description", "")).split())
+    if not message:
+        raise Refused(400, "missing or empty field 'description'")
+    commit = str(report.get("engine_commit", "")).strip()
+    if not commit:
+        raise Refused(400, "missing or empty field 'engine_commit'")
+    if report.get("schema_version") != 1:
+        raise Refused(400, "unsupported diagnostic schema_version")
+    fingerprint = hashlib.sha256(f"{message}\0{commit}".encode()).hexdigest()[:16]
+    return {
+        "schema_version": 1,
+        "fingerprint": fingerprint,
+        "kind": str(report.get("kind", "panic")),
+        "message": message,
+        "version": commit[:12],
+        "engine_commit": commit,
+        "platform": "wasm32-browser",
+        "arch": "wasm32",
+        "location": "browser diagnostics",
+        "backtrace": redact_diagnostic(report.get("backtrace") or ""),
+        "run_log_tail": redact_diagnostic(report.get("recent_log") or ""),
+        "warnings": report.get("warnings", []),
+        "report_sha256": hashlib.sha256(compressed).hexdigest(),
+    }
+
+
+def diagnostic_issue_body(bundle: dict, bundle_id: str) -> str:
+    """Facts only: the public issue never quotes the browser's log or /state."""
+    return "\n".join([
+        "### Browser crash",
+        "",
+        f"- Fingerprint: `{bounded(bundle['fingerprint'], 16)}`",
+        f"- Engine commit: `{bounded(bundle['engine_commit'], 40)}`",
+        f"- Kind: `{bounded(bundle['kind'], 32)}`",
+        "- Platform: `wasm32-browser` on the private estate origin",
+        f"- Report sha256: `{bounded(bundle['report_sha256'], 64)}`",
+        "",
+        "### Description",
+        "",
+        fenced(bounded(redact_diagnostic(bundle["message"]), 2000)),
+        "",
+        "### First backtrace frame",
+        "",
+        fenced(bounded(bundle.get("backtrace") or "not captured", 800)),
+        "",
+        "The full report (log tail and attachments) is stored by the receiver. "
+        "Maintainers can fetch it with the token-gated bundle link "
+        f"`/bug-reports/{bundle_id}` — it is deliberately not quoted in this "
+        "public issue.",
+    ])
+
+
 class Service:
     """One authenticated report: store it, then dedupe into GitHub.
 
@@ -692,6 +767,60 @@ class Service:
             "occurrences": occurrence["count"],
         }
 
+    def report_diagnostic(self, raw: bytes, compressed: bytes) -> dict:
+        """One browser report: store its bundle, then file or comment once."""
+        try:
+            report = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise Refused(400, f"body is not JSON: {error}") from error
+        if not isinstance(report, dict):
+            raise Refused(400, "body is not a JSON object")
+        bundle = diagnostic_bundle(report, compressed)
+        fingerprint = bundle["fingerprint"]
+        bundle_id = self.store.save_bug_bundle(bundle)
+        with self.lock:
+            occurrence = self.store.bug_occurrence(fingerprint)
+            if occurrence is None:
+                if not self.labels_ready:
+                    self.github.ensure_labels(DIAGNOSTIC_LABELS)
+                    self.labels_ready = True
+                number = self.github.create_issue(
+                    f"browser: {bundle['message'][:120]}",
+                    diagnostic_issue_body(bundle, bundle_id),
+                    labels=DIAGNOSTIC_LABELS,
+                )
+                occurrence = self.store.record_bug_occurrence(
+                    fingerprint, bundle_id, number, "browser"
+                )
+            else:
+                self.github.comment(
+                    occurrence["issue"],
+                    f"Browser crash recurrence {occurrence['count'] + 1} "
+                    f"(fingerprint `{fingerprint}`). New bundle: "
+                    f"`/bug-reports/{bundle_id}`.",
+                )
+                occurrence = self.store.record_bug_occurrence(
+                    fingerprint, bundle_id, None, "browser"
+                )
+        return {
+            "fingerprint": fingerprint,
+            "bundle": bundle_id,
+            "issue": occurrence["issue"],
+            "occurrences": occurrence["count"],
+        }
+
+
+def gunzip_bounded(compressed: bytes, limit: int) -> bytes:
+    """Decompress at most `limit` bytes; a zip bomb is refused, not expanded."""
+    try:
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = inflater.decompress(compressed, limit + 1)
+    except zlib.error as error:
+        raise Refused(400, f"invalid gzip body: {error}") from error
+    if len(raw) > limit or inflater.unconsumed_tail or not inflater.eof:
+        raise Refused(413, f"decompressed diagnostic exceeds {limit} bytes")
+    return raw
+
 
 def make_handler(config: Config, service: Service):
     """A handler class for one configuration and its one service."""
@@ -750,6 +879,15 @@ def make_handler(config: Config, service: Service):
                 elif self.path == BUG_REPORT_PATH:
                     self._authorize()
                     answer = service.report_bug(self._read_body())
+                elif self.path == DIAGNOSTIC_PATH:
+                    self._authorize()
+                    compressed = self._read_body()
+                    raw = gunzip_bounded(compressed, config.max_body_bytes)
+                    service.report_diagnostic(raw, compressed)
+                    answer = {
+                        "schema_version": 1,
+                        "report_id": hashlib.sha256(compressed).hexdigest(),
+                    }
                 else:
                     raise Refused(404, "unknown path")
             except Refused as refusal:
