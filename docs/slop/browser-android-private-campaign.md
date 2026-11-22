@@ -17,9 +17,9 @@ Stream: browser/WASM Android client. Companion spec:
   credentials; the identity signer is a separate origin and is unaffected.
 - Caddy landed as `ed26a36`, `fdf93de`, `61168fe` on `nixos-config` main and
   deployed (`just deploy-wait 61168fe`).
-- Verified with the previous path-scoped gate that public paths returned 200
-  and private paths 401/200. With the whole-site gate, every path on
-  `robin.jautis.lt` requires `robin`/`robin`; `robin-id.jautis.lt` is unchanged.
+- Verified after `d7e06ac` deployed: `https://robin.jautis.lt/` returns 401
+  without credentials, 200 with `robin`/`robin`, and 401 with the old password.
+  `robin-id.jautis.lt` is a separate origin and is unchanged.
 
 ## Corpus
 
