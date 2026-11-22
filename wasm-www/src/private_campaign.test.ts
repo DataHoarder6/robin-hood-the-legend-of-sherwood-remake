@@ -49,7 +49,7 @@ test("an invalid private binding fails loudly instead of falling back to Demo", 
   const { fetchJson } = fakeFetch({ ...BINDING, url: "/datadirs/full/../demo/datadir.bin" });
   await assert.rejects(
     resolvePrivateCampaignContent(
-      new URL(`https://robin.jautis.lt/play/${TOKEN}/`),
+      new URL("https://robin.jautis.lt/"),
       "abc1234",
       fetchJson,
       new AbortController().signal,
