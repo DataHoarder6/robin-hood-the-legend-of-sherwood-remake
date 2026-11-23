@@ -4,16 +4,18 @@
 # named reasons are the interface (scripts/test_run_bounds.sh).
 #
 #   scripts/run-bounds.sh check <contract-file>
+#   scripts/run-bounds.sh value <contract-file> <key>
 #   scripts/run-bounds.sh guard-edit <path>
 #
 # `check` prints one named reason per failed bound and exits 1, or prints `ok`
-# and exits 0. A missing or duplicated key fails closed. `guard-edit` exits 1
-# with `contract-is-immutable` when the path names the contract; the director's
-# frontmatter deny is the enforced form of the same rule.
+# and exits 0. A missing or duplicated key fails closed. `value` is the one
+# source the run driver reads for numeric bounds. `guard-edit` exits 1 with
+# `contract-is-immutable` when the path names the contract; the driver calls it
+# before every write and the director's frontmatter denies edit and shell.
 set -euo pipefail
 
 usage() {
-    printf 'usage: run-bounds.sh check <contract-file> | guard-edit <path>\n' >&2
+    printf 'usage: run-bounds.sh check <contract-file> | value <file> <key> | guard-edit <path>\n' >&2
     exit 2
 }
 
@@ -36,13 +38,14 @@ check_contract() {
     local file=$1
     [ -f "$file" ] || { printf 'missing-contract-file\n'; return 1; }
 
-    local wall batches reds bisect cap immutable
+    local wall batches reds bisect cap immutable timeout
     wall=$(value_of "$file" wall_clock_minutes)
     batches=$(value_of "$file" max_batches)
     reds=$(value_of "$file" consecutive_red_gates)
     bisect=$(value_of "$file" bisect_no_landing_halts)
     cap=$(value_of "$file" cost_cap)
     immutable=$(value_of "$file" contract_immutable)
+    timeout=$(value_of "$file" gate_timeout_secs)
 
     local reasons=()
     case $wall in
@@ -75,6 +78,11 @@ check_contract() {
         true) ;;
         *) reasons+=(contract-not-immutable) ;;
     esac
+    case $timeout in
+        missing-* | duplicate-*) reasons+=("$timeout") ;;
+        '' | *[!0-9]* | 0) reasons+=(gate-timeout-invalid) ;;
+        *) ;;
+    esac
 
     if [ ${#reasons[@]} -gt 0 ]; then
         printf '%s\n' "${reasons[@]}"
@@ -87,6 +95,15 @@ case "${1:-}" in
     check)
         [ $# -eq 2 ] || usage
         check_contract "$2"
+        ;;
+    value)
+        [ $# -eq 3 ] || usage
+        [ -f "$2" ] || { printf 'missing-contract-file\n'; exit 1; }
+        value=$(value_of "$2" "$3")
+        case $value in
+            missing-* | duplicate-*) printf '%s\n' "$value"; exit 1 ;;
+        esac
+        printf '%s\n' "$value"
         ;;
     guard-edit)
         [ $# -eq 2 ] || usage

@@ -227,6 +227,17 @@ that host pulls and activates. The loop itself never edits machine config; a
 request to do so is BLOCKED under [Risk routing](#risk-routing), with
 `nixos-config` named as the missing capability. Last verified: 2026-11-22.
 
+## Autonomous run driver
+
+`scripts/autonomy-driver.sh` is the run-level entry point for a contract-bounded
+run: it re-reads [the contract](AUTONOMOUS_RUN_CONTRACT.md), fails admission
+closed on invalid bounds or exhausted quota, drives one
+[batch](adr/0009-batched-agent-builds.md) at a time, enforces the circuit breaker
+and per-gate timeout, and records terminal and release outcomes in a resumable
+status file. Start with `runbg run autonomy -- bash scripts/autonomy-driver.sh`;
+`attach` is read-only and `stop`/`runbg stop autonomy` halt at a batch boundary.
+The driver is repo-local and never edits machine configuration.
+
 ## One-week pilot metrics
 
 Run `scripts/unattended-metrics.sh [SINCE]` on `oci-vm`. It prints each metric

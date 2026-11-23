@@ -21,6 +21,12 @@ the contract or asks for one. Last verified: 2026-11-23.
   interview.
 - Observation is read-only: manual start, read-only attach, stop via
   `runbg stop autonomy`. No takeover in v1.
+- [`scripts/autonomy-driver.sh`](../scripts/autonomy-driver.sh) is the run-level
+  entry point. `runbg run autonomy -- bash scripts/autonomy-driver.sh` starts or
+  resumes a run; `attach` is read-only, `status` prints the recorded state,
+  `stop` sets the run's stop flag, and `resume <run-id>` continues an interrupted
+  run from its recorded cursor. The driver is repo-local: it never edits Nix
+  files, timer units or a provider setting.
 
 ## Work queue
 
@@ -43,6 +49,7 @@ wall_clock_minutes: 240
 max_batches: 3
 consecutive_red_gates: 2
 bisect_no_landing_halts: true
+gate_timeout_secs: 900
 cost_cap: none
 contract_immutable: true
 ```

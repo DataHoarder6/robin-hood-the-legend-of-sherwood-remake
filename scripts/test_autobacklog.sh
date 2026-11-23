@@ -66,6 +66,18 @@ run next-ready
 expect_status 1 'next-ready fails when nothing is ready'
 expect_contains 'the reason is named' 'no-ready-item'
 
+# 2b. next-ready-after is the driver's resumable cursor.
+backlog \
+    'P001|ready|tests|small|First|scripts/test_a.sh' \
+    'P002|needs-work|tests|small|Skipped|scripts/test_b.sh' \
+    'P003|ready|docs|small|Third|docs/PLAY.md'
+run next-ready-after P001
+expect_status 0 'the resume cursor finds the next ready record'
+expect_contains 'the cursor skips a non-ready record' 'P003|ready'
+run next-ready-after P003
+expect_status 1 'the cursor fails at the end of the queue'
+expect_contains 'the end is named' 'no-ready-item'
+
 # 3. Docs and tests are promotable.
 backlog \
     'P001|proposed|docs|small|Fix a typo|docs/UNATTENDED.md' \

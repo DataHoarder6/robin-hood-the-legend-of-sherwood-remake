@@ -14,7 +14,7 @@ file=${ROBIN_BACKLOG_FILE:-docs/AUTONOMOUS_BACKLOG.md}
 defects=${ROBIN_DEFECTS_FILE:-docs/DEFECTS.md}
 
 usage() {
-    printf 'usage: autobacklog.sh next-ready | generate-proposed [title] | promote <item> | verdict <item> needs-work|rejected\n' >&2
+    printf 'usage: autobacklog.sh next-ready | next-ready-after <id> | generate-proposed [title] | promote <item> | verdict <item> needs-work|rejected\n' >&2
     exit 2
 }
 die() { printf 'autobacklog: %s\n' "$*"; exit 1; }
@@ -50,6 +50,17 @@ case "${1:-}" in
     next-ready)
         [ $# -eq 1 ] || usage
         line=$(records | awk -F'|' '$2 == "ready" { print; exit }')
+        [ -n "$line" ] || die 'no-ready-item'
+        printf '%s\n' "$line"
+        ;;
+    next-ready-after)
+        # Resume cursor: the first ready record AFTER the named id in file
+        # order. The id need not still be ready; it only has to exist.
+        [ $# -eq 2 ] || usage
+        line=$(records | awk -F'|' -v after="$2" '
+            $1 == after { seen = 1; next }
+            seen && $2 == "ready" { print; exit }
+        ')
         [ -n "$line" ] || die 'no-ready-item'
         printf '%s\n' "$line"
         ;;
