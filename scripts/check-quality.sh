@@ -209,6 +209,9 @@ case "$1" in
         node --test scripts/validation/supervised.test.mjs
         node --experimental-strip-types --test wasm-www/src/content_cache.test.ts
         node --test scripts/validation/browser-boot.test.mjs
+        # Issue #76: the reload check's pure contract (including the hard
+        # "no live mission after reload" assertion) runs without a browser.
+        node --test scripts/validation/campaign-persistence.test.mjs
         node --experimental-strip-types --test wasm-www/src/join_ticket.test.ts
         # A published manifest must be same-origin to the page that serves it,
         # not to a hard-coded upstream hostname.

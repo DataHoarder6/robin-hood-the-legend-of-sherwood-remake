@@ -72,6 +72,26 @@ export function assertPersistenceSurvivesReload(before, after) {
 }
 
 /**
+ * Assert the engine has a live mission after the reload. The durable probe is
+ * answered off the mission queue, so it can succeed while the page is still at
+ * the main menu; digest/count stability alone would then prove only that bytes
+ * survived, not that boot auto-resume put the player back in the campaign.
+ * Only the non-sensitive map name and frame are read.
+ */
+export function assertLiveMissionAfterReload(state) {
+    if (!state || typeof state !== 'object') {
+        throw new Error('no live engine state after reload');
+    }
+    if (!Number.isFinite(state.frame)) {
+        throw new Error('no live engine frame after reload');
+    }
+    if (typeof state.map !== 'string' || state.map.length === 0) {
+        throw new Error('no live engine mission map after reload');
+    }
+    return { map: state.map, frame: state.frame };
+}
+
+/**
  * Assert a corrupted / oversized archive is reported explicitly and is never
  * silently replaced. The runtime reports a stable `errorKind`, not raw bytes.
  */

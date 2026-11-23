@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { hostShortFromVersion, verifyPublishedArtifact } from './browser-boot.mjs';
 import { requireSupervisor, spawnSupervised, stop as stopSupervised, unitName } from './supervised.mjs';
-import { PERSISTENCE_ENDPOINT, assertPersistenceSurvivesReload, assertCorruptionReported } from './campaign-persistence.mjs';
+import { PERSISTENCE_ENDPOINT, assertPersistenceSurvivesReload, assertCorruptionReported, assertLiveMissionAfterReload } from './campaign-persistence.mjs';
 
 const { values } = parseArgs({ options: {
     data: { type: 'string' }, pkg: { type: 'string', default: 'wasm-www/pkg' },
@@ -549,8 +549,14 @@ async function runCampaignPersistence() {
     await cdp('Page.reload', { ignoreCache: true }, session);
     const afterReload = await waitForProbe('after reload');
     record('persistenceAfterReload', afterReload);
-    const reloadedState = await evaluate(`robinRpc('state')`).catch(() => null);
-    record('stateAfterReload', reloadedState ? { map: reloadedState.map, frame: reloadedState.frame } : null);
+    // The probe is answered off the queue, so it can succeed while the page is
+    // still at the main menu. A reload only proves the campaign resumed when a
+    // live engine state arrives; a null/absent map or frame is a hard failure,
+    // not a reason to skip the mission comparison.
+    const reloadedState = await waitForMissionReady('after reload')
+        .then(assertLiveMissionAfterReload)
+        .catch(error => { result.failures.push(`campaign reload: ${error.message}`); return null; });
+    record('stateAfterReload', reloadedState);
     await cdp('Page.captureScreenshot', { format: 'png' }, session)
         .then(shot => writeFileSync(join(evidence, 'campaign-after-reload.png'), Buffer.from(shot.data, 'base64'))).catch(() => {});
 
@@ -558,7 +564,7 @@ async function runCampaignPersistence() {
     try { summary = assertPersistenceSurvivesReload(afterSave, afterReload); }
     catch (error) { result.failures.push(`campaign reload: ${error.message}`); }
     if (summary) record('campaignReloadProof', summary);
-    if (savedState?.map && reloadedState?.map && savedState.map !== reloadedState.map) {
+    if (reloadedState && savedState?.map && savedState.map !== reloadedState.map) {
         result.failures.push(`campaign resumed on a different mission: ${savedState.map} -> ${reloadedState.map}`);
     }
 
