@@ -20,8 +20,8 @@ The evidence behind these rules, and the mitigation each one adopts, is in
 
 ## Terminal states
 
-Every iteration ends in exactly one of three states and reports it. There is no
-fourth state and no prompt to the owner to choose, confirm, or continue.
+Every iteration ends in exactly one of four states and reports it. There is no
+prompt to the owner to choose, confirm, or continue.
 
 - **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`.
   What a landing requires is defined in
@@ -34,13 +34,29 @@ fourth state and no prompt to the owner to choose, confirm, or continue.
   but passes in isolation ([Known flake policy](#known-flake-policy)). The row,
   never another rerun, ends the iteration.
 - **BLOCKED** — the next step needs a capability the loop cannot supply. Name the
-  missing capability and stop; do not ask the owner to provide it.
+  missing capability and stop; do not ask the owner to provide it. Quota
+  exhaustion is the `quota-exhausted` sub-reason: admission fails closed and the
+  provider is never switched.
+- **NEEDS-DECISION** — the run halts for a rare, brittle question. It is allowed
+  only for an irreversible action the contract does not authorise, two
+  conflicting contract clauses, a missing external permission, or an ambiguity
+  that would change what the contract means. Routine ambiguity is a contract
+  defect fixed at the next interview, not a question mid-run.
 
-`HUMAN_GATE` is an annotation on items deferred to a human, not a fourth
+`HUMAN_GATE` is an annotation on items deferred to a human, not an iteration
 terminal state: the iteration still ends LANDED or FILED for the Linux work it
 completes. The scope decision and the gated items are in ADR 0010 — see
 [Windows as a human gate](#windows-as-a-human-gate). Other capabilities can
 still be BLOCKED under [Risk routing](#risk-routing).
+
+**Release outcomes are not iteration terminal states.** `RELEASED` (tag pushed,
+workflow dispatched) and `ROLLED-BACK` (pinned to the previous good AppImage)
+are tracked separately by
+[the autonomous release path](adr/0011-autonomous-release.md). An iteration
+still ends LANDED, FILED, BLOCKED or NEEDS-DECISION; the release outcome is a
+second, independent fact. A bound hit ends the run in `RUN-COMPLETE` after the
+current batch, as defined by
+[the run contract](AUTONOMOUS_RUN_CONTRACT.md).
 
 ## LANDED requires origin read-back
 
@@ -62,8 +78,10 @@ decisions are [ADR 0010](adr/0010-linux-first-unattended-goal.md) and the
 `HUMAN_GATE` rows in [GAPS.md](GAPS.md). A tick does not dispatch research or
 deep-dive subagents: it reads the authoritative sources, selects one assertion,
 dispatches builder/reviewer/verifier, and ends in a terminal state. If a needed
-decision is missing, the tick ends `BLOCKED` with that decision named — it does
-not commission a study of it mid-run. Research that changes scope goes through
+decision is missing, the tick ends `BLOCKED` for a capability or
+`NEEDS-DECISION` only for one of the four causes in
+[Terminal states](#terminal-states) — it does not commission a study of it
+mid-run. Research that changes scope goes through
 [research-before-building](https://github.com/DataHoarder6/home/blob/main/docs/agents/research-before-building.md)
 and lands as an ADR or gap row before the next run.
 
@@ -134,8 +152,11 @@ paths go in `ROBIN_DOCS_CHECK_PATHS`, and the process-layer variables are
 forwarded by `scripts/remote-check.sh`. A missing binary or a pruned artifact is
 a prerequisite failure, not a red assertion.
 
-A stable tag is human work, not a loop action. The `robin --version` preflight
-before a tag is scriptable and owned by [RELEASES.md](RELEASES.md).
+A stable tag is human work, except for the contract-authorised autonomous path
+in [ADR 0011](adr/0011-autonomous-release.md): MINOR bumps only, new tags only,
+via [`scripts/auto-release.sh`](../scripts/auto-release.sh). The `robin --version`
+preflight before a tag is scriptable and owned by [RELEASES.md](RELEASES.md). The
+machine-repo pin, `apps-sync`, installs and seat launches remain human steps.
 
 ## Retry and quarantine
 

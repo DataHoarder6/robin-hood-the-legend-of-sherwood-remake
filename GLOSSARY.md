@@ -200,8 +200,9 @@ mechanism.
 _Avoid_: category, type, severity.
 
 **Terminal state**:
-How an unattended iteration ends: `LANDED`, `FILED` or `BLOCKED`. There is no
-fourth state and no question to the owner.
+How an unattended iteration ends: `LANDED`, `FILED`, `BLOCKED` or
+`NEEDS-DECISION`. A `RELEASED`/`ROLLED-BACK` release outcome is a separate fact,
+not a terminal state.
 _Avoid_: outcome, status, result.
 
 **Integration ref**:
@@ -228,3 +229,41 @@ _Avoid_: merge, push, deploy.
 A subsystem evidence document under `docs/slop/`: what was measured, against
 which tree, and what remains unproved. Evidence, not a guide.
 _Avoid_: notes, research doc.
+
+## Autonomous loop
+
+**Contract**:
+The committed pre-run rules in `docs/AUTONOMOUS_RUN_CONTRACT.md`: scope,
+authority, bounds and release policy. Set by a pre-run interview; immutable by
+the loop.
+_Avoid_: config, settings, policy (too broad).
+
+**Work queue**:
+`docs/AUTONOMOUS_BACKLOG.md`, the authoritative list of work items and their
+risk classes. Not the GitHub issue tracker.
+_Avoid_: backlog (the deferred-feature doc), tracker, queue file.
+
+**Work item**:
+One row of the work queue: an id, a risk class, a kind, a scale and the paths it
+touches. Its kind and scale decide whether the loop may promote it.
+_Avoid_: issue, ticket, task.
+
+**Promotion**:
+Changing one work item from `proposed` to `ready`. The loop may promote only
+docs, tests and small refactors; everything else stays owner-owned.
+_Avoid_: approval, admission, verdict.
+
+**Run**:
+One bounded autonomous execution, from the committed contract to
+`RUN-COMPLETE` or a halt. Bounded by wall clock and batch count.
+_Avoid_: tick, session, job (a tick is one iteration of a run).
+
+**Batch**:
+The set of ready work items the controller assembles into one staging tree and
+gates once. Its members are frozen at epoch cut.
+_Avoid_: group, wave, set.
+
+**Run end**:
+`RUN-COMPLETE`: no independent work remains or a contract bound was hit after
+the current batch. Distinct from an iteration's terminal state.
+_Avoid_: done, finished, exit.

@@ -37,6 +37,9 @@ permissions:
     resource: "scripts/release*.sh"
     effect: deny
   - action: "edit"
+    resource: "docs/AUTONOMOUS_RUN_CONTRACT.md"
+    effect: deny
+  - action: "edit"
     resource: "*.nix"
     effect: deny
   - action: "edit"
@@ -74,7 +77,7 @@ Stable tags — `docs/UNATTENDED.md`.
 Risk routing — `docs/UNATTENDED.md`; the frontmatter `edit` denies are the
 enforced subset.
 
-Own the terminal states — LANDED, FILED, BLOCKED — defined in `docs/UNATTENDED.md`.
+Own the terminal states — LANDED, FILED, BLOCKED, NEEDS-DECISION — defined in `docs/UNATTENDED.md`.
 Emit exactly one and report it. Never ask the owner to choose, confirm, or
 continue: the `question` tool is denied and no permission asks for approval.
 A missing capability is BLOCKED with that capability named, never a question.
