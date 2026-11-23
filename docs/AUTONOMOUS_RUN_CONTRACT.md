@@ -53,8 +53,11 @@ contract_immutable: true
   landing. A per-gate timeout fails the batch closed.
 - No cost cap and no paid-model fallback: quota exhaustion is a named `BLOCKED`
   sub-reason with fail-closed admission, never a provider switch.
-- The contract is immutable by the loop. The director's frontmatter denies
-  `edit` to this file and `scripts/run-bounds.sh guard-edit` refuses the path.
+- The contract is immutable by the loop. The director's frontmatter denies both
+  `edit` and `shell` access to this path, so a `sed -i` or append cannot bypass
+  the edit deny. The run driver also calls `scripts/run-bounds.sh guard-edit`
+  before each path it writes; that guard refuses this path with
+  `contract-is-immutable`.
 
 ## Release policy
 

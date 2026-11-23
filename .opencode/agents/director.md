@@ -39,6 +39,9 @@ permissions:
   - action: "edit"
     resource: "docs/AUTONOMOUS_RUN_CONTRACT.md"
     effect: deny
+  - action: "shell"
+    resource: "*AUTONOMOUS_RUN_CONTRACT.md*"
+    effect: deny
   - action: "edit"
     resource: "*.nix"
     effect: deny

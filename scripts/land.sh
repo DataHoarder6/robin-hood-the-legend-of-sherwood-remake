@@ -188,7 +188,25 @@ for _round in $(seq 1 "$rounds"); do
 
     # The first round always gates; a later round gates only because it rebased,
     # since that is the only thing that changes the tree or its base.
-    if [ "$rebased" = 1 ] || [ "$_round" = 1 ]; then
+    #
+    # A batch controller that has already gated THIS EXACT tree may hand over a
+    # green stamp. The env var alone is not enough: the stamped tree must match
+    # the tree about to land and the stamp must say green. A rebase changes the
+    # tree, so it re-enables the gate. This is the single, narrow pass-through
+    # that keeps ADR 0009's "one gate per batch" without weakening the exact-tree
+    # rule or making SKIP_PUSH_GATE a routine path.
+    passed_tree=${ROBIN_LAND_GATE_PASSED_TREE:-}
+    passed_file=${ROBIN_LAND_GATE_PASSED_FILE:-}
+    gate_already_passed=0
+    if [ -n "$passed_tree" ] && [ -n "$passed_file" ] &&
+       [ "$passed_tree" = "$(git rev-parse --verify "$head^{tree}")" ] &&
+       [ "$(cat "$passed_file" 2>/dev/null || true)" = green ]; then
+        gate_already_passed=1
+    fi
+    if [ "$gate_already_passed" = 1 ]; then
+        printf 'land: gate skipped for %s; the batch tree is already proved\n' \
+            "$head" >&2
+    elif [ "$rebased" = 1 ] || [ "$_round" = 1 ]; then
         bash scripts/push-gate.sh "$base" "$head"
     fi
 

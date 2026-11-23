@@ -135,5 +135,19 @@ output=$(bash "$source_root/scripts/run-bounds.sh" check "$source_root/docs/AUTO
 expect_status 0 'the committed contract passes'
 expect_reason 'the committed contract reports ok' 'ok'
 
+# 10. Immutability is enforced in the director's shell permissions too, so a
+#     `sed -i` or `printf >>` cannot bypass an edit-only deny.
+director=$source_root/.opencode/agents/director.md
+if grep -A2 'action: "shell"' "$director" | grep -q 'AUTONOMOUS_RUN_CONTRACT.md'; then
+    pass 'the director denies shell access to the contract path'
+else
+    fail 'the director has no shell deny for the contract path'
+fi
+if grep -A3 'action: "shell"' "$director" | grep -q 'effect: deny'; then
+    pass 'the shell deny is a deny'
+else
+    fail 'the shell rule is not a deny'
+fi
+
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

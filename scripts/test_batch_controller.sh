@@ -44,8 +44,19 @@ if [ -n "${FAKE_BAD_MARKER:-}" ] &&
 fi
 printf 'gate: green %s\n' "$3"
 GATE
+# The land stub emulates land.sh's own gate, including the narrow opt-in
+# pass-through: a green stamp for the exact tree being landed skips it.
 cat >"$work/land.sh" <<'LAND'
 #!/usr/bin/env bash
+tree=$(git rev-parse 'HEAD^{tree}')
+if [ "${ROBIN_LAND_GATE_PASSED_TREE:-}" = "$tree" ] &&
+   [ -n "${ROBIN_LAND_GATE_PASSED_FILE:-}" ] &&
+   [ "$(cat "${ROBIN_LAND_GATE_PASSED_FILE}" 2>/dev/null || true)" = green ]; then
+    printf 'gate skipped for %s\n' "$tree"
+else
+    bash "$ROBIN_BATCH_GATE" "$(git rev-parse refs/remotes/fork/main)" \
+        "$(git rev-parse HEAD)" "$tree" >/dev/null
+fi
 head=$(git rev-parse HEAD)
 printf '%s\n' "$head" >>"$FAKE_LAND_LOG"
 printf 'readback %s\n' "$head"
@@ -55,7 +66,19 @@ cat >"$work/land-lying.sh" <<'LAND'
 # Exits 0 without the read-back evidence: the controller must refuse it.
 exit 0
 LAND
-chmod +x "$work/gate.sh" "$work/land.sh" "$work/land-lying.sh"
+# A gate that reproduces push-gate.sh's exact-tree refusal: it only passes when
+# run from the staging worktree whose HEAD is the head under test.
+cat >"$work/gate-cwd.sh" <<'GATE'
+#!/usr/bin/env bash
+base=$1 head=$2 tree=$3
+if ! git diff --quiet "$head" -- .; then
+    printf 'gate: worktree differs from the head being proved\n'
+    exit 1
+fi
+printf '%s %s\n' "$PWD" "$head" >>"$FAKE_GATE_CWD_LOG"
+printf 'gate: green %s from %s\n' "$tree" "$PWD"
+GATE
+chmod +x "$work/gate.sh" "$work/land.sh" "$work/land-lying.sh" "$work/gate-cwd.sh"
 export ROBIN_BATCH_GATE=$work/gate.sh ROBIN_BATCH_LAND=$work/land.sh
 
 REPO=''
@@ -222,6 +245,72 @@ controller=$source_root/scripts/batch-controller.sh
 if grep -q 'scripts/land.sh' "$controller"; then pass 'the controller calls land.sh'; else fail 'the controller does not call land.sh'; fi
 if grep -q 'scripts/push-gate.sh' "$controller"; then pass 'the controller calls push-gate.sh'; else fail 'the controller does not call push-gate.sh'; fi
 if grep -qE 'git[[:space:]]+push' "$controller"; then fail 'the controller hand-pushes'; else pass 'the controller never hand-pushes'; fi
+
+# 8. The gate runs from the staging worktree, not the outer checkout.
+fixture cwd
+member a a.txt 'feat: a'
+publish a
+run epoch
+epoch_id=$(printf '%s\n' "$output" | awk '{print $2}')
+worktree=$(sed -n 's/^worktree //p' "$ROBIN_BATCH_STATE/epochs/$epoch_id/meta")
+export FAKE_GATE_CWD_LOG=$work/cwd.log
+: >"$FAKE_GATE_CWD_LOG"
+export ROBIN_BATCH_GATE=$work/gate-cwd.sh
+run gate "$epoch_id"
+expect_status 0 'the exact-tree gate passes from the staging worktree'
+expect_contains 'the gate names the tree' 'gate: green'
+if grep -q "$worktree" "$FAKE_GATE_CWD_LOG"; then
+    pass 'the gate recorded the staging worktree as its cwd'
+else
+    fail "the gate ran from the wrong cwd: $(cat "$FAKE_GATE_CWD_LOG")"
+fi
+export ROBIN_BATCH_GATE=$work/gate.sh
+
+# 9. One gate per batch: the pass-through stops land.sh re-gating the tree.
+fixture onegate
+member a a.txt 'feat: a'
+publish a
+run epoch
+epoch_id=$(printf '%s\n' "$output" | awk '{print $2}')
+run gate "$epoch_id"
+run land "$epoch_id"
+expect_status 0 'landing with a green stamp succeeds'
+expect_contains 'the landing reports the skipped gate' 'gate skipped'
+if [ "$(gate_calls)" -eq 1 ]; then pass 'the batch gated exactly once'; else fail "gate log has $(gate_calls) lines"; fi
+
+# 9b. A wrong-tree stamp does not authorise a skip; land gates again.
+fixture wrongstamp
+member a a.txt 'feat: a'
+publish a
+run epoch
+epoch_id=$(printf '%s\n' "$output" | awk '{print $2}')
+run gate "$epoch_id"
+tree=$(sed -n 's/^tree //p' "$ROBIN_BATCH_STATE/epochs/$epoch_id/meta")
+printf 'green\n' >"$ROBIN_BATCH_STATE/gates/not-$tree"
+# A caller-supplied mismatch is emulated by pointing the land stub at a
+# different tree through its own env.
+status=0
+output=$(cd "$ROBIN_BATCH_STATE/worktrees/$epoch_id" && \
+    ROBIN_LAND_GATE_PASSED_TREE=wrong ROBIN_LAND_GATE_PASSED_FILE="$ROBIN_BATCH_STATE/gates/not-$tree" \
+    bash "$work/land.sh" 2>&1) || status=$?
+expect_status 0 'a mismatched stamp still lands'
+if [ "$(gate_calls)" -eq 2 ]; then pass 'a mismatched stamp re-runs the gate'; else fail "gate log has $(gate_calls) lines"; fi
+
+# 10. FIFO is monotonic: re-publishing an early agent puts it at the back.
+fixture republish
+member a a.txt 'feat: a'
+member b b.txt 'fix: b'
+member c c.txt 'docs: c'
+publish a b c
+git -C "$REPO" checkout -q a
+printf 'again\n' >"$REPO/a2.txt"
+git -C "$REPO" add -- a2.txt
+git -C "$REPO" commit -qm 'feat: a again' -- a2.txt
+git -C "$REPO" checkout -q main
+publish a
+run epoch
+expect_status 0 'the re-published epoch departs'
+expect_contains 'the re-published agent goes to the back' 'members b c a'
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

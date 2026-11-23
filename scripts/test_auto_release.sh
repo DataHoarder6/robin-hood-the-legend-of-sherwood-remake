@@ -87,6 +87,26 @@ fi
 order=$(printf '%s\n' "$output" | grep -nE 'tagged|pushed|dispatched' | tr '\n' ' ' || true)
 case $order in *tagged*pushed*dispatched*) pass 'tag, push, dispatch run in order' ;; *) fail "the order is wrong: $order" ;; esac
 
+# 1b. The tag names the audited candidate, not a later HEAD.
+fixture headnotdef 0.5.0
+audited=$(git -C "$REPO" rev-parse HEAD)
+printf 'later\n' >"$REPO/later.txt"
+git -C "$REPO" add -- later.txt
+git -C "$REPO" commit -qm 'docs: later un audited work' -- later.txt
+run "$audited" "$work/robin" "$summary"
+expect_status 0 'a release of an earlier candidate succeeds'
+tagged_commit=$(git -C "$REPO" rev-parse 'v0.5.0^{commit}' 2>/dev/null || true)
+if [ "$tagged_commit" = "$audited" ]; then
+    pass 'the tag points at the audited candidate'
+else
+    fail "the tag points at $tagged_commit, not $audited"
+fi
+if [ "$tagged_commit" != "$(git -C "$REPO" rev-parse HEAD)" ]; then
+    pass 'the tag does not point at HEAD'
+else
+    fail 'the tag silently moved to HEAD'
+fi
+
 # 2. An existing tag is never moved.
 fixture exists 0.5.0 v0.5.0
 run "$(git -C "$REPO" rev-parse HEAD)" "$work/robin" "$summary"

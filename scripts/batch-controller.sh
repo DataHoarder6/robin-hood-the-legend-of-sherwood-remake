@@ -7,8 +7,8 @@
 #
 #   ready <agent> <head>   publish a compare-and-swap readiness ref + FIFO ticket
 #   epoch                  cut the next batch (prints its id, tree and members)
-#   gate <epoch>           run or reuse the tree-keyed gate
-#   land <epoch>           land through scripts/land.sh and require read-back
+#   gate <epoch>           run or reuse the tree-keyed gate in the staging worktree
+#   land <epoch>           land through scripts/land.sh, passing the gate stamp
 #   bisect <epoch>         split a red batch, land green halves, quarantine red
 #   release-worthy <epoch> Conventional-Commit bump: minor|none|major-not-allowed
 #
@@ -70,8 +70,11 @@ ready() {
     done
     git update-ref "refs/robin/ready/$agent" "$head" "$old" ||
         die "ready-cas-failed: $agent"
-    seq=$(find "$state/tickets" -maxdepth 1 -type f | wc -l)
+    # Monotonic, never count-derived: removing an old ticket on re-publish must
+    # not let an early agent reuse a number already held by a later arrival.
+    seq=$(cat "$state/ticket.counter" 2>/dev/null || printf 0)
     seq=$((seq + 1))
+    printf '%s\n' "$seq" >"$state/ticket.counter"
     ticket="$state/tickets/$(printf '%020d' "$seq")-$agent"
     line=$(printf '%s %s %s %s %s' "$agent" "$head" "$base" "$tree" "$(date +%s)")
     printf '%s\n' "$line" >"$ticket"
@@ -103,19 +106,23 @@ assemble_into() { # NAME BASE AGENT...  (sets ASSEMBLY_HEAD/ASSEMBLY_TREE/DIR)
     ASSEMBLY_TREE=$(git -C "$dir" rev-parse 'HEAD^{tree}')
 }
 
+gate_result_file() { printf '%s/gates/%s\n' "$state" "$1"; }
+
 # One gate per tree. A green result is stamped under the tree; a replay of the
 # exact tree returns it without rebuilding. Any other tree fails closed into a
-# fresh gate.
-run_gate() { # BASE HEAD TREE
-    local base=$1 head=$2 tree=$3 result="$state/gates/$4" rc=0
+# fresh gate. push-gate.sh refuses a worktree that differs from HEAD, so this
+# MUST run from the controller-owned staging worktree, never the outer checkout.
+run_gate() { # DIR BASE HEAD TREE
+    local dir=$1 base=$2 head=$3 tree=$4 result rc=0
+    result=$(gate_result_file "$tree")
     if [ -f "$result" ] && grep -qx green "$result"; then
         printf 'cached-green %s\n' "$tree"
         return 0
     fi
     if [ -n "$gate_cmd" ]; then
-        "$gate_cmd" "$base" "$head" "$tree" || rc=$?
+        ( cd -- "$dir" && "$gate_cmd" "$base" "$head" "$tree" ) || rc=$?
     else
-        bash scripts/push-gate.sh "$base" "$head" || rc=$?
+        ( cd -- "$dir" && bash scripts/push-gate.sh "$base" "$head" ) || rc=$?
     fi
     if [ "$rc" -eq 0 ]; then
         printf 'green\n' >"$result"
@@ -128,14 +135,19 @@ run_gate() { # BASE HEAD TREE
 }
 
 # Landing uses land.sh from the staging worktree and trusts only its read-back.
-land_tree() { # EPOCH DIR HEAD AGENT...
-    local epoch=$1 dir=$2 head=$3
-    shift 3
-    local out rc=0 agent
+# The green stamp for THIS tree is passed through so land.sh does not gate the
+# same tree a second time; a rebase changes the tree and re-enables its gate.
+land_tree() { # EPOCH DIR HEAD TREE AGENT...
+    local epoch=$1 dir=$2 head=$3 tree=$4
+    shift 4
+    local out rc=0 agent stamp
+    stamp=$(gate_result_file "$tree")
     if [ -n "$land_cmd" ]; then
-        out=$(cd -- "$dir" && "$land_cmd" 2>&1) || rc=$?
+        out=$(cd -- "$dir" && ROBIN_LAND_GATE_PASSED_TREE="$tree" \
+            ROBIN_LAND_GATE_PASSED_FILE="$stamp" "$land_cmd" 2>&1) || rc=$?
     else
-        out=$(cd -- "$dir" && bash scripts/land.sh 2>&1) || rc=$?
+        out=$(cd -- "$dir" && ROBIN_LAND_GATE_PASSED_TREE="$tree" \
+            ROBIN_LAND_GATE_PASSED_FILE="$stamp" bash scripts/land.sh 2>&1) || rc=$?
     fi
     [ "$rc" -eq 0 ] || die "land-failed: $head"
     case $out in
@@ -219,7 +231,8 @@ gate_epoch() {
     local id=$1 tree
     [ -f "$state/epochs/$id/meta" ] || die "unknown-epoch: $id"
     tree=$(meta_get "$id" tree)
-    run_gate "$(meta_get "$id" base)" "$(meta_get "$id" head)" "$tree" "$tree"
+    run_gate "$(meta_get "$id" worktree)" "$(meta_get "$id" base)" \
+        "$(meta_get "$id" head)" "$tree"
 }
 
 # Bisect a red batch. Green halves land; a red single member is quarantined to
@@ -245,8 +258,8 @@ bisect_epoch() {
             head=$(head_of "$id" "$agent")
             subset_no=$((subset_no + 1))
             assemble_into "$id-s$subset_no" "$base" "$agent"
-            if run_gate "$base" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE" "$ASSEMBLY_TREE"; then
-                land_tree "$id" "$ASSEMBLY_DIR" "$ASSEMBLY_HEAD" "$agent" >/dev/null
+            if run_gate "$ASSEMBLY_DIR" "$base" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE"; then
+                land_tree "$id" "$ASSEMBLY_DIR" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE" "$agent" >/dev/null
                 printf 'landed-half %s\n' "$agent"
                 landed_any=1
             else
@@ -268,8 +281,8 @@ bisect_epoch() {
             for p in "${part[@]}"; do heads+=("$p"); done
             subset_no=$((subset_no + 1))
             assemble_into "$id-s$subset_no" "$base" "${heads[@]}"
-            if run_gate "$base" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE" "$ASSEMBLY_TREE"; then
-                land_tree "$id" "$ASSEMBLY_DIR" "$ASSEMBLY_HEAD" "${heads[@]}" >/dev/null
+            if run_gate "$ASSEMBLY_DIR" "$base" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE"; then
+                land_tree "$id" "$ASSEMBLY_DIR" "$ASSEMBLY_HEAD" "$ASSEMBLY_TREE" "${heads[@]}" >/dev/null
                 printf 'landed-half %s\n' "${heads[*]}"
                 landed_any=1
             elif [ ${#heads[@]} -gt 1 ]; then
@@ -319,7 +332,7 @@ case "${1:-}" in
         [ $# -eq 1 ] || usage
         [ -f "$state/epochs/$1/meta" ] || die "unknown-epoch: $1"
         land_tree "$1" "$(meta_get "$1" worktree)" "$(meta_get "$1" head)" \
-            $(member_agents "$1")
+            "$(meta_get "$1" tree)" $(member_agents "$1")
         ;;
     bisect) shift; bisect_epoch "$@" ;;
     release-worthy) shift; release_worthy "$@" ;;

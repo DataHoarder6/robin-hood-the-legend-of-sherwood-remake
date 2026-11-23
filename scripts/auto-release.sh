@@ -76,7 +76,7 @@ fi
 # the tag would hide.
 printf 'auto-release: preflight ok; %s -> %s (binary %s)\n' "$previous" "$tag" "$binary"
 
-git tag -a "$tag" -m "$tag from $candidate; MINOR from $previous"
+git tag -a "$tag" "$candidate" -m "$tag from $candidate; MINOR from $previous"
 printf 'auto-release: tagged %s\n' "$tag"
 git push fork "$tag"
 printf 'auto-release: pushed %s\n' "$tag"
