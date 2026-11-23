@@ -1,4 +1,4 @@
-import { copyFile, lstat } from "node:fs/promises";
+import { lstat, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -19,9 +19,17 @@ export async function stageCloudflareHeaders(kind, outputDirectory) {
   if (facts === undefined || !facts.isDirectory() || facts.isSymbolicLink()) {
     throw new Error(`static output is not a real directory: ${output}`);
   }
-  await copyFile(
-    resolve(import.meta.dirname, "..", "deploy", sourceName),
+  // One origin input drives the HTML and the headers. Defaults stay upstream's
+  // so the Cloudflare workflow is unchanged; an estate build supplies both.
+  const signerOrigin =
+    process.env.ROBIN_SIGNER_ORIGIN ?? "https://identity.robinhood.phiresky.xyz";
+  const gameOrigin = process.env.ROBIN_GAME_ORIGIN ?? "https://robinhood.phiresky.xyz";
+  const source = await readFile(resolve(import.meta.dirname, "..", "deploy", sourceName), "utf8");
+  await writeFile(
     resolve(output, "_headers"),
+    source
+      .replaceAll("%ROBIN_SIGNER_ORIGIN%", signerOrigin)
+      .replaceAll("%ROBIN_GAME_ORIGIN%", gameOrigin),
   );
 }
 
