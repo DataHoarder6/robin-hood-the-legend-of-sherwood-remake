@@ -25,6 +25,10 @@ pub(crate) enum RankedError {
     /// No published board, endpoint or identity is available for this run.
     #[error("{0}")]
     Unavailable(Text),
+    /// No replay snapshot can exist (a browser build owns no recording path).
+    /// Presentation settles this without a notice; it is never a player error.
+    #[error("{0}")]
+    NoReplay(Text),
     /// The mission-end leaderboard lifecycle was used out of order.
     #[error("{0}")]
     Lifecycle(Text),
@@ -36,6 +40,10 @@ pub(crate) enum RankedError {
 impl RankedError {
     pub(crate) fn unavailable(message: impl Into<Text>) -> Self {
         Self::Unavailable(message.into())
+    }
+
+    pub(crate) fn no_replay(message: impl Into<Text>) -> Self {
+        Self::NoReplay(message.into())
     }
 
     pub(crate) fn lifecycle(message: impl Into<Text>) -> Self {

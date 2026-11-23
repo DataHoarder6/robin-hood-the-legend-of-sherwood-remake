@@ -25,6 +25,23 @@ pub(in crate::game_session) enum MissionEndLeaderboardTaskProgress {
     Detach(MissionEndLeaderboardController),
 }
 
+/// A preparation result that settles the task without opening a board or a
+/// notice. `None` leaves `tick` to run its normal board/notice handling.
+/// Renderer-free so the no-replay path is testable without a window.
+pub(super) fn settled_progress(
+    result: &Option<Result<(MissionEndRunBundle, Arc<[u8]>), RankedError>>,
+) -> Option<MissionEndLeaderboardTaskProgress> {
+    match result {
+        Some(Err(RankedError::NoReplay)) => {
+            tracing::debug!(
+                "mission-end leaderboards skipped: no replay snapshot can exist in this build"
+            );
+            Some(MissionEndLeaderboardTaskProgress::Finished)
+        }
+        _ => None,
+    }
+}
+
 impl MissionEndLeaderboardTaskState {
     pub(in crate::game_session) fn new(
         preparation: MissionEndPreparation,
@@ -45,6 +62,19 @@ impl MissionEndLeaderboardTaskState {
         )
     }
 
+    /// Apply the renderer-free settlement of a preparation result, if any.
+    #[cfg(test)]
+    pub(in crate::game_session) fn settle_without_ui(
+        &mut self,
+        result: &Option<Result<(MissionEndRunBundle, Arc<[u8]>), RankedError>>,
+    ) -> Option<MissionEndLeaderboardTaskProgress> {
+        let progress = settled_progress(result)?;
+        if matches!(progress, MissionEndLeaderboardTaskProgress::Finished) {
+            self.phase = MissionEndLeaderboardTaskPhase::Finished;
+        }
+        Some(progress)
+    }
+
     pub(in crate::game_session) fn tick(
         &mut self,
         io: &mut ModalScreenIo<'_, '_>,
@@ -57,7 +87,12 @@ impl MissionEndLeaderboardTaskState {
             MissionEndLeaderboardTaskPhase::Preparing(preparation) => {
                 let replay_exports = self.application_context.replay_exports();
                 let edition = super::installed_content_edition(&self.application_context);
-                let Some(result) = preparation.poll_bundle(&replay_exports, edition) else {
+                let result = preparation.poll_bundle(&replay_exports, edition);
+                if let Some(progress) = settled_progress(&result) {
+                    self.phase = MissionEndLeaderboardTaskPhase::Finished;
+                    return progress;
+                }
+                let Some(result) = result else {
                     render_preparing(renderer, resources, cursor);
                     return MissionEndLeaderboardTaskProgress::Pending;
                 };

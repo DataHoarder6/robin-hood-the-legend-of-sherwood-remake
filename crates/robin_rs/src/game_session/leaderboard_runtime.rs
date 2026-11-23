@@ -302,7 +302,19 @@ impl MissionEndPreparation {
         if self.browse.is_some() {
             return Ok(None);
         }
-        exports.snapshot().map(Some).map_err(RankedError::evidence)
+        let snapshot = exports.snapshot().map_err(RankedError::evidence)?;
+        if snapshot.is_empty() {
+            // No recording path wrote any bytes (the browser case), so no
+            // replay snapshot can exist. This is a build capability, not a
+            // failed upload — never surface it as an error notice.
+            // TODO: an explicit "this build cannot record" capability on
+            // `ReplayExports` would distinguish the browser case from a
+            // native recording failure; both present today as an empty spool.
+            return Err(RankedError::no_replay(
+                "no replay snapshot can exist in this build",
+            ));
+        }
+        Ok(Some(snapshot))
     }
 
     /// Poll once. `None` means the bounded HTTP task is still in flight.
@@ -411,6 +423,52 @@ mod tests {
             "the second capture must carry its own attempt's outcome"
         );
         assert!(runtime.preparation.is_none());
+    }
+
+    /// D13 (#79): a browser build owns no replay recording path, so its
+    /// replay spool stays empty and no replay snapshot can ever exist. The
+    /// mission-end leaderboard task must settle quietly rather than raise the
+    /// "Leaderboards unavailable" notice on the debriefing screen.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn no_replay_export_finishes_mission_end_leaderboard_without_notice() {
+        // An empty spool models the browser condition exactly: no recording
+        // was ever written, so `snapshot()` cannot produce a replay to encode.
+        let service = Arc::<crate::replay_service::ReplayService>::default();
+        let exports = service.exports();
+        let mut preparation = MissionEndPreparation {
+            preferences: LeaderboardPreferences {
+                show_mission_end_boards: true,
+                ..LeaderboardPreferences::default()
+            },
+            browse: None,
+            upload: None,
+        };
+        let mut result = preparation.poll_bundle(&exports, OfficialContentEditionV1::Demo);
+        for _ in 0..100 {
+            if result.is_some() {
+                break;
+            }
+            std::thread::yield_now();
+            result = preparation.poll_bundle(&exports, OfficialContentEditionV1::Demo);
+        }
+        let result = result.expect("no-replay preparation settles promptly");
+
+        let mut task = MissionEndLeaderboardTaskState::new(
+            preparation,
+            crate::host::ApplicationContext::default(),
+        );
+        let progress = task
+            .settle_without_ui(&result)
+            .expect("a missing replay snapshot must settle the task without a UI");
+        assert!(
+            matches!(progress, MissionEndLeaderboardTaskProgress::Finished),
+            "no replay export must finish the task, not raise an Unavailable phase"
+        );
+        assert!(
+            !task.owns_presentation(),
+            "a finished task must not keep an Unavailable notice alive"
+        );
     }
 
     #[test]

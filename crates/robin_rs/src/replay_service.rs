@@ -695,6 +695,12 @@ impl ReplaySnapshot {
             .map_err(|error| ExportError::Internal(format!("encode compact replay: {error}")))
     }
 
+    /// An empty snapshot means no recording was ever written for this run.
+    /// Browser builds never write one; there is nothing to encode or upload.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.byte_length == 0
+    }
+
     pub(crate) fn parse_sync(&self) -> Result<engine_replay::ReplayData, String> {
         if self.byte_length == 0 {
             return Err("no active replay recording".to_owned());
