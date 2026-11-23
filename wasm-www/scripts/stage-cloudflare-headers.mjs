@@ -21,8 +21,7 @@ export async function stageCloudflareHeaders(kind, outputDirectory) {
   }
   // One origin input drives the HTML and the headers. Defaults stay upstream's
   // so the Cloudflare workflow is unchanged; an estate build supplies both.
-  const signerOrigin =
-    process.env.ROBIN_SIGNER_ORIGIN ?? "https://identity.robinhood.phiresky.xyz";
+  const signerOrigin = process.env.ROBIN_SIGNER_ORIGIN ?? "https://identity.robinhood.phiresky.xyz";
   const gameOrigin = process.env.ROBIN_GAME_ORIGIN ?? "https://robinhood.phiresky.xyz";
   const source = await readFile(resolve(import.meta.dirname, "..", "deploy", sourceName), "utf8");
   await writeFile(
