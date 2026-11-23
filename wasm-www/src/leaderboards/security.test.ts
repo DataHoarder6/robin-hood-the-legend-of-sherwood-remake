@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { cspDirectives } from "../csp-test-utils.js";
-import { DEPLOYMENT } from "../../scripts/verify-cloudflare-deployment.mjs";
 import { element, link, replace } from "./dom.js";
 import { appendAchievements, playerTables, uploaderView } from "./public-components.js";
 import { parseBoardMetadata, parsePlayerRunHistoryPage } from "./public-response.js";
@@ -101,7 +100,13 @@ test("leaderboard CSP pins the dedicated signer and has no executable blob excep
   const html = readFileSync(new URL("../../leaderboards/index.html", import.meta.url), "utf8");
   const policy = cspDirectives(html);
   assert.deepEqual(policy.get("script-src"), new Set(["'self'"]));
-  assert.deepEqual(policy.get("frame-src"), new Set(["'self'", DEPLOYMENT.signerOrigin]));
+  // The source template carries Vite's placeholder; the jautis build fills it
+  // through VITE_ROBIN_IDENTITY_SIGNER_ORIGIN (see scripts/deploy_web_jautis.sh).
+  // A hardcoded origin here would break a second deployment on another origin.
+  assert.deepEqual(
+    policy.get("frame-src"),
+    new Set(["'self'", "%VITE_ROBIN_IDENTITY_SIGNER_ORIGIN%"]),
+  );
   assert.deepEqual(policy.get("connect-src"), new Set(["'self'"]));
   assert.deepEqual(policy.get("style-src"), new Set(["'self'"]));
   assert.deepEqual(policy.get("object-src"), new Set(["'none'"]));
@@ -115,8 +120,9 @@ test("game-shell CSP confines executable sources and permits verified blob modul
     policy.get("connect-src"),
     new Set(["'self'", "https:", "wss:", "http://127.0.0.1:*", "http://localhost:*"]),
   );
-  // The estate shell's inline CSP pins the estate signer origin (see index.html).
-  assert.deepEqual(policy.get("frame-src"), new Set(["https://robin-id.jautis.lt"]));
+  // The source shell carries the same Vite placeholder; the deploy build
+  // supplies the jautis signer origin, so no single origin is pinned in-tree.
+  assert.deepEqual(policy.get("frame-src"), new Set(["%VITE_ROBIN_IDENTITY_SIGNER_ORIGIN%"]));
   assert.deepEqual(policy.get("object-src"), new Set(["'none'"]));
 });
 
