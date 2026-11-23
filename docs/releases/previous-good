@@ -1,0 +1,5 @@
+# Owner-owned rollback pointer beside docs/releases/robin-pin. First non-comment
+# line names the known-good AppImage to fall back to. scripts/appimage-retain.sh
+# records and reads it; scripts/appimage-retain.sh rollback prints the target.
+# Set to the owner's actual previous-good filename before retention runs.
+PENDING-OWNER-SET

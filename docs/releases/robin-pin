@@ -1,0 +1,5 @@
+# Owner-owned pointer. The autonomous loop may never edit this file, the
+# machine repo's robin-hood pin, or any seat install. First non-comment line
+# names the pinned AppImage in the retention directory.
+# Set to the owner's actual pinned filename before retention runs.
+PENDING-OWNER-SET

@@ -10,6 +10,7 @@
 #   gate <epoch>           run or reuse the tree-keyed gate
 #   land <epoch>           land through scripts/land.sh and require read-back
 #   bisect <epoch>         split a red batch, land green halves, quarantine red
+#   release-worthy <epoch> Conventional-Commit bump: minor|none|major-not-allowed
 #
 # Environment: ROBIN_BATCH_REPO, ROBIN_BATCH_STATE, ROBIN_BATCH_BASE_REF
 # (fork/main), ROBIN_BATCH_MIN/MAX/WAIT_SECS, ROBIN_BATCH_GATE and
@@ -282,6 +283,32 @@ bisect_epoch() {
     [ "$landed_any" -eq 1 ] || die 'bisect-no-landing'
 }
 
+# Release-worthy is derived from Conventional Commits in the batch, never from
+# agent judgment: feat/fix -> MINOR, only docs/test/chore/... -> none, a
+# breaking marker -> a human decision (major-not-allowed).
+release_worthy() {
+    [ $# -eq 1 ] || usage
+    local id=$1 base agent head
+    [ -f "$state/epochs/$id/meta" ] || die "unknown-epoch: $id"
+    base=$(meta_get "$id" base)
+    local -a members=()
+    mapfile -t members < <(member_agents "$id")
+    local text=''
+    for agent in "${members[@]}"; do
+        head=$(head_of "$id" "$agent")
+        text+=$(git log --format='%s%n%b' "$base..$head")$'\n'
+    done
+    if printf '%s\n' "$text" | grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING CHANGE:'; then
+        printf 'major-not-allowed\n'
+        return 1
+    fi
+    if printf '%s\n' "$text" | grep -qE '^(feat|fix)(\([^)]*\))?:'; then
+        printf 'minor\n'
+        return 0
+    fi
+    printf 'none\n'
+}
+
 case "${1:-}" in
     ready) shift; ready "$@" ;;
     epoch) shift; [ $# -eq 0 ] || usage; epoch ;;
@@ -293,5 +320,6 @@ case "${1:-}" in
             $(member_agents "$1")
         ;;
     bisect) shift; bisect_epoch "$@" ;;
+    release-worthy) shift; release_worthy "$@" ;;
     *) usage ;;
 esac
