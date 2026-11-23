@@ -104,23 +104,23 @@ mod browser {
             return rejected(bytes, "corrupt");
         };
         let identity = active.get("name").and_then(|v| v.as_str()).map(digest);
-        let config = active.map(|profile| {
-            // Config digests intentionally cover only settings, never the
-            // player's name or any save data.
-            let mut canonical = String::new();
-            for key in [
-                "difficulty",
-                "graphic_config",
-                "gameplay_config",
-                "sound_config",
-                "multiplayer_config",
-            ] {
-                if let Some(field) = profile.get(key) {
-                    canonical.push_str(&field.to_string());
-                }
+        // `active` is already the unwrapped `&Value`, so the digest is computed
+        // directly from it. Config digests intentionally cover only settings,
+        // never the player's name or any save data. This path is always taken
+        // for a well-formed archive, so configDigest stays a non-null string.
+        let mut canonical = String::new();
+        for key in [
+            "difficulty",
+            "graphic_config",
+            "gameplay_config",
+            "sound_config",
+            "multiplayer_config",
+        ] {
+            if let Some(field) = active.get(key) {
+                canonical.push_str(&field.to_string());
             }
-            digest(&canonical)
-        });
+        }
+        let config = digest(&canonical);
         let attempts = active
             .get("campaign_history")
             .and_then(|history| history.get("attempts"))

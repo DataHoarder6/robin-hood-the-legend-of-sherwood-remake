@@ -136,6 +136,32 @@ Local evidence (non-gate, this host): `node --check` on both mjs files PASSED;
 pure assertions `RESULT pass=6 fail=0` (same six cases as round 1);
 `rustfmt --check --edition 2024 crates/robin_rs/src/main_menu/mod.rs` exit 0.
 
+## Verification round 1 — wasm compile fix
+
+The wasm target failed to compile (native suites passed):
+
+```
+error[E0599]: `&serde_json::Value` is not an iterator
+  --> crates/robin_rs/src/campaign_persistence.rs:107:29
+   |
+103 |     let Some(active) = active else { return rejected(bytes, "corrupt"); };
+    |         ------ binding `active` is `&Value` (the Option was destructured)
+107 |     let config = active.map(|profile| { ... digest(&canonical) });
+    |                            ^^^^ no method `map` on `&Value`
+```
+
+`let Some(active) = active else` unwraps an `Option<&Value>`, leaving `active:
+&Value`; `Option::map` no longer applies. The config digest is now computed
+directly from that `&Value` (same five settings keys, same `digest` helper), so
+`configDigest` stays a non-null string; identity digest and error kinds are
+untouched. Checked the module's other `#[cfg(target_arch = "wasm32")]` blocks
+and both other `let Some(...) else` sites — no other shadow-then-`.map()`
+occurrence.
+
+Local evidence: `node --check` on both mjs files PASSED; pure assertions
+`RESULT pass=6 fail=0`; `rustfmt --check --edition 2024
+crates/robin_rs/src/campaign_persistence.rs` exit 0. No cargo/gate on this host.
+
 STATUS: DONE_WITH_CONCERNS
 Commit: 1e6c78ed6371fa35bc9be996d0efdd113d03445d (fix); review fixes 851869919, 22a596f9d; ledger wording 8b855d491
 Evidence: `node --check` on both mjs files passed; reload assertions fail pre-fix (2/2) and pass post-fix (6/6); rustfmt --check on all changed Rust files exit 0.
