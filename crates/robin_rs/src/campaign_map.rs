@@ -770,10 +770,6 @@ impl CampaignMapModalState {
     }
 
     fn watch_selected_play(&mut self) {
-        if !crate::mission_replays::replay_playback_available() {
-            self.replay_status = "Replay playback requires the desktop game.".into();
-            return;
-        }
         let Some(play) = self
             .graph
             .nodes
@@ -2648,13 +2644,13 @@ fn detail_sections(
 }
 
 /// Watch control for the selected play: its label and whether it is active.
-/// The control is only meaningful when a recording exists and this build can
-/// actually open one.
+/// A build with no playback must never offer Watch, even if a recording link
+/// is somehow present; the reachable no-recording case keeps its honest label.
 fn watch_replay_control(has_recording: bool, playback_available: bool) -> (&'static str, bool) {
     match (has_recording, playback_available) {
         (true, true) => ("Watch replay", true),
-        (false, true) => ("No recording", false),
-        (_, false) => ("Replay unavailable", false),
+        (true, false) => ("Replay unavailable", false),
+        (false, _) => ("No recording", false),
     }
 }
 
@@ -4193,16 +4189,28 @@ mod browser_tests {
         }
     }
 
-    /// A browser build has no local viewer: even with a linked recording the
-    /// detail pane must not offer an active Watch control that can only fail.
+    /// Browser builds link no recordings (`RecordingIndex::find` always returns
+    /// `None`) and have no viewer, so the reachable detail-pane state is
+    /// "no recording, no playback". Bind both platform facts and the control
+    /// they produce; a playable build still offers Watch for a real recording.
     #[test]
     fn watch_replay_not_offered_in_browser() {
-        let (label, active) = watch_replay_control(true, false);
-        assert!(!active, "a browser Watch button cannot open a viewer");
-        assert_ne!(
-            label, "Watch replay",
-            "the disabled button must not promise playback"
+        let playback_available = crate::mission_replays::replay_playback_available();
+        assert_eq!(
+            playback_available,
+            cfg!(not(target_arch = "wasm32")),
+            "browser builds must report no local replay playback"
         );
+
+        // The only browser-reachable state: no linked recording, no viewer.
+        let (label, active) = watch_replay_control(false, playback_available);
+        assert!(!active, "the Watch control must be inactive in a browser");
+        assert_eq!(label, "No recording");
+
+        // The playback-capable path is not disabled by the browser guard.
+        let (label, active) = watch_replay_control(true, true);
+        assert!(active);
+        assert_eq!(label, "Watch replay");
     }
 
     #[test]
