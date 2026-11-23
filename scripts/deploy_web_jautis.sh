@@ -43,6 +43,7 @@ export ROBIN_OPUS_TOOLS_DIR="\$toolchain/opus-tools-0.2"
 # Origin-bound build: the estate signer and game origin, never upstream's.
 export VITE_IDENTITY_SIGNER_URL=https://robin-id.jautis.lt/identity-signer/
 export VITE_ROBIN_IDENTITY_SIGNER_ORIGIN=https://robin-id.jautis.lt
+export ROBIN_SIGNER_ORIGIN=https://robin-id.jautis.lt
 export VITE_GAME_ORIGIN=https://robin.jautis.lt
 export ROBINHOOD_LEADERBOARD_WEB_ORIGIN=https://robin.jautis.lt
 export ROBINHOOD_IDENTITY_SIGNER_ORIGIN=https://robin-id.jautis.lt
