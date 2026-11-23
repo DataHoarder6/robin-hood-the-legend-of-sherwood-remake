@@ -162,6 +162,29 @@ Local evidence: `node --check` on both mjs files PASSED; pure assertions
 `RESULT pass=6 fail=0`; `rustfmt --check --edition 2024
 crates/robin_rs/src/campaign_persistence.rs` exit 0. No cargo/gate on this host.
 
+## Verification round 2 — check readiness fix
+
+The delivered check failed on minipc with:
+
+```
+engine not ready — no active mission RPC session
+```
+
+`waitForProbe('first boot')` only proved the off-queue `campaign-persistence`
+RPC existed; the engine had no active mission yet, so `mission-result` failed
+and its `.catch` only logged the error. `attemptCount` then stayed 0 and no
+`campaignReloadProof` was produced. `runCampaignPersistence()` now waits for a
+live `robinRpc('state')` (finite `frame`, string `map`) under the existing
+deadline before any `set-paused` / `step-forward` / `mission-result`, records
+`missionReady: { started: true, frame: <n> }` as the precondition proof, and
+routes all four driving game RPCs through `requireGameRpc`, which pushes
+`label: error.message` into `result.failures` instead of swallowing it. Genuine
+`Page.reload`, digest/count assertions, and corrupt/oversize injections are
+unchanged; no sensitive data is recorded.
+
+Local evidence: `node --check` on both mjs files PASSED; pure assertions
+`RESULT pass=6 fail=0`. No cargo/gate on this host.
+
 STATUS: DONE_WITH_CONCERNS
 Commit: 1e6c78ed6371fa35bc9be996d0efdd113d03445d (fix); review fixes 851869919, 22a596f9d; ledger wording 8b855d491
 Evidence: `node --check` on both mjs files passed; reload assertions fail pre-fix (2/2) and pass post-fix (6/6); rustfmt --check on all changed Rust files exit 0.

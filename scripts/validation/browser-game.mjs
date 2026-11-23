@@ -495,6 +495,31 @@ async function runCampaignPersistence() {
         throw new Error(`${label}: campaign-persistence RPC never became available (last: ${JSON.stringify(last)?.slice(0, 300)})`);
     };
 
+    // The persistence RPC is answered off the mission queue, so its arrival
+    // says nothing about engine readiness. The ordinary flow gates on a live
+    // state instead; do the same before driving `set-paused` / `mission-result`.
+    const waitForMissionReady = async (label) => {
+        let last = null;
+        while (Date.now() < deadline) {
+            await pause(1500);
+            try {
+                const state = await evaluate(`Promise.race([robinRpc('state'), new Promise((_,r)=>setTimeout(()=>r(Error('state timeout')),10000))])`);
+                if (state && Number.isFinite(state.frame) && typeof state.map === 'string') {
+                    return state;
+                }
+                last = { error: 'state had no live mission frame/map' };
+            } catch (error) { last = { error: error.message }; }
+        }
+        throw new Error(`${label}: mission never became ready before the acceptance deadline (last: ${JSON.stringify(last)?.slice(0, 300)})`);
+    };
+
+    // A failed game RPC must fail this check, not be logged and forgotten:
+    // without a checkpoint the later digest assertions would only fail opaque.
+    const requireGameRpc = async (label, expression) => {
+        try { return await evaluate(expression); }
+        catch (error) { result.failures.push(`${label}: ${error.message}`); return null; }
+    };
+
     const query = new URLSearchParams({ 'wasm-log': 'info' });
     // The private origin boots from /campaign.json; the local fixture uses the
     // documented developer forced-launch path. Never change the guest protocol.
@@ -502,13 +527,15 @@ async function runCampaignPersistence() {
     await cdp('Page.navigate', { url: `${gameOrigin}/?${query}` }, session);
     const before = await waitForProbe('first boot');
     record('persistenceBefore', before);
+    const readyState = await waitForMissionReady('campaign persistence');
+    record('missionReady', { started: true, frame: readyState.frame });
 
     // Reach a durable checkpoint through the game's own terminal flow: a
     // mission result drives the terminal autosave and profile synchronization.
-    await evaluate(`robinRpc('set-paused',{paused:true})`).catch(() => {});
-    await evaluate(`robinRpc('step-forward',{n:30,auto_dismiss:true})`).catch(() => {});
-    await evaluate(`robinRpc('set-paused',{paused:false})`).catch(() => {});
-    await evaluate(`robinRpc('mission-result',{result:'won'})`).catch(error => console.log('mission-result:', error.message));
+    await requireGameRpc('set-paused (before step)', `robinRpc('set-paused',{paused:true})`);
+    await requireGameRpc('step-forward', `robinRpc('step-forward',{n:30,auto_dismiss:true})`);
+    await requireGameRpc('set-paused (after step)', `robinRpc('set-paused',{paused:false})`);
+    await requireGameRpc('mission-result', `robinRpc('mission-result',{result:'won'})`);
     await pause(5000);
     const afterSave = await waitForProbe('after checkpoint');
     record('persistenceAfterSave', afterSave);
