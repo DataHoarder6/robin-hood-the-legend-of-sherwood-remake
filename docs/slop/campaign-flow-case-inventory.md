@@ -167,7 +167,7 @@ lost and aborted use the lose text table.
 
 Tests: `mission_end_kind_comes_from_the_exit_code`,
 `mission_end_titles_are_the_three_retail_ids`,
-`leave_prompt_ids_are_the_retail_questions`, `mission_result_game_codes`,
+`leave_prompt_ids_are_the_retail_questions`, `each_mission_result_names_the_code_its_tick_returns`,
 `terminal_text_table_follows_win_loss_outcome`,
 `aborted_page_dismissal_returns_to_the_campaign`,
 `leaderboard_outcome_is_defined_only_for_terminal_attempts`,
