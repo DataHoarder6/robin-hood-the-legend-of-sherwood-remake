@@ -33,6 +33,9 @@ bindgen=/home/admin/build/robin/.tools/wasm-bindgen-0.2.129/bin/wasm-bindgen
 
 git -C "\$repo" fetch -q fork --tags
 if [ ! -d "\$wt/.git" ]; then
+    # A failed attempt can leave the directory behind without registering the
+    # worktree; it is this script's own staging path, so reuse it.
+    [ ! -e "\$wt" ] || rm -rf "\$wt"
     git -C "\$repo" worktree add --detach "\$wt" "\$tag" >/dev/null
 fi
 cd "\$wt"
