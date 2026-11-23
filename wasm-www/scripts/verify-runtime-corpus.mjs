@@ -14,6 +14,17 @@ import { DEPLOYMENT, validateRuntimeHeaders } from "./verify-cloudflare-deployme
 import { verifyRuntimeJavascriptModules } from "./runtime-javascript-modules.mjs";
 
 export { CLOUDFLARE_ASSET_BYTES_LIMIT, CLOUDFLARE_FREE_ASSET_LIMIT, DEMO_PATH };
+// A manifest must name the origin that actually serves its Demo object. The
+// default is upstream's Cloudflare origin; a second publisher sets
+// ROBIN_PUBLIC_ORIGIN (or passes `expectedOrigin`) for its own site.
+export function resolveExpectedOrigin(origin = process.env.ROBIN_PUBLIC_ORIGIN) {
+  if (origin === undefined) return DEPLOYMENT.publicOrigin;
+  try {
+    return new URL(origin).origin;
+  } catch {
+    throw new Error(`ROBIN_PUBLIC_ORIGIN is not a URL: ${origin}`);
+  }
+}
 // Runtime uploads up to release-48005f9bb945 carried the removed datadir
 // deployment receipt. Assembly drops it from the next upload.
 // TODO: delete once no retained upload carries this file (after the next release).
@@ -170,7 +181,14 @@ function json(bytes, label) {
   }
 }
 
-async function validateManifest(root, manifestPath, files, addition, retainedGenerations) {
+async function validateManifest(
+  root,
+  manifestPath,
+  files,
+  addition,
+  retainedGenerations,
+  expectedOrigin,
+) {
   const manifestBytes = await readFile(resolve(root, manifestPath));
   const manifest = json(manifestBytes, manifestPath);
   exactKeys(
@@ -288,10 +306,10 @@ async function validateManifest(root, manifestPath, files, addition, retainedGen
   const retained = addition
     ? undefined
     : retainedGenerations.find(
-        (generation) => `${DEPLOYMENT.publicOrigin}/${generation.datadirPath}` === demo.url,
+        (generation) => `${expectedOrigin}/${generation.datadirPath}` === demo.url,
       );
   if (retained === undefined) {
-    exact(demo.url, `${DEPLOYMENT.publicOrigin}/${DEMO_PATH}`, `${manifestPath} Demo URL`);
+    exact(demo.url, `${expectedOrigin}/${DEMO_PATH}`, `${manifestPath} Demo URL`);
   } else {
     exact(demo.byteLength, retained.datadirByteLength, `${manifestPath} retained Demo byteLength`);
     exact(demo.sha256, retained.datadirSha256, `${manifestPath} retained Demo digest`);
@@ -373,7 +391,12 @@ async function validateBuildClosure(root, manifest, files) {
  */
 export async function verifyRuntimeCorpus(
   directory,
-  { addition = false, retainedGenerations = [], priorUpload = false } = {},
+  {
+    addition = false,
+    retainedGenerations = [],
+    priorUpload = false,
+    expectedOrigin = resolveExpectedOrigin(),
+  } = {},
 ) {
   const root = runtimeRoot(directory);
   const facts = await regularFilesBelow(root);
@@ -399,11 +422,18 @@ export async function verifyRuntimeCorpus(
   const manifests = new Map();
   const currentDemoIdentities = new Map();
   for (const path of manifestPaths) {
-    const value = await validateManifest(root, path, files, addition, retainedGenerations);
+    const value = await validateManifest(
+      root,
+      path,
+      files,
+      addition,
+      retainedGenerations,
+      expectedOrigin,
+    );
     await validateBuildClosure(root, value.manifest, files);
     manifests.set(value.manifest.short, value);
     const demo = value.manifest.multiplayerContent.demo;
-    if (demo.url === `${DEPLOYMENT.publicOrigin}/${DEMO_PATH}`) {
+    if (demo.url === `${expectedOrigin}/${DEMO_PATH}`) {
       currentDemoIdentities.set(
         `${demo.sha256}:${demo.byteLength}:${demo.nativeContentSha256}`,
         value.manifest.short,
@@ -426,7 +456,7 @@ export async function verifyRuntimeCorpus(
   }
   if (
     !priorUpload &&
-    selected.manifest.multiplayerContent.demo.url !== `${DEPLOYMENT.publicOrigin}/${DEMO_PATH}`
+    selected.manifest.multiplayerContent.demo.url !== `${expectedOrigin}/${DEMO_PATH}`
   ) {
     throw new Error("wasm/latest.json must select the current Demo datadir generation");
   }
@@ -436,13 +466,25 @@ export async function verifyRuntimeCorpus(
 async function main() {
   const args = process.argv.slice(2);
   const addition = args.includes("--addition");
+  const originIndex = args.indexOf("--public-origin");
+  let expectedOrigin;
+  if (originIndex >= 0) {
+    expectedOrigin = args[originIndex + 1];
+    if (expectedOrigin === undefined || expectedOrigin.startsWith("--")) {
+      throw new Error("--public-origin requires a URL");
+    }
+    args.splice(originIndex, 2);
+  }
   const positionals = args.filter((value) => value !== "--addition");
   if (positionals.length !== 1) {
-    throw new Error("usage: node scripts/verify-runtime-corpus.mjs [--addition] DIRECTORY");
+    throw new Error(
+      "usage: node scripts/verify-runtime-corpus.mjs [--addition] [--public-origin URL] DIRECTORY",
+    );
   }
   const metrics = await verifyRuntimeCorpus(positionals[0], {
     addition,
     retainedGenerations: RETAINED_DEMO_GENERATIONS,
+    expectedOrigin: resolveExpectedOrigin(expectedOrigin),
   });
   console.log(
     `verified ${addition ? "runtime addition" : "complete wasm runtime corpus"}: ${metrics.assetCount} assets, ${metrics.totalBytes} bytes`,

@@ -12,6 +12,15 @@ export async function fetchWithProgress(
   return responseWithProgress(resp, url, contentType, onProgress, signal);
 }
 
+// A protected origin answers with an empty 401 rather than an artifact. Name
+// that case before any body handling: otherwise the missing/empty stream turns
+// a missing credential into a confusing ReadableStream or decode failure.
+function requireSuccessfulResponse(resp: Response, url: string): void {
+  if (resp.status === 401)
+    throw new Error(`fetch ${url}: origin requires authentication (HTTP 401)`);
+  if (!resp.ok) throw new Error(`fetch ${url}: HTTP ${resp.status}`);
+}
+
 function responseWithProgress(
   resp: Response,
   url: string,
@@ -19,7 +28,7 @@ function responseWithProgress(
   onProgress: (loaded: number, total: number) => void,
   signal: AbortSignal,
 ): Response {
-  if (!resp.ok) throw new Error(`fetch ${url}: HTTP ${resp.status}`);
+  requireSuccessfulResponse(resp, url);
   if (resp.body === null) throw new Error(`fetch ${url}: response has no body`);
   // Fetch exposes decoded bytes after native HTTP decompression.
   const encoded = resp.headers.has("Content-Encoding");
@@ -97,9 +106,7 @@ export async function fetchJson<T>(
   fetcher: typeof fetch = fetch,
 ): Promise<T> {
   const resp = await withAbort(signal, () => fetcher(url, { cache: "no-cache", signal }));
-  if (!resp.ok) {
-    throw new Error(`fetch ${url}: HTTP ${resp.status}`);
-  }
+  requireSuccessfulResponse(resp, url);
   return (await withAbort(signal, () => resp.json())) as T;
 }
 
@@ -125,9 +132,7 @@ export async function fetchPrecompressedWasm(
     discardResponse(resp);
     return undefined;
   }
-  if (!resp.ok) {
-    throw new Error(`fetch ${url}: HTTP ${resp.status}`);
-  }
+  requireSuccessfulResponse(resp, url);
   if (resp.body === null) {
     throw new Error(`fetch ${url}: response has no body`);
   }

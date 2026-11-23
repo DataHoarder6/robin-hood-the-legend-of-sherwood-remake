@@ -55,6 +55,17 @@ test("Cloudflare deploy verifies builds, deploys signer before public, then reco
   }
 });
 
+test("jautis publisher changes trigger the static deployment workflow", async () => {
+  const workflow = await repositoryFile(".github/workflows/deploy-static-workers.yml");
+  for (const path of ["scripts/deploy_web_jautis.sh", "scripts/release-parity-check.sh"]) {
+    assert.match(
+      workflow,
+      new RegExp(`^\\s+- ${path.replaceAll(".", "\\.")}$`, "mu"),
+      `${path} is not in the PR paths filter`,
+    );
+  }
+});
+
 test("runtime workflow stages the artifact before uploading it", async () => {
   const text = await repositoryFile(".github/workflows/build-static-runtime.yml");
   ordered(text, ["node wasm-www/scripts/stage-runtime-addition.mjs", "actions/upload-artifact@"]);

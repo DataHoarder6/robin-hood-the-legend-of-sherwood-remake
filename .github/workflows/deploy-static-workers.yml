@@ -9,7 +9,9 @@ on:
       - crates/robin_rs/js/browser_identity_*.js
       - crates/robin_rs/src/leaderboard_signing.rs
       - scripts/build_identity_signer.sh
+      - scripts/deploy_web_jautis.sh
       - scripts/install_pinned_wasm_bindgen.sh
+      - scripts/release-parity-check.sh
       - .github/workflows/deploy-static-workers.yml
   workflow_dispatch:
     inputs:

@@ -143,6 +143,33 @@ test("precompressed wasm handles raw gzip, browser-decoded gzip and missing side
   );
 });
 
+test("HTTP 401 with an empty body names the missing origin authentication", async () => {
+  const signal = new AbortController().signal;
+  const denied = async () => new Response(null, { status: 401 });
+  const cases: readonly [string, () => Promise<unknown>][] = [
+    [
+      "progress download",
+      () => fetchWithProgress("asset", "default", "application/wasm", () => {}, signal, denied),
+    ],
+    ["json manifest", () => fetchJson("manifest", signal, denied)],
+    [
+      "precompressed sidecar",
+      () => fetchPrecompressedWasm("asset.br", "default", () => {}, signal, denied, "brotli"),
+    ],
+    [
+      "streaming runtime",
+      () => fetchRuntimeWasm("asset.wasm", true, "default", () => {}, signal, denied),
+    ],
+    [
+      "raw runtime",
+      () => fetchRuntimeWasm("asset.wasm", false, "default", () => {}, signal, denied),
+    ],
+  ];
+  for (const [name, attempt] of cases) {
+    await assert.rejects(attempt(), /origin requires authentication \(HTTP 401\)/u, name);
+  }
+});
+
 test("abort cancels a stalled response body and JSON provider", async () => {
   const controller = new AbortController();
   let cancelled = false;

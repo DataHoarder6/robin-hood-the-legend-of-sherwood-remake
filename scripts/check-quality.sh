@@ -235,6 +235,7 @@ case "$1" in
         test -f tools/crash-receiver/test_receiver.py
         python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py
         bash scripts/test_parity_orchestration.sh
+        bash scripts/test_publisher_short.sh
         bash scripts/test_release.sh
         bash scripts/test_release_notes.sh
         bash scripts/test_verify_release_tag.sh

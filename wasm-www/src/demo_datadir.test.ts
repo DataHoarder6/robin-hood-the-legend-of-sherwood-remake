@@ -19,6 +19,15 @@ test("a manifest on the page origin is accepted, whatever the hostname", () => {
   assert.equal(result.identity.sha256, sha256);
 });
 
+test("a jautis-origin release URL at the pinned generation is accepted", () => {
+  // datadir-release.mjs now emits this exact URL when the estate publisher
+  // sets ROBIN_PUBLIC_ORIGIN; the browser must accept its own site's object.
+  const url = "https://robin.jautis.lt/datadirs/demo-leicester/v23-web-opus-q80.rhdata.zst";
+  const result = resolvePublishedDemoDatadir(demo(url), context);
+  assert.equal(result.url, url);
+  assert.equal(result.identity.sha256, sha256);
+});
+
 test("a manifest on a different origin is refused as not same-origin", () => {
   assert.throws(
     () =>

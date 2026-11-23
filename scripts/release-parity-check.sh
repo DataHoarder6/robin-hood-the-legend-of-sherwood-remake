@@ -16,7 +16,7 @@ bad()  { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
 
 git fetch -q fork --tags
 commit=$(git rev-parse "$tag^{commit}" 2>/dev/null) || { bad "no such tag on fork: $tag"; exit 1; }
-short=$(git rev-parse --short=12 "$tag")
+short=$(git rev-parse --short=12 "$tag^{commit}")
 version=${tag#v}
 expected_assets=(
     releases.win.json releases.linux.json
@@ -57,8 +57,20 @@ fi
 
 demo_url=$(jq -er .multiplayerContent.demo.url "$manifest" 2>/dev/null)
 demo_sha=$(jq -er .multiplayerContent.demo.sha256 "$manifest" 2>/dev/null)
-demo_path=$site${demo_url#https://robin.jautis.lt}
-if [ -f "$demo_path" ]; then
+# The site root is a local path; the manifest pins an absolute URL. Parse the
+# URL against the site's origin instead of stripping a literal origin string,
+# so a wrong-origin or malformed URL fails the gate rather than resolving to a
+# misleading local path.
+site_origin=https://robin.jautis.lt
+site_path() {
+    local url=$1 path
+    [[ $url == "$site_origin"/* ]] || return 1
+    path=${url#"$site_origin"}
+    [[ $path == /* && $path != *'?'* && $path != *'#'* && $path != *'..'* ]] || return 1
+    printf '%s%s\n' "$site" "$path"
+}
+demo_path=$(site_path "$demo_url") || bad "Demo URL $demo_url is not a path on $site_origin"
+if [ -n "$demo_path" ] && [ -f "$demo_path" ]; then
     live_sha=$(sha256sum "$demo_path" | cut -d' ' -f1)
     [ "$live_sha" = "$demo_sha" ] && ok 'served Demo datadir SHA matches manifest' \
         || bad "served Demo datadir SHA $live_sha != manifest $demo_sha"
@@ -69,6 +81,11 @@ fi
 latest=$(jq -er .short "$site/wasm/latest.json" 2>/dev/null)
 [ "$latest" = "$short" ] && ok "site latest.json selects $short" \
     || bad "site latest.json selects $latest, expected $short"
+# The selector is byte-for-byte the versioned manifest, not a rewritten copy:
+# the browser fetches both and the boot gate compares their identity.
+cmp -s "$site/wasm/latest.json" "$manifest" \
+    && ok 'site latest.json bytes equal the versioned manifest' \
+    || bad 'site latest.json bytes differ from the versioned manifest'
 
 # Seat version: check the local install when this host has one.
 if command -v robin >/dev/null 2>&1; then

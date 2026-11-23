@@ -19,9 +19,27 @@ export const DATADIR_RELEASE_SCHEMA = 1;
 const KEYS = ["schema", "url", "sha256", "byte_length", "native_content_sha256"];
 const DIGEST = /^[0-9a-f]{64}$/u;
 
-export const CURRENT_DEMO_URL = `${DEPLOYMENT.publicOrigin}/${DEMO_PATH}`;
+// One origin input for the published Demo URL. Cloudflare CI keeps the
+// upstream default; an estate publisher sets ROBIN_PUBLIC_ORIGIN to the origin
+// that actually serves the bytes, so the release it emits is same-origin with
+// the site that will load it. Validate it here, like ROBIN_SIGNER_ORIGIN in
+// verify-cloudflare-deployment.mjs, rather than splicing an arbitrary string.
+export const DEFAULT_PUBLIC_ORIGIN = DEPLOYMENT.publicOrigin;
+const configuredOrigin = process.env.ROBIN_PUBLIC_ORIGIN;
+let publicOrigin;
+try {
+  publicOrigin = new URL(configuredOrigin ?? DEFAULT_PUBLIC_ORIGIN).origin;
+} catch {
+  throw new Error(`ROBIN_PUBLIC_ORIGIN is not a URL: ${configuredOrigin}`);
+}
+export const PUBLIC_ORIGIN = publicOrigin;
+export const CURRENT_DEMO_URL = `${PUBLIC_ORIGIN}/${DEMO_PATH}`;
 
-export function parseDatadirRelease(value, label = "datadir-release.json") {
+export function parseDatadirRelease(
+  value,
+  label = "datadir-release.json",
+  expectedUrl = CURRENT_DEMO_URL,
+) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
   }
@@ -33,9 +51,9 @@ export function parseDatadirRelease(value, label = "datadir-release.json") {
     throw new Error(`${label} schema must be ${DATADIR_RELEASE_SCHEMA}`);
   // Runtime staging always binds the generation this checkout publishes; a
   // stale release file after a DEMO_ROOT bump is a real release mistake.
-  if (value.url !== CURRENT_DEMO_URL) {
+  if (value.url !== expectedUrl) {
     throw new Error(
-      `${label} url ${JSON.stringify(value.url)} is not the current Demo generation ${CURRENT_DEMO_URL}`,
+      `${label} url ${JSON.stringify(value.url)} is not the current Demo generation ${expectedUrl}`,
     );
   }
   if (!DIGEST.test(value.sha256) || !DIGEST.test(value.native_content_sha256)) {
@@ -81,7 +99,10 @@ export async function writeDatadirRelease({
   return writeRelease(
     {
       schema: DATADIR_RELEASE_SCHEMA,
-      url: demo.datadir_url,
+      // The corpus verifier labels the object with upstream's origin. The
+      // release must name the origin that publishes it, which is the same
+      // input parseDatadirRelease and the manifest verify gate use.
+      url: CURRENT_DEMO_URL,
       sha256: demo.datadir_sha256,
       byte_length: demo.datadir_byte_length,
       native_content_sha256: demo.native_content_sha256,
