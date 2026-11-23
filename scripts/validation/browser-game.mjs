@@ -9,7 +9,8 @@ import { createHash } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { hostShortFromVersion, verifyPublishedArtifact } from './browser-boot.mjs';
 import { requireSupervisor, spawnSupervised, stop as stopSupervised, unitName } from './supervised.mjs';
-import { PERSISTENCE_ENDPOINT, assertPersistenceSurvivesReload, assertCorruptionReported, assertLiveMissionAfterReload } from './campaign-persistence.mjs';
+import { PERSISTENCE_ENDPOINT, assertPersistenceSurvivesReload, assertCorruptionReported, assertLiveMissionAfterReload,
+    oversizeInjectionExpression, requireRecordedProof } from './campaign-persistence.mjs';
 
 const { values } = parseArgs({ options: {
     data: { type: 'string' }, pkg: { type: 'string', default: 'wasm-www/pkg' },
@@ -575,12 +576,25 @@ async function runCampaignPersistence() {
     try { record('corruptProof', assertCorruptionReported(corrupt, 'corrupt')); }
     catch (error) { result.failures.push(`corrupt report: ${error.message}`); }
 
-    // Oversize archive: also reported explicitly.
-    await evaluate(`localStorage.setItem('robin-hood-player-profiles-v1', 'x'.repeat(${4 * 1024 * 1024 + 1}))`);
-    await cdp('Page.reload', { ignoreCache: true }, session);
-    const oversize = await waitForProbe('after oversize injection');
-    try { record('oversizeProof', assertCorruptionReported(oversize, 'oversize')); }
-    catch (error) { result.failures.push(`oversize report: ${error.message}`); }
+    // Oversize archive: reported explicitly. The runtime rejects on UTF-8 byte
+    // length (>4 MiB, Rust `String::len`) but Chrome budgets localStorage in
+    // UTF-16 code units (<5 MiB per origin), so a 3-byte BMP character crosses
+    // the runtime limit inside the browser quota. A single `setItem` is atomic
+    // and replaces the prior corrupt value. Any injection/reload/probe
+    // exception is recorded here — it must not escape runCampaignPersistence
+    // into the outer catch and silently skip this assertion.
+    try {
+        await evaluate(oversizeInjectionExpression());
+        await cdp('Page.reload', { ignoreCache: true }, session);
+        const oversize = await waitForProbe('after oversize injection');
+        try { record('oversizeProof', assertCorruptionReported(oversize, 'oversize')); }
+        catch (error) { result.failures.push(`oversize report: ${error.message}`); }
+    } catch (error) {
+        result.failures.push(`oversize injection: ${error.message}`);
+    }
+    // A skipped or swallowed assertion cannot pass: the proof must be present.
+    try { requireRecordedProof(result.checks, 'oversizeProof'); }
+    catch (error) { result.failures.push(`oversize proof: ${error.message}`); }
 }
 
 try {

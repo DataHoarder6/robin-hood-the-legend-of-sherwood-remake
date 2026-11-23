@@ -3,12 +3,24 @@
 // sizes, map names and frames are used — no name, save payload or credential.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     PERSISTENCE_ENDPOINT,
     assertPersistenceSurvivesReload,
     assertCorruptionReported,
     assertLiveMissionAfterReload,
 } from './campaign-persistence.mjs';
+import * as persistence from './campaign-persistence.mjs';
+
+// Chrome budgets localStorage in UTF-16 code units (~5 MiB per origin), while
+// the runtime rejects on Rust `String::len` (UTF-8 bytes, >4 MiB). An ASCII
+// payload of 4 MiB+ therefore throws QuotaExceededError before the page can be
+// reloaded; only a multibyte BMP character can cross the runtime limit inside
+// the browser budget. These numbers are browser/runtime facts, kept local so
+// the check verifies the helper independently.
+const CHROME_QUOTA_UTF16_BYTES = 5 * 1024 * 1024;
+const RUNTIME_UTF8_BYTE_LIMIT = 4 * 1024 * 1024;
+const driverSource = () => readFileSync(new URL('./browser-game.mjs', import.meta.url), 'utf8');
 
 const profile = (overrides = {}) => ({
     present: true,
@@ -80,4 +92,47 @@ test('a reload without a live mission fails: durable bytes alone are not resume'
     assert.throws(() => assertLiveMissionAfterReload({ map: 'leicester', frame: null }), /no live engine/);
     assert.throws(() => assertLiveMissionAfterReload({ map: 'leicester', frame: Number.NaN }), /no live engine/);
     assert.deepEqual(assertLiveMissionAfterReload({ map: 'leicester', frame: 0 }), { map: 'leicester', frame: 0 });
+});
+
+test('the oversize injection payload fits Chrome UTF-16 quota but breaks the runtime UTF-8 byte limit', () => {
+    // Reproduce, without a browser, the exact value the driver injects under the
+    // profile key. The stub enforces Chrome's UTF-16 quota and is seeded with
+    // the prior corrupt value, so a QuotaExceededError or a non-replacement
+    // fails the same way it would on the private origin.
+    assert.equal(typeof persistence.oversizeInjectionExpression, 'function',
+        'no shared oversize-injection helper for the browser driver to use');
+    let stored = 'prior-corrupt-value';
+    const localStorage = {
+        setItem(key, value) {
+            assert.equal(key, 'robin-hood-player-profiles-v1', 'oversize payload stored under the wrong profile key');
+            const utf16Bytes = value.length * 2; // one UTF-16 code unit = 2 bytes
+            if (utf16Bytes > CHROME_QUOTA_UTF16_BYTES) throw new Error('QuotaExceededError');
+            stored = value;
+        },
+    };
+    const expression = persistence.oversizeInjectionExpression();
+    Function('localStorage', expression)(localStorage);
+    assert.ok(stored !== 'prior-corrupt-value', 'the prior corrupt value was left in place');
+    const utf8Bytes = Buffer.byteLength(stored, 'utf8');
+    assert.ok(utf8Bytes > RUNTIME_UTF8_BYTE_LIMIT,
+        `UTF-8 byte length ${utf8Bytes} does not exceed the ${RUNTIME_UTF8_BYTE_LIMIT}-byte runtime limit`);
+    assert.ok(stored.length * 2 <= CHROME_QUOTA_UTF16_BYTES,
+        `UTF-16 storage cost ${stored.length * 2} exceeds the ${CHROME_QUOTA_UTF16_BYTES}-byte Chrome quota`);
+    // The runtime reports the UTF-8 byte count as the oversize archive size.
+    assert.deepEqual(
+        assertCorruptionReported({ profile: { errorKind: 'oversize', archiveBytes: utf8Bytes } }, 'oversize'),
+        { errorKind: 'oversize', archiveBytes: utf8Bytes });
+});
+
+test('the browser driver cannot skip the oversize report assertion', () => {
+    const source = driverSource();
+    assert.ok(/oversizeInjectionExpression\(\)/u.test(source),
+        'driver must build the oversize payload from the shared budget-safe helper');
+    assert.ok(/requireRecordedProof\(\s*result\.checks,\s*'oversizeProof'\s*\)/u.test(source),
+        'driver must require the recorded oversize proof');
+    assert.ok(!/'x'\.repeat\(/u.test(source),
+        'the ASCII payload that exceeds Chrome quota must be gone');
+    assert.throws(() => persistence.requireRecordedProof({}, 'oversizeProof'), /not recorded/);
+    assert.deepEqual(persistence.requireRecordedProof({ oversizeProof: { errorKind: 'oversize' } }, 'oversizeProof'),
+        { errorKind: 'oversize' });
 });

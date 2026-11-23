@@ -8,6 +8,41 @@
 /** Fields the runtime must expose for the reload contract to be provable. */
 export const PERSISTENCE_ENDPOINT = 'campaign-persistence';
 
+/** localStorage key that holds the player profile archive. */
+export const PROFILES_KEY = 'robin-hood-player-profiles-v1';
+/** Runtime oversize limit: `String::len` counts UTF-8 bytes (campaign_persistence.rs BYTE_LIMIT). */
+export const RUNTIME_BYTE_LIMIT = 4 * 1024 * 1024;
+/** Chrome budgets localStorage in UTF-16 code units (~5 MiB per origin). */
+// TODO: this is a browser default, not an API constant; if the acceptance
+// browser changes its quota, re-derive OVERSIZE_REPEATS below.
+export const CHROME_QUOTA_UTF16_BYTES = 5 * 1024 * 1024;
+// A BMP character worth 3 UTF-8 bytes but only one UTF-16 code unit (€ U+20AC).
+// Repeating it crosses the runtime's UTF-8 byte limit while staying inside
+// Chrome's UTF-16 quota — an ASCII payload of the same byte length cannot.
+const OVERSIZE_UNIT = '\u20AC';
+// Smallest repeat count whose UTF-8 byte length exceeds RUNTIME_BYTE_LIMIT:
+// 1,398,102 * 3 = 4,194,306 bytes (> 4 MiB UTF-8), yet 1,398,102 * 2 =
+// 2,796,204 bytes (< 5 MiB UTF-16).
+const OVERSIZE_REPEATS = Math.floor(RUNTIME_BYTE_LIMIT / 3) + 1;
+
+/**
+ * Build the CDP expression that injects an oversized archive under PROFILES_KEY.
+ * The value is produced inside the page so no save payload is ferried over CDP
+ * or written to logs; one atomic `setItem` replaces the prior (corrupt) value.
+ */
+export function oversizeInjectionExpression() {
+    const escapedUnit = `\\u${OVERSIZE_UNIT.charCodeAt(0).toString(16).padStart(4, '0')}`;
+    return `localStorage.setItem(${JSON.stringify(PROFILES_KEY)}, '${escapedUnit}'.repeat(${OVERSIZE_REPEATS}))`;
+}
+
+/** Require that an assertion's proof was actually recorded, not skipped. */
+export function requireRecordedProof(checks, key) {
+    if (!checks || !Object.hasOwn(checks, key) || checks[key] === null || checks[key] === undefined) {
+        throw new Error(`${key} was not recorded; a skipped assertion cannot pass`);
+    }
+    return checks[key];
+}
+
 /**
  * Assert the profile and campaign state survived a real page reload.
  *
