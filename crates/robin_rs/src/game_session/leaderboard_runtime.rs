@@ -460,7 +460,7 @@ mod tests {
             crate::host::ApplicationContext::default(),
         );
         let progress = task
-            .settle_preparation(&result)
+            .settle_preparation(&Some(result))
             .expect("a missing replay snapshot must settle the task without a UI");
         assert!(
             matches!(progress, MissionEndLeaderboardTaskProgress::Finished),
