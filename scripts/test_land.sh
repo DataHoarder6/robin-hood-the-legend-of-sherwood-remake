@@ -21,6 +21,12 @@ export work
 export ROBIN_LAND_ALLOW_BARE=1
 
 export HOME=$work/home
+# land.sh and the queue tests below share one state root. The queue lock and
+# tickets are addressed as $HOME/.local/state/robin-land-queue further down, so
+# XDG_STATE_HOME must resolve there or the holder locks a different file than
+# land.sh reads. The gate stamp lives under the same root.
+export XDG_STATE_HOME=$HOME/.local/state
+mkdir -p "$XDG_STATE_HOME/robin-batch/gates"
 export GIT_CONFIG_GLOBAL=$work/gitconfig
 export GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$HOME"
@@ -65,6 +71,12 @@ expect_absent() {
         pass "$1"
     fi
 }
+expect_output_absent() { # DESCRIPTION SUBSTRING  — assert $output does not contain $2
+    case $output in
+        *"$2"*) fail "$1 (unexpected '$2')" ;;
+        *) pass "$1" ;;
+    esac
+}
 
 # A peer landing one commit, run from a stub gate. One move per case: a second
 # invocation returns immediately, or a case that expects two gates would see
@@ -97,6 +109,8 @@ case_repo() { # NAME
     git clone --quiet "$work/$1.git" "$work/$1"
     mkdir -p "$work/$1/scripts"
     cp -- "$source_root/scripts/land.sh" "$work/$1/scripts/land.sh"
+    cp -- "$source_root/scripts/gate-stamp.sh" "$work/$1/scripts/gate-stamp.sh"
+    chmod +x "$work/$1/scripts/gate-stamp.sh"
     cat >"$work/$1/scripts/push-gate.sh" <<'GATE'
 #!/usr/bin/env bash
 # Stand-in for the real gate: records the (base, head) pair it was asked to
@@ -379,6 +393,108 @@ export FAKE_GATE_LOG=$work/supervised.gate.log
 status=0
 output=$(cd "$work/supervised" && ROBIN_LAND_REMOTE=$work/supervised.git RUNBG_STATE=$work/runbg-state bash scripts/land.sh 2>&1) || status=$?
 expect_status 0 'a supervised land.sh proceeds'
+
+# --- Gate pass-through: only a controller-owned stamp may skip the gate. ---
+stamp_helper=$source_root/scripts/gate-stamp.sh
+case_base() { git --git-dir="$work/$1.git" rev-parse refs/heads/main; }
+head_tree() { git -C "$work/$1" rev-parse 'HEAD^{tree}'; }
+unset ROBIN_LAND_GATE_PASSED_TREE ROBIN_LAND_GATE_PASSED_FILE
+
+# (a) No stamp: the gate still runs, as before.
+case_repo stamp-none
+commit_file stamp-none 'my work' mine.txt mine
+export FAKE_GATE_LOG=$work/stamp-none.gate.log
+run_land stamp-none
+expect_status 0 'a landing without a stamp succeeds'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'no stamp runs the gate'; else fail 'the gate did not run once'; fi
+
+# (b) Correct internal stamp, exact tree and base: the gate is skipped.
+case_repo stamp-good
+commit_file stamp-good 'my work' mine.txt mine
+base=$(case_base stamp-good)
+tree=$(head_tree stamp-good)
+bash "$stamp_helper" write "$tree" "$base" green
+export FAKE_GATE_LOG=$work/stamp-good.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=$tree
+run_land stamp-good
+unset ROBIN_LAND_GATE_PASSED_TREE
+expect_status 0 'a stamped landing succeeds'
+expect_contains 'the skip is reported' 'gate skipped'
+if [ ! -e "$FAKE_GATE_LOG" ] || [ ! -s "$FAKE_GATE_LOG" ]; then
+    pass 'a valid stamp runs no gate'
+else
+    fail "a valid stamp still ran the gate: $(cat "$FAKE_GATE_LOG")"
+fi
+
+# (c) A stamp for a different tree never authorises a skip.
+case_repo stamp-wrong-tree
+commit_file stamp-wrong-tree 'my work' mine.txt mine
+base=$(case_base stamp-wrong-tree)
+bash "$stamp_helper" write deadbeefdeadbeefdeadbeefdeadbeefdeadbeef "$base" green
+export FAKE_GATE_LOG=$work/stamp-wrong-tree.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+run_land stamp-wrong-tree
+unset ROBIN_LAND_GATE_PASSED_TREE
+expect_status 0 'a wrong-tree stamp does not block the landing'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'a wrong-tree stamp runs the gate'; else fail 'the gate was skipped for the wrong tree'; fi
+expect_output_absent 'no skip was reported' 'gate skipped'
+
+# (d) A stamp file that is not green fails closed into a gate.
+case_repo stamp-red
+commit_file stamp-red 'my work' mine.txt mine
+base=$(case_base stamp-red)
+tree=$(head_tree stamp-red)
+bash "$stamp_helper" write "$tree" "$base" red
+export FAKE_GATE_LOG=$work/stamp-red.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=$tree
+run_land stamp-red
+unset ROBIN_LAND_GATE_PASSED_TREE
+expect_status 0 'a red stamp does not block the landing'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'a red stamp runs the gate'; else fail 'a red stamp skipped the gate'; fi
+expect_output_absent 'no skip was reported for red' 'gate skipped'
+
+# (d2) The stamp is bound to the base as well as the tree.
+case_repo stamp-wrong-base
+commit_file stamp-wrong-base 'my work' mine.txt mine
+tree=$(head_tree stamp-wrong-base)
+bash "$stamp_helper" write "$tree" deadbeefdeadbeefdeadbeefdeadbeefdeadbeef green
+export FAKE_GATE_LOG=$work/stamp-wrong-base.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=$tree
+run_land stamp-wrong-base
+unset ROBIN_LAND_GATE_PASSED_TREE
+expect_status 0 'a wrong-base stamp does not block the landing'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'a wrong-base stamp runs the gate'; else fail 'the gate was skipped for the wrong base'; fi
+
+# (d3) A caller-chosen stamp file path is ignored: only the internal path counts.
+# The forged file is exactly `green` — the value the old vulnerable land.sh
+# trusted from ROBIN_LAND_GATE_PASSED_FILE — so reverting that read would skip.
+case_repo stamp-forged-file
+commit_file stamp-forged-file 'my work' mine.txt mine-forged
+tree=$(head_tree stamp-forged-file)
+forged=$work/forged-stamp
+printf 'green\n' >"$forged"
+export FAKE_GATE_LOG=$work/stamp-forged-file.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=$tree ROBIN_LAND_GATE_PASSED_FILE=$forged
+run_land stamp-forged-file
+unset ROBIN_LAND_GATE_PASSED_TREE ROBIN_LAND_GATE_PASSED_FILE
+expect_status 0 'a forged file path does not block the landing'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'a forged file path runs the gate'; else fail 'a forged file path skipped the gate'; fi
+expect_output_absent 'no skip was reported for a forged file' 'gate skipped'
+
+# (e) A new commit changes the head tree and invalidates the stamp.
+case_repo stamp-head-change
+commit_file stamp-head-change 'first' mine.txt one
+base=$(case_base stamp-head-change)
+tree=$(head_tree stamp-head-change)
+bash "$stamp_helper" write "$tree" "$base" green
+commit_file stamp-head-change 'second' other.txt two
+export FAKE_GATE_LOG=$work/stamp-head-change.gate.log
+export ROBIN_LAND_GATE_PASSED_TREE=$tree
+run_land stamp-head-change
+unset ROBIN_LAND_GATE_PASSED_TREE
+expect_status 0 'a changed head still lands'
+if [ "$(wc -l <"$FAKE_GATE_LOG")" -eq 1 ]; then pass 'a changed head tree runs the gate'; else fail 'a stale stamp skipped the gate'; fi
+expect_output_absent 'no skip was reported after the head moved' 'gate skipped'
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))
