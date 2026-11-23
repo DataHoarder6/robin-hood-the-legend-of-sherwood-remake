@@ -8,8 +8,10 @@ const ENTRY = "leaderboard_identity_bridge.js";
 const WASM = "leaderboard_identity_bridge_bg.wasm";
 const VAULT = "browser_identity_vault.js";
 const CLIENT = "browser_identity_client.js";
-const GAME_ORIGIN = "https://robinhood.phiresky.xyz";
-const SIGNER_ORIGIN = "https://identity.robinhood.phiresky.xyz";
+// A second deployment serves the same bridge from different origins. The
+// defaults stay upstream's; an estate build supplies both as inputs.
+const GAME_ORIGIN = process.env.ROBIN_GAME_ORIGIN ?? "https://robinhood.phiresky.xyz";
+const SIGNER_ORIGIN = process.env.ROBIN_SIGNER_ORIGIN ?? "https://identity.robinhood.phiresky.xyz";
 const EXPECTED_EXPORTS = [
   "default",
   "initSync",
