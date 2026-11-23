@@ -8,7 +8,10 @@
 # a cache nothing can reach: `--prune` deletes exactly those.
 set -euo pipefail
 
-repository=$(git rev-parse --show-toplevel)
+# Resolve from this script, not the caller's cwd: remote-check.sh is invoked by
+# a systemd unit whose WorkingDirectory is $HOME, where `git rev-parse` failed
+# with "not a git repository" and left stale build copies unpruned for days.
+repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 git -C "$repository" worktree list --porcelain |
     sed -n 's/^worktree //p' |
     while IFS= read -r path; do basename -- "$path"; done |

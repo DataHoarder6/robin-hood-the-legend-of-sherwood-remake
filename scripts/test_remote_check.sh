@@ -210,6 +210,27 @@ else
     failures=$((failures + 1))
 fi
 
+# The process-layer e2e variables must reach the build host. A verifier that
+# sets them on a direct remote-check gate used to lose them at the ssh boundary
+# and fail with "Set ROBIN_E2E_BINARY".
+rendered_e2e="$work/rendered-e2e"
+mkdir -p "$rendered_e2e"
+(
+    cd "$work/repoA"
+    FIXTURE_RENDERED="$rendered_e2e" \
+    ROBIN_E2E_BINARY=/abs/robin \
+    ROBINHOOD_DATA_DIR=/abs/data \
+    ROBIN_E2E_EVIDENCE=/abs/evidence \
+        bash scripts/remote-check.sh wasm e2e-env
+) >"$work/e2e.out" 2>&1
+if grep -qh "ROBIN_E2E_BINARY=.*'/abs/robin'" "$rendered_e2e"/rendered-*.sh \
+    && grep -qh "ROBINHOOD_DATA_DIR=.*'/abs/data'" "$rendered_e2e"/rendered-*.sh; then
+    printf 'ok   e2e binary and data reach the rendered gate\n'
+else
+    printf 'FAIL rendered gate drops ROBIN_E2E_BINARY or ROBINHOOD_DATA_DIR\n'
+    failures=$((failures + 1))
+fi
+
 # The copy root must have been touched after sync even though rsync copied
 # files with --no-times and left the directory with an old mtime.
 copy_dir="$HOME/build/robin/race-copy"

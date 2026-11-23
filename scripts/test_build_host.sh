@@ -77,11 +77,21 @@ repo=$work/repo
 git init --quiet "$repo"
 git -C "$repo" commit --quiet --allow-empty -m "fixture"
 git -C "$repo" worktree add --quiet -b other "$work/other-worktree" HEAD
-live=$(cd "$repo" && bash "$source_root/scripts/live-worktrees.sh")
+mkdir -p "$repo/scripts"
+cp -- "$source_root/scripts/live-worktrees.sh" "$repo/scripts/live-worktrees.sh"
+live=$(cd "$repo" && bash "$repo/scripts/live-worktrees.sh")
 if [ "$live" = "$(printf '%s\n' "$(basename "$repo")" "other-worktree" | sort)" ]; then
     pass "live-worktrees names every worktree and nothing else"
 else
     fail "live-worktrees printed: $live"
+fi
+# The systemd prune unit runs from $HOME, not the repository. Resolving from
+# the script's own path must produce the same set from an unrelated cwd.
+live_from_home=$(cd "$HOME" && bash "$repo/scripts/live-worktrees.sh")
+if [ "$live_from_home" = "$live" ]; then
+    pass "live-worktrees is independent of the caller's cwd"
+else
+    fail "live-worktrees from \$HOME printed: $live_from_home"
 fi
 
 # --- basedir changes restart sccache and remap each copy root ------------------

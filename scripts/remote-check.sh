@@ -33,6 +33,14 @@ exec </dev/null
 # such variable. Default it here: `${var@Q}` on an unset name aborts under
 # set -u while the heredoc renders.
 docs_paths=${ROBIN_DOCS_CHECK_PATHS:-}
+# The process-layer e2e suite needs these on the build host. Forward them
+# explicitly instead of making the verifier hand-write an ssh gate: a bare
+# check-quality.sh multiplayer-e2e fails on a missing ROBIN_E2E_BINARY, which
+# cost the loop a verifier round on D10. Paths are the BUILD HOST's.
+e2e_binary=${ROBIN_E2E_BINARY:-}
+e2e_data=${ROBINHOOD_DATA_DIR:-}
+e2e_evidence=${ROBIN_E2E_EVIDENCE:-}
+e2e_jobs=${ROBIN_E2E_JOBS:-2}
 
 host=${ROBIN_BUILD_HOST:-minipc}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -508,6 +516,10 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
     ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
+    ROBIN_E2E_BINARY=${e2e_binary@Q} \
+    ROBINHOOD_DATA_DIR=${e2e_data@Q} \
+    ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
+    ROBIN_E2E_JOBS=${e2e_jobs@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
@@ -534,6 +546,10 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     SCCACHE_IDLE_TIMEOUT=0 \
     SCCACHE_CLIENT_SIDE=1 \
     ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
+    ROBIN_E2E_BINARY=${e2e_binary@Q} \
+    ROBINHOOD_DATA_DIR=${e2e_data@Q} \
+    ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
+    ROBIN_E2E_JOBS=${e2e_jobs@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
