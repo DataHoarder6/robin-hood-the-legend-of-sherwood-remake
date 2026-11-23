@@ -105,7 +105,14 @@ impl EngineInner {
                 linked_seek: None,
                 post_seek_sequence: None,
             };
-            self.launch_element(tcx, elem);
+            // Anchor the teleport element's sequence identity to the command's
+            // target frame. A lagging seat reaches this call a frame after the
+            // idle fallback for that frame was already installed; the anchored
+            // insertion replaces that fallback in place so both seats hold the
+            // same sequence id and element id at the same absolute frame.
+            // Without this the teleport and fallback swap ids and the full
+            // state hash diverges (D12 / #83).
+            self.launch_target_frame_anchored_element(tcx, elem, target_frame);
         }
     }
 

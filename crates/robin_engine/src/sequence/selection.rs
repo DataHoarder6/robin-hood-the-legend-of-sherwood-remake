@@ -371,6 +371,105 @@ impl SequenceManager {
         id
     }
 
+    /// Store a sequence whose identity is anchored to a command's authoritative
+    /// target frame instead of the monotonic allocator.
+    ///
+    /// A late rollback input is applied after the lagging seat already
+    /// installed the idle fallback for its target frame. The command owns the
+    /// anchored slot, so the fallback is moved forward to the next allocator
+    /// slot and the command is inserted in its place, reusing the fallback's
+    /// element ids. Both seats then hold the same set of sequences, with the
+    /// same ids and insertion order, at the same absolute frame: the forward
+    /// tick created its own fallback on the following frame, and the lagging
+    /// seat must not lose that sequence when the late input arrives (D12 /
+    /// #83).
+    pub(crate) fn insert_target_frame_anchored_sequence(
+        &mut self,
+        mut sequence: Sequence,
+        target_frame: u32,
+    ) -> SequenceId {
+        assert!(!sequence.is_empty(), "cannot launch an empty sequence");
+
+        let anchored = SequenceId(target_frame);
+        let previous_id = sequence.id;
+
+        if let Some(mut displaced) = self.sequences.shift_remove(&anchored) {
+            for (idx, element) in displaced.elements.iter().enumerate() {
+                if let Some(owner) = element.owner {
+                    self.remove_actor_live_ref(owner, SequenceElementRef::new(anchored, idx));
+                }
+            }
+            let reused_element_ids: Vec<u32> = displaced
+                .elements
+                .iter()
+                .map(|element| element.id)
+                .collect();
+
+            for (idx, element) in sequence.elements.iter_mut().enumerate() {
+                for link in [&mut element.next, &mut element.postponed] {
+                    if let Some(target) = link
+                        && target.sequence_id == previous_id
+                    {
+                        target.sequence_id = anchored;
+                    }
+                }
+                element.id = reused_element_ids
+                    .get(idx)
+                    .copied()
+                    .expect("late input has more elements than the fallback it displaces");
+            }
+
+            let moved_id = SequenceId(self.next_sequence_id);
+            self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
+            let old_id = displaced.id;
+            displaced.id = moved_id;
+            for element in &mut displaced.elements {
+                for link in [&mut element.next, &mut element.postponed] {
+                    if let Some(target) = link
+                        && target.sequence_id == old_id
+                    {
+                        target.sequence_id = moved_id;
+                    }
+                }
+                element.id = self.next_element_id;
+                self.next_element_id = self.next_element_id.wrapping_add(1);
+            }
+
+            sequence.id = anchored;
+            sequence.launch();
+            self.sequences.insert(anchored, sequence);
+            self.index_sequence_actor_refs(anchored);
+
+            self.sequences.insert(moved_id, displaced);
+            self.index_sequence_actor_refs(moved_id);
+
+            return anchored;
+        }
+
+        // No fallback occupied the slot: the forward tick's normal allocator
+        // was at the target-frame id, so stamp identities from the counters as
+        // an ordinary launch does and keep them strictly past the anchor.
+        sequence.id = SequenceId(self.next_sequence_id.max(anchored.0));
+        self.next_sequence_id = self.next_sequence_id.max(anchored.0.saturating_add(1));
+        for element in sequence.elements.iter_mut() {
+            for link in [&mut element.next, &mut element.postponed] {
+                if let Some(target) = link
+                    && target.sequence_id == previous_id
+                {
+                    target.sequence_id = sequence.id;
+                }
+            }
+            element.id = self.next_element_id;
+            self.next_element_id = self.next_element_id.wrapping_add(1);
+        }
+        let id = sequence.id;
+        sequence.launch();
+        self.sequences.insert(id, sequence);
+        self.index_sequence_actor_refs(id);
+
+        id
+    }
+
     /// Store a single element as a sequence without registering its first level.
     pub fn insert_element(&mut self, mut element: SequenceElement) -> SequenceId {
         element.command_level = 1;

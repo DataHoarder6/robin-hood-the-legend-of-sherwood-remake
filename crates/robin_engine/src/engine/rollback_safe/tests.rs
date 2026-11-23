@@ -367,13 +367,11 @@ fn legacy_adoption_cannot_reopen_finished_bootstrap() {
 
 /// D12 / #83: full-hash equality when the same teleport is applied at its
 /// target frame N on one seat and a frame late (N+1) on the other. The fade
-/// countdown and star-titbit ids are anchored to the target frame and agree;
-/// `SequenceManager` id allocation and `TitbitManager::update`'s per-tick
-/// phase countdown are still frame-driven, so the hashes diverge. Ignored so
-/// the gate stays green while the defect is open, not because the check is
-/// weak — see `docs/slop/teleport-late-input-desync.md`.
+/// countdown, star-titbit ids, sequence ids and star phases are all anchored
+/// to the command's authoritative target frame, so both seats reach the same
+/// `EngineInner::state_hash` at the same absolute frame — see
+/// `docs/slop/teleport-late-input-desync.md`.
 #[test]
-#[ignore = "D12 / #83: sequence-id and titbit-phase allocation are not target-frame anchored"]
 fn teleport_fade_state_matches_at_target_frame_despite_one_frame_apply_lag() {
     use crate::coordinates::MapPoint;
     use crate::element::{ActorPc, Entity, PcData};

@@ -149,6 +149,28 @@ impl crate::engine::EngineInner {
         self.launch_sequence_inline(tcx, active_scripts, sequence)
     }
 
+    /// Launch a single element whose sequence id is anchored to a command's
+    /// authoritative target frame. See
+    /// [`SequenceManager::insert_target_frame_anchored_sequence`] for why late
+    /// inputs need this instead of the monotonic allocator.
+    pub(crate) fn launch_target_frame_anchored_element_inline(
+        &mut self,
+        tcx: TickCtx<'_>,
+        active_scripts: &mut Vec<crate::engine::script::ActiveScriptCall>,
+        mut element: SequenceElement,
+        target_frame: u32,
+    ) -> Result<SequenceId, crate::engine::script::ScriptDriverError> {
+        element.command_level = 1;
+        let mut sequence = Sequence::new();
+        sequence.append_element(element);
+        let id = self
+            .orders
+            .sequence_manager
+            .insert_target_frame_anchored_sequence(sequence, target_frame);
+        self.start_sequence_inline(tcx, active_scripts, id)?;
+        Ok(id)
+    }
+
     /// The level boundary stays fixed across callbacks; each sibling is read
     /// again only after the preceding sibling has completed its registration.
     pub(crate) fn register_sequence_level(

@@ -78,13 +78,25 @@ impl EngineInner {
 
             let zero_teleport = (dest.x - old_pos.x).abs() < f32::EPSILON
                 && (dest.y - old_pos.y).abs() < f32::EPSILON;
-            // Only the fade countdown and the star titbits are anchored here:
-            // both are seeded from the command's target frame, so a late input
-            // whose element executes a frame later reaches the same values at
-            // the same absolute frame. This is not a full D12 fix — sequence-id
-            // allocation and other frame-driven state remain unanchored, so a
-            // command applied at N vs N+1 can still diverge (#83).
+            // Only the fade countdown and the star titbits are seeded from the
+            // command's target frame, so a late input whose element executes a
+            // frame later reaches the same values at the same absolute frame.
             let elapsed = self.control.frame_counter.saturating_sub(target_frame) as u16;
+            // `frame_counter` is the frame the command was admitted into — the
+            // hourglass increments it after commands run — so the element's
+            // authoritative execution frame is `frame_counter + 1`. The
+            // star-phase countdown is advanced once per tick from execution,
+            // so seed it relative to that absolute frame: a forward tick has
+            // elapsed 0, a one-frame-late replay 1. The extra update the
+            // forward tick receives is then exactly cancelled by the later
+            // replay's lower seed. Sequence ids are anchored at launch (see
+            // `manage_input_process_teleport`).
+            let phase_elapsed = self
+                .control
+                .frame_counter
+                .saturating_add(1)
+                .saturating_sub(target_frame) as u16;
+            let star_phase = |authored_phase: u16| authored_phase.saturating_sub(phase_elapsed);
 
             // Helper: emit 5 UnconsciousStar titbits from feet → eyes with
             // the canonical phases. Ids and animation phases come from the
@@ -127,7 +139,7 @@ impl EngineInner {
                     // state to seed. Skip stars whose countdown already
                     // expired before this element executed — a forward tick
                     // would have removed them too.
-                    let remaining = authored_phase.saturating_sub(elapsed);
+                    let remaining = star_phase(authored_phase);
                     if remaining <= 1 {
                         p.x += inc.x;
                         p.y += inc.y;
