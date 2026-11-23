@@ -81,6 +81,18 @@ export REAL_RUN_BOUNDS=$SCRIPTS/run-bounds.real.sh
 export FAKE_BC_SCRIPT=$BC_SCRIPT FAKE_BC_LOG=$BC_LOG
 export FAKE_RB_LOG=$RB_LOG FAKE_RELEASE_LOG=$RELEASE_LOG
 
+# Record the timeout argument the driver actually passes, then run the real one.
+mkdir -p "$work/bin"
+export REAL_TIMEOUT=$(command -v timeout)
+export FAKE_TIMEOUT_LOG=$work/timeout.log
+cat >"$work/bin/timeout" <<'TO'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >>"$FAKE_TIMEOUT_LOG"
+exec "$REAL_TIMEOUT" "$@"
+TO
+chmod +x "$work/bin/timeout"
+export PATH="$work/bin:$PATH"
+
 export ROBIN_AUTONOMY_STATE=$STATE
 export ROBIN_AUTONOMY_SCRIPTS=$SCRIPTS
 export ROBIN_AUTONOMY_CONTRACT=$CONTRACT
@@ -93,7 +105,7 @@ export ROBIN_RELEASE_BINARY=$work/robin
 export ROBIN_RELEASE_SUMMARY=$work/summary.json
 
 fixture() { # NAME
-    : >"$BC_SCRIPT"; : >"$BC_LOG"; : >"$RB_LOG"; : >"$RELEASE_LOG"
+    : >"$BC_SCRIPT"; : >"$BC_LOG"; : >"$RB_LOG"; : >"$RELEASE_LOG"; : >"$FAKE_TIMEOUT_LOG"
     rm -rf -- "$STATE" "$work/runs" "$BACKLOG"
     mkdir -p "$STATE" "$HEADS" "$work/runs" "$ROBIN_BATCH_STATE"
     printf 'ok\n' >"$STATE/quota"
@@ -101,7 +113,7 @@ fixture() { # NAME
     {
         printf '# Test contract\n\n```text\n'
         printf 'wall_clock_minutes: 240\nmax_batches: 3\nconsecutive_red_gates: 2\n'
-        printf 'bisect_no_landing_halts: true\ngate_timeout_secs: 900\n'
+        printf 'bisect_no_landing_halts: true\ngate_timeout_secs: 5400\n'
         printf 'cost_cap: none\ncontract_immutable: true\n```\n'
     } >"$CONTRACT"
     printf '# Test backlog\n\n```text\n' >"$BACKLOG"
@@ -128,6 +140,11 @@ run run
 expect_status 0 'a clean run succeeds'
 expect_contains 'the iteration reports LANDED' 'LANDED'
 expect_contains 'the run completes' 'RUN-COMPLETE'
+if grep -qx 5400 "$FAKE_TIMEOUT_LOG"; then
+    pass 'the driver uses the contract gate timeout'
+else
+    fail "the driver did not use 5400: $(cat "$FAKE_TIMEOUT_LOG")"
+fi
 id=$(run_id)
 [ -n "$id" ] && pass 'a run id was recorded' || fail 'no run id was recorded'
 [ "$(field "$id" terminal_state)" = LANDED ] && pass 'status records LANDED' || fail 'status lost LANDED'
@@ -191,11 +208,12 @@ expect_contains 'a missing quota signal fails closed' 'quota-exhausted'
 # 5. Per-gate timeout fails the batch closed.
 fixture
 item P001 'feat: slow'
-sed -i 's/^gate_timeout_secs: 900$/gate_timeout_secs: 1/' "$CONTRACT"
+sed -i 's/^gate_timeout_secs: 5400$/gate_timeout_secs: 1/' "$CONTRACT"
 script_bc 'epoch e001 tree t1 members P001::0' 'gate green t1::0'
 FAKE_GATE_SLEEP=3 run run
 expect_contains 'the timeout is named' 'gate-timeout'
 expect_contains 'the run halts' 'HALTED'
+if grep -qx 1 "$FAKE_TIMEOUT_LOG"; then pass 'the shortened contract timeout was used'; else fail "timeout arg was $(cat "$FAKE_TIMEOUT_LOG")"; fi
 id=$(run_id)
 [ "$(field "$id" terminal_state)" = FILED ] && pass 'the timed-out batch is FILED' || fail 'timeout did not fail closed'
 

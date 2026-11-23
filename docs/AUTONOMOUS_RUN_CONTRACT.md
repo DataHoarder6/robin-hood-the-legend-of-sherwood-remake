@@ -49,7 +49,9 @@ wall_clock_minutes: 240
 max_batches: 3
 consecutive_red_gates: 2
 bisect_no_landing_halts: true
-gate_timeout_secs: 900
+# 90 min: a build-host gate takes about an hour. 900 s would FILED every real
+# gate and trip the two-red circuit breaker before any batch could land.
+gate_timeout_secs: 5400
 cost_cap: none
 contract_immutable: true
 ```

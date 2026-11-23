@@ -36,7 +36,7 @@ expect_absent() {
 contract_file=$work/contract.md
 contract() {
     local key value override
-    local wall=240 batches=3 reds=2 bisect=true timeout=900 cap=none immutable=true
+    local wall=240 batches=3 reds=2 bisect=true timeout=5400 cap=none immutable=true
     local omit_wall=0 omit_batches=0 omit_reds=0 omit_bisect=0 omit_timeout=0 omit_cap=0 omit_immutable=0
     for override in "$@"; do
         case $override in
@@ -150,6 +150,13 @@ status=0
 output=$(bash "$source_root/scripts/run-bounds.sh" value "$contract_file" max_batches 2>&1) || status=$?
 expect_status 0 'value reads a bound'
 if [ "$output" = 3 ]; then pass 'value returns the exact value'; else fail "value returned '$output'"; fi
+
+# 9c. The committed gate timeout is long enough for the real build-host gate.
+status=0
+output=$(bash "$source_root/scripts/run-bounds.sh" value \
+    "$source_root/docs/AUTONOMOUS_RUN_CONTRACT.md" gate_timeout_secs 2>&1) || status=$?
+expect_status 0 'the committed timeout is readable'
+if [ "$output" = 5400 ]; then pass 'the committed timeout is 90 minutes'; else fail "committed timeout is '$output'"; fi
 
 # 10. Immutability is enforced in the director's shell permissions too, so a
 #     `sed -i` or `printf >>` cannot bypass an edit-only deny.
