@@ -1,7 +1,7 @@
 ---
 description: Read-only reviewer — checks presentation-state claims against authoritative game state
 mode: subagent
-model: opencode/hy4-flash-free#high
+model: opencode-go/hy4-flash-free#high
 permissions:
   - action: "*"
     resource: "*"

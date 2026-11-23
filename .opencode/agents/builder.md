@@ -1,7 +1,7 @@
 ---
 description: Implements one dispatched fix in its own worktree; no publish, merge, or landing
 mode: subagent
-model: opencode/hy4-flash-free#high
+model: opencode-go/hy4-flash-free#high
 permissions:
   - action: "*"
     resource: "*"

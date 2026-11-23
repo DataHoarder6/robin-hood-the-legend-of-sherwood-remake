@@ -1,7 +1,7 @@
 ---
 description: Runs suites through scripts/check-quality.sh and the build-host gate, independently of the builder
 mode: subagent
-model: opencode/hy4-flash-free#high
+model: opencode-go/hy4-flash-free#high
 permissions:
   - action: "*"
     resource: "*"

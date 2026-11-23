@@ -1,7 +1,7 @@
 ---
 description: Unattended orchestrator for issue #49 — selects one failing assertion, dispatches builder/reviewer/verifier, owns the terminal states
 mode: primary
-model: opencode/hy4-flash-free#high
+model: opencode-go/hy4-flash-free#high
 permissions:
   - action: "*"
     resource: "*"
