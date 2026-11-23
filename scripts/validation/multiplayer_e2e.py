@@ -132,7 +132,7 @@ PROCESS_LAYER = "process"
 # signals and relaunches only, so selection refuses them by name instead of
 # letting `apply` read a harness gap as a game failure.
 PROCESS_FAULTS = frozenset({"kill", "stop", "continue", "restart",
-                            "mission-result", "console", "command", "native", "key"})
+                            "mission-result", "script-win", "console", "command", "native", "key"})
 NETEM_FAULTS = frozenset({"duplicate", "drop", "reorder", "delay"})
 NETEM_GAP = ("section 2 names `netem {verb}` for the process layer and this suite has no "
              "netem driver, so the row is a harness gap")
@@ -1172,13 +1172,13 @@ class ScenarioRun:
         return seen > at["after"]
 
     def cursors_aligned(self, max_skew=0):
-        """Live peers' frame cursors agree closely enough to inject a command.
+        """Whether live peers' frame cursors agree closely enough to inject a command.
 
-        A joining seat can run a few frames ahead of the host. Posting a
-        host-authored command while that skew is open makes it a late input on
-        the client; its rollback replay can still diverge from the host's
-        forward tick (D12 / #83). Waiting for zero skew before injection is a
-        test precondition on the driver, not a weakening of `hash-equal`.
+        A joining seat can run frames ahead of the host. Posting a host-authored
+        command while that skew is open makes it a late input on the client; its
+        rollback replay can still diverge from the host's forward tick (D12 /
+        #83). Waiting for zero skew before injection is a test precondition on
+        the driver, not a weakening of `hash-equal`.
         """
         frames = [
             (self.latest.get(peer.seat) or {}).get("frame")
@@ -1220,6 +1220,8 @@ class ScenarioRun:
             self.restart(peer, fault)
         elif verb == "mission-result":
             self.end_mission(peer, fault)
+        elif verb == "script-win":
+            self.script_win(peer)
         elif verb == "console":
             self.post(peer, "console", "/console",
                       {"command": fault["command"]}, f"console {fault['command']}")
@@ -1257,6 +1259,43 @@ class ScenarioRun:
         """The host ends the mission through its own terminal flow."""
         self.post(peer, "mission_result", "/mission-result", {"result": fault["result"]},
                   f"mission-result {fault['result']}")
+
+    def script_win(self, peer):
+        """Win by the game's own scripted path, then leave as a player would.
+
+        `HarnessMarkMissionWon` yields the `EngineCommand::Win` a scripted
+        objective completion yields, so the engine marks `mission_won` itself.
+        The second request is the real `QuitMissionRequested` player command a
+        player sends to confirm the leave prompt; the engine sets `quit_won`
+        and its own mission phase returns `LevelSucceeded`. No `/mission-result`
+        is used, so the debriefing is the one a scripted win reaches.
+        """
+        # Every seat marks the win at its own frame 40: the leave command is
+        # replicated, so a seat that never marked the win would read it as an
+        # abort and open a different debriefing from the host's.
+        # TODO: a replicated `PlayerCommand` for the scripted victory would
+        # latch this at one authoritative frame instead of per-seat HTTP calls;
+        # the native is the smallest mechanism that reaches the real path today.
+        for seat_peer in self.peers:
+            self.post(seat_peer, "script_win_native", "/native",
+                      {"op": "HarnessMarkMissionWon", "args": []},
+                      "scripted victory engine command")
+        # The yielded Win command is applied on the frame that admits the
+        # native. Wait for that frame before the leave command: a leave sent
+        # first would read `mission_won == false` and abort instead.
+        start = (self.latest.get(peer.seat) or {}).get("frame")
+        deadline = time.monotonic() + BARRIER_DEADLINE_S
+        while time.monotonic() < deadline:
+            self.poll()
+            frame = (self.latest.get(peer.seat) or {}).get("frame")
+            if frame is not None and (start is None or frame >= start + 2):
+                break
+            time.sleep(0.1)
+        else:
+            raise ScenarioDeadline(
+                f"{peer.name}: the frame did not advance after the scripted victory")
+        self.post(peer, "script_win_leave", "/command", "QuitMissionRequested",
+                  "player leave confirmation")
 
     def resolve(self):
         """Press the debriefing button whose page a seat is actually showing.
