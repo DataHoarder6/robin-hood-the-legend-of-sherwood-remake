@@ -89,6 +89,13 @@ tag pushed without it is a bet rather than a release.
    flake input in `flake.nix` to the tag's commit, land that change through
    `land`, then run `just apps-sync` on every seat. That pin — not a channel
    option — is how the seats receive the release.
+9. Publish the browser artifact from the same tag with
+   `scripts/deploy_web_jautis.sh vX.Y.Z` on `oci-vm`, then run the blocking
+   `scripts/release-parity-check.sh vX.Y.Z` there. It fails unless the native
+   asset inventory, the served manifest (`short`, `commit`, `ticketSchema`),
+   the Demo datadir hash and `wasm/latest.json` all name the same tag. A
+   release is announced only on that pass; the script and the two publish
+   paths are described in [web-native-release-parity.md](slop/web-native-release-parity.md).
 
 Cross-OS replay parity is covered for one class only (step 3): Wine is not
 Windows, so MSVC runtime, WinDivert, Known-Folder APIs and the Windows scheduler
