@@ -26,6 +26,15 @@ export const DEPLOYMENT = Object.freeze({
   zoneName: "phiresky.xyz",
 });
 
+// The checked-in header templates carry origin placeholders filled at build
+// time. Validating them against DEPLOYMENT means seeing the same concrete
+// origins a build would stage, from the same input.
+function fillOrigins(text) {
+  return text
+    .replaceAll("%ROBIN_SIGNER_ORIGIN%", DEPLOYMENT.signerOrigin)
+    .replaceAll("%ROBIN_GAME_ORIGIN%", DEPLOYMENT.publicOrigin);
+}
+
 export const EXPECTED_PUBLIC_ROUTES = Object.freeze([
   // Cloudflare route matching includes the query string. A literal `/api`
   // route would therefore miss `/api?query`; the trailing wildcard keeps
@@ -380,10 +389,10 @@ export async function loadDeploymentSnapshot(root = resolve(import.meta.dirname,
     datadirWrangler: await readJson("deploy/wrangler-datadir.json"),
     signerWrangler: await readJson("deploy/wrangler-signer.json"),
     routes: await readJson("deploy/public-routes.json"),
-    publicHeaders: await readFile(resolve(root, "deploy/public-headers.txt"), "utf8"),
+    publicHeaders: fillOrigins(await readFile(resolve(root, "deploy/public-headers.txt"), "utf8")),
     runtimeHeaders: await readFile(resolve(root, "deploy/runtime-headers.txt"), "utf8"),
     datadirHeaders: await readFile(resolve(root, "deploy/datadir-headers.txt"), "utf8"),
-    signerHeaders: await readFile(resolve(root, "deploy/signer-headers.txt"), "utf8"),
+    signerHeaders: fillOrigins(await readFile(resolve(root, "deploy/signer-headers.txt"), "utf8")),
   };
 }
 

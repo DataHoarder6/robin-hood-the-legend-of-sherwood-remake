@@ -5,14 +5,20 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { verifyPublicBuild, verifySignerBuild } from "./verify-static-build.mjs";
+import { DEPLOYMENT } from "./verify-cloudflare-deployment.mjs";
 
-const publicHeaders = await readFile(
-  new URL("../deploy/public-headers.txt", import.meta.url),
-  "utf8",
+// The deploy templates now carry placeholders filled at build time. Fixtures
+// must see the same concrete origins the validator checks, from the same input.
+const fillOrigins = (text) =>
+  text
+    .replaceAll("%ROBIN_SIGNER_ORIGIN%", DEPLOYMENT.signerOrigin)
+    .replaceAll("%ROBIN_GAME_ORIGIN%", DEPLOYMENT.publicOrigin);
+
+const publicHeaders = fillOrigins(
+  await readFile(new URL("../deploy/public-headers.txt", import.meta.url), "utf8"),
 );
-const signerHeaders = await readFile(
-  new URL("../deploy/signer-headers.txt", import.meta.url),
-  "utf8",
+const signerHeaders = fillOrigins(
+  await readFile(new URL("../deploy/signer-headers.txt", import.meta.url), "utf8"),
 );
 const vaultSource = await readFile(
   new URL("../../crates/robin_identity_signer/js/browser_identity_vault.js", import.meta.url),
