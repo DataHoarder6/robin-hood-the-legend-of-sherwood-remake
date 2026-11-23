@@ -55,6 +55,27 @@ verifier reporting "tests pass" is not a gate result; only the suite verdict
 and the origin read-back count. [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md) owns
 the gate rule; this section owns the definition of a landed commit.
 
+## Decide before the run
+
+Scope, human gates and authority are decided before a run, not during one. The
+decisions are [ADR 0010](adr/0010-linux-first-unattended-goal.md) and the
+`HUMAN_GATE` rows in [GAPS.md](GAPS.md). A tick does not dispatch research or
+deep-dive subagents: it reads the authoritative sources, selects one assertion,
+dispatches builder/reviewer/verifier, and ends in a terminal state. If a needed
+decision is missing, the tick ends `BLOCKED` with that decision named — it does
+not commission a study of it mid-run. Research that changes scope goes through
+[research-before-building](https://github.com/DataHoarder6/home/blob/main/docs/agents/research-before-building.md)
+and lands as an ADR or gap row before the next run.
+
+## Regression coverage before `fixed`
+
+The builder's failing check must cover the defect surface the DEFECTS.md row
+names, not just its smallest reproducer; a group-command defect needs its
+multi-actor case. The reviewer verifies that coverage. The exact rules are in
+[`.opencode/agents/builder.md`](../.opencode/agents/builder.md) and
+[`.opencode/agents/reviewer.md`](../.opencode/agents/reviewer.md); D12's multi-PC
+teleport case is the row that exposed this gap.
+
 ## Iteration order
 
 The director reads the authoritative sources — issue #49,
@@ -93,6 +114,12 @@ landing requires.
 build-slot/gate rule and the FIFO landing queue; one gate is in flight across
 agents, and a competing gate queues behind the running one. Suite names live in
 [TESTING.md](TESTING.md).
+
+The verifier's gate contract lives in
+[`.opencode/agents/verifier.md`](../.opencode/agents/verifier.md): changed docs
+paths go in `ROBIN_DOCS_CHECK_PATHS`, and the process-layer variables are
+forwarded by `scripts/remote-check.sh`. A missing binary or a pruned artifact is
+a prerequisite failure, not a red assertion.
 
 A stable tag is human work, not a loop action. The `robin --version` preflight
 before a tag is scriptable and owned by [RELEASES.md](RELEASES.md).
@@ -168,19 +195,14 @@ request to do so is BLOCKED under [Risk routing](#risk-routing), with
 
 ## One-week pilot metrics
 
-Collect these for one week from the loop's first unattended run. Each row names
-its source; the source is the measurement, not a stored report.
+Run `scripts/unattended-metrics.sh [SINCE]` on `oci-vm`. It prints each metric
+with its source; the source is the measurement, not a stored report. A cost or
+duration the script cannot derive is printed as `not available`, never
+estimated. First-pass gate success and false quarantines come from the gate's
+`summary.json` evidence indexed by [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md), not
+from the script; the script's `not available` rows name the source that must be
+extended first.
 
-| Metric | Command / source |
-| --- | --- |
-| Tasks attempted, LANDED, FILED, BLOCKED | `journalctl --user -u director-loop.service` — one terminal state per iteration; a tick that ends `pending` in the handoff artifact is not a completed iteration and is not counted |
-| First-pass gate success | Gate evidence (`scripts/remote-check.sh` verdict / `summary.json`, indexed by [PARALLEL_AGENTS.md](PARALLEL_AGENTS.md)) — first gate versus retries |
-| Revert rate | `git log fork/main --grep=revert -i`; tip confirmed with `git ls-remote fork refs/heads/main` |
-| Review iterations | Director journal, reviewer rounds per item; cross-check `gh issue view 49` |
-| Time-to-land p50/p90 | Director journal timestamps: iteration start → LANDED |
-| Blocked dwell | Director journal timestamps: BLOCKED → next tick re-queues the item or escalates a capability issue (`gh issue`) |
-| Cost per landed task | `opencode stats` (tokens/cost per session) ÷ LANDED count from the journal |
-| False-quarantine count | [DEFECTS.md](DEFECTS.md) `deferred` rows whose check later passes without a fix; the verdict comes from gate evidence (`summary.json`), not the row text |
-
-A cost or duration that cannot be produced by one of these sources is not
-reported; do not fill the table with estimates.
+First run, 2026-11-23, `SINCE=2026-11-22`: 1 LANDED, 1 FILED, 7 BLOCKED, 6
+builder / 7 reviewer / 4 verifier dispatches, 16 quota failures, 0 reverts.
+`fork/main` tip confirmed with `git ls-remote fork refs/heads/main`.

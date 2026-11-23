@@ -54,6 +54,16 @@ Keep one gate in flight — queue behind the other agent's `runbg` unit instead 
 starting a competing gate; `docs/PARALLEL_AGENTS.md` owns the rule. Do not push,
 merge, or run `scripts/land.sh`; landing belongs to the director.
 
+Gate through `scripts/remote-check.sh` only. Set `ROBIN_DOCS_CHECK_PATHS` to the
+changed docs paths so the docs gate checks the change instead of unrelated rot;
+the script forwards it and `ROBIN_E2E_BINARY`, `ROBINHOOD_DATA_DIR`,
+`ROBIN_E2E_EVIDENCE` and `ROBIN_E2E_JOBS` to the build host. Never hand-run
+`check-quality.sh` there, and never start `multiplayer-e2e` without the binary
+and data variables — that fails on a missing prerequisite, not on the change.
+`scripts/release-gate.sh` is a release-tag action, not a verifier gate. Rebuild a
+pruned browser artifact before a browser suite; a missing artifact is not a red
+assertion. Report the evidence path with the verdict.
+
 Retries and quarantine follow `docs/PARALLEL_AGENTS.md`: a failure that survives
 its bounded budget is filed in `docs/DEFECTS.md`, not rerun. You report pass/fail
 with evidence; the director owns the terminal state.

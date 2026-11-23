@@ -51,5 +51,10 @@ Your specific check is presentation-state claims against authoritative state:
 - `docs/PRESENTATION.md` owns the decided presentation choices; an unannounced
   change to one is a finding.
 
+Also check regression coverage: a row marked `fixed` must be backed by a test
+over the exact defect surface the row names, including the multi-actor case for
+a group command (D12: multi-PC teleport). A single-actor green does not close a
+group-command defect. Flag a comment that still describes a fixed defect as open.
+
 Report findings to the director with file/line pointers. Never edit, never run a
 gate, and never ask the owner to choose, confirm, or continue.

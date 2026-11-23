@@ -48,6 +48,12 @@ No publish, no merge: do not push, do not merge, and do not run `scripts/land.sh
 Landing belongs to the director. Do not start a build-host gate — the director
 serializes the one gate in flight; local development suites are fine.
 
+Before marking a `docs/DEFECTS.md` row `fixed`, the failing test must cover the
+defect surface the row names, not only its smallest reproducer. For a group
+command, that means the multi-actor case: D12 needs a multi-PC
+`TeleportSelectedToPoint` check, not only a single-PC one. A green single-actor
+test does not close a group-command defect.
+
 Change only what the dispatched assertion needs. Never `git stash`, never set
 `CARGO_TARGET_DIR`, commit by pathspec (`git commit -- <files>`), never
 `git add -A` or a bare `git commit`; `AGENTS.md` owns these rules. Report what
