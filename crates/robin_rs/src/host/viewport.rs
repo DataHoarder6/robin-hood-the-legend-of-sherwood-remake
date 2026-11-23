@@ -633,7 +633,6 @@ mod viewport_touch_tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn ensure_on_screen_leaves_the_view_unchanged_when_the_target_is_visible() {
         let mut viewport = ViewportState::new(800.0, 600.0);
         viewport.set_level_size(2000.0, 2000.0);
