@@ -25,23 +25,6 @@ pub(in crate::game_session) enum MissionEndLeaderboardTaskProgress {
     Detach(MissionEndLeaderboardController),
 }
 
-/// A preparation result that settles the task without opening a board or a
-/// notice. `None` leaves `tick` to run its normal board/notice handling.
-/// Renderer-free so the no-replay path is testable without a window.
-pub(super) fn settled_progress(
-    result: &Option<Result<(MissionEndRunBundle, Arc<[u8]>), RankedError>>,
-) -> Option<MissionEndLeaderboardTaskProgress> {
-    match result {
-        Some(Err(RankedError::NoReplay)) => {
-            tracing::debug!(
-                "mission-end leaderboards skipped: no replay snapshot can exist in this build"
-            );
-            Some(MissionEndLeaderboardTaskProgress::Finished)
-        }
-        _ => None,
-    }
-}
-
 impl MissionEndLeaderboardTaskState {
     pub(in crate::game_session) fn new(
         preparation: MissionEndPreparation,
@@ -62,96 +45,124 @@ impl MissionEndLeaderboardTaskState {
         )
     }
 
-    /// Apply the renderer-free settlement of a preparation result, if any.
-    #[cfg(test)]
-    pub(in crate::game_session) fn settle_without_ui(
+    /// Settle a preparation result that cannot open a board or a notice.
+    /// `None` leaves the normal board/notice handling in charge. Both `tick`
+    /// and the no-replay test go through this method, so the phase transition
+    /// cannot drift from the decision it reports. Renderer-free.
+    pub(in crate::game_session) fn settle_preparation(
         &mut self,
         result: &Option<Result<(MissionEndRunBundle, Arc<[u8]>), RankedError>>,
     ) -> Option<MissionEndLeaderboardTaskProgress> {
-        let progress = settled_progress(result)?;
-        if matches!(progress, MissionEndLeaderboardTaskProgress::Finished) {
-            self.phase = MissionEndLeaderboardTaskPhase::Finished;
-        }
+        let progress = match result {
+            Some(Err(RankedError::NoReplay(_))) => {
+                tracing::debug!(
+                    "mission-end leaderboards skipped: no replay snapshot bytes are available"
+                );
+                MissionEndLeaderboardTaskProgress::Finished
+            }
+            _ => return None,
+        };
+        self.phase = MissionEndLeaderboardTaskPhase::Finished;
         Some(progress)
+    }
+
+    /// Poll preparation and apply its result. Renderer-free until the board
+    /// becomes visible or the preparing page needs drawing.
+    fn tick_preparation(
+        &mut self,
+        io: &mut ModalScreenIo<'_, '_>,
+    ) -> MissionEndLeaderboardTaskProgress {
+        let (preferences, result) = {
+            let MissionEndLeaderboardTaskPhase::Preparing(preparation) = &mut self.phase else {
+                unreachable!("tick_preparation is only called in the preparing phase")
+            };
+            let preferences = preparation.preferences().clone();
+            let replay_exports = self.application_context.replay_exports();
+            let edition = super::installed_content_edition(&self.application_context);
+            (
+                preferences,
+                preparation.poll_bundle(&replay_exports, edition),
+            )
+        };
+        if let Some(progress) = self.settle_preparation(&result) {
+            return progress;
+        }
+        let Some(result) = result else {
+            render_preparing(&mut *io.renderer, io.resources, io.cursor);
+            return MissionEndLeaderboardTaskProgress::Pending;
+        };
+        let (bundle, bytes) = match result {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                tracing::warn!("mission-end leaderboards unavailable: {error}");
+                if !preferences.show_mission_end_boards {
+                    self.phase = MissionEndLeaderboardTaskPhase::Finished;
+                    return MissionEndLeaderboardTaskProgress::Finished;
+                }
+                self.phase = MissionEndLeaderboardTaskPhase::Unavailable(
+                    crate::save_recovery::ErrorNotice::new(format!(
+                        "Leaderboards unavailable: {error}"
+                    )),
+                );
+                return MissionEndLeaderboardTaskProgress::Pending;
+            }
+        };
+        let api = match LeaderboardApi::from_preferences(&preferences) {
+            Ok(api) => api,
+            Err(error) => {
+                tracing::warn!("mission-end leaderboard endpoint unavailable: {error}");
+                self.phase = MissionEndLeaderboardTaskPhase::Finished;
+                return MissionEndLeaderboardTaskProgress::Finished;
+            }
+        };
+        let controller = MissionEndLeaderboardController::new(
+            bundle,
+            bytes,
+            preferences,
+            Box::new(HttpMissionEndLeaderboardBackend::new(api)),
+        );
+        let mut controller = match controller {
+            Ok(controller) => controller,
+            Err(error) => {
+                tracing::warn!("mission-end leaderboard setup failed: {error}");
+                self.phase = MissionEndLeaderboardTaskPhase::Finished;
+                return MissionEndLeaderboardTaskProgress::Finished;
+            }
+        };
+        controller.enable_history_tracking();
+        if controller.is_visible() {
+            self.phase = MissionEndLeaderboardTaskPhase::Visible(MissionEndLeaderboardScreen::new(
+                controller,
+                io.resources,
+            ));
+            // Do not poll the freshly-created controller a second time
+            // in this host frame.
+            MissionEndLeaderboardTaskProgress::Pending
+        } else {
+            controller
+                .apply_action(MissionEndLeaderboardAction::Close)
+                .unwrap_or_else(|error| {
+                    panic!("validated hidden leaderboard could not close: {error}")
+                });
+            self.phase = MissionEndLeaderboardTaskPhase::Finished;
+            retire_or_detach(controller)
+        }
     }
 
     pub(in crate::game_session) fn tick(
         &mut self,
         io: &mut ModalScreenIo<'_, '_>,
     ) -> MissionEndLeaderboardTaskProgress {
+        if matches!(self.phase, MissionEndLeaderboardTaskPhase::Preparing(_)) {
+            return self.tick_preparation(io);
+        }
         let window = &mut *io.window;
         let renderer = &mut *io.renderer;
         let resources = io.resources;
         let cursor = io.cursor;
         match &mut self.phase {
-            MissionEndLeaderboardTaskPhase::Preparing(preparation) => {
-                let replay_exports = self.application_context.replay_exports();
-                let edition = super::installed_content_edition(&self.application_context);
-                let result = preparation.poll_bundle(&replay_exports, edition);
-                if let Some(progress) = settled_progress(&result) {
-                    self.phase = MissionEndLeaderboardTaskPhase::Finished;
-                    return progress;
-                }
-                let Some(result) = result else {
-                    render_preparing(renderer, resources, cursor);
-                    return MissionEndLeaderboardTaskProgress::Pending;
-                };
-                let (bundle, bytes) = match result {
-                    Ok(bundle) => bundle,
-                    Err(error) => {
-                        tracing::warn!("mission-end leaderboards unavailable: {error}");
-                        if !preparation.preferences().show_mission_end_boards {
-                            self.phase = MissionEndLeaderboardTaskPhase::Finished;
-                            return MissionEndLeaderboardTaskProgress::Finished;
-                        }
-                        self.phase = MissionEndLeaderboardTaskPhase::Unavailable(
-                            crate::save_recovery::ErrorNotice::new(format!(
-                                "Leaderboards unavailable: {error}"
-                            )),
-                        );
-                        return MissionEndLeaderboardTaskProgress::Pending;
-                    }
-                };
-                let preferences = preparation.preferences().clone();
-                let api = match LeaderboardApi::from_preferences(&preferences) {
-                    Ok(api) => api,
-                    Err(error) => {
-                        tracing::warn!("mission-end leaderboard endpoint unavailable: {error}");
-                        self.phase = MissionEndLeaderboardTaskPhase::Finished;
-                        return MissionEndLeaderboardTaskProgress::Finished;
-                    }
-                };
-                let controller = MissionEndLeaderboardController::new(
-                    bundle,
-                    bytes,
-                    preferences,
-                    Box::new(HttpMissionEndLeaderboardBackend::new(api)),
-                );
-                let mut controller = match controller {
-                    Ok(controller) => controller,
-                    Err(error) => {
-                        tracing::warn!("mission-end leaderboard setup failed: {error}");
-                        self.phase = MissionEndLeaderboardTaskPhase::Finished;
-                        return MissionEndLeaderboardTaskProgress::Finished;
-                    }
-                };
-                controller.enable_history_tracking();
-                if controller.is_visible() {
-                    self.phase = MissionEndLeaderboardTaskPhase::Visible(
-                        MissionEndLeaderboardScreen::new(controller, resources),
-                    );
-                    // Do not poll the freshly-created controller a second time
-                    // in this host frame.
-                    MissionEndLeaderboardTaskProgress::Pending
-                } else {
-                    controller
-                        .apply_action(MissionEndLeaderboardAction::Close)
-                        .unwrap_or_else(|error| {
-                            panic!("validated hidden leaderboard could not close: {error}")
-                        });
-                    self.phase = MissionEndLeaderboardTaskPhase::Finished;
-                    retire_or_detach(controller)
-                }
+            MissionEndLeaderboardTaskPhase::Preparing(_) => {
+                unreachable!("the preparing phase is handled before borrowing modal IO")
             }
             MissionEndLeaderboardTaskPhase::Visible(screen) => {
                 let event = screen.tick(&mut ModalScreenIo {

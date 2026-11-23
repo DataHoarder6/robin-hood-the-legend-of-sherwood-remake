@@ -304,14 +304,15 @@ impl MissionEndPreparation {
         }
         let snapshot = exports.snapshot().map_err(RankedError::evidence)?;
         if snapshot.is_empty() {
-            // No recording path wrote any bytes (the browser case), so no
-            // replay snapshot can exist. This is a build capability, not a
-            // failed upload — never surface it as an error notice.
-            // TODO: an explicit "this build cannot record" capability on
-            // `ReplayExports` would distinguish the browser case from a
-            // native recording failure; both present today as an empty spool.
+            // No replay bytes are available at mission-end, so there is no
+            // snapshot to encode or upload. That is not a failed upload —
+            // never surface it as a leaderboard error notice.
+            // TODO: an explicit "no replay available in this build" capability
+            // on `ReplayExports` would distinguish the browser observation
+            // behind #79 from a native run that published no bytes. A
+            // poisoned spool is a real failure and still reports its error.
             return Err(RankedError::no_replay(
-                "no replay snapshot can exist in this build",
+                "no replay snapshot bytes are available",
             ));
         }
         Ok(Some(snapshot))
@@ -425,15 +426,15 @@ mod tests {
         assert!(runtime.preparation.is_none());
     }
 
-    /// D13 (#79): a browser build owns no replay recording path, so its
-    /// replay spool stays empty and no replay snapshot can ever exist. The
-    /// mission-end leaderboard task must settle quietly rather than raise the
+    /// D13 (#79): at mission-end some builds have no replay snapshot bytes to
+    /// encode (the browser observation behind the issue). The mission-end
+    /// leaderboard task must settle quietly rather than raise the
     /// "Leaderboards unavailable" notice on the debriefing screen.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn no_replay_export_finishes_mission_end_leaderboard_without_notice() {
-        // An empty spool models the browser condition exactly: no recording
-        // was ever written, so `snapshot()` cannot produce a replay to encode.
+        // An empty spool models the observed condition honestly: no replay
+        // bytes are available, so there is nothing to encode or upload.
         let service = Arc::<crate::replay_service::ReplayService>::default();
         let exports = service.exports();
         let mut preparation = MissionEndPreparation {
@@ -459,7 +460,7 @@ mod tests {
             crate::host::ApplicationContext::default(),
         );
         let progress = task
-            .settle_without_ui(&result)
+            .settle_preparation(&result)
             .expect("a missing replay snapshot must settle the task without a UI");
         assert!(
             matches!(progress, MissionEndLeaderboardTaskProgress::Finished),

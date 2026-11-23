@@ -25,7 +25,7 @@ pub(crate) enum RankedError {
     /// No published board, endpoint or identity is available for this run.
     #[error("{0}")]
     Unavailable(Text),
-    /// No replay snapshot can exist (a browser build owns no recording path).
+    /// No replay snapshot bytes are available for this run at mission-end.
     /// Presentation settles this without a notice; it is never a player error.
     #[error("{0}")]
     NoReplay(Text),

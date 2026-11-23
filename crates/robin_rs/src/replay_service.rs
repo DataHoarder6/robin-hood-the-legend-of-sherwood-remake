@@ -695,8 +695,9 @@ impl ReplaySnapshot {
             .map_err(|error| ExportError::Internal(format!("encode compact replay: {error}")))
     }
 
-    /// An empty snapshot means no recording was ever written for this run.
-    /// Browser builds never write one; there is nothing to encode or upload.
+    /// An empty snapshot carries no replay bytes to encode or upload. It is
+    /// not a claim about why none are available: a browser build can have a
+    /// recorder installed and still expose no bytes at mission-end.
     pub(crate) fn is_empty(&self) -> bool {
         self.byte_length == 0
     }
