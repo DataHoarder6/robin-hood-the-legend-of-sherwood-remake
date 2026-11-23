@@ -2,7 +2,7 @@
   "schema": 5,
   "id": "H38",
   "campaign": true,
-  "extends": "H36",
+  "extends": "H30",
   "proves": {
     "layer": "process",
     "runner": "scripts/validation/multiplayer_e2e.py"
@@ -12,7 +12,31 @@
     { "seat": 1, "role": "client" }
   ],
   "faults": [
-    { "at": { "frame": 40 }, "peer": 0, "fault": "script-win" }
+    {
+      "at": { "frame": 40 },
+      "peer": 0,
+      "fault": "command",
+      "command": {
+        "TeleportSelectedToPoint": {
+          "dest": { "x": 253.0, "y": 380.0 },
+          "layer": 0,
+          "sector": null
+        }
+      }
+    },
+    {
+      "at": { "frame": 45 },
+      "peer": 0,
+      "fault": "command",
+      "command": {
+        "LaunchInteraction": {
+          "actor": { "Pc": 126 },
+          "target": { "Scroll": 114 },
+          "command": "Take",
+          "running": false
+        }
+      }
+    }
   ],
   "resolve": [
     { "peer": 0, "result": "Completed" },

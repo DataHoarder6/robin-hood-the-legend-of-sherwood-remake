@@ -119,9 +119,9 @@ case; `invariant` and `vocabulary` are not cells.
 | H35 | process | fault | a client is killed and relaunched on the same install mid-mission: its joining key is the durable, domain-separated install identity, so the host reclaims the same seat and the client returns to `running` with hash agreement instead of exhausting its reconnect budget. asserts: `log(absent=giving up on reconnection,count=0)`; `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../multiplayer/identity.rs` + `.../multiplayer/native/peer_sessions.rs` |
 | H36 | process | baseline | a campaign host ends a won mission with `/mission-result`, both seats acknowledge the debriefing with Continue, and the single host-owned session hands the whole party to the next campaign mission instead of leaving each install on its own save: both seats enter the second mission together at equal hashes and keep running. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)` | `H30` + `crates/robin_rs/src/game_session/mod.rs` session loop |
 | H37 | core | baseline | the host commits a cooperative-pause decision at an exact sim frame into the hashed simulation gate; every seat that applies the same decision at that frame reaches the identical state hash, and committing one frame off the boundary diverges. A second decision resumes. The process layer cannot express this row: `/state.frame` is `engine.frame_counter()`, which deliberately stops while the gate holds, so a frame-anchored resume fault can never fire. The two-engine prover is the evidence. asserts: `hash-equal(peers=0,1,every=25)` | `crates/robin_engine/src/engine/commands/tests.rs::coop_pause_boundary_frame_hash_equality_is_exact_and_frame_sensitive` |
-| H38 | process | baseline | a two-seat campaign host plays a mission to the game's own scripted victory — the `script-win` verb calls the game's victory engine command (the one `WinBlazon` yields on a won objective) and then the real `QuitMissionRequested` leave, so the mission-end cause is the debriefing the game's own mission phase reaches, not `/mission-result`. Both seats acknowledge the page and the host-owned session hands them to mission 2 at equal hashes, still running. The exit-code log alone cannot distinguish the cause (H27 and H33 print it too), so the row also requires the dev trigger's own line to be absent. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(absent=developer trigger ended the mission,count=0)` | `H30` + `crates/robin_rs/src/game_session/mod.rs` session loop |
+| H38 | process | baseline | the host plays a campaign mission to a real in-game success with gameplay `PlayerCommand`s — a `TeleportSelectedToPoint` places Robin at H01_Lin_VL's objective scroll, and `LaunchInteraction { Take }` reads it, whose script's `IsTaken` sets the victory global that `CheckVictoryCondition` returns — so the engine's own `LevelSucceeded` opens the debriefing, both seats acknowledge it, and the host-owned session hands the party to mission 2 at equal hashes. No `/mission-result` (or `WIN`) dev trigger is involved. Precondition: the driver waits for zero frame-cursor skew before injecting commands, so no late input forces a teleport rollback; the separate late-input teleport desync is tracked as D12 ([#83](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/83)) and is out of this row's scope. The commands bind the Leicester demo data's entity ids (`Pc:126`, `Scroll:114`); for a different dataset, edit the two `faults[].command` bodies in `scripts/validation/scenarios/H38.json`. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(absent=developer trigger ended the mission,count=0)` | `H30` + `crates/robin_engine/src/engine/tick/mission.rs` victory gate + `crates/robin_rs/src/game_session/mod.rs` session loop |
 
-The mission-end rows are H22–H29, H32–H34; H35 is the same-identity reclaim, H36 the dev-trigger campaign handoff, H38 the scripted-victory handoff: H21 is a core row about the same
+The mission-end rows are H22–H29, H32–H34; H35 is the same-identity reclaim, H36 the dev-triggered campaign handoff and H38 the same handoff after a gameplay-driven victory: H21 is a core row about the same
 page, and H30 opens a campaign session a second seat joins. The sketch in
 `docs/slop/multiplayer-terminal-matrix.md` numbers the six terminal rows
 H21–H26, one lower. Its H22 (host answers Completed, client answers Restart)
@@ -248,30 +248,16 @@ each one played two missions.
 | `restart` | rebuild the peer from its `PeerOwner` | restart the client runtime with a fresh state | `SIGKILL` then relaunch as a new process |
 | `stall-surface` | hold the modal surface open past its deadline | same | same |
 | `mission-result` | unsupported | unsupported | `POST /mission-result` on the host |
-| `script-win` | unsupported | unsupported | game's scripted victory engine command on every seat, then `POST /command {"QuitMissionRequested"}` on the host |
 | `console` | unsupported | unsupported | `POST /console {"command": "..."}` on that peer |
 | `command` | deliver the `PlayerCommand` to the peer | unsupported | `POST /command` on that peer |
 | `native` | call the native on the peer | unsupported | `POST /native` on that peer |
 | `key` | unsupported | unsupported | that keysym on the peer's own window |
 
 A scenario may also end the mission and answer the page it opens, which is the
-schema-5 half of the vocabulary (`campaign` and `mission` came with schema 2;
-`console` came with schema 4; `script-win` came with schema 5).
-`mission-result` posts the decision on the host and
+schema-4 half of the vocabulary (`campaign` and `mission` came with schema 2;
+`console` came with schema 4). `mission-result` posts the decision on the host and
 nothing else: the command it queues is replicated, so both seats end the same
-mission at the same frame. `script-win` is the gameplay-outcome counterpart: it
-invokes the game's own scripted-victory engine command — the one `WinBlazon`
-yields when a mission's collected objective meets its win condition — so the
-mission is *won* by the game's script, and then delivers the real
-`QuitMissionRequested` leave command. The mission phase reads the flags those
-two steps set and returns `LevelSucceeded`; the debriefing and the campaign
-handoff are the ones a scripted win reaches. No `/mission-result` is involved:
-the exit-code line (`opening debriefing exit_code=LevelSucceeded`) is shared by
-the dev-trigger rows, so the row additionally asserts the absence of
-`developer trigger ended the mission` — the line only `end_mission` emits — to
-discriminate the cause. A row that wants the dev trigger instead
-keeps using `mission-result` (H36) — `script-win` adds a second cause, it does
-not weaken the first. A `resolve` list — not a fault — names a seat and a
+mission at the same frame. A `resolve` list — not a fault — names a seat and a
 `DialogResult`; the runner reads that seat's own `/state.presentation.kind` and
 posts the typed dismissal on `/step-forward`, so it never guesses the
 debriefing's text index and never presses a page the session already closed by
