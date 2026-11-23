@@ -96,3 +96,6 @@ __pycache__/
 .gitmodules
 .claude
 .mcp.json
+
+# SDD scratch workspace (subagent-driven-development)
+.superpowers/
