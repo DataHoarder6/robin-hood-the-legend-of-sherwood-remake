@@ -20,6 +20,17 @@ impl EngineInner {
         // `dest_layer` is kept as a fallback for the
         // new-side star burst when the validation step
         // gives up.
+        // The command's target frame is stamped on the PC when the teleport is
+        // admitted. It is replicated state, so a late input replayed through
+        // rollback reads the same anchor as the host's forward tick even when
+        // this element executes on a different frame.
+        let target_frame = self
+            .world
+            .entities
+            .get(owner)
+            .and_then(|entity| entity.pc_data())
+            .and_then(|pc| pc.teleport_target_frame)
+            .unwrap_or(self.control.frame_counter);
         let (dest, dest_layer) = {
             let elem = self.orders.sequence_manager.get_element_at(elem_ref);
             match elem.map(|e| &e.data) {
@@ -67,9 +78,23 @@ impl EngineInner {
 
             let zero_teleport = (dest.x - old_pos.x).abs() < f32::EPSILON
                 && (dest.y - old_pos.y).abs() < f32::EPSILON;
+            // Only the fade countdown and the star titbits are anchored here:
+            // both are seeded from the command's target frame, so a late input
+            // whose element executes a frame later reaches the same values at
+            // the same absolute frame. This is not a full D12 fix — sequence-id
+            // allocation and other frame-driven state remain unanchored, so a
+            // command applied at N vs N+1 can still diverge (#83).
+            let elapsed = self.control.frame_counter.saturating_sub(target_frame) as u16;
 
-            // Helper: emit 5 UnconsciousStar titbits from
-            // feet → eyes with the canonical phases.
+            // Helper: emit 5 UnconsciousStar titbits from feet → eyes with
+            // the canonical phases. Ids and animation phases come from the
+            // teleport's target frame and the actor, never from the frame this
+            // element happened to execute on, so a late rollback replay adds
+            // the same authoritative titbits as a forward tick.
+            let star_id_base = target_frame
+                .wrapping_mul(64)
+                .wrapping_add(owner.index())
+                .wrapping_mul(8);
             let emit_stars = |mgr: &mut crate::titbit::TitbitManager,
                               feet: crate::coordinates::WorldPoint3D,
                               eyes: crate::coordinates::WorldPoint3D,
@@ -94,16 +119,33 @@ impl EngineInner {
                     y: feet.y - 4.0,
                     z: feet.z,
                 };
-                for &phase in &[4u16, 12, 20, 12, 4] {
+                for (index, &authored_phase) in [4u16, 12, 20, 12, 4].iter().enumerate() {
+                    // No-supplier teleport stars are driven by `RetreatPhase`:
+                    // each tick decrements `phase` and removes it at <= 1.
+                    // `sprite_frame` / `frame_count` are never advanced for
+                    // these stars, so the countdown is the only animation
+                    // state to seed. Skip stars whose countdown already
+                    // expired before this element executed — a forward tick
+                    // would have removed them too.
+                    let remaining = authored_phase.saturating_sub(elapsed);
+                    if remaining <= 1 {
+                        p.x += inc.x;
+                        p.y += inc.y;
+                        p.z += inc.z;
+                        continue;
+                    }
+                    let id = crate::titbit::TitbitId::new(star_id_base.wrapping_add(index as u32))
+                        .expect("frame-anchored star id is not the reserved sentinel");
+                    mgr.reserve_id(id);
                     mgr.add_titbit(
                         p,
                         layer,
                         crate::titbit::TitbitKind::UnconsciousStar,
                         crate::titbit::ElementHandle::INVALID,
-                        phase,
+                        remaining,
                         crate::titbit::ElementHandle::INVALID,
                         false,
-                        crate::titbit::INVALID_ID,
+                        Some(id),
                         false,
                         None,
                         None,
@@ -130,6 +172,7 @@ impl EngineInner {
             // hulk-rebuild that consumes `teleport_counter`
             // lives in `game_render.rs::render_entities_gpu`.
             const TELEPORT_FADE_FRAMES: u16 = 20;
+            let seeded_counter = TELEPORT_FADE_FRAMES.saturating_sub(elapsed);
             let mut bstars = true;
             if is_pc
                 && let Some(entity) = self.world.entities.get_mut(owner)
@@ -144,7 +187,7 @@ impl EngineInner {
                 } else {
                     pc.position_before_teleport = old_pos;
                     pc.max_teleport_counter = TELEPORT_FADE_FRAMES;
-                    pc.teleport_counter = TELEPORT_FADE_FRAMES;
+                    pc.teleport_counter = seeded_counter;
                 }
                 bstars = !breturn;
             }

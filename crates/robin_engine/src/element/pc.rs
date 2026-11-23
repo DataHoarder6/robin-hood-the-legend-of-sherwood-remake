@@ -229,17 +229,26 @@ pub struct PcData {
     pub feet_seen: bool,
 
     // Teleport
+    //
+    // The hulk-rebuild fade is seeded from the teleport command's target
+    // frame, not from the frame its sequence element happened to execute on.
+    // Every seat therefore reaches the same counter at the same absolute frame
+    // even when a late input is re-applied through rollback. These fields are
+    // authoritative and hashed like the rest of PcData.
     pub position_before_teleport: MapPoint,
-    /// Frames remaining in the cheat-teleport hulk-rebuild fade.
-    /// Decremented each frame by the per-PC render path (not yet
-    /// implemented); read here by teleport setup to suppress the
-    /// old-position star burst when a re-teleport fires while the
-    /// previous fade is still in flight.
+    /// Frames remaining in the cheat-teleport hulk-rebuild fade, derived as
+    /// `TELEPORT_FADE_FRAMES - (current_frame - target_frame)`.
     pub teleport_counter: u16,
     /// Initial value of [`Self::teleport_counter`] when the most recent
     /// teleport began.  Used by the render path to compute the fade
     /// percentage.
     pub max_teleport_counter: u16,
+    /// Absolute frame the active teleport command was scheduled for. Stamped
+    /// from the replicated command's target frame, so a late input replayed
+    /// through rollback anchors the fade and star titbits to the same frame as
+    /// the host's forward tick. Hashed like the rest of PcData.
+    #[serde(default)]
+    pub teleport_target_frame: Option<u32>,
     pub fried_psykokwack: bool,
 
     // Carried person
@@ -348,6 +357,7 @@ impl Default for PcData {
             position_before_teleport: MapPoint::default(),
             teleport_counter: 0,
             max_teleport_counter: 0,
+            teleport_target_frame: None,
             fried_psykokwack: false,
             carried: None,
             carried_posture: Posture::Undefined as u32,

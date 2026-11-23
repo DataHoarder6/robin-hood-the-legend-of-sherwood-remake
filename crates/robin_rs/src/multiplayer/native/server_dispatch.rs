@@ -505,8 +505,19 @@ pub(super) fn broadcast_input(
     server_frame: u32,
     origin_frame: u32,
     target_frame: u32,
-    inp: PlayerInput,
+    mut inp: PlayerInput,
 ) {
+    // Anchor frame-derived command consequences (currently the cheat
+    // teleport's fade and star titbits) to the authoritative target frame.
+    // Every seat applies this same stamped command at that frame, whether it
+    // arrives in time or through rollback, so their derived state agrees.
+    if let robin_engine::player_command::PlayerCommand::TeleportSelectedToPoint {
+        target_frame: anchor,
+        ..
+    } = &mut inp.command
+    {
+        *anchor = Some(target_frame);
+    }
     // Local fan-in: feed the input back into our own game loop.
     let _ = context.incoming_tx.send(NetEvent::Input {
         server_frame,

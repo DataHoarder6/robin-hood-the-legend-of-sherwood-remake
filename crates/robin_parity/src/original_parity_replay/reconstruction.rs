@@ -577,6 +577,7 @@ impl TraceCommand {
                 sector: u16::try_from(goal_sector)
                     .ok()
                     .and_then(robin_engine::position_interface::SectorHandle::new),
+                target_frame: None,
             },
             Self::SelectAllPcs => PlayerCommand::SelectAllPcs,
             Self::UnselectPc { pc } => PlayerCommand::UnselectPc {

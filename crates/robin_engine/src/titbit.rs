@@ -491,6 +491,14 @@ impl TitbitManager {
         &mut self.titbits
     }
 
+    /// Keep the monotonic allocator ahead of a deterministically forced id.
+    /// Frame-anchored effects reserve their ids from the anchor and the actor
+    /// instead of from arrival order; without this reservation a later,
+    /// ordinarily allocated titbit could reuse one of those ids.
+    pub fn reserve_id(&mut self, id: TitbitId) {
+        self.current_id = self.current_id.max(id.get().saturating_add(1));
+    }
+
     pub fn blink_counter(&self) -> u32 {
         self.blink_counter
     }

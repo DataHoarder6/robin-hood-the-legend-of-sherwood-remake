@@ -1275,6 +1275,15 @@ pub enum PlayerCommand {
         /// teleport executor only overwrites `ElementData.sector`
         /// when this is `Some`.
         sector: Option<crate::position_interface::SectorHandle>,
+        /// Absolute simulation frame this command was scheduled for. The host
+        /// stamps it when broadcasting; the joining seat replays the same
+        /// command at that frame through rollback. The teleport's fade and
+        /// star titbits are derived from this anchor, so a late arrival cannot
+        /// seed them on a different frame. `None` is the compatibility path
+        /// for commands authored before the anchor existed (single-player,
+        /// old recordings), which fall back to the application frame.
+        #[serde(default)]
+        target_frame: Option<u32>,
     },
 
     // ── Minimap ─────────────────────────────────────────────────

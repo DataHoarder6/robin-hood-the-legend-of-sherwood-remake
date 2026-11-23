@@ -365,6 +365,85 @@ fn legacy_adoption_cannot_reopen_finished_bootstrap() {
     engine.finish_mission_bootstrap(MissionBootstrapCompletion::StartClock);
 }
 
+/// D12 / #83: full-hash equality when the same teleport is applied at its
+/// target frame N on one seat and a frame late (N+1) on the other. The fade
+/// countdown and star-titbit ids are anchored to the target frame and agree;
+/// `SequenceManager` id allocation and `TitbitManager::update`'s per-tick
+/// phase countdown are still frame-driven, so the hashes diverge. Ignored so
+/// the gate stays green while the defect is open, not because the check is
+/// weak — see `docs/slop/teleport-late-input-desync.md`.
+#[test]
+#[ignore = "D12 / #83: sequence-id and titbit-phase allocation are not target-frame anchored"]
+fn teleport_fade_state_matches_at_target_frame_despite_one_frame_apply_lag() {
+    use crate::coordinates::MapPoint;
+    use crate::element::{ActorPc, Entity, PcData};
+    use crate::player_command::PlayerCommand;
+
+    fn fixture_with_selected_pc() -> (Engine, LevelAssets) {
+        let (mut engine, mut assets) = frame_api_fixture();
+        std::sync::Arc::make_mut(&mut assets.profile_manager)
+            .characters
+            .push(crate::profiles::CharacterProfile::default());
+        let pc = engine.inner.add_test_entity(Entity::Pc(ActorPc {
+            element: Default::default(),
+            actor: Default::default(),
+            human: Default::default(),
+            pc: PcData::default(),
+        }));
+        engine.inner.world.pc_ids.push(pc);
+        engine.inner.players.seats[0].selection.push(pc);
+        engine.finish_mission_bootstrap(MissionBootstrapCompletion::StartClock);
+        (engine, assets)
+    }
+
+    const TARGET: u32 = 42;
+    let command = PlayerCommand::TeleportSelectedToPoint {
+        dest: MapPoint::new(253.0, 380.0),
+        layer: 0,
+        sector: None,
+        target_frame: Some(TARGET),
+    };
+    let (mut forward, assets) = fixture_with_selected_pc();
+    let (mut replayed, _) = fixture_with_selected_pc();
+
+    for _ in 0..TARGET - 1 {
+        forward
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("forward frame before teleport");
+        replayed
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("replay frame before teleport");
+    }
+    forward
+        .advance_frame(
+            &assets,
+            SimulationFrameInput::new(vec![command.clone().into()]),
+        )
+        .expect("host teleport executes on its target frame");
+    replayed
+        .advance_frame(&assets, SimulationFrameInput::default())
+        .expect("lagging seat's frame before the late teleport");
+    replayed
+        .advance_frame(&assets, SimulationFrameInput::new(vec![command.into()]))
+        .expect("late teleport input applied a frame after its target");
+    for _ in 0..8 {
+        forward
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("forward frame after teleport");
+    }
+    for _ in 0..7 {
+        replayed
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("replay frame after teleport");
+    }
+
+    assert_eq!(
+        crate::replay::state_hash(&forward.inner),
+        crate::replay::state_hash(&replayed.inner),
+        "a one-frame-late teleport must not desync authoritative state"
+    );
+}
+
 fn frame_api_fixture() -> (Engine, LevelAssets) {
     let mut assets = LevelAssets::new();
     let sim_config = SimConfig {

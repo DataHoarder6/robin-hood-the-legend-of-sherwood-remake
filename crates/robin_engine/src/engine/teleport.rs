@@ -34,10 +34,24 @@ impl EngineInner {
         dest: MapPoint,
         layer: u16,
         sector: Option<crate::position_interface::SectorHandle>,
+        target_frame: Option<u32>,
     ) {
         let selected = self.players.seats[0].selection.clone();
         if selected.is_empty() {
             return;
+        }
+        // Anchor the teleport's fade countdown and star titbits to the
+        // command's target frame, which every seat receives identically. This
+        // makes those two fields agree when the element executes a frame
+        // after admission; it does not make the whole tick late-input safe —
+        // D12 / #83 tracks the remaining sequence-id and phase divergences.
+        let target_frame = target_frame.unwrap_or(self.control.frame_counter);
+        for pc in &selected {
+            if let Some(entity) = self.world.entities.get_mut(*pc)
+                && let Some(pc_data) = entity.pc_data_mut()
+            {
+                pc_data.teleport_target_frame = Some(target_frame);
+            }
         }
 
         // Snapshot the first PC's current position to compute the

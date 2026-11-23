@@ -11,7 +11,10 @@ use crate::{
 /// Deterministic feedback production and shared director presentation state.
 ///
 /// Local viewport/UI animation remains host-owned; every field here is part of
-/// rollback and deterministic hashing.
+/// rollback and deterministic hashing. Star-titbit ids and countdowns emitted
+/// by the frame-anchored teleport are derived from that command's target
+/// frame. This does not make all titbit state late-input deterministic — D12 /
+/// #83 tracks the remaining divergences.
 #[derive(
     Clone,
     Serialize,

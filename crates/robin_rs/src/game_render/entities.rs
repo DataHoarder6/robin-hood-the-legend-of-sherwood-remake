@@ -891,7 +891,7 @@ pub(crate) fn render_selection_outlines_gpu(
             || engine
                 .tactical_selection(host.local_seat)
                 .contains(&entity_id)
-            || engine.is_player_aligned_camp(entity.camp());
+            || outline_camp_is_allied(entity.camp(), |camp| engine.is_player_aligned_camp(camp));
 
         // The selection set on its own does NOT draw the outline —
         // `refresh_pc_selection_hulk` seeds `running_hulk` on the first
@@ -1167,9 +1167,36 @@ pub(super) fn render_fx_entities_gpu<I>(
     }
 }
 
+/// Render-only camp guard. A freshly spawned mission-team member can reach the
+/// first rendered frame before its camp has an authored allegiance. That is a
+/// presentation-time gap, not a corruption of the diplomacy table: without an
+/// allegiance the entity is simply not yet known to be allied. Authoritative
+/// callers keep `DiplomacyState::valid_id`'s panic, so a mission-setup bug still
+/// fails loudly there.
+fn outline_camp_is_allied(
+    camp: robin_engine::element::Camp,
+    is_aligned: impl FnOnce(robin_engine::element::Camp) -> bool,
+) -> bool {
+    if camp.allegiance_id().is_some() {
+        is_aligned(camp)
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod outline_decision_tests {
     use super::*;
+
+    #[test]
+    fn unresolved_camp_is_not_allied_for_outlines() {
+        use robin_engine::element::Camp;
+        assert!(!outline_camp_is_allied(Camp::Error, |_| panic!(
+            "unresolved camp must never reach the diplomacy query"
+        )));
+        assert!(outline_camp_is_allied(Camp::Royalists, |_| true));
+        assert!(!outline_camp_is_allied(Camp::Royalists, |_| false));
+    }
 
     fn decision() -> OutlineDecision {
         OutlineDecision {

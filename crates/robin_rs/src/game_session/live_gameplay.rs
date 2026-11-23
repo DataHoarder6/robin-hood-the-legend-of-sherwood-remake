@@ -357,6 +357,7 @@ fn dispatch_gameplay_action(
                             sector: u16::try_from(u32::from(sector_idx))
                                 .ok()
                                 .and_then(engine_position_interface::SectorHandle::new),
+                            target_frame: None,
                         };
                         dispatch_local_command(&host.transport, commands, &command);
                     }

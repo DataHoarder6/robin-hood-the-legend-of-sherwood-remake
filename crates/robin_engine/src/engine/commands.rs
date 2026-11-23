@@ -1565,11 +1565,12 @@ impl EngineInner {
             dest,
             layer,
             sector,
+            target_frame,
         } = cmd
         else {
             unreachable!("apply_teleport_selected_to_point_command called for {cmd:?}")
         };
-        self.manage_input_process_teleport(tcx, *dest, *layer, *sector);
+        self.manage_input_process_teleport(tcx, *dest, *layer, *sector, *target_frame);
     }
 
     /// Apply the "fight through, don't stop" perk to a set of PCs.
