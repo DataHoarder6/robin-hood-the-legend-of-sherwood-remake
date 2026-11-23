@@ -41,11 +41,16 @@ impl EngineInner {
             return;
         }
         // Anchor the teleport's fade countdown and star titbits to the
-        // command's target frame, which every seat receives identically. This
-        // makes those two fields agree when the element executes a frame
-        // after admission; it does not make the whole tick late-input safe —
-        // D12 / #83 tracks the remaining sequence-id and phase divergences.
+        // command's target frame, which every seat receives identically, so
+        // those fields agree when the element executes after admission (D12 /
+        // #83).
         let target_frame = target_frame.unwrap_or(self.control.frame_counter);
+        // Commands run before the hourglass increments `frame_counter`, so the
+        // element's authoritative execution frame is `frame_counter + 1`. A
+        // command whose target frame is already past must undo the fallback
+        // allocations made at that frame before launching (D12 / #83).
+        let execution_frame = self.control.frame_counter.saturating_add(1);
+        let late = execution_frame > target_frame;
         for pc in &selected {
             if let Some(entity) = self.world.entities.get_mut(*pc)
                 && let Some(pc_data) = entity.pc_data_mut()
@@ -64,6 +69,7 @@ impl EngineInner {
             None => return,
         };
 
+        let mut destinations = Vec::with_capacity(selected.len());
         for (idx, pc_id) in selected.iter().enumerate() {
             let pc_dest = if idx == 0 {
                 dest
@@ -80,11 +86,34 @@ impl EngineInner {
                     y: pos.y + (dest.y - first_pos.y),
                 }
             };
+            destinations.push((*pc_id, pc_dest));
+        }
 
+        let displaced = if late {
+            // Rewind before launching anything: a launched teleport installs a
+            // new fallback for its owner and would hide a sibling's target-
+            // frame slot. The newest sequences are the fallbacks created at
+            // the target frame, one per selected actor. Keep them so they can
+            // be re-homed after the teleport claims their ids — dropping them
+            // would make the late seat one fallback per actor short.
+            // TODO: a PC busy with a real order then has no Wait, and a lag
+            // beyond one frame creates more fallbacks — generalise the rewind
+            // to both cases.
+            let owners: Vec<_> = destinations.iter().map(|(pc_id, _)| *pc_id).collect();
+            self.orders
+                .sequence_manager
+                .rewind_latest_wait_slots(&owners)
+        } else {
+            Vec::new()
+        };
+
+        // Both seats now launch through the same ordinary path. On the late
+        // seat that path re-allocates precisely the slots rewound above.
+        for (pc_id, pc_dest) in destinations {
             let mut elem = SequenceElement::new_movement(
                 1,
                 Command::Teleport,
-                Some(*pc_id),
+                Some(pc_id),
                 OrderType::RunningUpright,
             );
             elem.data = SequenceElementData::Movement {
@@ -105,14 +134,10 @@ impl EngineInner {
                 linked_seek: None,
                 post_seek_sequence: None,
             };
-            // Anchor the teleport element's sequence identity to the command's
-            // target frame. A lagging seat reaches this call a frame after the
-            // idle fallback for that frame was already installed; the anchored
-            // insertion replaces that fallback in place so both seats hold the
-            // same sequence id and element id at the same absolute frame.
-            // Without this the teleport and fallback swap ids and the full
-            // state hash diverges (D12 / #83).
-            self.launch_target_frame_anchored_element(tcx, elem, target_frame);
+            self.launch_element(tcx, elem);
+        }
+        if late {
+            self.orders.sequence_manager.rehome_sequences(displaced);
         }
     }
 

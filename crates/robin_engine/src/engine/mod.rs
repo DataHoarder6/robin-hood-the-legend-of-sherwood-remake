@@ -1985,22 +1985,6 @@ impl EngineInner {
         seq_id
     }
 
-    /// Launch a target-frame-anchored element from a non-script command
-    /// boundary. Mirrors [`Self::launch_element`] but routes the id allocation
-    /// through the authoritative target frame so a late input converges with
-    /// a forward tick (D12 / #83).
-    pub(crate) fn launch_target_frame_anchored_element(
-        &mut self,
-        tcx: TickCtx<'_>,
-        elem: crate::sequence::SequenceElement,
-        target_frame: u32,
-    ) -> crate::sequence::SequenceId {
-        self.launch_target_frame_anchored_element_inline(tcx, &mut Vec::new(), elem, target_frame)
-            .unwrap_or_else(|error| {
-                panic!("target-frame-anchored sequence element launch failed: {error:?}")
-            })
-    }
-
     /// Admit an owned fixture element at an instruction boundary using the
     /// same priority arbitration and transition stamping as scheduled work.
     #[cfg(test)]

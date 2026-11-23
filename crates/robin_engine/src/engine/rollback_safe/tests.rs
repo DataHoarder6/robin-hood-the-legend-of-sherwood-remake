@@ -367,10 +367,11 @@ fn legacy_adoption_cannot_reopen_finished_bootstrap() {
 
 /// D12 / #83: full-hash equality when the same teleport is applied at its
 /// target frame N on one seat and a frame late (N+1) on the other. The fade
-/// countdown, star-titbit ids, sequence ids and star phases are all anchored
-/// to the command's authoritative target frame, so both seats reach the same
-/// `EngineInner::state_hash` at the same absolute frame — see
-/// `docs/slop/teleport-late-input-desync.md`.
+/// countdown and star-titbit ids derive from the command's authoritative
+/// target frame, sequence ids from the ordinary allocator after the late seat
+/// rewinds its target-frame fallbacks, and star phases from the authoritative
+/// execution frame. Both seats reach the same `EngineInner::state_hash` at the
+/// same absolute frame — see `docs/slop/teleport-late-input-desync.md`.
 #[test]
 fn teleport_fade_state_matches_at_target_frame_despite_one_frame_apply_lag() {
     use crate::coordinates::MapPoint;
@@ -439,6 +440,92 @@ fn teleport_fade_state_matches_at_target_frame_despite_one_frame_apply_lag() {
         crate::replay::state_hash(&forward.inner),
         crate::replay::state_hash(&replayed.inner),
         "a one-frame-late teleport must not desync authoritative state"
+    );
+}
+
+/// D12 / #83, round 2: two selected PCs teleported by one command at its
+/// target frame N on one engine and a frame late (N+1) on the other must reach
+/// the same full `EngineInner::state_hash` at N+8. Round 1 anchored both PCs
+/// at `SequenceId(target_frame)`, which collides with older fallbacks as soon
+/// as the allocator issues more than one sequence per frame: the displaced
+/// fallbacks land at frame-dependent ids and the two seats diverge. The fix
+/// rebases the late seat's target-frame fallbacks and launches both PCs
+/// through the ordinary allocator on each seat — see
+/// `docs/slop/teleport-late-input-desync.md`.
+#[test]
+fn two_pc_teleport_matches_at_target_frame_despite_one_frame_apply_lag() {
+    use crate::coordinates::MapPoint;
+    use crate::element::{ActorPc, Entity, PcData};
+    use crate::player_command::PlayerCommand;
+
+    fn fixture_with_two_selected_pcs() -> (Engine, LevelAssets) {
+        let (mut engine, mut assets) = frame_api_fixture();
+        let profiles = std::sync::Arc::make_mut(&mut assets.profile_manager);
+        profiles
+            .characters
+            .push(crate::profiles::CharacterProfile::default());
+        profiles
+            .characters
+            .push(crate::profiles::CharacterProfile::default());
+        for _ in 0..2 {
+            let pc = engine.inner.add_test_entity(Entity::Pc(ActorPc {
+                element: Default::default(),
+                actor: Default::default(),
+                human: Default::default(),
+                pc: PcData::default(),
+            }));
+            engine.inner.world.pc_ids.push(pc);
+            engine.inner.players.seats[0].selection.push(pc);
+        }
+        engine.finish_mission_bootstrap(MissionBootstrapCompletion::StartClock);
+        (engine, assets)
+    }
+
+    const TARGET: u32 = 42;
+    let command = PlayerCommand::TeleportSelectedToPoint {
+        dest: MapPoint::new(253.0, 380.0),
+        layer: 0,
+        sector: None,
+        target_frame: Some(TARGET),
+    };
+    let (mut forward, assets) = fixture_with_two_selected_pcs();
+    let (mut replayed, _) = fixture_with_two_selected_pcs();
+
+    for _ in 0..TARGET - 1 {
+        forward
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("forward frame before teleport");
+        replayed
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("replay frame before teleport");
+    }
+    forward
+        .advance_frame(
+            &assets,
+            SimulationFrameInput::new(vec![command.clone().into()]),
+        )
+        .expect("host teleport executes on its target frame");
+    replayed
+        .advance_frame(&assets, SimulationFrameInput::default())
+        .expect("lagging seat's frame before the late teleport");
+    replayed
+        .advance_frame(&assets, SimulationFrameInput::new(vec![command.into()]))
+        .expect("late teleport input applied a frame after its target");
+    for _ in 0..8 {
+        forward
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("forward frame after teleport");
+    }
+    for _ in 0..7 {
+        replayed
+            .advance_frame(&assets, SimulationFrameInput::default())
+            .expect("replay frame after teleport");
+    }
+
+    assert_eq!(
+        crate::replay::state_hash(&forward.inner),
+        crate::replay::state_hash(&replayed.inner),
+        "a one-frame-late two-PC teleport must not desync authoritative state"
     );
 }
 

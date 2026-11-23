@@ -371,103 +371,129 @@ impl SequenceManager {
         id
     }
 
-    /// Store a sequence whose identity is anchored to a command's authoritative
-    /// target frame instead of the monotonic allocator.
+    /// Undo the target frame's idle `Wait` allocations on a seat that admits a
+    /// command a frame late, so the command's ordinary launch reuses the exact
+    /// ids, element ids and `IndexMap` tail the forward tick used (D12 / #83).
     ///
-    /// A late rollback input is applied after the lagging seat already
-    /// installed the idle fallback for its target frame. The command owns the
-    /// anchored slot, so the fallback is moved forward to the next allocator
-    /// slot and the command is inserted in its place, reusing the fallback's
-    /// element ids. Both seats then hold the same set of sequences, with the
-    /// same ids and insertion order, at the same absolute frame: the forward
-    /// tick created its own fallback on the following frame, and the lagging
-    /// seat must not lose that sequence when the late input arrives (D12 /
-    /// #83).
-    pub(crate) fn insert_target_frame_anchored_sequence(
-        &mut self,
-        mut sequence: Sequence,
-        target_frame: u32,
-    ) -> SequenceId {
-        assert!(!sequence.is_empty(), "cannot launch an empty sequence");
+    /// At its target frame the forward tick launches the command *before* the
+    /// actor update creates any fallback; a late seat already created one
+    /// `Wait` per selected actor. Those fallbacks are the manager's newest
+    /// sequences. Removing them and rewinding the two counters to the oldest
+    /// removed id puts the late seat back at the forward tick's allocator
+    /// state; the shared `launch_element` path is then deterministic on both
+    /// seats. Every slot is checked against its owner before removal — fail
+    /// rather than invent a value when the shape does not match.
+    pub(crate) fn rewind_latest_wait_slots(&mut self, owners: &[EntityId]) -> Vec<Sequence> {
+        assert!(!owners.is_empty(), "cannot rewind no wait slots");
+        assert!(
+            self.sequences.len() >= owners.len(),
+            "not enough sequences to hold the target frame's fallbacks"
+        );
 
-        let anchored = SequenceId(target_frame);
-        let previous_id = sequence.id;
+        // Newest-first from the tail, reversed so each slot lines up with the
+        // actor that created it at the target frame.
+        let mut anchors: Vec<SequenceId> = self
+            .sequences
+            .keys()
+            .rev()
+            .take(owners.len())
+            .copied()
+            .collect();
+        anchors.reverse();
+        let mut element_ids = Vec::with_capacity(anchors.len());
+        for (owner, anchor) in owners.iter().zip(&anchors) {
+            let seq = self
+                .sequences
+                .get(anchor)
+                .unwrap_or_else(|| panic!("missing target-frame fallback slot {anchor:?}"));
+            assert_eq!(
+                seq.elements.len(),
+                1,
+                "target-frame fallback {anchor:?} is not a single-element Wait"
+            );
+            let element = &seq.elements[0];
+            assert_eq!(
+                element.command,
+                crate::element::Command::Wait,
+                "target-frame fallback {anchor:?} is not a Wait"
+            );
+            assert_eq!(
+                element.owner,
+                Some(*owner),
+                "target-frame fallback {anchor:?} is not owned by {owner:?}"
+            );
+            element_ids.push(element.id);
+        }
 
-        if let Some(mut displaced) = self.sequences.shift_remove(&anchored) {
-            for (idx, element) in displaced.elements.iter().enumerate() {
+        let mut removed = Vec::with_capacity(anchors.len());
+        for anchor in &anchors {
+            let old = self
+                .sequences
+                .shift_remove(anchor)
+                .unwrap_or_else(|| panic!("late command anchor {anchor:?} vanished"));
+            for (idx, element) in old.elements.iter().enumerate() {
                 if let Some(owner) = element.owner {
-                    self.remove_actor_live_ref(owner, SequenceElementRef::new(anchored, idx));
+                    self.remove_actor_live_ref(owner, SequenceElementRef::new(*anchor, idx));
                 }
             }
-            let reused_element_ids: Vec<u32> = displaced
-                .elements
-                .iter()
-                .map(|element| element.id)
-                .collect();
+            removed.push(old);
+        }
 
-            for (idx, element) in sequence.elements.iter_mut().enumerate() {
-                for link in [&mut element.next, &mut element.postponed] {
-                    if let Some(target) = link
-                        && target.sequence_id == previous_id
-                    {
-                        target.sequence_id = anchored;
-                    }
-                }
-                element.id = reused_element_ids
-                    .get(idx)
-                    .copied()
-                    .expect("late input has more elements than the fallback it displaces");
-            }
+        // The rewound slots must be the newest allocations; otherwise the
+        // counters cannot be restored to their target-frame values.
+        let max_seq = anchors
+            .iter()
+            .map(|id| id.0)
+            .max()
+            .expect("non-empty anchors");
+        let max_elem = element_ids
+            .iter()
+            .copied()
+            .max()
+            .expect("non-empty elements");
+        assert_eq!(
+            self.next_sequence_id,
+            max_seq.wrapping_add(1),
+            "late command's fallback slots are not the newest sequences"
+        );
+        assert_eq!(
+            self.next_element_id,
+            max_elem.wrapping_add(1),
+            "late command's fallback slots are not the newest elements"
+        );
+        self.next_sequence_id = anchors
+            .iter()
+            .map(|id| id.0)
+            .min()
+            .expect("non-empty anchors");
+        self.next_element_id = element_ids.into_iter().min().expect("non-empty elements");
+        removed
+    }
 
-            let moved_id = SequenceId(self.next_sequence_id);
+    /// Re-home the target frame's fallbacks after a late command has claimed
+    /// their ids. They keep their state and payload; only their identities
+    /// move to fresh allocator slots, appended at the manager's tail so the
+    /// forward tick's insertion order is preserved (D12 / #83).
+    pub(crate) fn rehome_sequences(&mut self, sequences: Vec<Sequence>) {
+        for mut sequence in sequences {
+            let old_id = sequence.id;
+            let new_id = SequenceId(self.next_sequence_id);
             self.next_sequence_id = self.next_sequence_id.wrapping_add(1);
-            let old_id = displaced.id;
-            displaced.id = moved_id;
-            for element in &mut displaced.elements {
+            for element in sequence.elements.iter_mut() {
                 for link in [&mut element.next, &mut element.postponed] {
                     if let Some(target) = link
                         && target.sequence_id == old_id
                     {
-                        target.sequence_id = moved_id;
+                        target.sequence_id = new_id;
                     }
                 }
                 element.id = self.next_element_id;
                 self.next_element_id = self.next_element_id.wrapping_add(1);
             }
-
-            sequence.id = anchored;
-            sequence.launch();
-            self.sequences.insert(anchored, sequence);
-            self.index_sequence_actor_refs(anchored);
-
-            self.sequences.insert(moved_id, displaced);
-            self.index_sequence_actor_refs(moved_id);
-
-            return anchored;
+            sequence.id = new_id;
+            self.sequences.insert(new_id, sequence);
+            self.index_sequence_actor_refs(new_id);
         }
-
-        // No fallback occupied the slot: the forward tick's normal allocator
-        // was at the target-frame id, so stamp identities from the counters as
-        // an ordinary launch does and keep them strictly past the anchor.
-        sequence.id = SequenceId(self.next_sequence_id.max(anchored.0));
-        self.next_sequence_id = self.next_sequence_id.max(anchored.0.saturating_add(1));
-        for element in sequence.elements.iter_mut() {
-            for link in [&mut element.next, &mut element.postponed] {
-                if let Some(target) = link
-                    && target.sequence_id == previous_id
-                {
-                    target.sequence_id = sequence.id;
-                }
-            }
-            element.id = self.next_element_id;
-            self.next_element_id = self.next_element_id.wrapping_add(1);
-        }
-        let id = sequence.id;
-        sequence.launch();
-        self.sequences.insert(id, sequence);
-        self.index_sequence_actor_refs(id);
-
-        id
     }
 
     /// Store a single element as a sequence without registering its first level.
