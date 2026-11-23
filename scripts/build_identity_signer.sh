@@ -21,14 +21,19 @@ repository="$(cd "$script_directory/.." && pwd -P)"
 generated="$(mktemp -d)"
 trap 'rm -rf -- "$generated"' EXIT
 
+# A second deployment (the estate's jautis origins) supplies its own origins;
+# upstream stays the default so CI and the Cloudflare path are unchanged.
+game_origin=${ROBIN_GAME_ORIGIN:-https://robinhood.phiresky.xyz}
+signer_origin=${ROBIN_SIGNER_ORIGIN:-https://identity.robinhood.phiresky.xyz}
+
 cd "$repository/wasm-www"
-VITE_GAME_ORIGIN='https://robinhood.phiresky.xyz' pnpm build:signer-shell
+VITE_GAME_ORIGIN="$game_origin" pnpm build:signer-shell
 
 cd "$repository"
 RUSTC_WRAPPER='' \
 CARGO_INCREMENTAL=0 \
-ROBINHOOD_LEADERBOARD_WEB_ORIGIN='https://robinhood.phiresky.xyz' \
-ROBINHOOD_IDENTITY_SIGNER_ORIGIN='https://identity.robinhood.phiresky.xyz' \
+ROBINHOOD_LEADERBOARD_WEB_ORIGIN="$game_origin" \
+ROBINHOOD_IDENTITY_SIGNER_ORIGIN="$signer_origin" \
 cargo build \
     -Zbuild-std=std,panic_abort \
     --locked \

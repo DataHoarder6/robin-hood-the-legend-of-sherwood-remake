@@ -48,6 +48,7 @@ export VITE_IDENTITY_SIGNER_URL=https://robin-id.jautis.lt/identity-signer/
 export VITE_ROBIN_IDENTITY_SIGNER_ORIGIN=https://robin-id.jautis.lt
 export ROBIN_SIGNER_ORIGIN=https://robin-id.jautis.lt
 export VITE_GAME_ORIGIN=https://robin.jautis.lt
+export ROBIN_GAME_ORIGIN=https://robin.jautis.lt
 export ROBINHOOD_LEADERBOARD_WEB_ORIGIN=https://robin.jautis.lt
 export ROBINHOOD_IDENTITY_SIGNER_ORIGIN=https://robin-id.jautis.lt
 
@@ -56,9 +57,11 @@ if [ ! -d wasm-www/node_modules ]; then
 fi
 pnpm --dir wasm-www build:site
 pnpm --dir wasm-www verify:public
-pnpm --dir wasm-www build:signer-shell
+# Builds the signer shell AND the origin-bound leaderboard bridge, then
+# verifies the bridge. A bare build:signer-shell leaves verify:signer without
+# the generated bridge files.
+bash scripts/build_identity_signer.sh "\$bindgen"
 pnpm --dir wasm-www verify:signer
-pnpm --dir wasm-www verify:signer-bridge
 
 rm -rf "\$stage" "\$stage-signer"
 mkdir -p "\$stage/wasm/\$short" "\$stage-signer"
