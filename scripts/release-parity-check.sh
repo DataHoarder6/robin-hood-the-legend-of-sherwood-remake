@@ -47,8 +47,13 @@ schema=$(jq -er .ticketSchema "$manifest" 2>/dev/null)
     || bad "site manifest commit $read_commit != $commit"
 [ "$read_short" = "$short" ] && ok "site manifest short $short" \
     || bad "site manifest short $read_short != $short"
-[ "$schema" = 3 ] && ok 'site manifest ticketSchema 3' \
-    || bad "site manifest ticketSchema $schema != 3"
+# The boot gate owns the ticket-schema verdict; the parity gate must not
+# hard-code a version that moves with the runtime (browser-boot.mjs:49).
+if [ -n "$schema" ] && [ "$schema" -gt 0 ] 2>/dev/null; then
+    ok "site manifest ticketSchema $schema (boot gate owns its verdict)"
+else
+    bad "site manifest has no positive ticketSchema: ${schema:-none}"
+fi
 
 demo_url=$(jq -er .multiplayerContent.demo.url "$manifest" 2>/dev/null)
 demo_sha=$(jq -er .multiplayerContent.demo.sha256 "$manifest" 2>/dev/null)
