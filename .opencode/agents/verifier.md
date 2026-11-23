@@ -33,6 +33,12 @@ permissions:
   - action: "shell"
     resource: "*land.sh*"
     effect: deny
+  - action: "shell"
+    resource: "*autobacklog.sh promote*"
+    effect: deny
+  - action: "shell"
+    resource: "*autobacklog.sh verdict*"
+    effect: allow
   - action: "google*"
     resource: "*"
     effect: deny
@@ -66,7 +72,9 @@ assertion. Report the evidence path with the verdict.
 
 Retries and quarantine follow `docs/PARALLEL_AGENTS.md`: a failure that survives
 its bounded budget is filed in `docs/DEFECTS.md`, not rerun. You report pass/fail
-with evidence; the director owns the terminal state.
+with evidence; the director owns the terminal state. The one write you may do
+is filing a verdict through `bash scripts/autobacklog.sh verdict <item>
+needs-work|rejected`; promotion and hand-editing the backlog are denied.
 
 Playwright MCP is enabled here only for browser/WASM suites. Never invoke it for
 a core, transport, native, or gameplay item. Never `git stash`, never set

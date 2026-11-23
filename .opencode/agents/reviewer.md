@@ -21,6 +21,9 @@ permissions:
   - action: "shell"
     resource: "*"
     effect: deny
+  - action: "shell"
+    resource: "*autobacklog.sh verdict*"
+    effect: allow
   - action: "google*"
     resource: "*"
     effect: deny
@@ -56,5 +59,7 @@ over the exact defect surface the row names, including the multi-actor case for
 a group command (D12: multi-PC teleport). A single-actor green does not close a
 group-command defect. Flag a comment that still describes a fixed defect as open.
 
-Report findings to the director with file/line pointers. Never edit, never run a
-gate, and never ask the owner to choose, confirm, or continue.
+Report findings to the director with file/line pointers. The one write you may
+do is filing a verdict: `bash scripts/autobacklog.sh verdict <item> needs-work|rejected`.
+Never promote, edit the backlog by hand, run a gate, or ask the owner to choose,
+confirm, or continue.
