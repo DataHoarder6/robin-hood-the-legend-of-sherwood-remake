@@ -2331,6 +2331,136 @@ mod required_state_tests {
         let resources: Option<IngameMenuResources> = None;
         required_menu_resources(&resources, "test confirmation");
     }
+
+    /// The driver's `POST /mission-result` names a result, not a `GameCode`.
+    /// What puts an aborted attempt on the Interrupted leaderboard and the
+    /// lose-table debriefing page is the code the mission phase returns for
+    /// that result. Bind the whole handoff from the wire body to that code,
+    /// then to the page and leaderboard outcome the code selects.
+    #[test]
+    fn aborted_result_reaches_interrupted_leaderboard() {
+        use crate::ingame_menu::MissionEndKind;
+        use robin_engine::engine::SimulationFrameInput;
+        use robin_engine::game_operation::{GameCode, MissionResult};
+        use robin_engine::player_command::{DebriefingTextId, PlayerCommand};
+
+        // The request body decodes exactly as the HTTP route decodes it.
+        let result: MissionResult =
+            serde_json::from_str("\"aborted\"").expect("driver result body");
+        assert_eq!(result, MissionResult::Aborted);
+        assert_eq!(result.game_code(), GameCode::LevelInterrupted);
+
+        // The trigger rides the replicated command stream; the next mission
+        // phase returns the code the result names.
+        let (mut engine, assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        let ending = engine
+            .advance_frame(
+                &assets,
+                SimulationFrameInput::new(vec![PlayerCommand::ForceMissionEnd { result }.into()]),
+            )
+            .expect("the aborted driver end reaches the mission phase");
+        assert_eq!(
+            ending.events.code,
+            MissionResult::Aborted.game_code(),
+            "the tick returns the code the driver's result names"
+        );
+        assert_eq!(ending.events.code, GameCode::LevelInterrupted);
+
+        // That returned code — not the request body — is what the terminal
+        // flow reads: Interrupted on the leaderboard, the aborted page with
+        // the lose-table text id on the debriefing.
+        let end = MissionEndKind::from_exit_code(ending.events.code)
+            .expect("a terminal attempt code names an end page");
+        assert_eq!(end, MissionEndKind::Aborted);
+        assert!(!end.is_won(), "an aborted mission reads the lose table");
+        assert_eq!(
+            DebriefingTextId::from_outcome(end.is_won(), 1),
+            DebriefingTextId::Lose { index: 1 }
+        );
+    }
+
+    /// A debriefing dismissal is the driver's `Completed` answer. The campaign
+    /// handoff must carry the mission committed on the Sherwood map into the
+    /// mission actually entered next: the driver answers the page, it never
+    /// computes the order itself.
+    #[test]
+    fn debriefing_outcome_matches_next_mission_entered() {
+        use super::debriefing::{
+            SettledDebriefingOutcome, final_debriefing_outcome_from_replay, final_debriefing_result,
+        };
+        use robin_engine::campaign::Campaign;
+        use robin_engine::engine::{Engine, LevelAssets, SimConfig, SimulationFrameInput};
+        use robin_engine::game_operation::{GameCode, MissionResult};
+        use robin_engine::mission::Mission;
+        use robin_engine::player_command::{DialogResult, PlayerCommand};
+        use robin_engine::profiles::MissionProfile;
+
+        let mut assets = LevelAssets::new();
+        for _ in 0..3 {
+            std::sync::Arc::make_mut(&mut assets.profile_manager)
+                .missions
+                .push(MissionProfile::default());
+        }
+        let campaign = Campaign {
+            missions: (0..3)
+                .map(|idx| Mission {
+                    profile_idx: Some(idx as u32),
+                    ..Mission::new()
+                })
+                .collect(),
+            current_mission_idx: Some(0),
+            accessible_mission_indices: vec![1, 2],
+            ..Default::default()
+        };
+        let mut engine = Engine::new_for_test(640.0, 480.0, campaign, &mut assets)
+            .expect("build a campaign test engine");
+
+        // The host commits the choice on the map with the same replicated
+        // command the UI sends; the choice lives in `next_mission_idx`.
+        engine
+            .advance_frame(
+                &assets,
+                SimulationFrameInput::new(vec![
+                    PlayerCommand::CampaignSelectNextMission {
+                        mission_idx: Some(2),
+                    }
+                    .into(),
+                ]),
+            )
+            .expect("commit the Sherwood choice");
+        assert_eq!(engine.campaign().next_mission_idx, Some(2));
+
+        // The mission ends and opens its debriefing.
+        let ending = engine
+            .advance_frame(
+                &assets,
+                SimulationFrameInput::new(vec![
+                    PlayerCommand::ForceMissionEnd {
+                        result: MissionResult::Won,
+                    }
+                    .into(),
+                ]),
+            )
+            .expect("end the mission");
+        assert_eq!(ending.events.code, GameCode::LevelSucceeded);
+
+        // Dismissing that page with the OK seal settles on Continue — not a
+        // restart, a load, or an emergency end. That is the decision the
+        // campaign handoff receives.
+        let settled = final_debriefing_outcome_from_replay(DialogResult::Completed);
+        assert!(matches!(settled, SettledDebriefingOutcome::Ok));
+        assert_eq!(final_debriefing_result(&settled), DialogResult::Completed);
+
+        // The campaign the session hands to selection still carries the
+        // committed choice; the mission entered next is exactly that mission.
+        let campaign = engine.campaign().clone();
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        let advanced =
+            Engine::select_next_mission(campaign, &assets.profile_manager, 0, SimConfig::default());
+        assert_eq!(advanced.1, 2);
+        assert_eq!(advanced.0.current_mission_idx, Some(2));
+        assert_eq!(advanced.0.next_mission_idx, None);
+    }
 }
 mod mission_launch;
 use mission_launch::*;

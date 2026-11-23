@@ -2090,6 +2090,73 @@ mod tests {
         assert_eq!(leave_prompt_buttons(None), ConfirmButtons::YesNo);
     }
 
+    /// The first campaign mission has no Sherwood map to return to, so its
+    /// leave prompt offers only the confirm seal. That seal is the one driver
+    /// decision available: a dismissed prompt ends the mission through the
+    /// same `QuitMissionRequested` command any other leave prompt uses.
+    #[test]
+    fn yes_only_leave_prompt_confirms_first_mission() {
+        use super::{ActiveModalOutcome, dispatch_active_modal_outcome};
+        use crate::ingame_menu::MissionEndKind;
+        use robin_engine::game_operation::GameCode;
+        use robin_engine::player_command::{FrameCommands, PlayerCommand};
+
+        let menu_text = question_table();
+        // Both states the first mission can be left from keep the single seal,
+        // and each asks the question its own mission-end page titles.
+        for (mission_won, question_id) in [(false, 238), (true, 235)] {
+            assert_eq!(
+                super::leave_prompt_buttons(Some("H01_Lin_VL")),
+                ConfirmButtons::YesOnly
+            );
+            let (end, _message) = leave_prompt(&menu_text, mission_won);
+            assert_eq!(end.leave_prompt_id(), question_id);
+        }
+        // A later mission still has a map to go back to, hence a real cancel.
+        assert_eq!(
+            super::leave_prompt_buttons(Some("H02_Not_EC")),
+            ConfirmButtons::YesNo
+        );
+
+        // The only seal resolves to the confirm: the driver queues exactly one
+        // mission-exit command and no cancel.
+        let mut host = crate::host::Host::scratch(640.0, 480.0);
+        let mut commands = FrameCommands::new();
+        dispatch_active_modal_outcome(
+            ActiveModalOutcome::QuitMissionRequested,
+            &mut host,
+            &mut commands,
+        );
+        assert_eq!(commands.commands.len(), 1);
+        assert!(matches!(
+            commands.commands[0].command,
+            PlayerCommand::QuitMissionRequested
+        ));
+
+        // The confirmed leave ends the live first mission as an interrupted
+        // attempt, whose page uses the abandon question asserted above.
+        let (mut engine, assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        engine.test_set_mission_flags(false, false, false);
+        engine
+            .advance_frame(
+                &assets,
+                robin_engine::engine::SimulationFrameInput {
+                    post_commands: commands.commands.into_iter().map(Into::into).collect(),
+                    run_hourglass: false,
+                    ..Default::default()
+                },
+            )
+            .expect("admit the first mission's only leave decision");
+        let next = engine
+            .advance_frame(&assets, Default::default())
+            .expect("advance after the confirmed leave prompt");
+        assert_eq!(next.events.code, GameCode::LevelInterrupted);
+        assert_eq!(
+            MissionEndKind::from_exit_code(GameCode::LevelInterrupted),
+            Some(MissionEndKind::Aborted)
+        );
+    }
+
     #[test]
     fn shared_modal_driver_preserves_leave_mission_confirmation() {
         use super::{ActiveModalOutcome, dispatch_active_modal_outcome};
