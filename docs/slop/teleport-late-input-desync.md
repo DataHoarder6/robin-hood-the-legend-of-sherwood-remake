@@ -45,9 +45,10 @@ selected PCs:
   `frame_counter - target_frame`. A forward tick seeds elapsed 0 and receives
   one more tick; a one-frame-late replay seeds elapsed 1 and receives one
   fewer. Both reach the same phase at the same absolute frame. The fade
-  counter keeps its original `elapsed` seed; it is driven by the renderer's
-  pre-frame tick (`tick_pc_teleport_fades`), not by the engine hourglass, and
-  is not exercised by these engine-level checks.
+  counter keeps its original `elapsed` seed; it is a hashed `PcData` field,
+  seeded by `execute_teleport` and decremented by `tick_pc_teleport_fades`
+  under the engine's `Entities` hourglass phase, so the full state-hash
+  assertions cover fade convergence too.
 
 No field is excluded from the state hash and neither check's assertion was
 narrowed.
