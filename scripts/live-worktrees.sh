@@ -15,5 +15,5 @@ repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 git -C "$repository" worktree list --porcelain |
     sed -n 's/^worktree //p' |
     while IFS= read -r path; do basename -- "$path"; done |
-    grep -v '^gate-' |
+    awk '!/^gate-/' |
     sort -u

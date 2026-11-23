@@ -210,7 +210,9 @@ else
 fi
 
 git -C "$repo" worktree add --quiet -b gate-check "$work/gate-check" HEAD
-live=$(cd "$repo" && bash "$source_root/scripts/live-worktrees.sh")
+# Use the fixture's copy: live-worktrees resolves the repository from its own
+# path, so the source copy would list the caller's worktrees, not the fixture's.
+live=$(cd "$repo" && bash "$repo/scripts/live-worktrees.sh")
 case "$live" in
     *gate-check*) fail "live-worktrees printed a gate copy: $live" ;;
     *) pass "live-worktrees ignores gate copies" ;;
