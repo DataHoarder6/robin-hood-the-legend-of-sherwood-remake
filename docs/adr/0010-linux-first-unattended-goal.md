@@ -28,22 +28,29 @@ cannot provision. Wine replay parity ([RELEASES.md](../RELEASES.md),
 class, not the OS-layer class — Wine is not Windows. The owner will perform the
 real-Windows check themselves and expects Windows to work if the build runs.
 
+The recorded build also needs a human to play one full campaign end to end
+([issue #56](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/56)):
+the loop can prove the harness corpus and two-seat Linux replays, but it cannot
+substitute for the owner's play of the shipped artifact. That step is a human
+gate too — it is not a capability the loop blocks on.
+
 ## Decision
 
 The automated loop targets criteria 1, 2, 4, 5, 6, 7 and 8 on Linux — a
 Linux↔Linux full campaign played end to end on the recorded build. Criterion 3's
 Windows directions and criterion 9's Windows installer are a `HUMAN_GATE`: a
 human-owned check, not a capability the loop waits on. The loop records those
-items as `HUMAN_GATE` (an annotation, not a fourth terminal state) and continues
-with the Linux campaign work. A missing Windows seat is no longer a `BLOCKED`
-capability that stops the campaign goal.
+items as `HUMAN_GATE` (an annotation, not a fourth terminal state), as is the
+human full-campaign play on the recorded build (#56), and continues with the
+Linux campaign work. A missing Windows seat or human play is no longer a
+`BLOCKED` capability that stops the campaign goal.
 
 ## Consequences
 
 - The loop stops emitting the Windows `BLOCKED`; other missing capabilities
   (credentials, host configuration, CI/deploy authority) can still be `BLOCKED`.
-- Issue #49 stays open until the owner's real-Windows check is done; the loop
-  does not close it on a Linux-only pass.
+- Issue #49 stays open until the owner's real-Windows check and full-campaign
+  play are done; the loop does not close it on a Linux-only pass.
 - No assertion is weakened: the Windows directions and the installer remain part
   of the standing goal, and Windows code paths stay gated by the same build and
   test suites as the Linux paths.

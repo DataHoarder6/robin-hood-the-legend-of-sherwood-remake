@@ -10,7 +10,7 @@ per-defect evidence lives in [the defect ledger](DEFECTS.md).
 — a bug-free, end-to-end co-op campaign meeting its nine criteria — is the
 standing goal; the gaps below are what remains of it.
 
-Last verified: 2026-11-21 against `fork/main`.
+Last verified: 2026-11-23 against `fork/main`.
 
 Closed 2026-11-21: [issue #45](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/45)
 and [issue #47](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/47).
@@ -32,7 +32,10 @@ and [issue #47](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwoo
   [NEW_FEATURES.md, Todo](NEW_FEATURES.md#todo).
 - Linux↔Linux full campaign co-op is the automated target
   ([issue #77](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/77));
-  Windows cross-play is a human gate
+  Windows cross-play, the Windows installer and the owner's full-campaign play
+  on the recorded build
+  ([issue #56](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/56))
+  are `HUMAN_GATE` items, decided before the run
   ([ADR 0010](adr/0010-linux-first-unattended-goal.md)).
   [Issue #49](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/49)
   remains the standing goal.
