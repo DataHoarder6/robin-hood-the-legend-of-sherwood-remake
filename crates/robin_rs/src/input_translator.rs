@@ -83,6 +83,9 @@ pub enum GameKey {
     AiInfo,
     /// Built-in Sherwood-only shortcut for the post-port trading panel.
     SherwoodTrading,
+    /// Non-rebindable cooperative pause toggle (P). Host-authoritative in
+    /// multiplayer; Esc/DisplayMenu stays the local modal binding.
+    CoopPause,
 }
 
 // The persisted key-config rows occupy the prefix before reserved/debug keys.
@@ -269,6 +272,10 @@ impl InputTranslator {
         self.bindings[GameKey::PrintScreen] = Some(PrintScreen);
         self.bindings[GameKey::DisplayMenu] = Some(Escape);
         self.bindings[GameKey::SherwoodTrading] = Some(KeyT);
+        self.bindings[GameKey::CoopPause] = Some(KeyP);
+        // CapsLock already drives SwitchMaskedDisplay (masked sprite
+        // edges), so the reveal key is a distinct, unused binding.
+        self.bindings[GameKey::RevealHiddenCharacters] = Some(KeyO);
 
         // Debug keys (only in non-shipping builds)
         self.bindings[GameKey::SlowMotion] = Some(Pause);
