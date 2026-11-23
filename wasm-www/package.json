@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "pnpm build:site",
-    "build:site": "tsc --noEmit && VITE_ROBIN_IDENTITY_SIGNER_ORIGIN=https://identity.robinhood.phiresky.xyz vite build && node scripts/stage-cloudflare-headers.mjs public dist",
+    "build:site": "tsc --noEmit && VITE_ROBIN_IDENTITY_SIGNER_ORIGIN=${VITE_ROBIN_IDENTITY_SIGNER_ORIGIN:-https://identity.robinhood.phiresky.xyz} vite build && node scripts/stage-cloudflare-headers.mjs public dist",
     "build:signer": "../scripts/build_identity_signer.sh \"$ROBINHOOD_WASM_BINDGEN\"",
     "build:signer-shell": "tsc --noEmit && vite build --config vite.identity-signer.config.ts && node scripts/stage-cloudflare-headers.mjs signer signer-dist",
     "build:shell": "pnpm build:site && pnpm verify:public",
