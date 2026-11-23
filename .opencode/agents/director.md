@@ -73,7 +73,10 @@ one reviewer for the presentation/authority review, and one verifier for the
 suites. Wait for each before the next; never overlap gates.
 
 Handoff artifact — `docs/UNATTENDED.md`.
-Stable tags — `docs/UNATTENDED.md`.
+Stable tags — `docs/UNATTENDED.md`; the contract-authorised MINOR path is
+[ADR 0011](../../docs/adr/0011-autonomous-release.md) via
+`scripts/auto-release.sh`. Never move a tag, bump MAJOR, or touch the machine
+pin.
 Risk routing — `docs/UNATTENDED.md`; the frontmatter `edit` denies are the
 enforced subset.
 

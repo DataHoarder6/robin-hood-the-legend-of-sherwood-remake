@@ -84,7 +84,12 @@ tag pushed without it is a bet rather than a release.
 7. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's
-   assets against the previous tag before announcing it.
+   assets against the previous tag before announcing it. An autonomous run with
+   release authority cuts a MINOR tag through
+   [`scripts/auto-release.sh`](../scripts/auto-release.sh) instead
+   ([ADR 0011](adr/0011-autonomous-release.md)); it refuses an existing tag, a
+   non-MINOR bump and any gate without an observed H23. The human steps below —
+   pin, seat sync and browser publish — are unchanged.
 8. Pin the tag's commit in the machine repo: change `?rev=` on the `robin-hood`
    flake input in `flake.nix` to the tag's commit, land that change through
    `land`, then run `just apps-sync` on every seat. That pin — not a channel
