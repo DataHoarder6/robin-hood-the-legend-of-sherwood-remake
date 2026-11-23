@@ -44,18 +44,19 @@ if [ -n "${FAKE_BAD_MARKER:-}" ] &&
 fi
 printf 'gate: green %s\n' "$3"
 GATE
-# The land stub emulates land.sh's own gate, including the narrow opt-in
-# pass-through: a green stamp for the exact tree being landed skips it.
+# The land stub emulates land.sh's own gate. Like the real script, the caller
+# may name only a tree; the stamp file is derived by the shared helper and bound
+# to the base. ROBIN_LAND_GATE_PASSED_FILE is deliberately ignored here too.
 cat >"$work/land.sh" <<'LAND'
 #!/usr/bin/env bash
 tree=$(git rev-parse 'HEAD^{tree}')
-if [ "${ROBIN_LAND_GATE_PASSED_TREE:-}" = "$tree" ] &&
-   [ -n "${ROBIN_LAND_GATE_PASSED_FILE:-}" ] &&
-   [ "$(cat "${ROBIN_LAND_GATE_PASSED_FILE}" 2>/dev/null || true)" = green ]; then
+base=$(git rev-parse refs/remotes/fork/main)
+passed=${ROBIN_LAND_GATE_PASSED_TREE:-}
+if [ -n "$passed" ] && [ "$passed" = "$tree" ] &&
+   bash "$ROBIN_GATE_STAMP_HELPER" valid "$passed" "$base"; then
     printf 'gate skipped for %s\n' "$tree"
 else
-    bash "$ROBIN_BATCH_GATE" "$(git rev-parse refs/remotes/fork/main)" \
-        "$(git rev-parse HEAD)" "$tree" >/dev/null
+    bash "$ROBIN_BATCH_GATE" "$base" "$(git rev-parse HEAD)" "$tree" >/dev/null
 fi
 head=$(git rev-parse HEAD)
 printf '%s\n' "$head" >>"$FAKE_LAND_LOG"
@@ -80,6 +81,7 @@ printf 'gate: green %s from %s\n' "$tree" "$PWD"
 GATE
 chmod +x "$work/gate.sh" "$work/land.sh" "$work/land-lying.sh" "$work/gate-cwd.sh"
 export ROBIN_BATCH_GATE=$work/gate.sh ROBIN_BATCH_LAND=$work/land.sh
+export ROBIN_GATE_STAMP_HELPER=$source_root/scripts/gate-stamp.sh
 
 REPO=''
 fixture() { # NAME
@@ -87,6 +89,7 @@ fixture() { # NAME
     REPO=$work/$name
     export ROBIN_BATCH_REPO=$REPO
     export ROBIN_BATCH_STATE=$work/$name.state
+    export XDG_STATE_HOME=$work/$name.xdg
     export FAKE_GATE_LOG=$work/$name.gate.log
     export FAKE_LAND_LOG=$work/$name.land.log
     : >"$FAKE_GATE_LOG"
@@ -285,13 +288,10 @@ publish a
 run epoch
 epoch_id=$(printf '%s\n' "$output" | awk '{print $2}')
 run gate "$epoch_id"
-tree=$(sed -n 's/^tree //p' "$ROBIN_BATCH_STATE/epochs/$epoch_id/meta")
-printf 'green\n' >"$ROBIN_BATCH_STATE/gates/not-$tree"
-# A caller-supplied mismatch is emulated by pointing the land stub at a
-# different tree through its own env.
+# A caller naming a different tree cannot reuse the green stamp.
 status=0
 output=$(cd "$ROBIN_BATCH_STATE/worktrees/$epoch_id" && \
-    ROBIN_LAND_GATE_PASSED_TREE=wrong ROBIN_LAND_GATE_PASSED_FILE="$ROBIN_BATCH_STATE/gates/not-$tree" \
+    ROBIN_LAND_GATE_PASSED_TREE=wrong \
     bash "$work/land.sh" 2>&1) || status=$?
 expect_status 0 'a mismatched stamp still lands'
 if [ "$(gate_calls)" -eq 2 ]; then pass 'a mismatched stamp re-runs the gate'; else fail "gate log has $(gate_calls) lines"; fi

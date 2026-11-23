@@ -19,6 +19,8 @@ set -euo pipefail
 
 repo=$(cd -- "${ROBIN_BATCH_REPO:-.}" && pwd -P)
 cd -- "$repo"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+stamp_helper=$script_dir/gate-stamp.sh
 state=${ROBIN_BATCH_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/robin-batch}
 base_ref=${ROBIN_BATCH_BASE_REF:-fork/main}
 min_members=${ROBIN_BATCH_MIN:-4}
@@ -106,16 +108,17 @@ assemble_into() { # NAME BASE AGENT...  (sets ASSEMBLY_HEAD/ASSEMBLY_TREE/DIR)
     ASSEMBLY_TREE=$(git -C "$dir" rev-parse 'HEAD^{tree}')
 }
 
-gate_result_file() { printf '%s/gates/%s\n' "$state" "$1"; }
+gate_stamp_valid() { bash "$stamp_helper" valid "$1" "$2"; }
+gate_stamp_write() { bash "$stamp_helper" write "$1" "$2" "$3"; }
 
-# One gate per tree. A green result is stamped under the tree; a replay of the
-# exact tree returns it without rebuilding. Any other tree fails closed into a
-# fresh gate. push-gate.sh refuses a worktree that differs from HEAD, so this
-# MUST run from the controller-owned staging worktree, never the outer checkout.
+# One gate per tree. A green result is stamped under the tree and its base in
+# the controller-owned state dir; a replay of the exact pair returns it without
+# rebuilding. Any other tree or base fails closed into a fresh gate.
+# push-gate.sh refuses a worktree that differs from HEAD, so this MUST run from
+# the controller-owned staging worktree, never the outer checkout.
 run_gate() { # DIR BASE HEAD TREE
-    local dir=$1 base=$2 head=$3 tree=$4 result rc=0
-    result=$(gate_result_file "$tree")
-    if [ -f "$result" ] && grep -qx green "$result"; then
+    local dir=$1 base=$2 head=$3 tree=$4 rc=0
+    if gate_stamp_valid "$tree" "$base"; then
         printf 'cached-green %s\n' "$tree"
         return 0
     fi
@@ -125,29 +128,28 @@ run_gate() { # DIR BASE HEAD TREE
         ( cd -- "$dir" && bash scripts/push-gate.sh "$base" "$head" ) || rc=$?
     fi
     if [ "$rc" -eq 0 ]; then
-        printf 'green\n' >"$result"
+        gate_stamp_write "$tree" "$base" green
         printf 'gate green %s\n' "$tree"
         return 0
     fi
-    printf 'red\n' >"$result"
+    gate_stamp_write "$tree" "$base" red
     printf 'gate red %s\n' "$tree"
     return 1
 }
 
 # Landing uses land.sh from the staging worktree and trusts only its read-back.
-# The green stamp for THIS tree is passed through so land.sh does not gate the
-# same tree a second time; a rebase changes the tree and re-enables its gate.
+# The caller names only the tree; land.sh derives the stamp path itself from the
+# same controller-owned helper, so a forged file path cannot skip the gate.
 land_tree() { # EPOCH DIR HEAD TREE AGENT...
     local epoch=$1 dir=$2 head=$3 tree=$4
     shift 4
-    local out rc=0 agent stamp
-    stamp=$(gate_result_file "$tree")
+    local out rc=0 agent
     if [ -n "$land_cmd" ]; then
         out=$(cd -- "$dir" && ROBIN_LAND_GATE_PASSED_TREE="$tree" \
-            ROBIN_LAND_GATE_PASSED_FILE="$stamp" "$land_cmd" 2>&1) || rc=$?
+            "$land_cmd" 2>&1) || rc=$?
     else
         out=$(cd -- "$dir" && ROBIN_LAND_GATE_PASSED_TREE="$tree" \
-            ROBIN_LAND_GATE_PASSED_FILE="$stamp" bash scripts/land.sh 2>&1) || rc=$?
+            bash scripts/land.sh 2>&1) || rc=$?
     fi
     [ "$rc" -eq 0 ] || die "land-failed: $head"
     case $out in
