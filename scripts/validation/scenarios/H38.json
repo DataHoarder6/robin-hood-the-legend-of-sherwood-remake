@@ -22,6 +22,7 @@
     { "assert": "mission", "peers": [0, 1], "count": 2 },
     { "assert": "hash-equal", "peers": [1], "every": 25 },
     { "assert": "exit", "peers": [0, 1], "status": "running" },
-    { "assert": "log", "contains": "opening debriefing exit_code=LevelSucceeded", "at_least": 1 }
+    { "assert": "log", "contains": "opening debriefing exit_code=LevelSucceeded", "at_least": 1 },
+    { "assert": "log", "absent": "developer trigger ended the mission", "count": 0 }
   ]
 }
