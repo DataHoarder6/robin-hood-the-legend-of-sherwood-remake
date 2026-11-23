@@ -139,7 +139,9 @@ land_tree() { # EPOCH DIR HEAD AGENT...
     fi
     [ "$rc" -eq 0 ] || die "land-failed: $head"
     case $out in
-        *"readback $head"*) ;;
+        # land.sh proves the tip with "remote/branch = <sha>"; test stubs use
+        # "readback <sha>". Either token is a read-back, push exit status is not.
+        *"= $head"* | *"readback $head"*) ;;
         *) die 'land-readback-missing' ;;
     esac
     for agent in "$@"; do
