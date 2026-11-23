@@ -2277,4 +2277,84 @@ mod tests {
             assert_eq!(decoded, mode);
         }
     }
+
+    /// A quick load deferred until the zoom completes must still refuse a
+    /// non-host: it reports the host-only message and queues no load. The
+    /// authoritative seat is the control — it queues the deferred load with
+    /// the shift/backup choice intact and shows no refusal.
+    #[test]
+    fn quick_load_refused_for_non_host() {
+        use crate::main_entry::SaveLoadRequest;
+        use crate::multiplayer::NetChannels;
+        use robin_engine::player_command::PlayerId;
+
+        fn callbacks_for(root: &std::path::Path) -> crate::main_entry::RustCallbacks {
+            let save_root = root.to_string_lossy().into_owned();
+            let mut players =
+                robin_engine::player_profile::PlayerProfileManager::new(save_root.clone());
+            let player = players.create_profile(
+                "Quick Load Test".into(),
+                robin_engine::player_profile::DifficultyLevel::Medium,
+            );
+            players.set_active(player);
+            let context = crate::host::ApplicationContext::complete(
+                crate::player_profile_store::PlayerProfileStore::for_directory(&save_root),
+                Default::default(),
+                players,
+                crate::key_config_store::KeyConfigStore::new(save_root),
+                None,
+            )
+            .unwrap();
+            crate::main_entry::RustCallbacks::new(context).unwrap()
+        }
+
+        const HOST_ONLY: &str =
+            "Quick Load is available only to the multiplayer host after synchronization finishes.";
+        let root = tempfile::tempdir().unwrap();
+        let (engine, assets) = robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        let manager = robin_engine::engine_manager::EngineManager::new(engine);
+
+        let deferred = |seat: PlayerId, shift_held: bool| {
+            let mut host = crate::host::Host::scratch(640.0, 480.0);
+            let (net, _incoming, _outgoing, _, _) = NetChannels::new();
+            host.transport
+                .install_session(net, seat, "Test".into(), 0, Default::default(), None);
+            let mut game = crate::game::Game::default();
+            game.quick_load_after_zoom = true;
+            let mut callbacks = callbacks_for(root.path());
+            super::drain_deferred_save_load_after_zoom(
+                &host,
+                &mut game,
+                &manager,
+                &assets,
+                &mut callbacks,
+                shift_held,
+            );
+            (game, callbacks)
+        };
+
+        for seat in (1..robin_engine::coop::MAX_PLAYERS as u8).map(PlayerId) {
+            let (game, callbacks) = deferred(seat, false);
+            assert!(!game.quick_load_after_zoom, "deferred intent is consumed");
+            assert_eq!(
+                game.message_text, HOST_ONLY,
+                "a client is told the gate rule"
+            );
+            assert_eq!(game.message_delay, 100);
+            assert!(
+                callbacks.pending_request().is_none(),
+                "a client must not queue a QuickLoad"
+            );
+        }
+
+        let (game, callbacks) = deferred(PlayerId::HOST, true);
+        assert!(game.message_text.is_empty(), "the host is not refused");
+        assert!(
+            matches!(
+                callbacks.pending_request(),
+                Some(SaveLoadRequest::QuickLoad { use_backup: true })
+            ),
+            "the host's deferred load queues with its backup choice"
+        );
+    }
 }

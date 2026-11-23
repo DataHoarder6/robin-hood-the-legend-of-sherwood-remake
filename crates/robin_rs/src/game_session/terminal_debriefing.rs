@@ -73,6 +73,63 @@ fn terminal_load_target(
         .map(TerminalLoadTarget::Local)
 }
 
+/// The request a locally accepted terminal `Load` queues. The picker's pinned
+/// selection binds the live catalogue generation, and the mission id travels
+/// with the request so a save from another campaign position is routed through
+/// the session reload boundary. `None` is a recorded load, whose restore owns
+/// its own boundary and queues nothing here.
+fn terminal_debriefing_load_request(
+    manager: &crate::savegame::SaveGameManager,
+    local_load: Option<TerminalLoadSelection>,
+    wire_slot: usize,
+    mission_id: u32,
+    playing_back: bool,
+    is_client: bool,
+) -> Result<Option<SaveLoadRequest>, String> {
+    match terminal_load_target(manager, local_load, wire_slot, playing_back, is_client)? {
+        TerminalLoadTarget::Local(slot) => Ok(Some(SaveLoadRequest::Load {
+            slot: Some(slot),
+            mission_id,
+        })),
+        TerminalLoadTarget::AuthoritativeSnapshot => {
+            unreachable!("client load must retain its terminal snapshot-wait phase")
+        }
+        TerminalLoadTarget::ReplayContinuation => Ok(None),
+    }
+}
+
+/// The debriefing content rebuilt when the load picker is cancelled. Kept
+/// separate from the renderer-bound picker close so the resume page can be
+/// bound in a unit test; the body is never consumed a line at a time.
+fn load_picker_cancel_content<'a>(
+    page: &'a TerminalDebriefingPage,
+    body: String,
+    was_on_stat: bool,
+) -> crate::ingame_menu::DebriefingContent<'a> {
+    crate::ingame_menu::DebriefingContent {
+        body,
+        stat: Some(&page.mission_stat),
+        mission_length_seconds: page.mission_length,
+        end: page.end,
+        restart_allowed: page.restart_allowed,
+        quick_load_key: page.quick_load_key,
+        restart_snapshot_exists: page.restart_snapshot_exists,
+        start_at_stat: was_on_stat,
+    }
+}
+
+fn load_picker_cancelled_phase(
+    page: &TerminalDebriefingPage,
+    resources: &crate::ingame_menu::IngameMenuResources,
+    body: String,
+    was_on_stat: bool,
+) -> TerminalDebriefingPhase {
+    TerminalDebriefingPhase::Debriefing(crate::ingame_menu::DebriefingModalState::new(
+        resources,
+        load_picker_cancel_content(page, body, was_on_stat),
+    ))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum TerminalDebriefingAction {
     Continue,
@@ -997,21 +1054,8 @@ impl TerminalDebriefingState {
         picker.close(&mut context.presentation.renderer);
         match outcome {
             SaveLoadOutcome::Cancel => {
-                self.phase = TerminalDebriefingPhase::Debriefing(
-                    crate::ingame_menu::DebriefingModalState::new(
-                        resources,
-                        crate::ingame_menu::DebriefingContent {
-                            body: body.clone(),
-                            stat: Some(&self.page.mission_stat),
-                            mission_length_seconds: self.page.mission_length,
-                            end: self.page.end,
-                            restart_allowed: self.page.restart_allowed,
-                            quick_load_key: self.page.quick_load_key,
-                            restart_snapshot_exists: self.page.restart_snapshot_exists,
-                            start_at_stat: *was_on_stat,
-                        },
-                    ),
-                );
+                self.phase =
+                    load_picker_cancelled_phase(&self.page, resources, body.clone(), *was_on_stat);
                 TerminalDebriefingProgress::Pending
             }
             SaveLoadOutcome::Slot(slot) => {
@@ -1064,22 +1108,16 @@ fn apply_terminal_debriefing_action(
             // authority while its host-authored decision is settling.
             let is_client =
                 context.host.transport.local_seat() != engine_player_command::PlayerId::HOST;
-            let slot = match terminal_load_target(
+            let request = match terminal_debriefing_load_request(
                 &context.callbacks.save_manager,
                 local_load,
                 slot,
+                mission_id,
                 context.playing_back,
                 is_client,
             ) {
-                Ok(TerminalLoadTarget::Local(slot)) => slot,
-                Ok(TerminalLoadTarget::AuthoritativeSnapshot) => {
-                    unreachable!("client load must retain its terminal snapshot-wait phase")
-                }
-                Err(error) => {
-                    tracing::error!("Debriefing load rejected stale slot: {error:#}");
-                    return false;
-                }
-                Ok(TerminalLoadTarget::ReplayContinuation) => {
+                Ok(Some(request)) => request,
+                Ok(None) => {
                     tracing::debug!(
                         slot,
                         "terminal replay load is owned by recorded restore boundaries"
@@ -1087,11 +1125,12 @@ fn apply_terminal_debriefing_action(
                     context.game.operation.set(GameCode::LevelInProgress);
                     return false;
                 }
+                Err(error) => {
+                    tracing::error!("Debriefing load rejected stale slot: {error:#}");
+                    return false;
+                }
             };
-            context.callbacks.queue_operation(SaveLoadRequest::Load {
-                slot: Some(slot),
-                mission_id,
-            });
+            context.callbacks.queue_operation(request);
             context.game.operation.set(GameCode::LevelInProgress);
             false
         }
@@ -1453,6 +1492,123 @@ mod tests {
                 TerminalLoadTarget::Local(_) => false,
             });
         }
+    }
+
+    /// The debriefing's `Load` action must hand the session the exact slot the
+    /// picker pinned, together with the campaign position (mission id) the
+    /// request was produced for. A cross-mission payload uses that id to route
+    /// through the session reload boundary, so dropping it leaves the player
+    /// in the mission that just ended instead of the save's position.
+    #[test]
+    fn debriefing_load_restores_campaign_position() {
+        let root = tempfile::tempdir().unwrap();
+        let mut manager = selected_catalog(root.path());
+        let mission_id = 17;
+        let selection = TerminalLoadSelection::capture(&manager, 0).unwrap();
+        let request = terminal_debriefing_load_request(
+            &manager,
+            Some(selection),
+            0,
+            mission_id,
+            false,
+            false,
+        )
+        .unwrap()
+        .expect("a locally accepted load must queue a request");
+        let SaveLoadRequest::Load {
+            slot: Some(handle),
+            mission_id: carried,
+        } = request
+        else {
+            panic!("debriefing load must queue a Load request")
+        };
+        assert_eq!(handle.name().as_str(), "Selected");
+        assert_eq!(manager.resolve_handle(&handle).unwrap(), 0);
+        assert_eq!(
+            carried, mission_id,
+            "the campaign position must travel with the request"
+        );
+
+        // Reordering the catalogue after the picker accepted the slot cannot
+        // redirect the load to a different campaign position: the pinned
+        // selection still names "Selected", now at catalogue index 1.
+        let selection = TerminalLoadSelection::capture(&manager, 0).unwrap();
+        reorder_catalog(&mut manager);
+        let request = terminal_debriefing_load_request(
+            &manager,
+            Some(selection),
+            0,
+            mission_id,
+            false,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        let SaveLoadRequest::Load {
+            slot: Some(handle), ..
+        } = request
+        else {
+            panic!("debriefing load must queue a Load request")
+        };
+        assert_eq!(handle.name().as_str(), "Selected");
+        assert_eq!(manager.resolve_handle(&handle).unwrap(), 1);
+
+        // Without local selection authority no request is produced; a recorded
+        // load owns its restore boundary and queues nothing here.
+        assert!(
+            terminal_debriefing_load_request(&manager, None, 1, mission_id, false, false).is_err()
+        );
+        assert!(
+            terminal_debriefing_load_request(&manager, None, 1, mission_id, true, false)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// Cancelling the load picker rebuilds the debriefing page with the same
+    /// body and the same stat/body position the player left, instead of
+    /// dropping back to the first line or abandoning the page.
+    #[test]
+    fn load_picker_cancel_returns_to_debriefing() {
+        use crate::ingame_menu::DebriefingContent;
+        let state = terminal_state();
+        for was_on_stat in [false, true] {
+            let content = load_picker_cancel_content(
+                &state.page,
+                "the complete debriefing body".into(),
+                was_on_stat,
+            );
+            let DebriefingContent {
+                body,
+                stat,
+                mission_length_seconds,
+                end,
+                restart_allowed,
+                quick_load_key,
+                restart_snapshot_exists,
+                start_at_stat,
+            } = content;
+            assert_eq!(body, "the complete debriefing body");
+            assert!(stat.is_some());
+            assert_eq!(start_at_stat, was_on_stat);
+            assert_eq!(mission_length_seconds, state.page.mission_length);
+            assert_eq!(end, state.page.end);
+            assert_eq!(restart_allowed, state.page.restart_allowed);
+            assert_eq!(quick_load_key, state.page.quick_load_key);
+            assert_eq!(restart_snapshot_exists, state.page.restart_snapshot_exists);
+        }
+
+        let resources = crate::ingame_menu::IngameMenuResources::stub();
+        let phase = load_picker_cancelled_phase(
+            &state.page,
+            &resources,
+            "the complete debriefing body".into(),
+            true,
+        );
+        assert!(
+            matches!(phase, TerminalDebriefingPhase::Debriefing(_)),
+            "a cancelled picker re-enters the debriefing page"
+        );
     }
 
     #[test]
