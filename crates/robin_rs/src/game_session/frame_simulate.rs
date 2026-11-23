@@ -779,8 +779,12 @@ fn leave_prompt(
 /// mission. The mission name is kept in the signature because callers derive
 /// the prompt from the running mission; there is no longer a one-seal
 /// exception for `H01_Lin_VL`.
-fn leave_prompt_buttons(_mission_name: Option<&str>) -> ConfirmButtons {
-    ConfirmButtons::YesNo
+fn leave_prompt_buttons(mission_name: Option<&str>) -> ConfirmButtons {
+    if mission_name == Some("H01_Lin_VL") {
+        ConfirmButtons::YesOnly
+    } else {
+        ConfirmButtons::YesNo
+    }
 }
 
 /// Drive the mission-state leave/abandon confirmation after scripted modal
@@ -2073,15 +2077,14 @@ mod tests {
     }
 
     #[test]
-    fn every_leave_prompt_offers_both_confirm_and_cancel() {
+    fn first_mission_leave_prompt_offers_only_the_confirm_button() {
         use super::leave_prompt_buttons;
 
-        // The first mission has no return path, but a cancel seal still
-        // closes the prompt without quitting — the player is never offered a
-        // one-button "confirmation" that cannot be declined.
+        // The first mission has no Sherwood map to return to, so its leave
+        // prompt offers only the confirm seal.
         assert_eq!(
             leave_prompt_buttons(Some("H01_Lin_VL")),
-            ConfirmButtons::YesNo
+            ConfirmButtons::YesOnly
         );
         assert_eq!(
             leave_prompt_buttons(Some("H02_Not_EC")),
