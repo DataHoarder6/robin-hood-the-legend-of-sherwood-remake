@@ -158,7 +158,16 @@ gate_short=${gate_candidate:0:12}
 evidence=${ROBIN_E2E_EVIDENCE:-"~/e2e-gate/release-$gate_short"}
 case $evidence in '~/'* | /*) ;; *) die "evidence-bad-path:$evidence" ;; esac
 case $evidence in *[!A-Za-z0-9._/~+-]*) die "evidence-bad-path:$evidence" ;; esac
-if ! ROBIN_E2E_EVIDENCE="$evidence" \
+# release-gate.sh runs the e2e suite in ~/build/robin/e2e on the build host.
+# Provision that checkout from this exact candidate before invoking it; the
+# gate itself only verifies the binary's sha, it does not create the tree.
+e2e_checkout=${ROBIN_RELEASE_CHECKOUT_DIR:-"~/build/robin/e2e"}
+case $e2e_checkout in '~/'* | /*) ;; *) die "checkout-bad-path:$e2e_checkout" ;; esac
+case $e2e_checkout in *[!A-Za-z0-9._/~+-]*) die "checkout-bad-path:$e2e_checkout" ;; esac
+if ! bash "$scripts/remote-check.sh" --sync e2e >/dev/null 2>&1; then
+    die 'e2e-checkout-sync-failed'
+fi
+if ! ROBIN_E2E_EVIDENCE="$evidence" ROBIN_RELEASE_CHECKOUT_DIR="$e2e_checkout" \
     bash "$scripts/release-gate.sh" "$gate_candidate" "$binary" \
     >"$gate_log" 2>&1; then
     cat -- "$gate_log" >&2
