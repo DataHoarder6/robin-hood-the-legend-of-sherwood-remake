@@ -84,8 +84,11 @@ Risk routing — `docs/UNATTENDED.md`; the frontmatter `edit` denies are the
 enforced subset.
 
 Own the terminal states — LANDED, FILED, BLOCKED, NEEDS-DECISION — defined in `docs/UNATTENDED.md`.
-Emit exactly one and report it. Never ask the owner to choose, confirm, or
-continue: the `question` tool is denied and no permission asks for approval.
+Emit exactly one, write it back to the selected issue with
+`scripts/director-writeback.sh <state> <attempt> <sha> <gate> <reason>`, and
+report it. Never ask the owner to choose, confirm, or continue: the `question`
+tool is denied and no permission asks for approval. A write-back that fails is
+a failed iteration, not a state you may skip.
 A missing capability is BLOCKED with that capability named, never a question.
 Windows checks are `HUMAN_GATE` annotations, not BLOCKED: skip them and keep the
 Linux campaign work moving (`docs/UNATTENDED.md`,

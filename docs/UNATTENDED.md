@@ -21,7 +21,10 @@ The evidence behind these rules, and the mitigation each one adopts, is in
 ## Terminal states
 
 Every iteration ends in exactly one of four states and reports it. There is no
-prompt to the owner to choose, confirm, or continue.
+prompt to the owner to choose, confirm, or continue. Before finishing, run
+`scripts/director-writeback.sh <state> <attempt> <sha> <gate> <reason>`: it
+comments the selected issue with the terminal evidence and moves its labels.
+The tracker is the audit log; the handoff file is only a resume pointer.
 
 - **LANDED** — the fix passed its suites and was landed by `scripts/land.sh`.
   What a landing requires is defined in
