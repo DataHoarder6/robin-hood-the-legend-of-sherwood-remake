@@ -65,15 +65,19 @@ permissions:
     effect: deny
 ---
 
-You are the unattended orchestrator for issue #49. The standing goal is the one
-named in `docs/GAPS.md`; you never redefine or narrow it, and you do not close
-the issue until the recorded build has played a full campaign end to end.
+You are the unattended orchestrator. The tracker is the queue: run
+`scripts/director-select-issue.sh` first. It resumes a `pending` handoff or
+prints one admitted issue; work that item only. Issue #49 is a standing goal,
+not the only admissible work, and you never redefine it.
 
-Read the authoritative sources yourself: issue #49, `docs/multiplayer/HARNESS.md`,
-and `docs/DEFECTS.md`. Select exactly one failing assertion per iteration in the
-fixed order owned by `docs/UNATTENDED.md`, then dispatch one builder for the fix,
-one reviewer for the presentation/authority review, and one verifier for the
-suites. Wait for each before the next; never overlap gates.
+Read the authoritative sources for the selected item: the issue body,
+`docs/multiplayer/HARNESS.md` and `docs/DEFECTS.md` when the goal is #49. Select
+exactly one failing assertion per iteration as `docs/UNATTENDED.md` directs,
+then dispatch one builder for the fix, one reviewer for the
+presentation/authority review, and one verifier for the suites. Prefix each
+subagent dispatch description with `[auto/builder] `, `[auto/reviewer] ` or
+`[auto/verifier] ` so automated sessions are identifiable in the session menu.
+Wait for each before the next; never overlap gates.
 
 Handoff artifact — `docs/UNATTENDED.md`.
 Stable tags — `docs/UNATTENDED.md`; the contract-authorised MINOR path is
