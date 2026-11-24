@@ -42,6 +42,7 @@ version=${2:-}
 
 scripts=${ROBIN_RELEASE_SCRIPTS:-$repository/scripts}
 host=${ROBIN_BUILD_HOST:-minipc}
+gh_repo=${ROBIN_RELEASE_REPO:-DataHoarder6/robin-hood-the-legend-of-sherwood-remake}
 data_dir=${ROBIN_RELEASE_DATA_DIR:-"~/Games/robin-hood/game"}
 corpus=scripts/validation/parity_corpus
 corpus_schema=crates/robin_run_types/src/lib.rs
@@ -141,12 +142,12 @@ obtain_windows() { # SHA
     # only downloads the artifact and ships it there.
     ssh -n "$host" 'command -v wine >/dev/null 2>&1' || die 'wine-unavailable'
     download=$(mktemp -d "${TMPDIR:-/tmp}/robin-release-exe.XXXXXX")
-    gh workflow run native-release.yml --ref "$ref" >/dev/null ||
+    gh workflow run native-release.yml --repo "$gh_repo" --ref "$ref" >/dev/null ||
         die 'gh-dispatch-failed'
     deadline=$(( $(date +%s) + ${ROBIN_RELEASE_RUN_TIMEOUT:-3600} ))
     run_id=
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        run_id=$(gh run list --workflow native-release.yml --event workflow_dispatch \
+        run_id=$(gh run list --repo "$gh_repo" --workflow native-release.yml --event workflow_dispatch \
             --branch "$ref" --limit 1 --json databaseId \
             --jq '.[0].databaseId' 2>/dev/null || true)
         [ -n "$run_id" ] && [ "$run_id" != null ] && break
@@ -156,13 +157,13 @@ obtain_windows() { # SHA
     [ -n "$run_id" ] || die 'gh-run-not-found'
     state=
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        state=$(gh run view "$run_id" --json status,conclusion \
+        state=$(gh run view "$run_id" --repo "$gh_repo" --json status,conclusion \
             --jq '.status + " " + (.conclusion // "")' 2>/dev/null || true)
         case $state in completed*) break ;; esac
         sleep "$interval"
     done
     case $state in completed*success*) ;; *) die "gh-run-failed:${state:-unknown}" ;; esac
-    gh run download "$run_id" --name robin-windows-x86_64-exe --dir "$download" ||
+    gh run download "$run_id" --repo "$gh_repo" --name robin-windows-x86_64-exe --dir "$download" ||
         die 'gh-download-failed'
     exe=$(find "$download" -type f -name robin.exe -print -quit)
     [ -n "$exe" ] || die 'windows-exe-missing'

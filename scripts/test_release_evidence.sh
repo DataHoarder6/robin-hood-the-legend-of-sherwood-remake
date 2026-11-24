@@ -311,7 +311,7 @@ if git log --oneline -n 1 -- docs/releases/0.5.0.md | grep -q 'add 0.5.0 release
 else
     fail 'the note was not committed'
 fi
-if grep -q 'workflow run native-release.yml --ref main' "$GH_CALLS"; then
+if grep -q 'workflow run native-release.yml --repo .* --ref main' "$GH_CALLS"; then
     pass 'the Windows build is dispatched from main'
 else
     fail 'no native-release dispatch'
