@@ -137,7 +137,9 @@ obtain_windows() { # SHA
     local sha=$1 ref=${ROBIN_RELEASE_GH_REF:-main} download run_id state deadline
     local interval=${ROBIN_RELEASE_POLL_SECS:-10} rendered exe
     command -v gh >/dev/null || die 'gh-unavailable'
-    command -v wine >/dev/null || die 'wine-unavailable'
+    # Wine lives on the build host that replays the Windows binary; the runtime
+    # only downloads the artifact and ships it there.
+    ssh -n "$host" 'command -v wine >/dev/null 2>&1' || die 'wine-unavailable'
     download=$(mktemp -d "${TMPDIR:-/tmp}/robin-release-exe.XXXXXX")
     gh workflow run native-release.yml --ref "$ref" >/dev/null ||
         die 'gh-dispatch-failed'
@@ -164,7 +166,13 @@ obtain_windows() { # SHA
         die 'gh-download-failed'
     exe=$(find "$download" -type f -name robin.exe -print -quit)
     [ -n "$exe" ] || die 'windows-exe-missing'
-    rendered=$(wine "$exe" --version 2>&1) || die 'wine-version-failed'
+    # The Windows exe is replayed on the build host, so verify its --version
+    # there with that host's wine, not with a runtime-side wine that does not
+    # exist. scp first, then ask the build host to render the banner.
+    probe=$remote_abs/verify-$run_id.exe
+    scp -q -- "$exe" "$host:$probe" || die 'windows-exe-scp-failed'
+    rendered=$(ssh -n "$host" "wine '$probe' --version 2>&1") || die 'wine-version-failed'
+    ssh -n "$host" "rm -f -- '$probe'" || true
     case $rendered in
         *"$sha"*) ;;
         *) die "windows-exe-commit-mismatch:$rendered" ;;

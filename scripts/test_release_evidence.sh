@@ -26,7 +26,7 @@ mkdir -p "$stubs"
 cat >"$stubs/ssh" <<'STUB'
 #!/usr/bin/env bash
 while [[ $# -gt 0 ]]; do
-    case $1 in -n | -o) shift 2 ;; -*) shift ;; *) break ;; esac
+    case $1 in -o) shift 2 ;; -*) shift ;; *) break ;; esac
 done
 host=$1; shift
 printf '%s host=%s args=%s\n' "$(date +%s)" "$host" "$*" >>"$SSH_CALLS"
@@ -40,6 +40,16 @@ case $* in
         exit 0
         ;;
     rm\ -rf\ *)
+        exit 0
+        ;;
+    wine\ *)
+        printf 'robin 0.5.0+%s\n' "${FAKE_WIN_SHA:-$FAKE_CANDIDATE_SHORT}"
+        exit 0
+        ;;
+    rm\ -f\ *)
+        exit 0
+        ;;
+    command\ -v\ wine\ *)
         exit 0
         ;;
 esac
