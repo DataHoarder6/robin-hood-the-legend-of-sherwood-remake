@@ -79,7 +79,9 @@ for item in "$data_dir"; do
     case $item in *[!A-Za-z0-9._/~+-]*) die "unsupported-remote-path:$item" ;; esac
 done
 
-copy_name=release-evidence-$short
+# gate-shared is the one name the build-host prune timer always keeps. A
+# per-sha copy is deleted mid-build when the timer fires during a long build.
+copy_name=gate-shared
 binary=''
 win_exe_host=''
 gate_candidate=$candidate
