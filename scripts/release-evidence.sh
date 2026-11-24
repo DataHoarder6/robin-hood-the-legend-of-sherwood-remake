@@ -205,7 +205,7 @@ obtain_windows() { # SHA
     # "no driver could be loaded", which used to be misreported as a commit
     # mismatch. Run it under a private Xvfb and keep the banner on stdout.
     rendered=$(
-        ssh -n "$host" bash -s <<EOF2
+        ssh "$host" bash -s <<EOF2
 set -e
 ROBIN_PROBE='$probe' nix shell nixpkgs#xorg.xorgserver nixpkgs#xvfb-run --command \\
     bash -c 'WINEDEBUG=-all xvfb-run -a wine "\$ROBIN_PROBE" --version' 2>/dev/null
