@@ -33,10 +33,14 @@ the contract or asks for one. Last verified: 2026-11-23.
 [`docs/AUTONOMOUS_BACKLOG.md`](AUTONOMOUS_BACKLOG.md) is authoritative. The loop
 works `ready:` items, files reviewer verdicts as `needs-work` or `rejected`, and
 may promote only docs, tests and small refactors. Gameplay, schema, protocol,
-release, deletion and version items stay `proposed:` for the owner. When the
-queue is empty, the loop may generate a `proposed:` item; it never promotes its
-own proposal without the classifier in
-[`scripts/autobacklog.sh`](../scripts/autobacklog.sh).
+release, deletion and version items stay `proposed:` for the owner, as does
+any item whose `PATHS` names a protected path. When the queue is empty, the
+driver asks [`scripts/autobacklog.sh`](../scripts/autobacklog.sh) to generate
+one `proposed:` item from a curated docs/test gap and applies the same
+classifier; a deferred defect row is never a source. A proposal that fails the
+classifier, or no gap to generate from, ends the run in `RUN-COMPLETE` with the
+named reason `no-promotable-proposal` or `no-proposal-source`. Generation is
+attempted once per run, so a refusal cannot spin.
 
 ## Bounds
 

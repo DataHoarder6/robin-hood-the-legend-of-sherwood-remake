@@ -125,6 +125,16 @@ item() { # ID SUBJECT
     printf '%s\n' "$(printf '%s' "$1" | sha256sum | cut -c1-40)" >"$HEADS/$1"
 }
 script_bc() { printf '%s\n' "$@" >"$BC_SCRIPT"; }
+idea() { # Insert curated proposal-source lines inside the backlog fence.
+    local tmp=$work/backlog.tmp
+    head -n -1 -- "$BACKLOG" >"$tmp"
+    printf '%s\n' "$@" >>"$tmp"
+    printf '```\n' >>"$tmp"
+    cat -- "$tmp" >"$BACKLOG"
+}
+generation_attempts() {
+    grep -c 'empty queue; generating a proposal' "$STATE/runs/$(run_id)/events.log" || true
+}
 run() {
     status=0
     output=$(cd "$work" && bash "$source_root/scripts/autonomy-driver.sh" "$@" 2>&1) || status=$?
@@ -356,6 +366,54 @@ output=$(cd "$work" && env -u ROBIN_AUTONOMY_ALLOW_BARE -u RUNBG_STATE \
     bash "$source_root/scripts/autonomy-driver.sh" run 2>&1) || status=$?
 expect_status 2 'a bare driver run is refused'
 expect_contains 'the remedy is printed' 'runbg run autonomy -- bash scripts/autonomy-driver.sh'
+
+# 12. Empty queue: one curated proposal is generated, classified, promoted and
+# worked in the same run; the exhausted queue then ends with a named reason.
+fixture
+idea 'IDEA|Document the empty queue path|docs/AUTONOMOUS_BACKLOG.md'
+printf '%s\n' "$(printf P001 | sha256sum | cut -c1-40)" >"$HEADS/P001"
+script_bc 'epoch e001 tree t1 members P001::0' 'gate green t1::0' \
+    'land landed::0' 'none::0'
+run run
+expect_status 0 'a generated and promoted item runs successfully'
+expect_contains 'generation and promotion are reported' 'PROMOTED P001'
+expect_contains 'the promoted item is worked in the same run' 'LANDED'
+expect_contains 'the run completes' 'RUN-COMPLETE'
+expect_contains 'the exhausted queue is named' 'no-workable-item'
+id=$(run_id)
+[ "$(field "$id" generation_attempted)" = 1 ] && pass 'the run records one generation attempt' \
+    || fail 'the generation flag is missing'
+[ "$(generation_attempts)" -eq 1 ] && pass 'generation is attempted exactly once' \
+    || fail "generation was attempted $(generation_attempts) times"
+[ "$(grep -c '^epoch ' "$BC_LOG")" -eq 1 ] && pass 'exactly one batch was driven' \
+    || fail 'the loop drove more than one batch'
+
+# 13. A generated item that fails the classifier ends RUN-COMPLETE with a
+# named reason and never starts a batch or retries generation.
+fixture
+idea 'IDEA|Tidy the gate stamp|scripts/gate-stamp.sh'
+script_bc
+run run
+expect_status 0 'a refused proposal ends cleanly'
+expect_contains 'the run completes' 'RUN-COMPLETE'
+expect_contains 'the refusal is named' 'no-promotable-proposal'
+expect_contains 'the protected path is named' 'protected path'
+expect_absent 'no item was promoted' 'PROMOTED'
+if [ ! -s "$BC_LOG" ]; then pass 'no batch work follows a refused proposal'; else fail 'a batch ran for a refused proposal'; fi
+[ "$(generation_attempts)" -eq 1 ] && pass 'a refusal does not retry generation' \
+    || fail "generation was attempted $(generation_attempts) times"
+
+# 14. No curated gap: the run names what is needed and does not spin.
+fixture
+script_bc
+run run
+expect_status 0 'an empty source list ends cleanly'
+expect_contains 'the run completes' 'RUN-COMPLETE'
+expect_contains 'the missing source is named' 'no-proposal-source'
+expect_contains 'the needed source is named' 'IDEA|title|paths'
+if [ ! -s "$BC_LOG" ]; then pass 'no batch work follows a missing source'; else fail 'a batch ran without a source'; fi
+[ "$(generation_attempts)" -eq 1 ] && pass 'a missing source does not retry generation' \
+    || fail "generation was attempted $(generation_attempts) times"
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

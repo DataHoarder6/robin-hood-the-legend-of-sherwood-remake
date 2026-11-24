@@ -205,7 +205,30 @@ while :; do
         line=$("$scripts/autobacklog.sh" next-ready 2>&1) || rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        complete no-ready-item
+        # Empty queue: offer one curated low-risk proposal to the classifier.
+        # Generation is attempted at most once per run, so a refused or
+        # unworkable proposal ends the run instead of spinning.
+        if [ -n "$(read_field generation_attempted)" ]; then
+            complete no-workable-item
+        fi
+        write_status generation_attempted 1
+        log_event 'empty queue; generating a proposal'
+        rc=0
+        proposal_out=''
+        proposal_out=$("$scripts/autobacklog.sh" generate-proposed 2>&1) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            complete "no-proposal-source:${proposal_out}"
+        fi
+        proposal_id=${proposal_out%%|*}
+        rc=0
+        promoted_out=''
+        promoted_out=$("$scripts/autobacklog.sh" promote "$proposal_id" 2>&1) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            complete "no-promotable-proposal:${promoted_out}"
+        fi
+        log_event "promoted generated item $promoted_out"
+        printf 'PROMOTED %s\n' "$promoted_out"
+        continue
     fi
     item=${line%%|*}
     head=$(cat "$heads/$item" 2>/dev/null || true)
