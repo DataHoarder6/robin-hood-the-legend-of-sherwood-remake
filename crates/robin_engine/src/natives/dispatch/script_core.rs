@@ -53,6 +53,11 @@ impl NativeContext<'_, '_> {
             // player's `QuitMissionRequested` then ends the mission through
             // the game's own mission phase and debriefing.
             HarnessMarkMissionWon => {
+                // Path-unique marker: the dev `/mission-result won` route takes
+                // the same win branch but never reaches end_mission, so only
+                // this native path stamps it. H38 counts one per seat to prove
+                // the game's own scripted victory caused the debriefing.
+                tracing::info!(target: "rh_harness", "harness native victory path: HarnessMarkMissionWon yielded the scripted Win command");
                 self.yield_engine_command(EngineCommand::Win { show_window: true });
                 0
             }
