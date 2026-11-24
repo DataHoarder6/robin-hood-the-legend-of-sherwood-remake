@@ -2430,8 +2430,10 @@ mod required_state_tests {
             .expect("commit the Sherwood choice");
         assert_eq!(engine.campaign().next_mission_idx, Some(2));
 
-        // The mission ends and opens its debriefing.
-        let ending = engine
+        // WIN marks the mission won and raises the 235 leave-now prompt; it is
+        // no longer an instant ending. Confirming the prompt is a separate
+        // replicated command, and the mission phase ends on the next frame.
+        engine
             .advance_frame(
                 &assets,
                 SimulationFrameInput::new(vec![
@@ -2441,6 +2443,15 @@ mod required_state_tests {
                     .into(),
                 ]),
             )
+            .expect("mark the mission won and raise the leave prompt");
+        engine
+            .advance_frame(
+                &assets,
+                SimulationFrameInput::new(vec![PlayerCommand::QuitMissionRequested.into()]),
+            )
+            .expect("confirm the leave-now prompt");
+        let ending = engine
+            .advance_frame(&assets, SimulationFrameInput::new(vec![]))
             .expect("end the mission");
         assert_eq!(ending.events.code, GameCode::LevelSucceeded);
 
