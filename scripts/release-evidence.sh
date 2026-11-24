@@ -271,7 +271,9 @@ set -euo pipefail
 cd -- "$remote_abs"
 export ROBINHOOD_DATA_DIR=$data_abs
 rm -rf -- "$record_dir"
-mkdir -p -- "$record_dir/record"
+mkdir -p -- "$record_dir"
+# The recorder creates its own record/ directory; pre-creating it makes
+# "create mission recording ... File exists".
 # --spec stops at the frame budget with exit 3 by design; the recorder has
 # already flushed a complete, replayable recording (parity_corpus/README.md).
 set +e

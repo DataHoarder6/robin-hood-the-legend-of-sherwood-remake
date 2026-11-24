@@ -79,7 +79,9 @@ if grep -q 'cargo build' "$script"; then
     exit 0
 fi
 if grep -q -- '--record' "$script"; then
-    record=$(sed -n 's/^mkdir -p -- "\(.*\)\/record"$/\1/p' "$script" | head -1)
+    # The heredoc is expanded by the caller, so the scratch path is literal.
+    record=$(sed -n 's/^rm -rf -- "\(.*\)"$/\1/p' "$script" | head -1)
+    [ -n "$record" ] || { echo "stub: no record dir" >&2; exit 1; }
     mkdir -p "$record/record"
     printf '{"recording":{"version":%s,"mission_id":"Sherwood"},"chunk":{"file":"00000000.rhrec.jsonl"}}\n' \
         "${FAKE_SCHEMA:-80}" >"$record/record/00000000.rhrec.jsonl"
