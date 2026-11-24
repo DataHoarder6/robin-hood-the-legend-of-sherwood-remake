@@ -88,8 +88,12 @@ tag pushed without it is a bet rather than a release.
    release authority cuts a MINOR tag through
    [`scripts/auto-release.sh`](../scripts/auto-release.sh) instead
    ([ADR 0011](adr/0011-autonomous-release.md)); it refuses an existing tag, a
-   non-MINOR bump and any gate without an observed H23. The human steps below —
-   pin, seat sync and browser publish — are unchanged.
+   non-MINOR bump and any gate without an observed H23. When the driver has no
+   binary or summary in its environment, it first runs
+   [`scripts/release-evidence.sh`](../scripts/release-evidence.sh) to produce
+   them ([UNATTENDED.md](UNATTENDED.md#autonomous-run-driver)); note generation
+   stays with `release-notes.sh`. The human steps below — pin, seat sync and
+   browser publish — are unchanged.
 8. Pin the tag's commit in the machine repo: change `?rev=` on the `robin-hood`
    flake input in `flake.nix` to the tag's commit, land that change through
    `land`, then run `just apps-sync` on every seat. That pin — not a channel

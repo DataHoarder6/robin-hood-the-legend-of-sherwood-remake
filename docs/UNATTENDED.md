@@ -240,7 +240,16 @@ The driver is repo-local and never edits machine configuration.
 
 ## One-week pilot metrics
 
-Run `scripts/unattended-metrics.sh [SINCE]` on `oci-vm`. It prints each metric
+Run `scripts/release-evidence.sh` supplies the release inputs when the driver has
+none: it builds the Linux binary, obtains and verifies the Windows exe from
+`native-release.yml`, repairs a stale parity corpus, runs `parity-cross` and the
+release gate, and generates the version note. The driver calls it for a MINOR
+batch and consumes `ROBIN_RELEASE_BINARY`, `ROBIN_RELEASE_SUMMARY` and the
+candidate it prints; a refusal is `ROLLED-BACK` plus `NEEDS-DECISION`. The
+script never tags or pushes — [auto-release.sh](../scripts/auto-release.sh)
+keeps that authority ([ADR 0011](adr/0011-autonomous-release.md)).
+
+`scripts/unattended-metrics.sh [SINCE]` on `oci-vm`. It prints each metric
 with its source; the source is the measurement, not a stored report. A cost or
 duration the script cannot derive is printed as `not available`, never
 estimated. First-pass gate success and false quarantines come from the gate's
