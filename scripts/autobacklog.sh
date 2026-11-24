@@ -6,12 +6,13 @@
 #   ID|CLASS|KIND|SCALE|TITLE|PATHS
 #
 # CLASS is proposed|ready|needs-work|rejected. The loop may promote docs, tests
-# and small refactors only; gameplay, schema, protocol, release, deletion and
-# version items stay proposed for the owner. Local files, no gate or network.
+# and small refactors only, and never a protected PATHS entry. Gameplay, schema,
+# protocol, release, deletion and version items stay proposed for the owner.
+# Proposals come from curated IDEA sources, never a deferred defect row.
+# Local files, no gate or network.
 set -euo pipefail
 
 file=${ROBIN_BACKLOG_FILE:-docs/AUTONOMOUS_BACKLOG.md}
-defects=${ROBIN_DEFECTS_FILE:-docs/DEFECTS.md}
 
 usage() {
     printf 'usage: autobacklog.sh next-ready | next-ready-after <id> | generate-proposed [title] | promote <item> | verdict <item> needs-work|rejected\n' >&2
@@ -23,6 +24,9 @@ die() { printf 'autobacklog: %s\n' "$*"; exit 1; }
 
 records() { grep -E '^P[0-9]+\|' "$file" || true; }
 find_item() { records | grep -F -m1 "$1|" || true; }
+# Curated low-risk work: one `IDEA|title|paths` line per docs/test gap. Deferred
+# DEFECTS.md rows are never a source: a known flake must never be re-fixed.
+sources() { grep '^IDEA|' "$file" || true; }
 
 # Replace the class field of one record, failing closed if the id is absent.
 rewrite() { # ID CLASS
@@ -38,7 +42,29 @@ rewrite() { # ID CLASS
     rm -f -- "$tmp"
 }
 
-promotable() { # KIND SCALE -> 0 when the loop may promote
+# A path outside the loop's authority is never promotable, whatever the kind
+# or scale. Mirrors the risk-routing deny list in docs/UNATTENDED.md.
+paths_safe() { # PATHS
+    local -a tokens=()
+    local p
+    [ -n "$1" ] || return 1
+    IFS=', ' read -r -a tokens <<<"$1"
+    for p in "${tokens[@]}"; do
+        p=${p#./}
+        [ -n "$p" ] || continue
+        case $p in
+            scripts/land.sh | scripts/remote-check.sh | scripts/push-gate.sh | \
+            scripts/gate-stamp.sh | scripts/release*.sh | \
+            .github | .github/* | *.nix | \
+            .env | .env* | *.env | */.env* | *secret* | */secrets/* )
+                return 1 ;;
+        esac
+    done
+    return 0
+}
+
+promotable() { # KIND SCALE PATHS -> 0 when the loop may promote
+    paths_safe "$3" || return 1
     case $1 in
         docs | tests) return 0 ;;
         refactor) [ "$2" = small ] ;;
@@ -69,9 +95,10 @@ case "${1:-}" in
         id=$2
         line=$(find_item "$id")
         [ -n "$line" ] || die "unknown-item: $id"
-        IFS='|' read -r _ class kind scale _ <<<"$line"
+        IFS='|' read -r _ class kind scale _ paths <<<"$line"
         [ "$class" = proposed ] || die "not-proposed: $id is $class"
-        promotable "$kind" "$scale" || die "not-promotable: $kind/$scale"
+        promotable "$kind" "$scale" "$paths" ||
+            die "not-promotable: $kind/$scale PATHS '$paths' (protected path or high-risk kind/scale)"
         rewrite "$id" ready
         find_item "$id"
         ;;
@@ -89,19 +116,26 @@ case "${1:-}" in
     generate-proposed)
         [ $# -le 2 ] || usage
         title=${2:-}
+        paths=docs/AUTONOMOUS_BACKLOG.md
         if [ -z "$title" ]; then
-            [ -f "$defects" ] || die "no-proposal-source: $defects is missing"
-            id_from_defect=$(awk -F'|' '/deferred/ {
-                for (i = 1; i <= NF; i++) {
-                    gsub(/^[ \t]+|[ \t]+$/, "", $i)
-                    if ($i ~ /^D[0-9]+$/) { print $i; exit }
-                }
-            }' "$defects")
-            [ -n "$id_from_defect" ] || die 'no-proposal-source: no deferred defect row'
-            title="Deferred $id_from_defect from DEFECTS.md"
+            # Only a curated docs/test gap may become loop work. A deferred
+            # DEFECTS.md row (notably a known flake) is never a source.
+            existing_titles=$(records | awk -F'|' '{ print $5 }')
+            candidate=$(sources | while IFS='|' read -r _ candidate_title candidate_paths; do
+                printf '%s\n' "$existing_titles" | grep -F -x -q "$candidate_title" && continue
+                printf '%s|%s\n' "$candidate_title" "$candidate_paths"
+                break
+            done)
+            if [ -z "$candidate" ]; then
+                die "no-proposal-source: add a low-risk docs/test gap as an IDEA|title|paths line in $file"
+            fi
+            title=${candidate%%|*}
+            paths=${candidate#*|}
         fi
-        # Pipes would break the record format; a title with one is invalid.
+        # Pipes would break the record format; a title or path with one is invalid.
         case $title in *'|'*) die 'invalid-title: no pipe allowed' ;; esac
+        case $paths in *'|'*) die 'invalid-paths: no pipe allowed' ;; esac
+        [ -n "$paths" ] || die 'invalid-paths: empty'
         max=0
         while IFS='|' read -r rid _; do
             n=${rid#P}
@@ -109,10 +143,9 @@ case "${1:-}" in
             [ "$n" -gt "$max" ] && max=$n
         done < <(records)
         next=$(printf 'P%03d' "$((max + 1))")
-        printf '%s|proposed|docs|small|%s|docs/AUTONOMOUS_BACKLOG.md\n' \
-            "$next" "$title" >>"$file"
-        printf '%s|proposed|docs|small|%s|docs/AUTONOMOUS_BACKLOG.md\n' \
-            "$next" "$title"
+        record="$next|proposed|docs|small|$title|$paths"
+        printf '%s\n' "$record" >>"$file"
+        printf '%s\n' "$record"
         ;;
     *) usage ;;
 esac

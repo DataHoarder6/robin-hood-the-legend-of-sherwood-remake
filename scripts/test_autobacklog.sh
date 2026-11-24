@@ -9,7 +9,6 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/robin-autobacklog.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 export ROBIN_BACKLOG_FILE=$work/backlog.md
-export ROBIN_DEFECTS_FILE=$work/DEFECTS.md
 
 pass_count=0
 failures=0
@@ -34,6 +33,15 @@ expect_absent() {
     esac
 }
 record() { grep "^$1|" "$ROBIN_BACKLOG_FILE" || true; }
+
+# Insert curated proposal-source lines inside the backlog's fenced block.
+idea() {
+    local tmp=$work/backlog.tmp
+    head -n -1 -- "$ROBIN_BACKLOG_FILE" >"$tmp"
+    printf '%s\n' "$@" >>"$tmp"
+    printf '```\n' >>"$tmp"
+    cat -- "$tmp" >"$ROBIN_BACKLOG_FILE"
+}
 
 # The first argument is the record set; later arguments are literal lines.
 backlog() {
@@ -123,6 +131,28 @@ for id in P001 P002 P003 P004 P005 P006; do
     esac
 done
 
+# 5b. PATHS overrides KIND/SCALE: a protected path is never promotable, even
+# for a small refactor or a docs/test item with an otherwise safe class.
+backlog \
+    'P001|proposed|refactor|small|Tidy the gate stamp|scripts/gate-stamp.sh' \
+    'P002|proposed|docs|small|Update CI workflow|.github/workflows/check.yml' \
+    'P003|proposed|tests|small|Bump the pin|flake.nix' \
+    'P004|proposed|docs|small|Hide a credential|config/secrets/api.key' \
+    'P005|proposed|refactor|small|Safe tidy|scripts/helper.sh' \
+    'P006|proposed|docs|small|Two paths|docs/PLAY.md,scripts/land.sh' \
+    'P007|proposed|tests|small|Relative gate path|./scripts/land.sh'
+for id in P001 P002 P003 P004 P006 P007; do
+    run promote "$id"
+    expect_status 1 "$id is refused for a protected path"
+    expect_contains "$id names the protected path" 'not-promotable'
+    case $(record "$id") in
+        "$id|proposed|"*) pass "$id is unchanged" ;;
+        *) fail "$id was changed: $(record "$id")" ;;
+    esac
+done
+run promote P005
+expect_status 0 'a safe small refactor still promotes'
+
 # 6. Promotion is idempotent by state and unknown items fail closed.
 backlog 'P001|ready|docs|small|Already ready|docs/PLAY.md'
 run promote P001
@@ -166,16 +196,37 @@ esac
 count=$(grep -c '^P0' "$ROBIN_BACKLOG_FILE")
 if [ "$count" -eq 2 ]; then pass 'exactly one item was appended'; else fail "the backlog has $count items"; fi
 
-# 9. With no title, generate-proposed reads a deferred DEFECTS.md row.
+# 9. With no title, generate-proposed uses curated docs/test gaps, never a
+# deferred defect row: a known flake must never be re-fixed.
 backlog
-printf '| D12 | presentation | step | check | deferred |\n' >"$ROBIN_DEFECTS_FILE"
+printf '| D09 | release | known load flake | full corpus | isolated recheck | deferred |\n' \
+    >"$work/DEFECTS.md"
 run generate-proposed
-expect_status 0 'a deferred defect supplies a proposal'
-expect_contains 'the proposal names the defect' 'D12'
-printf '| D12 | presentation | step | check | fixed |\n' >"$ROBIN_DEFECTS_FILE"
-run generate-proposed
-expect_status 1 'no source fails closed'
+expect_status 1 'no curated gap fails closed'
 expect_contains 'the reason is named' 'no-proposal-source'
+expect_contains 'the needed source is named' 'IDEA|title|paths'
+
+idea 'IDEA|Document the empty queue path|docs/AUTONOMOUS_BACKLOG.md' \
+     'IDEA|Add a PATHS fixture|scripts/test_autobacklog.sh'
+run generate-proposed
+expect_status 0 'a curated gap supplies a proposal'
+expect_contains 'the proposal carries the gap title' 'Document the empty queue path'
+expect_contains 'the proposal carries the gap path' 'docs/AUTONOMOUS_BACKLOG.md'
+expect_absent 'the known flake is not proposed' 'D09'
+case $output in
+    P001'|'proposed'|'docs'|'small'|'*) pass 'the proposal is a low-risk docs item' ;;
+    *) fail "the proposal shape is wrong: $output" ;;
+esac
+run generate-proposed
+expect_status 0 'the next unused gap is proposed'
+expect_contains 'the second gap is used' 'Add a PATHS fixture'
+case $output in
+    P002'|'*) pass 'the next id is allocated' ;;
+    *) fail "the next id is wrong: $output" ;;
+esac
+run generate-proposed
+expect_status 1 'exhausted gaps fail closed'
+expect_contains 'the end is named' 'no-proposal-source'
 
 # 10. Permission guards: the read-only roles may file a verdict and nothing else.
 for role in reviewer verifier; do
