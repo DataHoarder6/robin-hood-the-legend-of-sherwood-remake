@@ -192,7 +192,16 @@ obtain_windows() { # SHA
     # exist. scp first, then ask the build host to render the banner.
     probe=$remote_abs/verify-$run_id.exe
     scp -q -- "$exe" "$host:$probe" || die 'windows-exe-scp-failed'
-    rendered=$(ssh -n "$host" "wine '$probe' --version 2>&1") || die 'wine-version-failed'
+    # The build host is headless. wine without a DISPLAY fails with
+    # "no driver could be loaded", which used to be misreported as a commit
+    # mismatch. Run it under a private Xvfb and keep the banner on stdout.
+    rendered=$(
+        ssh -n "$host" bash -s <<EOF2
+set -e
+ROBIN_PROBE='$probe' nix shell nixpkgs#xorg.xorgserver nixpkgs#xvfb-run --command \\
+    bash -c 'WINEDEBUG=-all xvfb-run -a wine "\$ROBIN_PROBE" --version' 2>/dev/null
+EOF2
+    ) || die 'wine-version-failed'
     ssh -n "$host" "rm -f -- '$probe'" || true
     case $rendered in
         *"$sha"*) ;;

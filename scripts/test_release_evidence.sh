@@ -46,6 +46,11 @@ case $* in
         printf 'robin 0.5.0+%s\n' "${FAKE_WIN_SHA:-$FAKE_CANDIDATE_SHORT}"
         exit 0
         ;;
+    *ROBIN_PROBE*)
+        # Headless wine runs under Xvfb via `bash -s`; render the same banner.
+        printf 'robin 0.5.0+%s\n' "${FAKE_WIN_SHA:-$FAKE_CANDIDATE_SHORT}"
+        exit 0
+        ;;
     rm\ -f\ *)
         exit 0
         ;;
@@ -57,6 +62,10 @@ script=$FIXTURE_WORK/ssh-script.$$
 cat >"$script"
 printf '%s\n' '--- rendered remote script ---' >>"$SSH_CALLS"
 cat "$script" >>"$SSH_CALLS"
+if grep -q 'ROBIN_PROBE' "$script"; then
+    printf 'robin 0.5.0+%s\n' "${FAKE_WIN_SHA:-$FAKE_CANDIDATE_SHORT}"
+    exit 0
+fi
 if grep -q 'cargo build' "$script"; then
     if [[ -n ${FAKE_BUILD_FAIL:-} ]]; then
         printf 'fixture build failure\n' >&2
