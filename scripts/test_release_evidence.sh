@@ -337,6 +337,15 @@ else
     pass 'no target directory override'
 fi
 
+# The private build copy must have a live worktree of the same name, or the
+# hourly prune deletes it mid-compile.
+if grep -qF 'worktree add --detach --quiet "$keep_worktree"' "$source_root/scripts/release-evidence.sh" &&
+   grep -qF 'worktree remove --force "$keep_worktree"' "$source_root/scripts/release-evidence.sh"; then
+    pass 'evidence copy is registered with the prune keep set'
+else
+    fail 'evidence copy can be pruned mid-build'
+fi
+
 # 4. No double tag: release-evidence never tags or pushes a tag itself.
 if [ -z "$(git tag --list 'v*')" ] && ! grep -qE 'git (tag|push)' "$SSH_CALLS"; then
     pass 'no tag or tag push is created by release-evidence'

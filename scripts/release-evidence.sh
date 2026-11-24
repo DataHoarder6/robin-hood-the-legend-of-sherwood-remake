@@ -86,7 +86,25 @@ gate_candidate=$candidate
 summary_file=${TMPDIR:-/tmp}/robin-release-summary-$short.json
 parity_log=${TMPDIR:-/tmp}/robin-release-parity-$short.log
 gate_log=${TMPDIR:-/tmp}/robin-release-gate-$short.log
-trap 'rm -f -- "$summary_file"' EXIT
+
+# The hourly prune keeps only build copies whose name matches a live local
+# worktree. Without one, it deletes this script's private copy mid-compile
+# (observed 2026-11-24: "No such file or directory" while building robin_rs).
+# Register the copy's name as a worktree for the run's lifetime, then remove it.
+keep_worktree=$repository/.worktrees/$copy_name
+created_keep=0
+if [ ! -d "$keep_worktree/.git" ]; then
+    git -C "$repository" worktree add --detach --quiet "$keep_worktree" "$candidate" ||
+        die 'keep-worktree-failed'
+    created_keep=1
+fi
+cleanup() {
+    rm -f -- "$summary_file"
+    if [ "$created_keep" -eq 1 ]; then
+        git -C "$repository" worktree remove --force "$keep_worktree" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
 
 # ---- 1. Build the Linux release binary from the candidate on the build host.
 sync_copy() {
