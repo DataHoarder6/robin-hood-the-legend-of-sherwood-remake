@@ -14,7 +14,8 @@
 #
 # Environment: ROBIN_AUTONOMY_STATE, ROBIN_AUTONOMY_CONTRACT, ROBIN_AUTONOMY_SCRIPTS,
 # ROBIN_QUOTA_STATUS (or $STATE/quota), ROBIN_ITEM_HEAD_DIR, ROBIN_BACKLOG_FILE,
-# ROBIN_RELEASE_BINARY, ROBIN_RELEASE_SUMMARY, ROBIN_RUN_TOKENS, ROBIN_RUN_COST.
+# ROBIN_RELEASE_BINARY, ROBIN_RELEASE_SUMMARY, ROBIN_RELEASE_VERSION,
+# ROBIN_RUN_TOKENS, ROBIN_RUN_COST.
 # It is repo-local: no Nix files, timer units, provider selection or installs.
 set -euo pipefail
 
@@ -288,9 +289,70 @@ while :; do
         case $token in
             major-not-allowed) halt NEEDS-DECISION major-not-allowed ;;
             minor)
+                # The binary and summary are produced by release-evidence.sh;
+                # the driver is already under runbg and that script puts its one
+                # long step (parity-cross) under runbg itself. When an operator
+                # supplies the two inputs explicitly, keep the old path.
+                release_candidate=$head
+                if [ -z "$release_binary" ] || [ -z "$release_summary" ]; then
+                    version=${ROBIN_RELEASE_VERSION:-}
+                    if [ -z "$version" ]; then
+                        version=$(awk '
+                            /^\[package\]/ { in_package = 1; next }
+                            /^\[/ { in_package = 0 }
+                            in_package && /^version = "/ {
+                                gsub(/"/, "", $3); print $3; exit
+                            }
+                        ' crates/robin_rs/Cargo.toml 2>/dev/null || true)
+                    fi
+                    [ -n "$version" ] ||
+                        halt NEEDS-DECISION release-version-missing
+                    evidence_out=''
+                    rc=0
+                    evidence_out=$("$scripts/release-evidence.sh" "$head" \
+                        "$version" 2>&1) || rc=$?
+                    if [ "$rc" -ne 0 ]; then
+                        # A refusal rolls the observable outcome back just like
+                        # a refused tag; auto-release is never reached.
+                        rollback_out=''
+                        if [ -n "${ROBIN_APPIMAGE_DIR:-}" ] &&
+                           [ -f "$scripts/appimage-retain.sh" ]; then
+                            rollback_out=$("$scripts/appimage-retain.sh" rollback \
+                                "$ROBIN_APPIMAGE_DIR" 2>&1) || true
+                        fi
+                        write_status release_outcome ROLLED-BACK
+                        log_event "ROLLED-BACK $rollback_out"
+                        printf 'ROLLED-BACK %s\n' "${rollback_out:-previous-good}"
+                        halt NEEDS-DECISION "release-evidence-refused:$evidence_out"
+                    fi
+                    release_binary=$(
+                        printf '%s\n' "$evidence_out" |
+                            sed -n 's/^ROBIN_RELEASE_BINARY=//p' | head -1
+                    )
+                    release_summary=$(
+                        printf '%s\n' "$evidence_out" |
+                            sed -n 's/^ROBIN_RELEASE_SUMMARY=//p' | head -1
+                    )
+                    evidence_candidate=$(
+                        printf '%s\n' "$evidence_out" |
+                            sed -n 's/^ROBIN_RELEASE_CANDIDATE=//p' | head -1
+                    )
+                    [ -n "$release_binary" ] && [ -n "$release_summary" ] ||
+                        halt NEEDS-DECISION release-evidence-incomplete
+                    # Corpus/note maintenance commits move HEAD; the tag must
+                    # name the tree the evidence was generated from.
+                    [ -z "$evidence_candidate" ] ||
+                        release_candidate=$evidence_candidate
+                    verdict=$(
+                        printf '%s\n' "$evidence_out" |
+                            sed -n 's/^VERDICT //p' | head -1
+                    )
+                    log_event "RELEASE-EVIDENCE $verdict"
+                    printf 'RELEASE-EVIDENCE %s\n' "$verdict"
+                fi
                 release_out=''
                 rc=0
-                release_out=$("$scripts/auto-release.sh" "$head" \
+                release_out=$("$scripts/auto-release.sh" "$release_candidate" \
                     "$release_binary" "$release_summary" 2>&1) || rc=$?
                 if [ "$rc" -eq 0 ]; then
                     write_status release_outcome RELEASED
