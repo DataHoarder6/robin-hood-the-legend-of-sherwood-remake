@@ -253,14 +253,23 @@ obtain_windows() { # SHA
     # The build host is headless. wine without a DISPLAY fails with
     # "no driver could be loaded", which used to be misreported as a commit
     # mismatch. Run it under a private Xvfb and keep the banner on stdout.
-    rendered=$(
-        ssh "$host" bash -s <<EOF2
+    wine_out=$download/wine.out
+    wine_err=$download/wine.err
+    if ! ssh -n "$host" bash -s >"$wine_out" 2>"$wine_err" <<EOF2
 set -e
 ROBIN_PROBE='$probe' nix shell nixpkgs#xorg.xorgserver nixpkgs#xvfb-run --command \\
-    bash -c 'WINEDEBUG=-all xvfb-run -a wine "\$ROBIN_PROBE" --version' 2>/dev/null
+    bash -c 'WINEDEBUG=-all xvfb-run -a wine "\$ROBIN_PROBE" --version'
 EOF2
-    ) || die 'wine-version-failed'
+    then
+        die "wine-version-failed:$(tail -n 2 "$wine_err" | tr '\n' ' ')"
+    fi
     ssh -n "$host" "rm -f -- '$probe'" || true
+    rendered=$(cat -- "$wine_out")
+    # An empty banner is a display/wine failure, not a commit mismatch. Name
+    # it separately so the evidence does not look like a bad binary.
+    if [ -z "$rendered" ] || ! printf '%s' "$rendered" | grep -q '[0-9a-f]\{12\}'; then
+        die "wine-banner-empty:$(tail -n 2 "$wine_err" | tr '\n' ' ')"
+    fi
     case $rendered in
         *"$sha"*) ;;
         *) die "windows-exe-commit-mismatch:$rendered" ;;

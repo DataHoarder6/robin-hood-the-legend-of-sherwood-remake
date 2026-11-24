@@ -7,7 +7,7 @@
 set -uo pipefail
 
 tag=${1:?usage: scripts/release-parity-check.sh <v-tag>}
-repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+repo=${ROBIN_REPO:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}
 cd "$repo"
 
 fail=0
@@ -37,7 +37,7 @@ for asset in "${expected_assets[@]}"; do
 done
 
 # Browser artifact: the served manifest must name the same commit.
-site=/var/www/robin
+site=${ROBIN_SITE_ROOT:-/var/www/robin}
 manifest=$site/wasm/$short/manifest.json
 [ -f "$manifest" ] || { bad "site has no wasm/$short/manifest.json"; exit 1; }
 read_commit=$(jq -er .commit "$manifest" 2>/dev/null)
@@ -81,6 +81,13 @@ fi
 latest=$(jq -er .short "$site/wasm/latest.json" 2>/dev/null)
 [ "$latest" = "$short" ] && ok "site latest.json selects $short" \
     || bad "site latest.json selects $latest, expected $short"
+# A minimal {commit,short} document can name the right checkout while serving
+# no multiplayer content. The site must publish the exact manifest bytes.
+if cmp -s "$site/wasm/latest.json" "$manifest"; then
+    ok 'site latest.json is byte-identical to the versioned manifest'
+else
+    bad 'site latest.json bytes differ from the versioned manifest'
+fi
 # The selector is byte-for-byte the versioned manifest, not a rewritten copy:
 # the browser fetches both and the boot gate compares their identity.
 cmp -s "$site/wasm/latest.json" "$manifest" \

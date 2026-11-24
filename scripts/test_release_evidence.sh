@@ -63,6 +63,10 @@ cat >"$script"
 printf '%s\n' '--- rendered remote script ---' >>"$SSH_CALLS"
 cat "$script" >>"$SSH_CALLS"
 if grep -q 'ROBIN_PROBE' "$script"; then
+    if [[ -n ${FAKE_WIN_EMPTY:-} ]]; then
+        printf 'nodrv_CreateWindow: no driver could be loaded\n' >&2
+        exit 0
+    fi
     printf 'robin 0.5.0+%s\n' "${FAKE_WIN_SHA:-$FAKE_CANDIDATE_SHORT}"
     exit 0
 fi
@@ -387,6 +391,12 @@ fixture 80
 FAKE_WIN_SHA=deadbeefdead run_evidence "$head" 0.5.0
 expect_status 1 'a wrong-sha Windows exe is refused'
 expect_contains 'the mismatch is named' 'windows-exe-commit-mismatch'
+
+# An empty wine banner is a display failure, not a binary mismatch.
+fixture 80
+FAKE_WIN_EMPTY=1 run_evidence "$head" 0.5.0
+expect_status 1 'an empty wine banner is refused'
+expect_contains 'the empty banner is named' 'wine-banner-empty'
 
 # 7. A red parity-cross stops the release before the gate.
 fixture 80
