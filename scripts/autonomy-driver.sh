@@ -323,6 +323,17 @@ while :; do
                         write_status release_outcome ROLLED-BACK
                         log_event "ROLLED-BACK $rollback_out"
                         printf 'ROLLED-BACK %s\n' "${rollback_out:-previous-good}"
+                        # A refusal is a work item, not a silent terminal state.
+                        # File exactly one admitted issue with the named reason,
+                        # then end this run. Intake failure never masks the refusal.
+                        refusal=$(printf '%s\n' "$evidence_out" |
+                            sed -n 's/.*reason=\([^ ]*\).*/\1/p' | head -1)
+                        [ -n "$refusal" ] || refusal=release-evidence-refused
+                        if [ -x "$scripts/release-failure-intake.sh" ]; then
+                            intake=$("$scripts/release-failure-intake.sh" \
+                                "$refusal" "$head" "$version" 2>&1) || true
+                            log_event "failure-intake $intake"
+                        fi
                         halt NEEDS-DECISION "release-evidence-refused:$evidence_out"
                     fi
                     release_binary=$(
