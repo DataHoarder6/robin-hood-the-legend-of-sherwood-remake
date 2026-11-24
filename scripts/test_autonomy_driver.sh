@@ -18,6 +18,7 @@ BC_SCRIPT=$work/bc.script
 BC_LOG=$work/bc.log
 RB_LOG=$work/rb.log
 RELEASE_LOG=$work/release.log
+EVIDENCE_LOG=$work/evidence.log
 mkdir -p "$SCRIPTS" "$HEADS" "$work/runs"
 
 pass_count=0
@@ -69,6 +70,28 @@ cat >"$SCRIPTS/auto-release.sh" <<'REL'
 printf '%s\n' "$*" >>"$FAKE_RELEASE_LOG"
 printf 'RELEASED %s\n' v0.5.0
 REL
+# Release-evidence stub: prints the machine-readable lines the driver consumes.
+# FAKE_EVIDENCE_MODE can make it refuse or emit a partial result.
+cat >"$SCRIPTS/release-evidence.sh" <<'EVID'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FAKE_EVIDENCE_LOG"
+case ${FAKE_EVIDENCE_MODE:-ok} in
+    refuse)
+        printf 'release-evidence: refused-by-fixture\n' >&2
+        exit 1
+        ;;
+    partial)
+        printf 'ROBIN_RELEASE_BINARY=%s\n' "$FAKE_EVIDENCE_BINARY"
+        ;;
+    *)
+        printf 'ROBIN_RELEASE_BINARY=%s\n' "$FAKE_EVIDENCE_BINARY"
+        printf 'ROBIN_RELEASE_SUMMARY=%s\n' "$FAKE_EVIDENCE_SUMMARY"
+        printf 'ROBIN_RELEASE_CANDIDATE=%s\n' "$FAKE_EVIDENCE_CANDIDATE"
+        printf 'VERDICT observed candidate=%s version=%s\n' \
+            "$FAKE_EVIDENCE_CANDIDATE" "${2:-0.5.0}"
+        ;;
+esac
+EVID
 cat >"$SCRIPTS/run-bounds.sh" <<'RB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$FAKE_RB_LOG"
@@ -80,6 +103,10 @@ chmod +x "$SCRIPTS/"*.sh
 export REAL_RUN_BOUNDS=$SCRIPTS/run-bounds.real.sh
 export FAKE_BC_SCRIPT=$BC_SCRIPT FAKE_BC_LOG=$BC_LOG
 export FAKE_RB_LOG=$RB_LOG FAKE_RELEASE_LOG=$RELEASE_LOG
+export FAKE_EVIDENCE_LOG=$EVIDENCE_LOG
+export FAKE_EVIDENCE_BINARY=$work/evidence-robin
+export FAKE_EVIDENCE_SUMMARY=$work/evidence-summary.json
+export FAKE_EVIDENCE_CANDIDATE=0123456789abcdef0123456789abcdef01234567
 
 # Record the timeout argument the driver actually passes, then run the real one.
 mkdir -p "$work/bin"
@@ -105,7 +132,7 @@ export ROBIN_RELEASE_BINARY=$work/robin
 export ROBIN_RELEASE_SUMMARY=$work/summary.json
 
 fixture() { # NAME
-    : >"$BC_SCRIPT"; : >"$BC_LOG"; : >"$RB_LOG"; : >"$RELEASE_LOG"; : >"$FAKE_TIMEOUT_LOG"
+    : >"$BC_SCRIPT"; : >"$BC_LOG"; : >"$RB_LOG"; : >"$RELEASE_LOG"; : >"$EVIDENCE_LOG"; : >"$FAKE_TIMEOUT_LOG"
     rm -rf -- "$STATE" "$work/runs" "$BACKLOG"
     mkdir -p "$STATE" "$HEADS" "$work/runs" "$ROBIN_BATCH_STATE"
     printf 'ok\n' >"$STATE/quota"
@@ -138,6 +165,12 @@ generation_attempts() {
 run() {
     status=0
     output=$(cd "$work" && bash "$source_root/scripts/autonomy-driver.sh" "$@" 2>&1) || status=$?
+}
+run_no_inputs() {
+    status=0
+    output=$(cd "$work" && env -u ROBIN_RELEASE_BINARY -u ROBIN_RELEASE_SUMMARY \
+        ROBIN_RELEASE_VERSION=0.5.0 \
+        bash "$source_root/scripts/autonomy-driver.sh" "$@" 2>&1) || status=$?
 }
 run_id() { cat "$STATE/run-id" 2>/dev/null || true; }
 
@@ -343,6 +376,57 @@ printf '%s\n' "$*" >>"$FAKE_RELEASE_LOG"
 printf 'RELEASED %s\n' v0.5.0
 REL
 chmod +x "$SCRIPTS/auto-release.sh"
+
+# 9c. No env inputs: the driver generates the evidence itself, consumes its
+# paths and candidate, and calls auto-release exactly once (no double tag).
+fixture
+item P001 'feat: self-evidenced'
+script_bc 'epoch e001 tree t1 members P001::0' 'gate green t1::0' 'land landed::0' 'minor::0'
+run_no_inputs run
+expect_status 0 'a self-evidenced release succeeds'
+expect_contains 'the release is reported' 'RELEASED'
+expect_contains 'the evidence verdict is recorded' 'RELEASE-EVIDENCE'
+if [ "$(wc -l <"$EVIDENCE_LOG")" -eq 1 ]; then
+    pass 'release-evidence is called once'
+else
+    fail "release-evidence called $(wc -l <"$EVIDENCE_LOG") times"
+fi
+if [ "$(wc -l <"$RELEASE_LOG")" -eq 1 ]; then
+    pass 'auto-release is called once; no double tag'
+else
+    fail "auto-release called $(wc -l <"$RELEASE_LOG") times"
+fi
+release_args=$(cat "$RELEASE_LOG")
+case $release_args in
+    *"$FAKE_EVIDENCE_CANDIDATE"*"$FAKE_EVIDENCE_BINARY"*"$FAKE_EVIDENCE_SUMMARY"*)
+        pass 'auto-release consumes the evidence paths and candidate' ;;
+    *) fail "auto-release args are wrong: $release_args" ;;
+esac
+id=$(run_id)
+[ "$(field "$id" release_outcome)" = RELEASED ] && pass 'status records RELEASED' || fail 'status lost RELEASED'
+
+# 9d. A refused evidence run never reaches auto-release and needs a decision.
+fixture
+item P001 'feat: evidence-refused'
+script_bc 'epoch e001 tree t1 members P001::0' 'gate green t1::0' 'land landed::0' 'minor::0'
+FAKE_EVIDENCE_MODE=refuse run_no_inputs run
+expect_contains 'a refused evidence run rolls back' 'ROLLED-BACK'
+expect_contains 'a refused evidence run needs a decision' 'NEEDS-DECISION'
+expect_contains 'the reason is named' 'release-evidence-refused'
+if [ -s "$RELEASE_LOG" ]; then fail 'auto-release ran after a refused evidence run'; else pass 'auto-release is skipped on refusal'; fi
+id=$(run_id)
+[ "$(field "$id" release_outcome)" = ROLLED-BACK ] && pass 'status records ROLLED-BACK' || fail 'status lost ROLLED-BACK'
+unset FAKE_EVIDENCE_MODE
+
+# 9e. Partial evidence output is a named NEEDS-DECISION, not a silent release.
+fixture
+item P001 'feat: partial-evidence'
+script_bc 'epoch e001 tree t1 members P001::0' 'gate green t1::0' 'land landed::0' 'minor::0'
+FAKE_EVIDENCE_MODE=partial run_no_inputs run
+expect_contains 'partial evidence is refused' 'NEEDS-DECISION'
+expect_contains 'the incomplete reason is named' 'release-evidence-incomplete'
+if [ -s "$RELEASE_LOG" ]; then fail 'auto-release ran on partial evidence'; else pass 'partial evidence never tags'; fi
+unset FAKE_EVIDENCE_MODE
 
 # 10. Missing capability and invalid bounds fail closed.
 fixture
