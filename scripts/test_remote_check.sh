@@ -150,9 +150,13 @@ else
     printf 'UNSTABLE %s %s %s\n' "$suite" "$before" "$after" >>"$FIXTURE_RESULTS"
 fi
 SUITE
+    cat >"$dir/scripts/gate-copy-name.sh" <<'NAME'
+#!/usr/bin/env bash
+printf '%s' "${FIXTURE_COPY_NAME:-fixture-copy}"
+NAME
     printf '#!/usr/bin/env bash\nshift 2\nexec "$@"\n' >"$dir/scripts/build-slot.sh"
     chmod +x "$dir/scripts/check-quality.sh" "$dir/scripts/build-slot.sh" \
-        "$dir/scripts/remote-check.sh"
+        "$dir/scripts/gate-copy-name.sh" "$dir/scripts/remote-check.sh"
 }
 
 make_repo "$work/repoA" AAA
@@ -230,6 +234,52 @@ else
     printf 'FAIL rendered gate drops ROBIN_E2E_BINARY or ROBINHOOD_DATA_DIR\n'
     failures=$((failures + 1))
 fi
+
+# Cross-OS parity variables must reach the build host in BOTH gate shapes.
+# check-quality.sh parity-cross hard-fails on the first three when ssh drops
+# them; the last three change which binary layout and corpus are checked.
+parity_env=(
+    PARITY_LINUX_BIN=/abs/linux-robin
+    PARITY_WINDOWS_EXE=/abs/robin.exe
+    PARITY_DATA_DIR=/abs/game-data
+    PARITY_LINUX_DIR=/abs/linux-dir
+    PARITY_WINDOWS_DIR=/abs/windows-dir
+    PARITY_REPLAY=/abs/extra.rhrec.jsonl
+)
+for shape in multi single; do
+    rendered_parity="$work/rendered-parity-$shape"
+    mkdir -p "$rendered_parity"
+    if [[ $shape == multi ]]; then
+        suites=(--suites format wasm)
+    else
+        suites=(wasm parity-single-env)
+    fi
+    (
+        cd "$work/repoA"
+        env FIXTURE_COPY_NAME="parity-$shape-env" \
+        FIXTURE_RENDERED="$rendered_parity" \
+            "${parity_env[@]}" \
+            bash scripts/remote-check.sh "${suites[@]}"
+    ) >"$work/parity-$shape.out" 2>&1 || {
+        cat "$work/parity-$shape.out" >&2
+        failures=$((failures + 1))
+        continue
+    }
+    for expected in \
+        "PARITY_LINUX_BIN=.*'/abs/linux-robin'" \
+        "PARITY_WINDOWS_EXE=.*'/abs/robin.exe'" \
+        "PARITY_DATA_DIR=.*'/abs/game-data'" \
+        "PARITY_LINUX_DIR=.*'/abs/linux-dir'" \
+        "PARITY_WINDOWS_DIR=.*'/abs/windows-dir'" \
+        "PARITY_REPLAY=.*'/abs/extra.rhrec.jsonl'"; do
+        if grep -qh "$expected" "$rendered_parity"/rendered-*.sh; then
+            printf 'ok   %s parity gate forwards %s\n' "$shape" "$expected"
+        else
+            printf 'FAIL %s parity gate drops %s\n' "$shape" "$expected"
+            failures=$((failures + 1))
+        fi
+    done
+done
 
 # The copy root must have been touched after sync even though rsync copied
 # files with --no-times and left the directory with an old mtime.

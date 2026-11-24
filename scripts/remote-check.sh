@@ -41,6 +41,16 @@ e2e_binary=${ROBIN_E2E_BINARY:-}
 e2e_data=${ROBINHOOD_DATA_DIR:-}
 e2e_evidence=${ROBIN_E2E_EVIDENCE:-}
 e2e_jobs=${ROBIN_E2E_JOBS:-2}
+# The cross-OS replay parity suite hard-fails on these three (check-quality.sh
+# uses ${var:?}), and the two optional directory/replay overrides change which
+# binary layout and corpus it checks. Paths are the BUILD HOST's. Without all
+# six, `remote-check.sh parity-cross` can never pass, however it is invoked.
+parity_linux_bin=${PARITY_LINUX_BIN:-}
+parity_windows_exe=${PARITY_WINDOWS_EXE:-}
+parity_data_dir=${PARITY_DATA_DIR:-}
+parity_linux_dir=${PARITY_LINUX_DIR:-}
+parity_windows_dir=${PARITY_WINDOWS_DIR:-}
+parity_replay=${PARITY_REPLAY:-}
 
 host=${ROBIN_BUILD_HOST:-minipc}
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -520,6 +530,12 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     ROBINHOOD_DATA_DIR=${e2e_data@Q} \
     ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
     ROBIN_E2E_JOBS=${e2e_jobs@Q} \
+    PARITY_LINUX_BIN=${parity_linux_bin@Q} \
+    PARITY_WINDOWS_EXE=${parity_windows_exe@Q} \
+    PARITY_DATA_DIR=${parity_data_dir@Q} \
+    PARITY_LINUX_DIR=${parity_linux_dir@Q} \
+    PARITY_WINDOWS_DIR=${parity_windows_dir@Q} \
+    PARITY_REPLAY=${parity_replay@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
@@ -550,6 +566,12 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     ROBINHOOD_DATA_DIR=${e2e_data@Q} \
     ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
     ROBIN_E2E_JOBS=${e2e_jobs@Q} \
+    PARITY_LINUX_BIN=${parity_linux_bin@Q} \
+    PARITY_WINDOWS_EXE=${parity_windows_exe@Q} \
+    PARITY_DATA_DIR=${parity_data_dir@Q} \
+    PARITY_LINUX_DIR=${parity_linux_dir@Q} \
+    PARITY_WINDOWS_DIR=${parity_windows_dir@Q} \
+    PARITY_REPLAY=${parity_replay@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
