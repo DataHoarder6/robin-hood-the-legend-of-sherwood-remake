@@ -3,7 +3,7 @@
 Date: 2026-11-23. Status: proposed, pending owner approval.
 Source of decisions: a four-round grilling with the owner on 2026-11-22/23,
 recorded in `/tmp/opencode/autonomy-decisions.md`. Research:
-[`docs/research/sandcastle-evaluation.md`](../research/sandcastle-evaluation.md)
+`docs/research/sandcastle-evaluation.md` (in the `agent-sandcastle-research` worktree)
 and the estate fact sheet on existing automation primitives.
 
 ## Intent
@@ -14,7 +14,7 @@ lands via `scripts/land.sh`, and publishes a MINOR release when the batch is
 release-worthy. A human sets the rules in a pre-run contract; the loop never
 changes them mid-run and never asks a question mid-run.
 
-The vocabulary is fixed in [`GLOSSARY.md`](../../GLOSSARY.md): work item, work
+The vocabulary is fixed in [`GLOSSARY.md`](../../../GLOSSARY.md): work item, work
 queue, contract, run, batch, release, promotion, terminal state, run end.
 
 ## Goals
