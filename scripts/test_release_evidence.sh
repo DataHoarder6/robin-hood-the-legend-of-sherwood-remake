@@ -332,10 +332,10 @@ if git log --oneline -n 1 -- docs/releases/0.5.0.md | grep -q 'add 0.5.0 release
 else
     fail 'the note was not committed'
 fi
-if grep -q 'workflow run native-release.yml --repo .* --ref main' "$GH_CALLS"; then
-    pass 'the Windows build is dispatched from main'
+if grep -q "workflow run native-release.yml --repo .* --ref $head" "$GH_CALLS"; then
+    pass 'the Windows build is dispatched from the candidate commit'
 else
-    fail 'no native-release dispatch'
+    fail 'no native-release dispatch from the candidate'
 fi
 if [ "$(grep -c '^PARITY_' "$PARITY_CALLS")" -eq 6 ]; then
     pass 'all six PARITY_* variables reach parity-cross'

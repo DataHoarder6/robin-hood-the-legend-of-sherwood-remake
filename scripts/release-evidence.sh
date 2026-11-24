@@ -192,7 +192,10 @@ jq -e --argjson expected "$expected_rows" \
 
 # ---- 2. Obtain robin.exe built from the candidate and verify it under wine.
 obtain_windows() { # SHA
-    local sha=$1 ref=${ROBIN_RELEASE_GH_REF:-main} download run_id state deadline
+    local sha=$1 ref=${ROBIN_RELEASE_GH_REF:-} download run_id state deadline
+    # CI must build the candidate itself. --ref main built the moving tip and
+    # produced an exe with the wrong sha (evidence run 8).
+    [ -n "$ref" ] || ref=$candidate
     local interval=${ROBIN_RELEASE_POLL_SECS:-10} rendered exe
     command -v gh >/dev/null || die 'gh-unavailable'
     # Wine lives on the build host that replays the Windows binary; the runtime
@@ -204,7 +207,7 @@ obtain_windows() { # SHA
     # dispatch can download a stale exe built from an earlier commit. Wait for
     # a NEW id, then verify its sha below.
     previous=$(gh run list --repo "$gh_repo" --workflow native-release.yml \
-        --event workflow_dispatch --branch "$ref" --limit 1 --json databaseId \
+        --event workflow_dispatch --limit 1 --json databaseId \
         --jq '.[0].databaseId // ""' 2>/dev/null || true)
     gh workflow run native-release.yml --repo "$gh_repo" --ref "$ref" >/dev/null ||
         die 'gh-dispatch-failed'
@@ -212,7 +215,7 @@ obtain_windows() { # SHA
     run_id=
     while [ "$(date +%s)" -lt "$deadline" ]; do
         run_id=$(gh run list --repo "$gh_repo" --workflow native-release.yml --event workflow_dispatch \
-            --branch "$ref" --limit 1 --json databaseId \
+            --limit 1 --json databaseId \
             --jq '.[0].databaseId' 2>/dev/null || true)
         if [ -n "$run_id" ] && [ "$run_id" != null ] && [ "$run_id" != "$previous" ]; then
             break
