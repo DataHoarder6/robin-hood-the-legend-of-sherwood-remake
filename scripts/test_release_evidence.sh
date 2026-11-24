@@ -112,10 +112,18 @@ cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$GH_CALLS"
 case ${1:-} in
-    workflow) exit 0 ;;
+    workflow)
+        # A dispatch creates a new run id so the script never reuses the
+        # previous artifact (the real failure this covers).
+        if [[ ${2:-} == run ]]; then
+            n=$(( ${GH_RUN_SEQ:-12345} + 1 ))
+            printf '%s\n' "$n" >"$GH_RUN_SEQ_FILE"
+        fi
+        exit 0
+        ;;
     run)
         case ${2:-} in
-            list) printf '12345\n' ;;
+            list) printf '%s\n' "$(cat "$GH_RUN_SEQ_FILE" 2>/dev/null || echo 12345)" ;;
             view) printf 'completed success\n' ;;
             download)
                 dir=''
@@ -235,7 +243,8 @@ for tool in bash git jq python3 awk sed grep find head mktemp date sleep dirname
 done
 for stub in ssh scp wine runbg; do ln -sf "$stubs/$stub" "$work/no-gh-bin/$stub"; done
 
-export SSH_CALLS=$work/ssh-calls GH_CALLS=$work/gh-calls RC_CALLS=$work/rc-calls
+export SSH_CALLS=$work/ssh-calls GH_CALLS=$work/gh-calls RC_CALLS=$work/rc-calls GH_RUN_SEQ_FILE=$work/gh-run-seq
+printf '12345\n' >"$GH_RUN_SEQ_FILE"
 export FIXTURE_WORK=$work
 export PARITY_CALLS=$work/parity-calls GATE_CALLS=$work/gate-calls NOTES_CALLS=$work/notes-calls
 export FAKE_SUMMARY_FILE=$work/summary.json
@@ -258,6 +267,7 @@ fixture() {
     : >"$SSH_CALLS"; : >"$GH_CALLS"; : >"$RC_CALLS"; : >"$PARITY_CALLS"
     : >"$GATE_CALLS"; : >"$NOTES_CALLS"
     unset FAKE_BUILD_FAIL FAKE_GATE_FAIL FAKE_PARITY_FAIL FAKE_WIN_SHA FAKE_CORPUS_VERSION
+    printf '12345\n' >"$GH_RUN_SEQ_FILE"
     rm -rf -- "$repo"
     cp -a -- "$work/template" "$repo"
     cd -- "$repo"

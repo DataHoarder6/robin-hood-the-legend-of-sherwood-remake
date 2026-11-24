@@ -162,6 +162,13 @@ obtain_windows() { # SHA
     # only downloads the artifact and ships it there.
     ssh -n "$host" 'command -v wine >/dev/null 2>&1' || die 'wine-unavailable'
     download=$(mktemp -d "${TMPDIR:-/tmp}/robin-release-exe.XXXXXX")
+    # Remember the newest dispatch that already existed. A workflow_dispatch on
+    # main leaves older runs behind; taking --limit 1 immediately after our own
+    # dispatch can download a stale exe built from an earlier commit. Wait for
+    # a NEW id, then verify its sha below.
+    previous=$(gh run list --repo "$gh_repo" --workflow native-release.yml \
+        --event workflow_dispatch --branch "$ref" --limit 1 --json databaseId \
+        --jq '.[0].databaseId // ""' 2>/dev/null || true)
     gh workflow run native-release.yml --repo "$gh_repo" --ref "$ref" >/dev/null ||
         die 'gh-dispatch-failed'
     deadline=$(( $(date +%s) + ${ROBIN_RELEASE_RUN_TIMEOUT:-3600} ))
@@ -170,7 +177,9 @@ obtain_windows() { # SHA
         run_id=$(gh run list --repo "$gh_repo" --workflow native-release.yml --event workflow_dispatch \
             --branch "$ref" --limit 1 --json databaseId \
             --jq '.[0].databaseId' 2>/dev/null || true)
-        [ -n "$run_id" ] && [ "$run_id" != null ] && break
+        if [ -n "$run_id" ] && [ "$run_id" != null ] && [ "$run_id" != "$previous" ]; then
+            break
+        fi
         run_id=
         sleep "$interval"
     done
