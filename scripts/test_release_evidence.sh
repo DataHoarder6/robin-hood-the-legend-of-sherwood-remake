@@ -394,7 +394,10 @@ fixture 80
 FAKE_PARITY_FAIL=1 run_evidence "$head" 0.5.0
 expect_status 1 'a red parity suite stops the release'
 expect_contains 'the parity reason is named' 'parity-cross-red'
-[ -s "$GATE_CALLS" ] && fail 'the gate ran after red parity' || pass 'the gate is skipped after red parity'
+# The Linux gate intentionally runs before CI dispatch, so it may be present.
+# What matters is that a red parity never reaches VERDICT observed or a note.
+[ -f docs/releases/0.5.0.md ] && fail 'a note was written after red parity' \
+    || pass 'no note after red parity'
 
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

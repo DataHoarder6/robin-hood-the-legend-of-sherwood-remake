@@ -153,6 +153,43 @@ if ! build_linux "$short" >"$gate_log" 2>&1; then
     die 'linux-build-failed'
 fi
 
+# ---- 5. Release gate, summary fetch, generated note and its commit.
+gate_short=${gate_candidate:0:12}
+evidence=${ROBIN_E2E_EVIDENCE:-"~/e2e-gate/release-$gate_short"}
+case $evidence in '~/'* | /*) ;; *) die "evidence-bad-path:$evidence" ;; esac
+case $evidence in *[!A-Za-z0-9._/~+-]*) die "evidence-bad-path:$evidence" ;; esac
+if ! ROBIN_E2E_EVIDENCE="$evidence" \
+    bash "$scripts/release-gate.sh" "$gate_candidate" "$binary" \
+    >"$gate_log" 2>&1; then
+    cat -- "$gate_log" >&2
+    die 'release-gate-refused'
+fi
+
+ssh "$host" "cat -- $evidence/summary.json" >"$summary_file" ||
+    die 'summary-fetch-failed'
+jq -e '.verdict == "observed"' "$summary_file" >/dev/null 2>&1 ||
+    die 'gate-verdict-not-observed'
+jq -e '.verdicts.H23 == "observed"' "$summary_file" >/dev/null 2>&1 ||
+    die 'gate-h23-not-observed'
+expected_rows=$(
+    python3 -B - "$repository/scripts/validation" <<'PY'
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+import scenario_corpus
+_, scenarios = scenario_corpus.load_corpus()
+rows = sorted(identifier for identifier, (_, document) in scenarios.items()
+              if (document.get("proves") or {}).get("layer") == "process")
+if not rows:
+    print("no process-layer rows", file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps(rows))
+PY
+) || die 'gate-process-rows-unavailable'
+jq -e --argjson expected "$expected_rows" \
+    '. as $s | all($expected[]; . as $row | (($s.selected // []) | index($row)) != null)' \
+    "$summary_file" >/dev/null 2>&1 || die 'gate-selected-incomplete'
+
 # ---- 2. Obtain robin.exe built from the candidate and verify it under wine.
 obtain_windows() { # SHA
     local sha=$1 ref=${ROBIN_RELEASE_GH_REF:-main} download run_id state deadline
@@ -368,43 +405,7 @@ fi
     die 'parity-cross-not-green'
 }
 
-# ---- 5. Release gate, summary fetch, generated note and its commit.
-gate_short=${gate_candidate:0:12}
-evidence=${ROBIN_E2E_EVIDENCE:-"~/e2e-gate/release-$gate_short"}
-case $evidence in '~/'* | /*) ;; *) die "evidence-bad-path:$evidence" ;; esac
-case $evidence in *[!A-Za-z0-9._/~+-]*) die "evidence-bad-path:$evidence" ;; esac
-if ! ROBIN_E2E_EVIDENCE="$evidence" \
-    bash "$scripts/release-gate.sh" "$gate_candidate" "$binary" \
-    >"$gate_log" 2>&1; then
-    cat -- "$gate_log" >&2
-    die 'release-gate-refused'
-fi
-
-ssh "$host" "cat -- $evidence/summary.json" >"$summary_file" ||
-    die 'summary-fetch-failed'
-jq -e '.verdict == "observed"' "$summary_file" >/dev/null 2>&1 ||
-    die 'gate-verdict-not-observed'
-jq -e '.verdicts.H23 == "observed"' "$summary_file" >/dev/null 2>&1 ||
-    die 'gate-h23-not-observed'
-expected_rows=$(
-    python3 -B - "$repository/scripts/validation" <<'PY'
-import json
-import sys
-sys.path.insert(0, sys.argv[1])
-import scenario_corpus
-_, scenarios = scenario_corpus.load_corpus()
-rows = sorted(identifier for identifier, (_, document) in scenarios.items()
-              if (document.get("proves") or {}).get("layer") == "process")
-if not rows:
-    print("no process-layer rows", file=sys.stderr)
-    raise SystemExit(1)
-print(json.dumps(rows))
-PY
-) || die 'gate-process-rows-unavailable'
-jq -e --argjson expected "$expected_rows" \
-    '. as $s | all($expected[]; . as $row | (($s.selected // []) | index($row)) != null)' \
-    "$summary_file" >/dev/null 2>&1 || die 'gate-selected-incomplete'
-
+# ---- 5. Generate and commit the release note.
 if ! bash "$scripts/release-notes.sh" "$summary_file" "$version" >/dev/null; then
     die 'release-notes-failed'
 fi
@@ -414,6 +415,8 @@ git add -- "$note" || die 'release-note-stage-failed'
 git commit -m "docs: add $version release evidence" -- "$note" ||
     die 'release-note-commit-failed'
 final_candidate=$(git rev-parse HEAD)
+
+
 
 # ---- 6. Machine-readable outputs consumed by autonomy-driver.sh.
 printf 'ROBIN_RELEASE_BINARY=%s\n' "$binary"
