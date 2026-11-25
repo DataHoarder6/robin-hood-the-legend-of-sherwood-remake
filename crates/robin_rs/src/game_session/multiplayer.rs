@@ -1849,7 +1849,7 @@ fn validate_preflighted_content(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod story_regression;
 
 #[cfg(test)]
