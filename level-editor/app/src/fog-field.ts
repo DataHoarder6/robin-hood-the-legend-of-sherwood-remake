@@ -40,7 +40,8 @@ interface CatalogEntry {
 
 const sha = /^[a-f0-9]{64}$/;
 const paintingKey = (ambiance: FieldAmbiance) => ambiance.toLowerCase() as "fog" | "night";
-const slopeChannels = (field: Pick<AmbianceColorField, "slope_channels">) => field.slope_channels ?? 1;
+const slopeChannels = (field: Pick<AmbianceColorField, "slope_channels">) =>
+  field.slope_channels ?? 1;
 export function validateAmbianceColorField(value: unknown): AmbianceColorField {
   const fail = (why: string): never => {
     throw new Error(`Invalid ambiance colour field: ${why}`);
@@ -49,26 +50,50 @@ export function validateAmbianceColorField(value: unknown): AmbianceColorField {
   const f = value as AmbianceColorField;
   if (f.version !== 1 || f.kind !== "native-ambiance-color-field") fail("version/kind");
   if (typeof f.map !== "string" || !f.map) fail("map");
-  if (!FIELD_AMBIANCES.includes(f.ambiance)) fail(`ambiance must be one of ${FIELD_AMBIANCES.join(", ")}`);
+  if (!FIELD_AMBIANCES.includes(f.ambiance))
+    fail(`ambiance must be one of ${FIELD_AMBIANCES.join(", ")}`);
   if (f.space !== "srgb-unorm") fail("colour space");
-  if (!Number.isFinite(f.camera_elevation_deg) || f.camera_elevation_deg <= 0 || f.camera_elevation_deg >= 90)
+  if (
+    !Number.isFinite(f.camera_elevation_deg) ||
+    f.camera_elevation_deg <= 0 ||
+    f.camera_elevation_deg >= 90
+  )
     fail("camera elevation");
   for (const key of ["day", paintingKey(f.ambiance)] as const) {
     const s = f.source?.[key];
-    if (!s || typeof s.path !== "string" || !s.path || typeof s.sha256 !== "string" || !sha.test(s.sha256))
+    if (
+      !s ||
+      typeof s.path !== "string" ||
+      !s.path ||
+      typeof s.sha256 !== "string" ||
+      !sha.test(s.sha256)
+    )
       fail(`source.${key}`);
   }
   const positive = (v: unknown) => Number.isInteger(v) && (v as number) > 0;
-  if (!Array.isArray(f.map_size) || f.map_size.length !== 2 || !f.map_size.every(positive)) fail("map_size");
+  if (!Array.isArray(f.map_size) || f.map_size.length !== 2 || !f.map_size.every(positive))
+    fail("map_size");
   if (!Array.isArray(f.grid) || f.grid.length !== 2 || !f.grid.every(positive)) fail("grid");
   if (!positive(f.block)) fail("block");
-  if (f.grid[0] !== Math.ceil(f.map_size[0] / f.block) || f.grid[1] !== Math.ceil(f.map_size[1] / f.block))
+  if (
+    f.grid[0] !== Math.ceil(f.map_size[0] / f.block) ||
+    f.grid[1] !== Math.ceil(f.map_size[1] / f.block)
+  )
     fail("grid does not tile the map");
   const cells = f.grid[0] * f.grid[1];
-  if (f.slope_channels !== undefined && f.slope_channels !== 1 && f.slope_channels !== 3) fail("slope_channels");
-  if (!Array.isArray(f.slope) || f.slope.length !== slopeChannels(f) * cells || !f.slope.every((v) => Number.isFinite(v) && v > 0 && v <= 2))
+  if (f.slope_channels !== undefined && f.slope_channels !== 1 && f.slope_channels !== 3)
+    fail("slope_channels");
+  if (
+    !Array.isArray(f.slope) ||
+    f.slope.length !== slopeChannels(f) * cells ||
+    !f.slope.every((v) => Number.isFinite(v) && v > 0 && v <= 2)
+  )
     fail("slope");
-  if (!Array.isArray(f.offset) || f.offset.length !== 3 * cells || !f.offset.every((v) => Number.isFinite(v) && v >= -1 && v <= 1))
+  if (
+    !Array.isArray(f.offset) ||
+    f.offset.length !== 3 * cells ||
+    !f.offset.every((v) => Number.isFinite(v) && v >= -1 && v <= 1)
+  )
     fail("offset");
   return f;
 }
@@ -105,11 +130,17 @@ export async function loadAmbianceColorField(
   const catalog = value as { version?: unknown; entries?: unknown };
   if (!catalog || catalog.version !== 1 || !Array.isArray(catalog.entries))
     throw new Error("Invalid ambiance catalog");
-  const rows = (catalog.entries as CatalogEntry[]).filter((e) => e?.map === map && e?.ambiance === ambiance);
+  const rows = (catalog.entries as CatalogEntry[]).filter(
+    (e) => e?.map === map && e?.ambiance === ambiance,
+  );
   if (rows.length > 1) throw new Error(`Duplicate ambiance field for ${map} ${ambiance}`);
   const row = rows[0];
   if (!row) return null;
-  if (typeof row.field?.path !== "string" || !safeLibraryPath(row.field.path) || !sha.test(row.field.sha256 ?? ""))
+  if (
+    typeof row.field?.path !== "string" ||
+    !safeLibraryPath(row.field.path) ||
+    !sha.test(row.field.sha256 ?? "")
+  )
     throw new Error(`Invalid ambiance catalog row for ${map} ${ambiance}`);
   const field = validateAmbianceColorField(await pinnedJson(root, row.field));
   if (field.map !== map || field.ambiance !== ambiance)
@@ -124,7 +155,8 @@ export function ambianceFieldTexture(field: AmbianceColorField): THREE.DataTextu
     shared = slopeChannels(field) === 1;
   const data = new Uint16Array(gx * gy * 4);
   for (let i = 0; i < gx * gy; i++) {
-    for (let c = 0; c < 3; c++) data[i * 4 + c] = THREE.DataUtils.toHalfFloat(field.offset[i * 3 + c]!);
+    for (let c = 0; c < 3; c++)
+      data[i * 4 + c] = THREE.DataUtils.toHalfFloat(field.offset[i * 3 + c]!);
     data[i * 4 + 3] = THREE.DataUtils.toHalfFloat(shared ? field.slope[i]! : 1);
   }
   return fieldTexture(data, gx, gy);
@@ -136,7 +168,8 @@ export function ambianceFieldSlopeTexture(field: AmbianceColorField): THREE.Data
   const [gx, gy] = field.grid;
   const data = new Uint16Array(gx * gy * 4);
   for (let i = 0; i < gx * gy; i++) {
-    for (let c = 0; c < 3; c++) data[i * 4 + c] = THREE.DataUtils.toHalfFloat(field.slope[i * 3 + c]!);
+    for (let c = 0; c < 3; c++)
+      data[i * 4 + c] = THREE.DataUtils.toHalfFloat(field.slope[i * 3 + c]!);
     data[i * 4 + 3] = THREE.DataUtils.toHalfFloat(1);
   }
   return fieldTexture(data, gx, gy);
@@ -155,7 +188,12 @@ function fieldTexture(data: Uint16Array, gx: number, gy: number) {
 }
 
 /** CPU reference of the shader for one 8-bit sRGB colour at a map pixel (tests, audits). */
-export function applyAmbianceField(field: AmbianceColorField, mapX: number, mapY: number, rgb: readonly number[]) {
+export function applyAmbianceField(
+  field: AmbianceColorField,
+  mapX: number,
+  mapY: number,
+  rgb: readonly number[],
+) {
   const [gx, gy] = field.grid,
     [w, h] = field.map_size;
   // Bilinear between tile centres, clamped at the border (GPU LinearFilter + ClampToEdge).
@@ -169,7 +207,10 @@ export function applyAmbianceField(field: AmbianceColorField, mapX: number, mapY
     ty = fy - y0;
   const at = (values: number[], stride: number, k: number) => {
     const v = (x: number, y: number) => values[(y * gx + x) * stride + k]!;
-    return (v(x0, y0) * (1 - tx) + v(x1, y0) * tx) * (1 - ty) + (v(x0, y1) * (1 - tx) + v(x1, y1) * tx) * ty;
+    return (
+      (v(x0, y0) * (1 - tx) + v(x1, y0) * tx) * (1 - ty) +
+      (v(x0, y1) * (1 - tx) + v(x1, y1) * tx) * ty
+    );
   };
   const channels = slopeChannels(field);
   return rgb.map((v, c) => {
@@ -182,7 +223,8 @@ export function applyAmbianceField(field: AmbianceColorField, mapX: number, mapY
 export function isAmbianceNativeMaterial(material: THREE.Material, field: AmbianceColorField) {
   return (
     material.userData.source_ambiance === field.ambiance ||
-    material.userData.reprojection_source_sha256 === field.source[paintingKey(field.ambiance)]!.sha256
+    material.userData.reprojection_source_sha256 ===
+      field.source[paintingKey(field.ambiance)]!.sha256
   );
 }
 
@@ -204,7 +246,10 @@ export function ambianceFieldUniforms(): AmbianceFieldUniforms {
     fogFieldElevation: { value: new THREE.Vector2(0, 1) },
   };
 }
-export function setAmbianceFieldUniforms(uniforms: AmbianceFieldUniforms, field: AmbianceColorField | null) {
+export function setAmbianceFieldUniforms(
+  uniforms: AmbianceFieldUniforms,
+  field: AmbianceColorField | null,
+) {
   uniforms.fogFieldMap.value?.dispose();
   uniforms.fogFieldMap.value = field ? ambianceFieldTexture(field) : null;
   uniforms.fogFieldSlopeMap.value?.dispose();
@@ -230,8 +275,14 @@ export function supportsAmbianceField(material: THREE.Material) {
 /** Inject the field into a compiled standard shader. The editor world is three.js Y-up with the
  * map's Z-up frame rotated -90° about X, so map x = X and map y = Z·sin(e) − Y·cos(e). The field
  * acts on the final sRGB colour, matching how it was fitted on 8-bit paintings. */
-export function injectAmbianceField(shader: THREE.WebGLProgramParametersWithUniforms, uniforms: AmbianceFieldUniforms) {
-  if (!shader.vertexShader.includes("#include <project_vertex>") || !shader.fragmentShader.includes("#include <opaque_fragment>"))
+export function injectAmbianceField(
+  shader: THREE.WebGLProgramParametersWithUniforms,
+  uniforms: AmbianceFieldUniforms,
+) {
+  if (
+    !shader.vertexShader.includes("#include <project_vertex>") ||
+    !shader.fragmentShader.includes("#include <opaque_fragment>")
+  )
     throw new Error("Ambiance field requires a standard three.js material shader");
   Object.assign(shader.uniforms, uniforms);
   shader.vertexShader =

@@ -76,7 +76,12 @@ export class NativeExtractionLoader {
       manifestSha256: pin.sha256,
       associations,
     });
-    try { current(); } catch (error) { retireNativeExtractionContext(context); throw error; }
+    try {
+      current();
+    } catch (error) {
+      retireNativeExtractionContext(context);
+      throw error;
+    }
     this.contexts.add(context);
     return context;
   }

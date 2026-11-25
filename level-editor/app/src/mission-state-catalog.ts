@@ -1,4 +1,7 @@
-import { validateStateApertureManifest, type StateApertureManifest } from './state-aperture-loader.ts';
+import {
+  validateStateApertureManifest,
+  type StateApertureManifest,
+} from "./state-aperture-loader.ts";
 import { safeLibraryPath, type ProtoLevel } from "@rle/shared";
 import { isNotFound, readJson, subdir } from "./fs.ts";
 import {
@@ -57,7 +60,8 @@ export function parseMissionStateCatalog(value: unknown): MissionStateCatalogEnt
       ) ||
       ids.has(entry.id) ||
       !pin(entry.contract) ||
-      (entry.aperture !== undefined && (!pin(entry.aperture) || (entry.kind !== undefined && entry.kind !== "transition"))) ||
+      (entry.aperture !== undefined &&
+        (!pin(entry.aperture) || (entry.kind !== undefined && entry.kind !== "transition"))) ||
       !pin(entry.mission_data) ||
       !pin(entry.level_data)
     )
@@ -105,7 +109,12 @@ export async function loadMissionStatePreview(
   root: FileSystemDirectoryHandle,
   entry: MissionStateCatalogEntry,
 ): Promise<
-  | { kind: "transition"; contract: StateDeliveryContract; source: MissionStateSource; aperture?: StateApertureManifest }
+  | {
+      kind: "transition";
+      contract: StateDeliveryContract;
+      source: MissionStateSource;
+      aperture?: StateApertureManifest;
+    }
   | { kind: "native-loop"; contract: NativeLoopPreviewContract; source: MissionStateSource }
   | { kind: "native-patch"; contract: NativePatchPreviewContract; source: MissionStateSource }
 > {
@@ -152,5 +161,10 @@ export async function loadMissionStatePreview(
     return { kind: "native-patch", contract: contract as NativePatchPreviewContract, source };
   return loop
     ? { kind: "native-loop", contract: contract as NativeLoopPreviewContract, source }
-    : { kind: "transition", contract: contract as StateDeliveryContract, source, ...(aperture ? { aperture } : {}) };
+    : {
+        kind: "transition",
+        contract: contract as StateDeliveryContract,
+        source,
+        ...(aperture ? { aperture } : {}),
+      };
 }

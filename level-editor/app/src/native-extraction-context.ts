@@ -43,7 +43,8 @@ export async function bindNativeExtractionContext(input: {
     !/^[a-f0-9]{64}$/.test(input.manifestSha256) ||
     (await digest(manifestBytes)) !== input.manifestSha256 ||
     (await digest(bytes)) !== binding.source.model_sha256
-  ) throw new Error("Native extraction context pin mismatch");
+  )
+    throw new Error("Native extraction context pin mismatch");
   const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (
     bytes.length < 20 ||
@@ -59,9 +60,7 @@ export async function bindNativeExtractionContext(input: {
   const verifyGeometry = createNativeExtractionGeometryVerifier(bytes, json);
   if (JSON.stringify(json) !== JSON.stringify(parserJson))
     throw new Error("Native extraction parser differs from pinned model");
-  const manifest = JSON.parse(
-    new TextDecoder().decode(manifestBytes),
-  ) as NativeExtractionManifest;
+  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as NativeExtractionManifest;
   if (
     manifest.version !== 1 ||
     manifest.model_sha256 !== binding.source.model_sha256 ||
@@ -105,9 +104,7 @@ export async function bindNativeExtractionContext(input: {
     const key = `${index}:${primitive!.primitives}`;
     if (seenPrimitives.has(key)) throw new Error("Native extraction duplicate loaded primitive");
     seenPrimitives.add(key);
-    geometryChecks.push(
-      verifyGeometry(mesh, primitive!.meshes!, primitive!.primitives!),
-    );
+    geometryChecks.push(verifyGeometry(mesh, primitive!.meshes!, primitive!.primitives!));
     seen.add(index);
     meshRoles.set(mesh, role);
   });
@@ -219,7 +216,6 @@ export function prepareNativeExtractionContext(
   if (!trusted.has(context)) throw new Error("Unverified native extraction context");
   return context.prepare(object, binding);
 }
-
 
 /** Release verification snapshots after an independent pinned session is ready.
  * The strict handle is permanently invalid; this never skips a live strict check.

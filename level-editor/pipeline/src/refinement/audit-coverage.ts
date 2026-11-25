@@ -16,9 +16,15 @@ export async function auditCoverage(
   width: number,
   height: number,
 ): Promise<Uint8Array> {
-  if (!coverage || !coverage.file || !/^[a-f0-9]{64}$/.test(coverage.sha256) ||
-      (coverage.channel !== "alpha" && coverage.channel !== "red")) {
-    throw new Error("--audit-input requires explicit pinned object_coverage (file, sha256, channel). Prepare a new coverage-bound manifest; RGB background guessing is unsupported.");
+  if (
+    !coverage ||
+    !coverage.file ||
+    !/^[a-f0-9]{64}$/.test(coverage.sha256) ||
+    (coverage.channel !== "alpha" && coverage.channel !== "red")
+  ) {
+    throw new Error(
+      "--audit-input requires explicit pinned object_coverage (file, sha256, channel). Prepare a new coverage-bound manifest; RGB background guessing is unsupported.",
+    );
   }
   const bytes = await fs.readFile(path.resolve(directory, coverage.file));
   if (createHash("sha256").update(bytes).digest("hex") !== coverage.sha256)
@@ -31,8 +37,10 @@ export async function auditCoverage(
   const pixels = await sharp(bytes).toColourspace("srgb").ensureAlpha().raw().toBuffer();
   const result = new Uint8Array(width * height);
   for (let i = 0; i < result.length; i++) {
-    if (coverage.channel === "red" &&
-        (pixels[i * 4] !== pixels[i * 4 + 1] || pixels[i * 4] !== pixels[i * 4 + 2]))
+    if (
+      coverage.channel === "red" &&
+      (pixels[i * 4] !== pixels[i * 4 + 1] || pixels[i * 4] !== pixels[i * 4 + 2])
+    )
       throw new Error("Red-channel object coverage must be a grayscale mask");
     result[i] = Number(pixels[i * 4 + (coverage.channel === "alpha" ? 3 : 0)]! > 0);
   }

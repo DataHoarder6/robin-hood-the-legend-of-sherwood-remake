@@ -45,7 +45,12 @@ async function main(): Promise<void> {
   if (process.argv.includes("--audit-input")) {
     const view = manifest.views[0];
     if (!view) throw new Error("Missing source view");
-    const coverage = await auditCoverage(directory, view.object_coverage, view.crop.width, view.crop.height);
+    const coverage = await auditCoverage(
+      directory,
+      view.object_coverage,
+      view.crop.width,
+      view.crop.height,
+    );
     const frame = await sharp(path.join(directory, view.input)).ensureAlpha().raw().toBuffer();
     const editMask = await sharp(path.join(directory, view.mask)).ensureAlpha().raw().toBuffer();
     const { data: source, info } = await sharp(manifest.source_image)
