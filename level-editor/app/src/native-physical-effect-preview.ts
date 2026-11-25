@@ -70,40 +70,20 @@ export function validateNativeEffectMaterial(material: THREE.Material) {
     material.color.equals(new THREE.Color(0, 0, 0)) &&
     material.emissive.equals(new THREE.Color(1, 1, 1)) &&
     material.emissiveIntensity === 1 &&
-    map instanceof THREE.Texture &&
-    map.channel === 1 &&
-    emissive instanceof THREE.Texture &&
-    emissive.channel === 0 &&
-    material.metalness === 0 &&
-    material.roughness === 1 &&
-    !material.vertexColors &&
-    material.side === THREE.DoubleSide &&
-    material.opacity === 1 &&
-    !material.transparent &&
-    material.alphaTest === 0.5 &&
-    !material.alphaHash &&
-    !material.alphaToCoverage &&
-    material.blending === THREE.NormalBlending &&
-    !material.premultipliedAlpha &&
-    material.depthTest &&
-    material.depthWrite &&
-    !material.stencilWrite &&
-    !material.polygonOffset &&
-    !material.alphaMap &&
-    !material.envMap &&
-    !material.lightMap &&
-    !material.aoMap &&
-    !material.normalMap &&
-    !material.bumpMap &&
-    !material.displacementMap &&
-    !material.metalnessMap &&
-    !material.roughnessMap &&
-    !material.wireframe &&
-    !material.flatShading &&
-    !material.clippingPlanes?.length &&
+    map instanceof THREE.Texture && map.channel === 1 &&
+    emissive instanceof THREE.Texture && emissive.channel === 0 &&
+    material.metalness === 0 && material.roughness === 1 &&
+    !material.vertexColors && material.side === THREE.DoubleSide &&
+    material.opacity === 1 && !material.transparent && material.alphaTest === 0.5 &&
+    !material.alphaHash && !material.alphaToCoverage &&
+    material.blending === THREE.NormalBlending && !material.premultipliedAlpha &&
+    material.depthTest && material.depthWrite && !material.stencilWrite && !material.polygonOffset &&
+    !material.alphaMap && !material.envMap && !material.lightMap && !material.aoMap &&
+    !material.normalMap && !material.bumpMap && !material.displacementMap &&
+    !material.metalnessMap && !material.roughnessMap &&
+    !material.wireframe && !material.flatShading && !material.clippingPlanes?.length &&
     !material.userData.foliage_physical_opacity &&
-    !material.userData.source_ownership_semantics &&
-    !material.userData.source_ownership_fill &&
+    !material.userData.source_ownership_semantics && !material.userData.source_ownership_fill &&
     (!material.defines || Object.keys(material.defines).every((key) => key === "STANDARD"));
   if (complementaryEmission) return;
   const sameTexture =

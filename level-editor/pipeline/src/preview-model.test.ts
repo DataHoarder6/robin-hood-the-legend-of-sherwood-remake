@@ -30,25 +30,15 @@ test("preview compression keeps both axes positive for thin texture strips", asy
     const doc = new Document();
     const buffer = doc.createBuffer();
     const image = await sharp({ create: { width, height, channels: 4, background: "#63884a" } })
-      .png()
-      .toBuffer();
+      .png().toBuffer();
     const texture = doc.createTexture().setImage(image).setMimeType("image/png");
     const material = doc.createMaterial().setBaseColorTexture(texture);
-    const positions = doc
-      .createAccessor()
-      .setType("VEC3")
-      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]))
-      .setBuffer(buffer);
-    const uv = doc
-      .createAccessor()
-      .setType("VEC2")
-      .setArray(new Float32Array([0, 0, 1, 0, 0, 1]))
-      .setBuffer(buffer);
-    const primitive = doc
-      .createPrimitive()
-      .setAttribute("POSITION", positions)
-      .setAttribute("TEXCOORD_0", uv)
-      .setMaterial(material);
+    const positions = doc.createAccessor().setType("VEC3")
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])).setBuffer(buffer);
+    const uv = doc.createAccessor().setType("VEC2")
+      .setArray(new Float32Array([0, 0, 1, 0, 0, 1])).setBuffer(buffer);
+    const primitive = doc.createPrimitive().setAttribute("POSITION", positions)
+      .setAttribute("TEXCOORD_0", uv).setMaterial(material);
     doc.createScene().addChild(doc.createNode().setMesh(doc.createMesh().addPrimitive(primitive)));
     const input = path.join(root, `${width}x${height}.glb`);
     await new NodeIO().write(input, doc);
@@ -88,10 +78,7 @@ test("internal generator returns deterministic meshopt preview bytes; standalone
   await new NodeIO().write(input, doc);
   const run = promisify(execFile);
   const script = new URL("./preview-model.ts", import.meta.url).pathname;
-  await assert.rejects(
-    run(process.execPath, [script, input, path.join(root, "a.glb")]),
-    /Internal module/,
-  );
+  await assert.rejects(run(process.execPath, [script, input, path.join(root, "a.glb")]), /Internal module/);
   const first = await generatePreview(input);
   const second = await generatePreview(input);
   assert.equal(first.edge, null);

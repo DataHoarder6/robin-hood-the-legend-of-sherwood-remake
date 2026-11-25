@@ -73,11 +73,9 @@ test("refined-level filter includes reviewed sources regardless of case and comb
   }));
   const catalog = [
     ...refined,
-    ...["York", "Croisement01", "Croisement03", "Wychford", "Future level"].map((source_map) => ({
-      ...entries[0]!,
-      id: source_map,
-      source_map,
-    })),
+    ...["York", "Croisement01", "Croisement03", "Wychford", "Future level"].map(
+      (source_map) => ({ ...entries[0]!, id: source_map, source_map }),
+    ),
   ];
   assert.deepEqual(filterAssets(catalog, "", "", REFINED_LEVELS_FILTER), refined);
   assert.equal(filterAssets(catalog, "", "", "").length, catalog.length);

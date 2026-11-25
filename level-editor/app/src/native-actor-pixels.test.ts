@@ -7,7 +7,10 @@ import { prepareActorPixels, type ActorMaskQuery } from "./native-actor-pixels.t
 const root = resolve(import.meta.dirname, "../../..");
 const fixture = JSON.parse(
   readFileSync(
-    resolve(root, "level-editor/work/active/croisement02/restart20-hidden-outline-v1/fixture.json"),
+    resolve(
+      root,
+      "level-editor/work/active/croisement02/restart20-hidden-outline-v1/fixture.json",
+    ),
     "utf8",
   ),
 );
