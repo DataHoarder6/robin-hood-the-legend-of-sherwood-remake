@@ -573,12 +573,16 @@ impl ViewportState {
         let anchor = anchor.unwrap_or_else(|| {
             ScreenPoint::new(self.screen_size.x * 0.5, self.screen_size.y * 0.5)
         });
+        // The anchor is a screen pixel; view_position lives in unrotated map
+        // space. Undo the playfield rotation before using it as an offset, or
+        // every zoom step slides the map point under the cursor away.
+        let unrotated = self.camera_rotation().screen_inverse(anchor);
         let before = self.screen_to_map_unchecked(anchor);
         self.old_zoom_factor = self.zoom_factor;
         self.zoom_factor = next;
         self.view_position = MapPoint::new(
-            before.x - anchor.x / self.zoom_factor,
-            before.y - anchor.y / self.zoom_factor,
+            before.x - unrotated.x / self.zoom_factor,
+            before.y - unrotated.y / self.zoom_factor,
         );
         self.apply_rotation_constraints();
         self.clip_view();
@@ -618,12 +622,13 @@ impl ViewportState {
 
         let previous_centroid = ScreenPoint::new(centroid.x - pan.x, centroid.y - pan.y);
         let anchor = self.screen_to_map_unchecked(previous_centroid);
+        let unrotated = self.camera_rotation().screen_inverse(centroid);
         self.old_view_position = self.view_position;
         self.old_zoom_factor = self.zoom_factor;
         self.zoom_factor = (self.zoom_factor * scale).clamp(MIN_ZOOM, MAX_ZOOM);
         self.view_position = MapPoint::new(
-            anchor.x - centroid.x / self.zoom_factor,
-            anchor.y - centroid.y / self.zoom_factor,
+            anchor.x - unrotated.x / self.zoom_factor,
+            anchor.y - unrotated.y / self.zoom_factor,
         );
         self.player_zoom_factor = self.zoom_factor;
         self.clip_view();

@@ -174,9 +174,11 @@ fn portrait_selection_command(
 }
 
 /// Camera placement for a keyboard portrait selection. The mouse click path
-/// centres the chosen character; this helper is the keyboard path's own seam.
+/// centres the chosen character; #101 asks the number keys to use that same
+/// placement rather than the XAG 117 ensure-on-screen pan.
+// TODO: reconcile with XAG 117 if ordinary selections should stay minimal.
 fn place_keyboard_selection_camera(viewport: &mut crate::host::ViewportState, point: MapPoint) {
-    viewport.ensure_on_screen(point);
+    viewport.center_on_point(point);
 }
 
 /// Commands emitted for one number-key press. A press on an already-selected
@@ -188,13 +190,16 @@ fn keyboard_selection_commands(
     already_selected: bool,
     pc_id: robin_engine::element::EntityId,
 ) -> Vec<PlayerCommand> {
-    let _ = already_selected;
-    let _ = pc_id;
-    vec![portrait_selection_command(
-        portrait_index,
-        ctrl_held,
-        quick_group_exists,
-    )]
+    let selection = portrait_selection_command(portrait_index, ctrl_held, quick_group_exists);
+    let mut commands = vec![selection];
+    // Re-pressing the number key on an already-selected PC would otherwise be
+    // a no-op in the engine. Re-seed the native outline fade through the same
+    // deterministic PlayerCommand the double-click path uses: replay and the
+    // live engine apply identical commands, so hashes stay in step.
+    if already_selected && matches!(commands[0], PlayerCommand::SelectByPortrait { .. }) {
+        commands.push(PlayerCommand::ReseedSelectionHulk { pc_id });
+    }
+    commands
 }
 
 /// Dispatch one admitted non-menu gameplay action.
