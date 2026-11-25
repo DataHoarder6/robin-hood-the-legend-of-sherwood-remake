@@ -353,6 +353,10 @@ impl ViewportState {
                 self.old_zoom_factor = zoom;
                 self.view_position = view;
                 self.zoom_factor = zoom;
+                // The pre-cutscene zoom was the player's choice. Keep the
+                // ladder's hand-back rule in step with the restored camera:
+                // without this the release would jump to the last wheel stop.
+                self.player_zoom_factor = zoom;
             }
         }
 
