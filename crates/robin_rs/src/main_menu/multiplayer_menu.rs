@@ -3021,6 +3021,8 @@ mod tests {
             campaign_rules: Some(rules),
             campaign_save: load_save.then(|| crate::savegame::SlotName::new("Continue").unwrap()),
             mission_id: 1,
+            #[cfg(target_arch = "wasm32")]
+            authoritative_basename: String::new(),
             mission_name: "Start Campaign".into(),
             label: "Start Campaign".into(),
             custom: None,
