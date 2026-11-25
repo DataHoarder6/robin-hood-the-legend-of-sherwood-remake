@@ -24,13 +24,22 @@ short=$(git -C "$repo" rev-parse --short=12 "$tag^{commit}")
 echo "deploy_web_jautis: $tag -> $short ($commit)"
 
 # The runtime binds the Demo identity of the datadir corpus this deploy will
-# publish, which is still live under $public_root. Read it from the current
-# manifest before touching anything; jq -er fails closed if a field is absent.
+# publish, which is still live under $public_root. `latest.json` on an older
+# origin can be a minimal selector with no `multiplayerContent`; in that case
+# read the same identity from the newest versioned manifest it points at.
 live_manifest=$public_root/wasm/latest.json
 [ -f "$live_manifest" ] || { echo "deploy_web_jautis: no live manifest $live_manifest" >&2; exit 1; }
-demo_sha=$(jq -er '.multiplayerContent.demo.sha256' "$live_manifest")
-demo_bytes=$(jq -er '.multiplayerContent.demo.byteLength' "$live_manifest")
-demo_native_sha=$(jq -er '.multiplayerContent.demo.nativeContentSha256' "$live_manifest")
+demo=$(jq -c '.multiplayerContent.demo | select(.sha256 and .byteLength and .nativeContentSha256)' "$live_manifest" 2>/dev/null || true)
+if [ -z "$demo" ]; then
+    while IFS= read -r candidate; do
+        demo=$(jq -c '.multiplayerContent.demo | select(.sha256 and .byteLength and .nativeContentSha256)' "$candidate" 2>/dev/null || true)
+        [ -n "$demo" ] && break
+    done < <(find "$public_root/wasm" -mindepth 2 -maxdepth 2 -name manifest.json | sort -r)
+fi
+[ -n "$demo" ] || { echo "deploy_web_jautis: no Demo identity in live manifests" >&2; exit 1; }
+demo_sha=$(printf '%s\n' "$demo" | jq -r .sha256)
+demo_bytes=$(printf '%s\n' "$demo" | jq -r .byteLength)
+demo_native_sha=$(printf '%s\n' "$demo" | jq -r .nativeContentSha256)
 
 stage_remote=/home/admin/build/robin/jautis-deploy-$short
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$build_host" bash -s <<REMOTE
