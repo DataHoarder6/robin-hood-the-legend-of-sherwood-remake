@@ -164,7 +164,9 @@ a prerequisite failure, not a red assertion.
 
 A stable tag is human work, except for the contract-authorised autonomous path
 in [ADR 0011](adr/0011-autonomous-release.md): MINOR bumps only, new tags only,
-via [`scripts/auto-release.sh`](../scripts/auto-release.sh). The `robin --version`
+via [`scripts/auto-release.sh`](../scripts/auto-release.sh). The loop may execute
+`scripts/release-orchestrator.sh` and the human-authored web-promote wrapper; it
+may not edit them, the workflows or Nix files. The `robin --version`
 preflight before a tag is scriptable and owned by [RELEASES.md](RELEASES.md). The
 machine-repo pin, `apps-sync`, installs and seat launches remain human steps.
 

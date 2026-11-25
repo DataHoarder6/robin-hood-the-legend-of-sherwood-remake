@@ -14,6 +14,9 @@ the contract or asks for one. Last verified: 2026-11-23.
   [ADR 0011](adr/0011-autonomous-release.md). This is the explicit, ADR-backed
   deviation from [UNATTENDED.md](UNATTENDED.md)'s "a stable tag is human work"
   rule; everything else in that page still holds.
+- The loop may execute `scripts/release-orchestrator.sh` and the human-authored
+  web-promote entry point. It never edits those scripts, workflows or Nix files;
+  execution authority is pre-granted here, never widened mid-run.
 - The loop asks no question mid-run. An irreversible action the contract does
   not authorise, two conflicting clauses, a missing external permission, or an
   ambiguity that would change the contract's meaning halts the run in
@@ -34,7 +37,10 @@ the contract or asks for one. Last verified: 2026-11-23.
 works `ready:` items, files reviewer verdicts as `needs-work` or `rejected`, and
 may promote only docs, tests and small refactors. Gameplay, schema, protocol,
 release, deletion and version items stay `proposed:` for the owner, as does
-any item whose `PATHS` names a protected path. When the queue is empty, the
+any item whose `PATHS` names a protected path. The mechanical next-MINOR bump
+and its generated notes are `ready:` when produced by
+`scripts/release/prepare-next-minor.sh` from landed sources — never from agent
+judgment. When the queue is empty, the
 driver asks [`scripts/autobacklog.sh`](../scripts/autobacklog.sh) to generate
 one `proposed:` item from a curated docs/test gap and applies the same
 classifier; a deferred defect row is never a source. A proposal that fails the
@@ -77,5 +83,8 @@ contract_immutable: true
 MINOR bumps only (`0.x.0`); MAJOR is human-only and new tags are created, never
 moved. The bump and "releasable?" decision come from Conventional Commits in the
 batch, not agent judgment. [`scripts/auto-release.sh`](../scripts/auto-release.sh)
-and [ADR 0011](adr/0011-autonomous-release.md) own the tag path; the machine-repo
-pin, `apps-sync`, installs and seat launches stay with the owner.
+and [ADR 0011](adr/0011-autonomous-release.md) own the tag path. The loop may
+execute `scripts/release-orchestrator.sh` to verify the tag and its assets,
+publish the browser artifact and record the release outcome; it never edits the
+orchestrator, the workflow or the promote wrapper. The machine-repo pin,
+`apps-sync`, installs and seat launches stay with the owner.

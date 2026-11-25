@@ -416,6 +416,16 @@ class QualitySuitesTests(unittest.TestCase):
                     pass
 
 
+    def test_release_authority_is_documented(self):
+        """The one-time amendment must grant execution, not edit authority."""
+        contract = (ROOT / "docs" / "AUTONOMOUS_RUN_CONTRACT.md").read_text(encoding="utf-8")
+        adr = (ROOT / "docs" / "adr" / "0011-autonomous-release.md").read_text(encoding="utf-8")
+        director = (ROOT / ".opencode" / "agents" / "director.md").read_text(encoding="utf-8")
+        self.assertIn("may execute `scripts/release-orchestrator.sh`", contract)
+        self.assertIn("mechanical next-MINOR bump", contract)
+        self.assertIn("grants execution of named, human-authored release entry", adr)
+        self.assertIn("execute the named release entry points", director)
+
     def test_director_fixtures_are_gated(self):
         """The unattended loop's fixtures must run in the tooling suite."""
         body = (ROOT / "scripts" / "check-quality.sh").read_text(encoding="utf-8")

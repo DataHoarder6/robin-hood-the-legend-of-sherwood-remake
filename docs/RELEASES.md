@@ -81,6 +81,13 @@ tag pushed without it is a bet rather than a release.
    it contains. When the harness is not yet available, record that instead of
    claiming a pass; the contract and endpoint are in
    [BUG_REPORTS.md](BUG_REPORTS.md#provisioning-the-endpoint-operator).
+For the autonomous path, steps 7 and 9 are executed in one idempotent pass by
+`scripts/release-orchestrator.sh`: it verifies notes, tags once, dispatches and
+reads back native assets, calls the human-authored web-promote wrapper, then
+runs the blocking parity check before recording `RELEASED`. A retry re-verifies
+the same tag; it never moves or deletes one. Step 8 and the human gates stay
+with the owner.
+
 7. `git tag -a vX.Y.Z -m … && git push fork vX.Y.Z`, then
    `gh workflow run native-release.yml --ref vX.Y.Z` — the tag push is verified
    by a dispatch until the push-run cause (#26) is known. Check the release's

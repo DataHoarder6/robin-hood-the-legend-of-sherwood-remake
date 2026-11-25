@@ -26,6 +26,13 @@ it runs `git tag -a`, `git push fork <tag>` and
 `gh workflow run native-release.yml --ref <tag>`. The bump and the releasable
 decision come from Conventional Commits in the batch, not agent judgment.
 
+This decision also grants execution of named, human-authored release entry
+points: the director may run the release orchestrator and the web-promote
+wrapper but may not edit either, or any workflow or Nix file. A retry of an
+existing tag re-verifies the same release; tags are immutable and never moved.
+Consecutive MINOR releases depend on the mechanical bump and notes prepared
+from landed sources, not on a new interview per release.
+
 The script never edits the machine repo's `?rev=` pin, never runs the seat sync,
 never installs and never launches the game. Those steps stay with the owner;
 [RELEASES.md](../RELEASES.md) keeps describing them. MAJOR bumps, moving an

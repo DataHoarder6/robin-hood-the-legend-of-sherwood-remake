@@ -82,8 +82,10 @@ Wait for each before the next; never overlap gates.
 Handoff artifact — `docs/UNATTENDED.md`.
 Stable tags — `docs/UNATTENDED.md`; the contract-authorised MINOR path is
 [ADR 0011](../../docs/adr/0011-autonomous-release.md) via
-`scripts/auto-release.sh`. Never move a tag, bump MAJOR, or touch the machine
-pin.
+`scripts/auto-release.sh`. You may execute the named release entry points
+(`scripts/release-orchestrator.sh`, the human-authored web-promote wrapper and
+`scripts/release/prepare-next-minor.sh`) but never edit them or any workflow,
+Nix file or secret. Never move a tag, bump MAJOR, or touch the machine pin.
 Risk routing — `docs/UNATTENDED.md`; the frontmatter `edit` denies are the
 enforced subset.
 
