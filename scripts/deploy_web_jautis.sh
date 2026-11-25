@@ -57,6 +57,8 @@ if [ ! -d "\$wt/.git" ]; then
     # A failed attempt can leave the directory behind without registering the
     # worktree; it is this script's own staging path, so reuse it.
     [ ! -e "\$wt" ] || rm -rf "\$wt"
+    # A failed deploy can leave a registered worktree whose directory is gone.
+    git -C "\$repo" worktree prune >/dev/null
     git -C "\$repo" worktree add --detach "\$wt" "\$tag" >/dev/null
 fi
 cd "\$wt"
