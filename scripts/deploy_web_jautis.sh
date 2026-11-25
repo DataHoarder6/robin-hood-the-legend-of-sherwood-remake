@@ -21,7 +21,8 @@ commit=$(git -C "$repo" rev-parse "$tag^{commit}")
 # An annotated tag names a tag object; the artifact short is the commit it
 # points at. Resolving the tag itself bakes the tag object's id instead.
 short=$(git -C "$repo" rev-parse --short=12 "$tag^{commit}")
-deploy_source=$(pwd)
+verifier_remote=/home/admin/build/robin/verify-cloudflare-deployment-$short.mjs
+scp -q "$PWD/wasm-www/scripts/verify-cloudflare-deployment.mjs" "$build_host:$verifier_remote"
 echo "deploy_web_jautis: $tag -> $short ($commit)"
 
 # The runtime binds the Demo identity of the datadir corpus this deploy will
@@ -47,7 +48,7 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 "$build_host" bash -s <<REMOTE
 set -euo pipefail
 tag=$tag
 short=$short
-deploy_source=$deploy_source
+verifier_remote=$verifier_remote
 stage=$stage_remote
 repo=/home/admin/git/robin-hood-remake
 wt=/home/admin/build/robin/jautis-src-$short
@@ -64,10 +65,9 @@ if [ ! -d "\$wt/.git" ]; then
     git -C "\$repo" worktree add --detach "\$wt" "\$tag" >/dev/null
 fi
 cd "\$wt"
-# The tag's tree predates deploy-time fixes. Use the verifier from the deploy
-# checkout so the origin-bound checks match the origin we actually publish.
-cp "\$deploy_source/wasm-www/scripts/verify-cloudflare-deployment.mjs" \
-    wasm-www/scripts/verify-cloudflare-deployment.mjs
+# The tag's tree predates deploy-time fixes. Use the verifier staged from the
+# deploy checkout so the checks match the origin we actually publish.
+cp "\$verifier_remote" wasm-www/scripts/verify-cloudflare-deployment.mjs
 
 export PATH="\$toolchain/bin:\$PATH"
 export ROBINHOOD_WASM_BINDGEN="\$bindgen"
