@@ -103,3 +103,187 @@ Tag summary: Robin Hood 0.3.0 — D06 fixed, full H23 release gate observed
 - `109b019ec` camera: pan from the player view and restore it on cutscene release
 - `ce650692b` feat(client): buffer and draw teammates' cursors
 - `229fe654c` feat(client): ignore empty box selections
+
+## v0.5.0
+
+Tag summary: v0.5.0
+
+### What's new
+
+
+### Source commits
+
+- `df811d9d3` fix(release): read robin_rs version from its Cargo.lock package
+- `e6c2b7df2` fix(release): accept the staged 0.5.0 version when preparing a tag
+- `9e46baa4d` fix(zoom): restore player zoom when a cutscene releases the camera
+- `4e96a3151` fix(zoom): drop two unused mutable bindings in ladder tests
+- `51e72f02d` client: a nine-stop zoom ladder with fixed-level HUD buttons
+- `8454a8657` render: persistent outline for controlled/allied hidden chars; reveal key for hostiles
+- `ba7a72ee6` fix(D13): pass the Option into settle_preparation in the no-replay test
+- `510b4c4e6` review(D13): fix NoReplay pattern, share production settlement, correct browser premise
+- `5fb5ed413` fix(client): settle mission-end leaderboards without a notice when no replay exists (D13)
+- `517169c7d` release: name an empty wine banner and prove parity
+- `b96840a66` fix(validation): make the oversize archive check actually prove criterion #76
+- `f399f14a3` docs: fix dead modding-tools link and stale build host name
+- `a51c31b00` fix(nix): refresh cargo vendor hash for 0.5.0 tree
+- `1a960a7bc` fix: restore CoopPause key dropped during rebase
+- `8be9558fb` fix: remove stray conflict marker from viewport tests
+- `f15423244` fix: collapse rotation readout conditions for clippy
+- `7c6eb8927` fix: cast sprite bank id in rotation wraparound test
+- `73acb69c1` test: keep GPU contract rotation fixture rotatable under the cap
+- `464113fac` fix: correct rotation cap test and readout on refused steps
+- `06456f9c4` docs: record rotation polish in NEW_FEATURES
+- `d418425c3` feat: show a fading camera angle readout
+- `c17a6f291` fix: cap rotation by map size to keep baked art crisp
+- `b3fa020a6` fix: keep split-screen edge bars out of rotated views
+- `242b87f03` docs: plan the map rotation visual polish pass
+- `d2be8a513` docs: design the map rotation visual polish pass
+- `8bc73ea7a` docs: make the conflict note durable and parented
+- `2f94401cc` refactor: share rotation helpers across render paths
+- `d1f99a014` fix: sample rotation keys outside the action stream
+- `251f329a1` fix: restore angle-zero exactness and cover rotated small levels
+- `0937c2377` docs: record the director-camera rebase conflict
+- `5237790b0` fix: align GPU rotation pivot with host viewport
+- `bdac42fa2` style: rustfmt rotation imports
+- `7f3e2af4a` fix: address map rotation review findings
+- `19c9285d4` fix: satisfy clippy on rotation helpers
+- `0269ffc38` feat: finish host-only map rotation
+- `9d919bd40` feat: keep directional sprites facing world directions
+- `ede554e83` feat: rotate terrain sampling with the camera
+- `2d943ebd6` feat: rotate sprites and overlays with the camera
+- `7273fef79` feat: bind camera rotation keys
+- `efda46dd0` feat: add host camera rotation transform
+- `8ad583d90` docs: plan host-only map rotation
+- `c9e0bd65c` docs: settle rotation design review questions
+- `089c4a92b` docs: design host-only map rotation
+- `6634f10a5` docs: record loop capability research, design and plan
+- `4313f5694` fix(defects): defer pre-existing editor lint debt as D14
+- `2f3596e55` Revert "style(editor): apply pinned formatter to drifted files"
+- `db2a7d294` fix(wasm-tests): supply the wasm-only MissionChoice field in tests
+- `5c557b300` fix(wasm): gate the Sherwood deployment test module off wasm32
+- `2be97ab70` feat(release): idempotent orchestrator closes the release tail
+- `af80292d2` feat(release): prepare the next MINOR from landed sources
+- `d1f6013e6` docs(contract): grant bounded execution of the release tail
+- `db6081254` style(editor): apply pinned formatter to drifted files
+- `e05add78f` fix(wasm): keep native-only test modules off wasm32
+- `3a8b5a60a` fix(abi): move the Spellforge golden after two native additions
+- `9181d809b` fix(gate): select editor, ABI and wasm-test paths
+- `488026003` fix(ci): fail fast on missing tools and pin suite environments
+- `ef0db4fc7` test(director): gate the loop fixtures in tooling
+- `fedf76ea7` feat(director): one bounded run drives fresh-context ticks
+- `ac914cb1b` fix(director): write back to the explicit selected issue only
+- `a7122efd2` fix(director): make selection machine-checked and fail closed
+- `80d2fd012` feat(director): atomic handoff ledger with revision and no-progress state
+- `3b0691320` fix(H38): drive the scripted victory through the game's own native path
+- `0740f53bf` release: file an admitted issue on evidence refusal
+- `b07c1de25` fix(release): provision the e2e checkout before the release gate
+- `f7d5b0193` release: build CI from the candidate commit
+- `f9083d2bc` validation: re-record parity corpus at replay schema 80
+- `e2d6b7857` release: run the Linux gate before CI dispatch
+- `9236a8ae0` fix(release): let the recorder create its own record directory
+- `7d5dbf4f0` fix(release): let the Wine probe read its heredoc over ssh
+- `27317b953` docs: set the 0.5.0 scope
+- `a6d75ab41` fix(release): wait for a fresh CI run instead of reusing a stale exe
+- `48863dc66` release: run windows verification under Xvfb
+- `d4b7c7dbb` agent: generalise director selection and prefix its subagents
+- `4b332cbed` fix(release): build in gate-shared so prune cannot delete it mid-build
+- `177d4769a` release: keep the evidence build copy from being pruned
+- `f5de19735` loop: write terminal states back to the tracker
+- `2eddf0cc0` fix(release): dispatch CI on the estate fork, not the upstream mirror
+- `6d5cfeef0` fix(release): verify the CI Windows binary with the build host's wine
+- `8130ff917` chore: make the release-evidence test executable
+- `7e7950daa` docs: point the release path at release-evidence.sh
+- `a5e912df8` test: cover the autonomous release-evidence path
+- `e776d7462` feat: produce release evidence for the autonomous director
+- `95f56b266` fix: forward parity variables across the remote gate
+- `87c55fc86` autonomy: generate and promote one proposal on an empty queue
+- `83759397e` autonomy: check protected PATHS and curate proposal sources
+- `39f25d9a0` docs: fix spec relative links for the integration tree
+- `f53f16af7` autonomy: set production gate timeout to 90 minutes (risk)
+- `89dfd8ab7` test: cover land.sh gate pass-through branches (N2)
+- `abf6c236e` autonomy: unforgeable gate skip via controller-owned stamp (N1)
+- `5449ca324` autonomy: run-level driver with bounds, breaker, admission, meter and resumable status (findings 7-10)
+- `8d6dad8a7` autonomy: fix review round 1 findings 1-6 (gate cwd, one gate, candidate tag, FIFO, immutability)
+- `e5a24418b` chore: ignore SDD scratch workspace
+- `bd0e4e2ab` docs: commit the approved autonomy design and implementation plan
+- `995893bc9` fix: accept land.sh's real read-back format in batch controller
+- `76f63c72c` autonomy: AppImage retention and release-worthy predicate (Task 6)
+- `950bb9e1b` autonomy: guarded autonomous MINOR release (Task 5)
+- `61610cfd8` autonomy: ADR 0009 batch controller (Task 4)
+- `9bdfa9024` autonomy: risk-classified work queue and verdict permits (Task 3)
+- `bebcb085e` autonomy: contract bounds and terminal states (Task 2)
+- `903d4a506` fix(campaign): confirm leave prompt before asserting won mission end
+- `27bea16b6` fix(campaign): restore first-mission yes-only leave prompt after rebase
+- `0248ede76` release: sync Cargo.lock with the 0.5.0 crate version
+- `e1822e950` release: bump robin_rs to 0.5.0 for the stable tag
+- `d2e3330a4` web: fix jautis publish pipeline, parity gate and 401 diagnostics
+- `75b154f28` docs(campaign-flow): name the bound mission-result test in the inventory
+- `f59ba77e8` test(campaign-flow): bind result, first-mission dialog and debriefing-to-mission cases
+- `9de7f74fc` test(debriefing): bind load, picker-cancel and quick-load refusal cases
+- `8ccc5b072` fix(replays): bind reachable browser watch state, withdraw D10
+- `8821fbbe1` fix(replays): do not offer Watch without local playback
+- `97933d461` test(leaderboard): bind widget enablement, retry routing and unavailable notice cases
+- `07b21a9cb` test(campaign_map): bind redisplay, inspect, leaderboard and cancel cases
+- `b3f33883e` test(game_session): make non-host refusal no-dispatch assertion falsifiable
+- `2d561dc05` test(game_session): bind Sherwood outcome arms and non-host refusal
+- `0edf7e287` test(game_session): bind the live terminal debriefing phase chain
+- `9d33369b4` fix(ui): do not offer restart without a restart snapshot
+- `237d2920a` docs: plan campaign case coverage and full co-op proof
+- `25d472be2` docs: design full co-op campaign proof and case inventory
+- `d5ded33dc` docs: correct D12 fade-counter coverage in slop note
+- `165f396b4` fix(engine): rebase late-teleport fallbacks so multi-PC state converges (D12)
+- `e73c3fc4f` fix(engine): anchor late teleport sequence ids and star phases (D12)
+- `70579fced` loop: select work from the live issue queue
+- `6f8cb3854` fix: fill origin placeholders in deployment header fixtures
+- `ee4cdd0bf` test: assert signer-origin placeholder in CSP templates
+- `0ea4eebb3` style: format signer-origin line for oxfmt
+- `d13c7ce9f` web: make signer bridge origins an input (web part of 9dc48ebbd)
+- `da399c388` release: gate parity in web verify (web part of 489e1f817)
+- `856f6b88b` web: drive signer origin from one input
+- `40a979529` loop: require regression coverage (docs part of dbc09810f)
+- `31a1ea5a7` release: require parity gate before announcement (docs part of 489e1f817)
+- `10bdd5c5d` docs: decide human gates before the unattended run
+- `c1a853d18` docs: record why web and native release paths are split
+- `f9ada041b` fix: tolerate a gate-only worktree list in live-worktrees
+- `fa660f3e7` loop: collect pilot metrics (scripts part of dbc09810f)
+- `e0d9625b0` web: make signer bridge origins an input (scripts part of 9dc48ebbd)
+- `5cdfc6506` release: let the boot gate own ticket schema
+- `d6dd03a70` release: add blocking web/native parity gate (scripts part of 489e1f817)
+- `60f4f6b41` web: reuse a failed attempt source dir
+- `02fdefb0c` web: verify the jautis signer origin
+- `2960f1004` web: add canonical jautis origin deploy from a tag
+- `c175fcfbb` scripts: fix prune cwd and forward e2e gate variables
+- `fa1b0ebe6` loop: pin agents to the opencode-go free provider
+- `e319d51e3` harness: align frame cursors before injecting gameplay commands
+- `9ea50d3a6` docs: file D12 teleport late-input desync as open
+- `5aab6dccc` harness: prove campaign handoff after gameplay-driven victory (H38)
+- `8c06b4e65` engine: make teleport state target-frame anchored and scope camp guard
+- `ef5d5bf80` docs: close D10 after live-mission reload proof
+- `6c6c12759` fix(check): fail D10 reload check without a live resumed mission
+- `ab5bce116` docs: file H38 discriminator gate failure as deferred D11
+- `c5fd887a6` fix(check): wait for a live mission before driving campaign persistence
+- `ac933a4e4` fix(76): compute config digest directly from unwrapped profile value
+- `5bc5d3f2f` fix(76): derive Continue availability from the current save manager
+- `9d11cd2b2` docs(76): record review round 1 fixes in builder report
+- `6fcd435bb` fix(76): keep native self-healing and avoid logging raw profile names
+- `89c6af4d0` fix(76): offer main-menu Continue only with a durable resume target
+- `ecac629ab` docs(76): correct D10 check to digest-based assertion
+- `664c1f43e` docs(76): finalize crash-76-builder report
+- `71c14113e` fix(76): restore browser campaign on reload and report rejected saves
+- `ce649587a` H38: assert the dev-trigger log line is absent
+- `0949a2966` H38: prove campaign handoff through the game's own debriefing
+- `d8db80c5a` docs: fix D09 status cell to the deferred vocabulary
+- `59ebf8de2` perks-panel: tolerate malformed modded campaign saves
+- `6ee9ead73` renderer: keep post-cursor overlays in the logical frame
+- `c121f169a` docs: require private TMPDIR per test run to avoid parallel-suite deadlock
+- `be1636bbe` engine: fix authored roster reset, staged-garrison alert count, mission replay
+- `b3e97c2d4` engine: fix three opt-in AI/level review findings
+- `d4c1b2799` multiplayer: re-validate reconnect Welcome against admitted content
+- `3f6f6d5cb` debriefing: derive client snapshot wait from host transition budget
+- `eb0284643` fix: guard Camp::Error in engine adapter, repair release publish, review cleanups
+- `f65fa257b` Retarget gated-items reference to ADR 0010
+- `df239dacf` Fix round 1: keep ADR decision single-sourced and date correct
+- `bf178d836` Make Linux campaign the automated goal, Windows a human gate
+- `e44b02d3f` Fix final review findings on unattended loop policy
+- `0c9de3b60` Fix review round 1 on unattended loop hardening
+- `83d6ae42a` Harden unattended loop policy with research-backed ceilings
