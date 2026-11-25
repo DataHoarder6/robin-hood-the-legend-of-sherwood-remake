@@ -60,6 +60,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | Suite argument | Scope | What it checks |
 | --- | --- | --- |
 | `core` | `robin_util`, `robin_display_text`, `robin_state_hash_derive`, `robin_spellforge`, `robin_lua` | Unit, integration and doc tests |
+| `contracts` | `robin_spellforge` ABI test | `executable_abi_digest_is_stable`: every `NATIVE_REGISTRY` change needs a reviewed golden update |
 | `scripting-llvm` | `robin_spellforge`, `robin_lua` | Explicit poison recovery and native-session unwind tests with LLVM package overrides |
 | `engine` | `robin_engine` | Deterministic simulation tests |
 | `assets` | `robin_assets`, `robin_data_io` | Assets with/without engine adapters; fixture resolver tests; engine and `robin_run_types` graphs exclude `robin_run_protocol`/Ed25519 |
@@ -71,6 +72,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `client-release` | `robin_rs`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates; audio example check |
 | `tools` | `robin_modding_tools`; `robin_rs` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
 | `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the shipped `audio,multiplayer` client and its threaded plan |
+| `wasm-tests` | `robin_rs` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
 | `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer rows of the scenario corpus: real signals, per-install isolation, assertions over `/state`; core and transport rows name the Rust test that proves them |

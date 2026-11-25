@@ -152,5 +152,66 @@ else
     fail "the docs gate receives the changed Markdown (got '$checked')"
 fi
 
+# Editor sources previously selected no suite, so formatting drift landed.
+mkdir -p level-editor/app/src
+printf 'export const x = 1;\n' >level-editor/app/src/asset-library.ts
+git add level-editor/app/src/asset-library.ts
+git commit --quiet -m editor-path
+editor_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$docs_head" "$editor_head" 2>&1) || status=$?
+expect_status 0 'an editor source change gates the editor suite'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites editor' ]; then
+    pass 'the editor change selects editor'
+else
+    fail "the editor change selects editor (selected '$selected')"
+fi
+
+# Native signatures feed the Spellforge ABI golden; changing them without the
+# ABI test leaves a stale golden invisible to every landing gate.
+mkdir -p crates/robin_script_types/src/natives
+printf '// fixture\n' >crates/robin_script_types/src/natives/signatures.rs
+git add crates/robin_script_types/src/natives/signatures.rs
+git commit --quiet -m abi-input
+abi_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$editor_head" "$abi_head" 2>&1) || status=$?
+expect_status 0 'an ABI input change gates the contracts suite'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites format lint check client-release wasm contracts' ]; then
+    pass 'the ABI change selects contracts'
+else
+    fail "the ABI change selects contracts (selected '$selected')"
+fi
+
+# `cfg(test)` modules compiled for wasm32 can break while the shipped wasm
+# artifact builds; the lifecycle gate's --tests checks are a separate suite.
+mkdir -p crates/robin_rs/src/game_session/multiplayer
+printf '// fixture test module\n' >crates/robin_rs/src/game_session/multiplayer/story_regression.rs
+git add crates/robin_rs/src/game_session/multiplayer/story_regression.rs
+git commit --quiet -m wasm-test-module
+wasmtest_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$abi_head" "$wasmtest_head" 2>&1) || status=$?
+expect_status 0 'a wasm test-module change gates wasm-tests'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites format lint check client-release wasm wasm-tests' ]; then
+    pass 'the wasm test module selects wasm-tests'
+else
+    fail "the wasm test module selects wasm-tests (selected '$selected')"
+fi
+
+# A change with no gated path must still select nothing.
+mkdir -p assets
+printf 'fixture\n' >assets/readme.txt
+git add assets/readme.txt
+git commit --quiet -m unrelated
+unrelated_head=$(git rev-parse HEAD)
+status=0
+output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$wasmtest_head" "$unrelated_head" 2>&1) || status=$?
+expect_status 0 'an unrelated path change runs no suite'
+expect_contains 'the unrelated change says nothing was selected' 'no gated path changed'
+
 printf '\n%s checks passed, %s failed\n' "$pass_count" "$failures"
 (( failures == 0 ))

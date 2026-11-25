@@ -23,7 +23,7 @@ assert_build_host() {
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint check core scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint check core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -62,6 +62,18 @@ case "$1" in
         ;;
     core)
         cargo test --locked -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
+        ;;
+    contracts)
+        # The executable Spellforge identity: every NATIVE_REGISTRY definition
+        # is part of the ABI, so a signature change without a reviewed golden
+        # update must fail the landing.
+        cargo test --locked -p robin_spellforge --test abi
+        ;;
+    wasm-tests)
+        # The lifecycle gate's two `cfg(test)`-on-wasm32 checks, run separately
+        # from the shipped-artifact `wasm` suite.
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --no-default-features --features audio --bin robin --tests
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --no-default-features --features audio,multiplayer --bin robin --tests
         ;;
     scripting-llvm)
         # LLVM verifies unwind/destructor semantics, not just panic detection.

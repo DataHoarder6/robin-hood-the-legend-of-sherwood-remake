@@ -102,6 +102,22 @@ fi
 if [ "$engine_changed" = 1 ]; then
     suites+=(engine)
 fi
+# The editor has its own formatter/lint/test suite; without this selector an
+# editor-only change lands with zero checks (32 unformatted files survived).
+if printf '%s\n' "$paths" | grep -qE '^level-editor/'; then
+    suites+=(editor)
+fi
+# Native signatures are ABI inputs: the Spellforge golden must move in the
+# same landing, or a stale identity ships and no other suite notices.
+if printf '%s\n' "$paths" | grep -qE '^(crates/robin_script_types/src/natives/signatures\.rs$|crates/robin_spellforge/|vendor/rilua/)'; then
+    suites+=(contracts)
+fi
+# `cfg(test)` code compiled for wasm32 is not the shipped artifact; the
+# lifecycle gate's --tests checks are a separate suite so a native-only test
+# module cannot break the browser build unnoticed.
+if printf '%s\n' "$paths" | grep -qE '^crates/robin_rs/.*(/tests/|tests\.rs$|story_regression\.rs$)'; then
+    suites+=(wasm-tests)
+fi
 # `tooling` is the allowlisted shell/Python gate for everything under `scripts/`
 # and `tools/`; it is green on the build host (issue #40).
 if [ "$tools_changed" = 1 ]; then
