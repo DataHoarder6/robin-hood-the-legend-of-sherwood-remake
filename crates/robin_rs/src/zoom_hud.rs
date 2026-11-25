@@ -284,7 +284,7 @@ mod tests {
         use robin_engine::engine::LevelAssets;
 
         let mut assets = LevelAssets::new();
-        let mut engine = engine_api::Engine::new_for_test_with_level_size(
+        let engine = engine_api::Engine::new_for_test_with_level_size(
             1024.0,
             768.0,
             Campaign::default(),
@@ -315,7 +315,7 @@ mod tests {
         use robin_engine::engine::LevelAssets;
 
         let mut assets = LevelAssets::new();
-        let mut engine = engine_api::Engine::new_for_test_with_level_size(
+        let engine = engine_api::Engine::new_for_test_with_level_size(
             1024.0,
             768.0,
             Campaign::default(),
