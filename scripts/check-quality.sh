@@ -29,6 +29,11 @@ fi
 
 assert_build_host
 
+# Name a missing tool before any long build. CI installs the same pinned tools
+# from flake.nix before calling a suite; a missing binary is a prerequisite
+# failure, never a red test result.
+bash "$repository/scripts/quality-preflight.sh" "$1"
+
 case "$1" in
     format)
         cargo fmt --all -- --check
@@ -255,6 +260,7 @@ case "$1" in
         bash scripts/test_director_select_issue.sh
         bash scripts/test_director_writeback.sh
         bash scripts/tests/director-loop.sh
+        bash scripts/tests/quality-preflight.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every

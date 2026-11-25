@@ -424,6 +424,7 @@ class QualitySuitesTests(unittest.TestCase):
             "bash scripts/test_director_select_issue.sh",
             "bash scripts/test_director_writeback.sh",
             "bash scripts/tests/director-loop.sh",
+            "bash scripts/tests/quality-preflight.sh",
         ):
             with self.subTest(fixture=fixture):
                 self.assertIn(fixture, body)

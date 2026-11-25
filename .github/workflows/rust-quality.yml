@@ -11,7 +11,9 @@ permissions:
 
 concurrency:
   group: rust-quality-${{ github.ref }}
-  cancel-in-progress: true
+  # A cancelled run destroys its evidence. Queued runs keep it (FIFO), matching
+  # the repo's one-gate-in-flight rule; see docs/slop/ci-signal.md.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,6 +30,7 @@ jobs:
   format:
     name: Format
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v5
@@ -42,6 +45,7 @@ jobs:
   test:
     name: Rust / ${{ matrix.suite }}
     runs-on: ubuntu-26.04
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +99,19 @@ jobs:
         if: matrix.suite == 'wasm' || matrix.suite == 'browser-audio'
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Install pinned cargo-nextest
+        if: matrix.suite == 'client' || matrix.suite == 'client-release'
+        # Version from the nixpkgs pin in flake.lock, read with
+        # `nix eval --raw nixpkgs#cargo-nextest.version`.
+        run: cargo install cargo-nextest --version 0.9.149 --locked
+
+      - name: Install pinned wasm tools
+        if: matrix.suite == 'wasm'
+        run: |
+          destination="${RUNNER_TEMP}/wasm-tools"
+          paths=$(bash scripts/install_pinned_wasm_tools.sh "$destination")
+          printf '%s\n' $paths >> "$GITHUB_PATH"
+
       - name: Provision matched Chrome and ChromeDriver
         if: matrix.suite == 'browser-audio'
         id: audio-chrome
@@ -140,6 +157,7 @@ jobs:
   tooling:
     name: Fixture-free orchestration
     runs-on: ubuntu-26.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - name: Install pinned pnpm and Node.js
@@ -160,11 +178,13 @@ jobs:
   editor:
     name: Editor / tests, types and build
     runs-on: ubuntu-26.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - name: Install pinned pnpm and Node.js
         uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
         with:
+          version: 12.3.4
           runtime: node@24.19.0
           working-directory: level-editor
           cache: true
