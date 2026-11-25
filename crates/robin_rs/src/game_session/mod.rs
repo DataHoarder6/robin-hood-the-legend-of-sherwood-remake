@@ -1152,7 +1152,7 @@ async fn run_mission_with_seed(
     outcome
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod sherwood_deployment_tests;
 
 #[cfg(test)]
