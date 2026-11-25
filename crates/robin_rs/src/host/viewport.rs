@@ -53,6 +53,9 @@ pub struct ViewportState {
     ensure_selection_on_screen: bool,
     /// Requested angle, in radians. Host-only: no engine state depends on it.
     camera_angle: f32,
+    /// Compass heading, in radians, stepped by the second rotation control.
+    /// Composed with `camera_angle` into one angle for every renderer consumer.
+    compass_heading: f32,
     /// Rendered angle, eased towards `camera_angle` between frames.
     display_angle: f32,
     saved_camera_angle: Option<f32>,
@@ -115,6 +118,7 @@ impl ViewportState {
             cutscene_view: None,
             ensure_selection_on_screen: true,
             camera_angle: 0.0,
+            compass_heading: 0.0,
             display_angle: 0.0,
             saved_camera_angle: None,
             last_rotation_ms: None,
@@ -142,12 +146,48 @@ impl ViewportState {
         self.display_angle
     }
 
-    /// Angle quantised to the sprite's 22.5° view frames.
+    /// Compass heading, in radians, normalised to `[0, 2π)`.
+    pub fn compass_heading(&self) -> f32 {
+        self.compass_heading
+    }
+
+    /// The one composed angle every renderer and picking consumer uses.
+    pub fn effective_angle(&self) -> f32 {
+        self.camera_angle + self.compass_heading
+    }
+
+    /// Step the world compass heading by 15°, wrapping at a full turn.
+    /// Unlike the ±45° view rotation this is never refused by the crispness
+    /// cap: the whole point is to reach every direction.
+    pub fn rotate_heading(&mut self, steps: i8) -> bool {
+        let step = std::f32::consts::PI / 12.0;
+        let full_turn = 2.0 * std::f32::consts::PI;
+        let mut next = (self.compass_heading + f32::from(steps) * step).rem_euclid(full_turn);
+        // Fifteen degrees times 24 must read as exactly north, not as `2π`
+        // with a floating-point remainder.
+        if next.abs() < 1e-5 || (next - full_turn).abs() < 1e-5 {
+            next = 0.0;
+        }
+        if (next - self.compass_heading).abs() < f32::EPSILON {
+            return false;
+        }
+        self.compass_heading = next;
+        true
+    }
+
+    /// Angle quantised to the sprite's 22.5° view frames, wrapped mod 16 so a
+    /// full compass turn keeps reusing the same 16 direction rows.
     ///
-    /// Sprite rows snap to the requested angle; only terrain/screen geometry
+    /// Sprite rows snap to the composed angle; only terrain/screen geometry
     /// eases between frames.
     pub fn camera_steps(&self) -> i8 {
-        (self.camera_angle / FRAC_PI_8).round() as i8
+        let raw = (self.effective_angle() / FRAC_PI_8).round() as i16;
+        let wrapped = raw.rem_euclid(16);
+        if wrapped >= 8 {
+            (wrapped - 16) as i8
+        } else {
+            wrapped as i8
+        }
     }
 
     pub fn playfield_center(&self) -> ScreenPoint {
@@ -179,8 +219,10 @@ impl ViewportState {
     }
 
     pub fn reset_rotation(&mut self) -> bool {
-        let changed = self.camera_angle != 0.0 || self.display_angle != 0.0;
+        let changed =
+            self.camera_angle != 0.0 || self.compass_heading != 0.0 || self.display_angle != 0.0;
         self.camera_angle = 0.0;
+        self.compass_heading = 0.0;
         self.display_angle = 0.0;
         self.saved_camera_angle = None;
         self.last_rotation_ms = None;
@@ -205,9 +247,10 @@ impl ViewportState {
             .map_or(0, |last| now_ms.saturating_sub(last));
         self.last_rotation_ms = Some(now_ms);
         let factor = 1.0 - (-(dt as f32) / 150.0).exp();
-        self.display_angle += (self.camera_angle - self.display_angle) * factor;
-        if (self.camera_angle - self.display_angle).abs() < 0.001 {
-            self.display_angle = self.camera_angle;
+        let target = self.effective_angle();
+        self.display_angle += (target - self.display_angle) * factor;
+        if (target - self.display_angle).abs() < 0.001 {
+            self.display_angle = target;
         }
         self.clip_view();
     }
@@ -284,6 +327,9 @@ impl ViewportState {
         if after.owns_view {
             self.saved_camera_angle.get_or_insert(self.camera_angle);
             self.camera_angle = 0.0;
+            // Authored framing owns the whole view: the compass heading is
+            // reset while the cutscene runs and is not restored on release.
+            self.compass_heading = 0.0;
             self.display_angle = 0.0;
         } else if before.owns_view {
             let saved = self.saved_camera_angle.take();
@@ -1360,5 +1406,57 @@ mod viewport_touch_tests {
         assert!(viewport.advance_touch_inertia(116));
         close(viewport.view_position.x, 920.0);
         close(viewport.view_position.y, 1000.0);
+    }
+
+    #[test]
+    fn compass_heading_steps_wrap_at_full_turn() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        for _ in 0..24 {
+            assert!(viewport.rotate_heading(1));
+        }
+        close(viewport.compass_heading(), 0.0);
+        assert!(viewport.rotate_heading(1));
+        close(viewport.compass_heading(), std::f32::consts::PI / 12.0);
+        for _ in 0..24 {
+            assert!(viewport.rotate_heading(-1));
+        }
+        close(viewport.compass_heading(), std::f32::consts::PI / 12.0);
+    }
+
+    #[test]
+    fn compass_heading_composes_with_view_rotation() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        assert!(viewport.rotate_by(1));
+        assert!(viewport.rotate_heading(1));
+        close(
+            viewport.effective_angle(),
+            std::f32::consts::FRAC_PI_8 + std::f32::consts::PI / 12.0,
+        );
+        assert_eq!(viewport.camera_steps(), 2);
+        close(viewport.camera_angle(), std::f32::consts::FRAC_PI_8);
+    }
+
+    #[test]
+    fn compass_heading_is_not_refused_by_the_crispness_cap() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(64.0, 64.0);
+        assert!(!viewport.rotate_by(1));
+        assert!(viewport.rotate_heading(4));
+        close(
+            viewport.compass_heading(),
+            4.0 * std::f32::consts::PI / 12.0,
+        );
+    }
+
+    #[test]
+    fn reset_rotation_clears_compass_heading() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        assert!(viewport.rotate_heading(3));
+        assert!(viewport.reset_rotation());
+        close(viewport.compass_heading(), 0.0);
+        close(viewport.effective_angle(), 0.0);
     }
 }

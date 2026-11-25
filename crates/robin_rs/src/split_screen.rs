@@ -269,7 +269,7 @@ fn clip_cell(points: &[[f32; 2]], a: [f32; 2], b: [f32; 2]) -> Vec<[f32; 2]> {
 /// corner inside the level once rotation coverage is enforced, so there is no
 /// uncovered area to paint.
 pub(super) fn split_edge_bars(viewport: &crate::host::ViewportState) -> [(i32, i32, i32, i32); 4] {
-    if viewport.camera_angle() != 0.0
+    if viewport.effective_angle() != 0.0
         || viewport.level_size.x <= 0.0
         || viewport.level_size.y <= 0.0
     {

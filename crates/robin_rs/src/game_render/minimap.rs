@@ -95,18 +95,51 @@ pub(crate) fn render_minimap(
         camera_pos.y + screen_size.y / zoom - 80.0, // PANNEL_HEIGHT = 80
     );
 
-    // Convert camera corners to minimap pixel coordinates
-    if let (Some(tl), Some(br)) = (
-        mm.real_to_map(camera_pos, level_size),
-        mm.real_to_map(view_br, level_size),
-    ) {
-        let x1 = tl.x.floor() as i32;
-        let y1 = tl.y.floor() as i32;
-        let x2 = br.x.floor() as i32;
-        let y2 = br.y.floor() as i32;
-
-        // Black rectangle outline (color 0x0000).
-        renderer.draw_rect_outline_screen(x1, y1, x2, y2, 0x0000);
+    // Convert camera corners to minimap pixel coordinates. At angle zero keep
+    // the legacy axis-aligned rectangle exactly; otherwise rotate the four
+    // corners with the composed heading so the minimap agrees with the view.
+    let angle = host.viewport().effective_angle();
+    if angle == 0.0 {
+        if let (Some(tl), Some(br)) = (
+            mm.real_to_map(camera_pos, level_size),
+            mm.real_to_map(view_br, level_size),
+        ) {
+            let x1 = tl.x.floor() as i32;
+            let y1 = tl.y.floor() as i32;
+            let x2 = br.x.floor() as i32;
+            let y2 = br.y.floor() as i32;
+            renderer.draw_rect_outline_screen(x1, y1, x2, y2, 0x0000);
+        }
+    } else {
+        let (cos, sin) = (angle.cos(), angle.sin());
+        let centre_x = camera_pos.x + (view_br.x - camera_pos.x) * 0.5;
+        let centre_y = camera_pos.y + (view_br.y - camera_pos.y) * 0.5;
+        let corners = [
+            (camera_pos.x, camera_pos.y),
+            (view_br.x, camera_pos.y),
+            (view_br.x, view_br.y),
+            (camera_pos.x, view_br.y),
+        ];
+        let mapped: Vec<(i32, i32)> = corners
+            .iter()
+            .filter_map(|(x, y)| {
+                let dx = x - centre_x;
+                let dy = y - centre_y;
+                let rotated = engine_coordinates::MapPoint::new(
+                    centre_x + cos * dx - sin * dy,
+                    centre_y + sin * dx + cos * dy,
+                );
+                mm.real_to_map(rotated, level_size)
+                    .map(|point| (point.x.floor() as i32, point.y.floor() as i32))
+            })
+            .collect();
+        if mapped.len() == 4 {
+            for index in 0..4 {
+                let (x1, y1) = mapped[index];
+                let (x2, y2) = mapped[(index + 1) % 4];
+                renderer.draw_line_screen(x1, y1, x2, y2, 0x0000);
+            }
+        }
     }
 
     // ── Element dots ──

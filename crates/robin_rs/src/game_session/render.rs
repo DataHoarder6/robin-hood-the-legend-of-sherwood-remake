@@ -2578,7 +2578,13 @@ impl OverlayHudInputs<'_> {
         // Host-only camera angle, shown briefly after a rotation input.
         let now_ms = crate::window::process_uptime_ms();
         if crate::host::rotation_readout_visible(now_ms, host.viewport().rotation_readout_until()) {
-            let degrees = host.viewport().camera_angle().to_degrees().round() as i32;
+            let heading = host
+                .viewport()
+                .effective_angle()
+                .to_degrees()
+                .rem_euclid(360.0)
+                .round() as i32;
+            let degrees = heading;
             crate::hud_text::render_text_with_shadow_gpu(
                 renderer,
                 &fonts.tooltip_font,

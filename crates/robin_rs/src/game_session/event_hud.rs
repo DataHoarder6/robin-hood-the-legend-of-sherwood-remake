@@ -445,6 +445,7 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         .minimap_fast_key
         .is_some_and(|fast_key| input.translator.was_key_released(fast_key, keys));
     use winit::keyboard::KeyCode;
+    let shift_held = keys.contains(&KeyCode::ShiftLeft) || keys.contains(&KeyCode::ShiftRight);
     let step_keys_gated =
         ui.console_overlay.is_visible() || ui.pause_menu.is_some() || modal_input_active;
     // Camera rotation is a host presentation edge on the same physical-key
@@ -476,14 +477,34 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
                 .viewport
                 .set_rotation_readout(frame.started_at_ms);
         }
+        // Shift+Comma/Period are the compass-heading controls. They are
+        // physical edges outside GameAction, so replays stay byte-identical.
+        if shift_held
+            && input.translator.was_key_pressed(KeyCode::Comma, keys)
+            && host.frontend.viewport.rotate_heading(-1)
+        {
+            host.frontend
+                .viewport
+                .set_rotation_readout(frame.started_at_ms);
+        }
+        if shift_held
+            && input.translator.was_key_pressed(KeyCode::Period, keys)
+            && host.frontend.viewport.rotate_heading(1)
+        {
+            host.frontend
+                .viewport
+                .set_rotation_readout(frame.started_at_ms);
+        }
     }
     let step_shortcuts = plan_step_shortcuts(
         StepShortcutInput {
             now_ms: frame.started_at_ms,
-            forward_held: keys.contains(&KeyCode::Period),
-            forward_hit: input.translator.was_key_pressed(KeyCode::Period, keys),
-            back_held: keys.contains(&KeyCode::Comma),
-            back_hit: input.translator.was_key_pressed(KeyCode::Comma, keys),
+            // Shift+Comma/Period belong to the compass; the dev step
+            // shortcuts move behind a modifier so the two cannot collide.
+            forward_held: !shift_held && keys.contains(&KeyCode::Period),
+            forward_hit: !shift_held && input.translator.was_key_pressed(KeyCode::Period, keys),
+            back_held: !shift_held && keys.contains(&KeyCode::Comma),
+            back_hit: !shift_held && input.translator.was_key_pressed(KeyCode::Comma, keys),
             backspace_held: keys.contains(&KeyCode::Backspace),
             unpause_hit: input.translator.was_key_released(KeyCode::Enter, keys),
             gated: step_keys_gated,

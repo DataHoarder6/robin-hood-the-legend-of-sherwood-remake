@@ -1578,6 +1578,18 @@ A list of which additional features we have added, which ones we might still wan
   unchanged; when a cutscene releases the view, the camera returns to the zoom
   the player chose.
 
+- **Compass heading on `<`/`>`.** Shift+Comma and Shift+Period turn the world
+  heading in 15° steps through a full circle, wrapping at 360°. This is a
+  second, host-only presentation control: it composes with the existing ±45°
+  view rotation into one angle for terrain, sprites, picking, overlays and the
+  minimap, while characters and HUD stay upright. The heading resets on
+  mission load and cutscene, is never stored in saves or replays, and never
+  changes engine state or peers' views. It is never refused by the crispness
+  cap that limits the original rotation on small maps. Baked lighting, shadows
+  and signs can read wrong at large headings — notably near 180° — because
+  retail maps have no re-bake sources; this is a known limitation, not a
+  simulation change.
+
 - **Live Sherwood production forecast.** The Sherwood report now includes a
   compact, toggleable item-production panel built from current map stock and
   live production-zone membership. Once a mission is selected it shows exact
