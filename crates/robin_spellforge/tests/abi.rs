@@ -18,7 +18,7 @@ fn executable_abi_digest_is_stable() {
     // a previous ABI merely because some edits are behavior-preserving.
     assert_eq!(
         spellforge_vm_abi(),
-        "spellforge-v1-sha256:c19e17aa80e13c1813ded4d83b7793a2f12c7f31e315e173e3fae893c62c03b5"
+        "spellforge-v1-sha256:87c3b138a0f4d7f6cec45e8afd9dfa2050403dd363a5dd0dac609766d1670cb5"
     );
 }
 
