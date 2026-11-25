@@ -132,11 +132,14 @@ Before selecting anything, the director reads
 `/home/matt/.local/state/robin-director/handoff.json` on `oci-vm` — outside the
 repo, never committed, no git churn. It is state, not a second source of rules.
 
-Write the file at selection and after every state transition. It records exactly
-five fields: selected item, worktree path, gate unit/result, current terminal
-state or `pending`, and next action. An absent file means no prior selection was
-recorded; start from [Iteration order](#iteration-order). The rules stay here
-and in the agent files; the artifact records only where this loop stopped.
+Write the file at selection and after every state transition. `scripts/director-state.sh`
+owns the write under a lock: `claim` records `revision`, `issue`, `assertion`,
+`tree_sha`, `attempt`, `state`, `seen` and `next_action`; `finish` is a
+compare-and-swap on `revision` and records the terminal state in `seen`.
+A handoff only resumes when its state is `pending`/`in_progress` and its tree sha
+matches the current integration sha. A terminal handoff is a history record, not
+a resume pointer; start from [Iteration order](#iteration-order). The rules stay
+here and in the agent files; the artifact records only where this loop stopped.
 
 ## Gate and land path
 
