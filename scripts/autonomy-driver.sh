@@ -366,9 +366,21 @@ while :; do
                 release_out=$("$scripts/auto-release.sh" "$release_candidate" \
                     "$release_binary" "$release_summary" 2>&1) || rc=$?
                 if [ "$rc" -eq 0 ]; then
-                    write_status release_outcome RELEASED
-                    log_event "RELEASED $release_out"
-                    printf 'RELEASED %s\n' "$release_out"
+                    # The tag alone is not a published release. The orchestrator
+                    # verifies native assets and the browser artifact and runs
+                    # the blocking parity check before RELEASED is recorded.
+                    orch_out=''
+                    orch_rc=0
+                    orch_out=$(bash "$scripts/release-orchestrator.sh" "v$version" 2>&1) || orch_rc=$?
+                    if [ "$orch_rc" -eq 0 ]; then
+                        write_status release_outcome RELEASED
+                        log_event "RELEASED $release_out; $orch_out"
+                        printf 'RELEASED %s\n' "$release_out"
+                    else
+                        write_status release_outcome ROLLED-BACK
+                        log_event "ROLLED-BACK orchestrator refused: $orch_out"
+                        halt NEEDS-DECISION "release-orchestrator-refused:$orch_out"
+                    fi
                 else
                     # A refused release rolls the observable outcome back to the
                     # previous-good picture. The rollback command only names the

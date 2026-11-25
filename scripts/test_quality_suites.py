@@ -436,6 +436,7 @@ class QualitySuitesTests(unittest.TestCase):
             "bash scripts/tests/director-loop.sh",
             "bash scripts/tests/quality-preflight.sh",
             "bash scripts/test_prepare_next_minor.sh",
+            "bash scripts/test_release_orchestrator.sh",
         ):
             with self.subTest(fixture=fixture):
                 self.assertIn(fixture, body)

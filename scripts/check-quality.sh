@@ -274,6 +274,7 @@ case "$1" in
         bash scripts/tests/director-loop.sh
         bash scripts/tests/quality-preflight.sh
         bash scripts/test_prepare_next_minor.sh
+        bash scripts/test_release_orchestrator.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every
