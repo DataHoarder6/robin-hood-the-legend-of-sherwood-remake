@@ -806,7 +806,11 @@ discovers arbitrary capture, publishing or deployment commands. Python 3.11+
 (for `tomllib`), Bash, GNU coreutils (`timeout`), `flock`, `setsid`, `zstd` and
 `rsync` are the Linux
 prerequisites. Negative-path tests intentionally print error diagnostics.
-The suite exits nonzero on the first failed check.
+The suite exits nonzero on the first failed check. The unattended loop's four
+fixtures (`scripts/test_director_state.sh`, `scripts/test_director_select_issue.sh`,
+`scripts/test_director_writeback.sh`, `scripts/tests/director-loop.sh`) run here:
+they are fixture-only and assert the handoff ledger, admissible selection,
+explicit write-back target and bounded one-run driver.
 
 The web suite delegates to `pnpm --dir wasm-www verify:web` and requires the
 pinned Node/pnpm versions and a frozen-lockfile install in `wasm-www`. It runs

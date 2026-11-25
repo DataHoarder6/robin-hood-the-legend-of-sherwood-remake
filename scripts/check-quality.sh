@@ -248,6 +248,13 @@ case "$1" in
         bash scripts/test_release_gate.sh
         bash scripts/test_build_host.sh
         bash scripts/test_remote_check.sh
+        # The unattended loop's state machine and one-run driver: fixture-only,
+        # no network, no gate. They catch wrong-target write-backs and repeated
+        # assertions before those behaviours strand a run.
+        bash scripts/test_director_state.sh
+        bash scripts/test_director_select_issue.sh
+        bash scripts/test_director_writeback.sh
+        bash scripts/tests/director-loop.sh
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every

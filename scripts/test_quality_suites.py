@@ -416,5 +416,18 @@ class QualitySuitesTests(unittest.TestCase):
                     pass
 
 
+    def test_director_fixtures_are_gated(self):
+        """The unattended loop's fixtures must run in the tooling suite."""
+        body = (ROOT / "scripts" / "check-quality.sh").read_text(encoding="utf-8")
+        for fixture in (
+            "bash scripts/test_director_state.sh",
+            "bash scripts/test_director_select_issue.sh",
+            "bash scripts/test_director_writeback.sh",
+            "bash scripts/tests/director-loop.sh",
+        ):
+            with self.subTest(fixture=fixture):
+                self.assertIn(fixture, body)
+
+
 if __name__ == "__main__":
     unittest.main()
