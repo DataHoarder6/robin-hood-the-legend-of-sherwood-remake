@@ -1,6 +1,6 @@
 # 0002 — Finished work lands on `fork/main` in the same session
 
-- **Status:** Accepted
+- **Status:** DEPRECATED 2026-11-26 — superseded by [0012](0012-reviewed-recovery-of-parked-work.md)
 - **Date:** 2026-11-20
 - **Related:** [`0001`](0001-empty-box-selection-is-not-a-deselect.md)
 

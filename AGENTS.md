@@ -92,7 +92,8 @@
 - Land finished work in the same session: run `runbg run NAME -- bash scripts/land.sh`
   (fetch, rebase,
   gate, push, remote read-back), then remove worktree and branch. No PRs and no
-  parked feature branches here — `docs/adr/0002-finished-work-lands-in-session.md`.
+  parked feature branches here —
+  `docs/adr/0012-reviewed-recovery-of-parked-work.md` (supersedes 0002).
 
 ## Repo structure
 
