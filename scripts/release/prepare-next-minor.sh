@@ -47,7 +47,11 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     fail 'candidate-tag-exists-with-unprepared-tree'
 fi
 current=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$cargo" | head -1)
-lock_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.lock | head -1)
+lock_version=$(awk '
+    /^\[\[package\]\]/ { name = "" }
+    /^name = / { gsub(/"/, "", $3); name = $3 }
+    /^version = / && name == "robin_rs" { gsub(/"/, "", $3); print $3; exit }
+' Cargo.lock)
 case $current in
     "$version") staged=0 ;;
     "$next") staged=1 ;;

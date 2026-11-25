@@ -16,7 +16,7 @@ repo=$work/repo
 mkdir -p "$repo/docs/releases" "$repo/crates/robin_rs" "$repo/stub"
 cd "$repo"
 printf '[package]\nname = "robin_rs"\nversion = "0.5.0"\n' >crates/robin_rs/Cargo.toml
-printf 'version = "0.5.0"\n' >Cargo.lock
+printf '[[package]]\nname = "unrelated"\nversion = "9.9.9"\n\n[[package]]\nname = "robin_rs"\nversion = "0.5.0"\n' >Cargo.lock
 printf '{\n  "v0.5.0": {"new_features": [], "commits": ["aaaaaaaaaaaaa"]}\n}\n' >docs/releases/whats-new.json
 printf '# Features\n\n- **Rotating map**: turns the map.\n' >docs/NEW_FEATURES.md
 printf '# Notes\n' >docs/RELEASE_NOTES.md
@@ -85,7 +85,7 @@ repo3=$work/repo3
 mkdir -p "$repo3/docs/releases" "$repo3/crates/robin_rs"
 cd "$repo3"
 printf '[package]\nname = "robin_rs"\nversion = "0.5.0"\n' >crates/robin_rs/Cargo.toml
-printf 'version = "0.5.0"\n' >Cargo.lock
+printf '[[package]]\nname = "unrelated"\nversion = "9.9.9"\n\n[[package]]\nname = "robin_rs"\nversion = "0.5.0"\n' >Cargo.lock
 printf '{\n  "v0.4.0": {"new_features": [], "commits": ["aaaaaaaaaaaaa"]}\n}\n' >docs/releases/whats-new.json
 printf '# Notes\n' >docs/RELEASE_NOTES.md
 cat >stub-notes <<'STUB'
