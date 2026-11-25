@@ -30,46 +30,54 @@ next="$major.$((minor + 1)).0"
 tag="v$next"
 
 manifest=docs/releases/whats-new.json
+cargo=crates/robin_rs/Cargo.toml
+[ -f "$manifest" ] || fail 'no-whats-new-manifest'
+[ -f "$cargo" ] || fail 'no-crate-manifest'
 
-# A retry after a successful preparation is a no-op: the bump commit, its tag
-# and its manifest entry all name the same version.
-if [ "$(git log -1 --format=%s)" = "release: bump to $version" ] &&
-   grep -q "\"v$version\"" "$manifest" &&
-   grep -q "^version = \"$version\"\$" crates/robin_rs/Cargo.toml 2>/dev/null; then
-    printf '%s\n' "$version"
+# A retry after a successful preparation is a no-op: HEAD carries the tag,
+# the manifest entry and the version files all name the same release.
+head_tag=$(git tag --points-at HEAD | grep '^v[0-9]' | sort -V | tail -1 || true)
+if [ -n "$head_tag" ] &&
+   grep -q "\"$head_tag\"" "$manifest" &&
+   grep -q "^version = \"${head_tag#v}\"\$" "$cargo"; then
+    printf '%s\n' "${head_tag#v}"
     exit 0
 fi
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     fail 'candidate-tag-exists-with-unprepared-tree'
 fi
-cargo=crates/robin_rs/Cargo.toml
-[ -f "$manifest" ] || fail 'no-whats-new-manifest'
-[ -f "$cargo" ] || fail 'no-crate-manifest'
-grep -q "^version = \"$version\"\$" "$cargo" || fail 'version-precondition'
-grep -q "^version = \"$version\"\$" Cargo.lock || fail 'lockfile-precondition'
+current=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$cargo" | head -1)
+lock_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.lock | head -1)
+case $current in
+    "$version") staged=0 ;;
+    "$next") staged=1 ;;
+    *) fail 'version-precondition' ;;
+esac
+[ "$lock_version" = "$current" ] || fail 'lockfile-precondition'
 
 mapfile -t commits < <(git log --format='%H' "$previous"..HEAD | cut -c1-12)
 (( ${#commits[@]} > 0 )) || fail 'no-landed-source'
 
-python3 -B - "$version" "$next" "$cargo" Cargo.lock "$manifest" "${commits[@]}" <<'PY'
+python3 -B - "$version" "$next" "$staged" "$cargo" Cargo.lock "$manifest" "${commits[@]}" <<'PY'
 import json
 import pathlib
 import re
 import sys
 
-previous, next_version, cargo_path, lock_path, manifest_path, *commits = sys.argv[1:]
-for path in (pathlib.Path(cargo_path), pathlib.Path(lock_path)):
-    body = path.read_text(encoding="utf-8")
-    updated, count = re.subn(
-        rf'^version = "{re.escape(previous)}"$',
-        f'version = "{next_version}"',
-        body,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    if count != 1:
-        raise SystemExit(f"prepare-next-minor: could not bump {path}")
-    path.write_text(updated, encoding="utf-8")
+previous, next_version, staged, cargo_path, lock_path, manifest_path, *commits = sys.argv[1:]
+if staged == "0":
+    for path in (pathlib.Path(cargo_path), pathlib.Path(lock_path)):
+        body = path.read_text(encoding="utf-8")
+        updated, count = re.subn(
+            rf'^version = "{re.escape(previous)}"$',
+            f'version = "{next_version}"',
+            body,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if count != 1:
+            raise SystemExit(f"prepare-next-minor: could not bump {path}")
+        path.write_text(updated, encoding="utf-8")
 manifest = json.loads(pathlib.Path(manifest_path).read_text(encoding="utf-8"))
 if f"v{next_version}" in manifest:
     raise SystemExit("prepare-next-minor: manifest already names the next tag")
@@ -79,8 +87,12 @@ pathlib.Path(manifest_path).write_text(
 )
 PY
 
-git add -- "$cargo" Cargo.lock "$manifest"
-git commit --quiet -m "release: bump to $next"
+if [ "$staged" = 0 ]; then
+    git add -- "$cargo" Cargo.lock "$manifest"
+    git commit --quiet -m "release: bump to $next"
+else
+    git add -- "$manifest"
+fi
 git tag -a "$tag" -m "$tag"
 
 notes=${ROBIN_RELEASE_NOTES:-$repo/scripts/release-notes.sh}

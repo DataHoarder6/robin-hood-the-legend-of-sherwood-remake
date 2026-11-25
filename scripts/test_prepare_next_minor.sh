@@ -76,9 +76,39 @@ set +e
 out=$(bash "$script" --repo "$repo2" 2>&1)
 rc=$?
 set -e
-[[ $rc -ne 0 && "$out" == *'no-landed-source'* ]] \
-    && pass 'missing-source-fails-closed' \
-    || bad "missing-source-fails-closed: rc=$rc out=$out"
+[[ $rc -eq 0 && "$out" == '0.5.0' ]] \
+    && pass 'already-released-is-no-op' \
+    || bad "already-released-is-no-op: rc=$rc out=$out"
+
+# A version staged ahead of the previous tag is accepted without a bump commit.
+repo3=$work/repo3
+mkdir -p "$repo3/docs/releases" "$repo3/crates/robin_rs"
+cd "$repo3"
+printf '[package]\nname = "robin_rs"\nversion = "0.5.0"\n' >crates/robin_rs/Cargo.toml
+printf 'version = "0.5.0"\n' >Cargo.lock
+printf '{\n  "v0.4.0": {"new_features": [], "commits": ["aaaaaaaaaaaaa"]}\n}\n' >docs/releases/whats-new.json
+printf '# Notes\n' >docs/RELEASE_NOTES.md
+cat >stub-notes <<'STUB'
+#!/usr/bin/env bash
+printf 'generated\n' >docs/RELEASE_NOTES.md
+STUB
+chmod +x stub-notes
+git init --quiet -b main
+git add . && git commit --quiet -m base
+git tag -a v0.4.0 -m v0.4.0
+printf 'landed feature\n' >feature.txt
+git add feature.txt && git commit --quiet -m 'feat: staged 0.5.0'
+staged_sha=$(git rev-parse --short=12 HEAD)
+set +e
+out=$(ROBIN_RELEASE_NOTES="$repo3/stub-notes" bash "$script" --repo "$repo3" 2>&1)
+rc=$?
+set -e
+[[ $rc -eq 0 && "$out" == '0.5.0' ]] \
+    && git rev-parse -q --verify refs/tags/v0.5.0 >/dev/null \
+    && [ "$(git rev-parse --short=12 HEAD)" = "$staged_sha" ] \
+    && grep -q "$staged_sha" docs/releases/whats-new.json \
+    && pass 'staged-version-is-accepted' \
+    || bad "staged-version-is-accepted: rc=$rc out=$out"
 
 (( fail == 0 )) || exit 1
 printf 'prepare-next-minor: OK\n'
