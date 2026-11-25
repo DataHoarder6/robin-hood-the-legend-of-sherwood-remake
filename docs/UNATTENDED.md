@@ -230,12 +230,13 @@ Windows seat runs a recorded session ([WINDOWS.md](WINDOWS.md)).
 
 ## Kill switch
 
-`systemctl --user stop director-loop.timer` on `oci-vm` stops a running loop
-immediately — the break-glass, not a terminal state. The durable form is a
-commit to `~/nixos-config` setting `agent.director-loop.enable = false`, which
-that host pulls and activates. The loop itself never edits machine config; a
+`runbg stop director` on `oci-vm` stops the running loop at the next tick
+boundary — the break-glass, not a terminal state. Creating
+`/home/matt/.local/state/robin-director/stop` has the same effect. The loop is
+started once with `runbg run director -- bash scripts/director-loop.sh`; there
+is no `director-loop.timer`. The loop itself never edits machine config; a
 request to do so is BLOCKED under [Risk routing](#risk-routing), with
-`nixos-config` named as the missing capability. Last verified: 2026-11-22.
+`nixos-config` named as the missing capability. Last verified: 2026-11-25.
 
 ## Autonomous run driver
 
