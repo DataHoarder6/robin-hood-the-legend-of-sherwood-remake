@@ -1459,4 +1459,39 @@ mod viewport_touch_tests {
         close(viewport.compass_heading(), 0.0);
         close(viewport.effective_angle(), 0.0);
     }
+
+    /// A click lands on whatever the renderer drew under the cursor. Zooming
+    /// must not slide that map point away from the cursor, at any angle or
+    /// ladder stop, or the next click selects/moves the wrong thing.
+    #[test]
+    fn zoom_steps_keep_the_click_target_under_the_cursor_at_both_angles() {
+        for steps in [0_i8, 1] {
+            let mut viewport = ViewportState::new(800.0, 680.0);
+            viewport.set_level_size(5000.0, 5000.0);
+            viewport.view_position = MapPoint::new(1000.0, 900.0);
+            viewport.rotate_by(steps);
+            viewport.advance_rotation(0);
+            viewport.advance_rotation(u32::MAX);
+            assert_eq!(viewport.display_angle(), viewport.camera_angle());
+
+            let click = ScreenPoint::new(600.0, 200.0);
+            for direction in [
+                ZoomDirection::In,
+                ZoomDirection::In,
+                ZoomDirection::Out,
+                ZoomDirection::Out,
+            ] {
+                let before = viewport
+                    .screen_to_map(click)
+                    .expect("click target is inside the level");
+                viewport.zoom_step(direction, Some(click));
+                let after = viewport
+                    .screen_to_map(click)
+                    .expect("click target is still inside the level");
+                close(after.x, before.x);
+                close(after.y, before.y);
+            }
+            close(viewport.zoom_factor, 1.0);
+        }
+    }
 }

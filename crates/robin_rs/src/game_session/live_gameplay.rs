@@ -9,6 +9,7 @@ use super::interactive::{
 };
 use super::*;
 use crate::game::Game;
+use robin_engine::coordinates::MapPoint;
 use robin_engine::player_command::FrameCommands;
 
 /// Mission/process borrows required while live actions are admitted.
@@ -172,6 +173,30 @@ fn portrait_selection_command(
     }
 }
 
+/// Camera placement for a keyboard portrait selection. The mouse click path
+/// centres the chosen character; this helper is the keyboard path's own seam.
+fn place_keyboard_selection_camera(viewport: &mut crate::host::ViewportState, point: MapPoint) {
+    viewport.ensure_on_screen(point);
+}
+
+/// Commands emitted for one number-key press. A press on an already-selected
+/// character should re-arm the same native outline fade the double-click uses.
+fn keyboard_selection_commands(
+    portrait_index: u8,
+    ctrl_held: bool,
+    quick_group_exists: bool,
+    already_selected: bool,
+    pc_id: robin_engine::element::EntityId,
+) -> Vec<PlayerCommand> {
+    let _ = already_selected;
+    let _ = pc_id;
+    vec![portrait_selection_command(
+        portrait_index,
+        ctrl_held,
+        quick_group_exists,
+    )]
+}
+
 /// Dispatch one admitted non-menu gameplay action.
 fn dispatch_gameplay_action(
     context: &mut LiveGameplayContext<'_>,
@@ -250,21 +275,32 @@ fn dispatch_gameplay_action(
         }
         GameAction::SelectCharacter { portrait_index } => {
             let index = *portrait_index as usize;
-            // Number-key selection is ordinary selection: at most an
-            // ensure-on-screen pan, never a hard-centre (XAG 117).
-            if let Some(pc_id) = engine.character_for_portrait_index(*portrait_index)
+            let pc_id = engine.character_for_portrait_index(*portrait_index);
+            if let Some(pc_id) = pc_id
                 && let Some(entity) = engine.get_entity(pc_id)
             {
-                host.frontend
-                    .viewport
-                    .ensure_on_screen(entity.position_iface().map_position());
+                place_keyboard_selection_camera(
+                    &mut host.frontend.viewport,
+                    entity.position_iface().map_position(),
+                );
             }
-            let command = portrait_selection_command(
-                *portrait_index,
-                ctrl_held,
-                index < 9 && !engine.quick_select_group(index).is_empty(),
-            );
-            dispatch_local_command(&host.transport, commands, &command);
+            let selection_commands = match pc_id {
+                Some(pc_id) => keyboard_selection_commands(
+                    *portrait_index,
+                    ctrl_held,
+                    index < 9 && !engine.quick_select_group(index).is_empty(),
+                    engine
+                        .hero_selection(host.transport.local_seat())
+                        .contains(&pc_id),
+                    pc_id,
+                ),
+                None => vec![portrait_selection_command(
+                    *portrait_index,
+                    ctrl_held,
+                    index < 9 && !engine.quick_select_group(index).is_empty(),
+                )],
+            };
+            dispatch_local_commands(&host.transport, commands, &selection_commands);
         }
         GameAction::QuickSave => {
             if !engine.is_zoom_possible() {
@@ -576,8 +612,14 @@ fn should_cancel_planned_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{portrait_selection_command, should_cancel_planned_action, spellforge_virtual_key};
+    use super::{
+        keyboard_selection_commands, place_keyboard_selection_camera, portrait_selection_command,
+        should_cancel_planned_action, spellforge_virtual_key,
+    };
     use crate::gfx_types::Keycode;
+    use crate::host::{ViewportState, ZoomDirection};
+    use robin_engine::coordinates::MapPoint;
+    use robin_engine::element::{EntityId, EntityIdKind};
     use robin_engine::player_command::PlayerCommand;
     use robin_engine::profiles::Action;
 
@@ -613,5 +655,61 @@ mod tests {
         assert_eq!(spellforge_virtual_key(Keycode::F12), Some(0x7b));
         assert_eq!(spellforge_virtual_key(Keycode::Left), Some(0x25));
         assert_eq!(spellforge_virtual_key(Keycode::Unknown), None);
+    }
+
+    /// The number-key path must put the character where the mouse click puts
+    /// it, at angle zero and under rotation, at every ladder stop.
+    #[test]
+    fn number_key_centres_the_character_like_a_mouse_click() {
+        for steps in [0_i8, 1] {
+            for zoom_steps in 0..2 {
+                let mut keyed = ViewportState::new(1024.0, 768.0);
+                keyed.set_level_size(5000.0, 5000.0);
+                keyed.view_position = MapPoint::new(1000.0, 800.0);
+                keyed.rotate_by(steps);
+                keyed.advance_rotation(0);
+                keyed.advance_rotation(u32::MAX);
+                for _ in 0..zoom_steps {
+                    keyed.zoom_step(ZoomDirection::In, None);
+                }
+
+                let character = MapPoint::new(1400.0, 1000.0);
+                let mut clicked = keyed.clone();
+                clicked.center_on_point(character);
+                place_keyboard_selection_camera(&mut keyed, character);
+
+                assert_eq!(
+                    keyed.view_position, clicked.view_position,
+                    "camera differs at rotation step {steps}, zoom steps {zoom_steps}"
+                );
+                assert_eq!(
+                    keyed.map_to_screen_unclamped(character),
+                    clicked.map_to_screen_unclamped(character)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn repeating_a_number_key_on_the_selected_character_reseeds_the_hulk() {
+        let pc = EntityId::new(7, EntityIdKind::Pc);
+        let first = keyboard_selection_commands(0, false, false, false, pc);
+        assert_eq!(first.len(), 1);
+        assert!(matches!(
+            first[0],
+            PlayerCommand::SelectByPortrait {
+                portrait_index: 0,
+                append: false
+            }
+        ));
+
+        let second = keyboard_selection_commands(0, false, false, true, pc);
+        assert!(
+            second.iter().any(|cmd| matches!(
+                cmd,
+                PlayerCommand::ReseedSelectionHulk { pc_id } if *pc_id == pc
+            )),
+            "the second identical press must re-arm the selection outline: {second:?}"
+        );
     }
 }
