@@ -1859,6 +1859,69 @@ fn summoned_bodies_withdraw_when_the_level_is_calm() {
 }
 
 #[test]
+fn adaptive_pressure_wakes_a_staged_body_only_for_noisy_play() {
+    use crate::ai::AlertLevel;
+    use crate::engine::adaptive_pressure::AdaptivePressureSettings;
+
+    let (mut engine, body) = staged_garrison_engine();
+    engine.control.sim_config.extra_guards = true;
+    engine.control.frame_counter = AdaptivePressureSettings::default().start_after_frames;
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+
+    // A stealthy mission leaves the staged encounter untouched.
+    engine.hourglass_phase_adaptive_pressure(TickCtx::new(&sim, &assets));
+    assert!(
+        engine
+            .get_entity(body)
+            .expect("body")
+            .soldier_data()
+            .expect("soldier data")
+            .staged,
+        "Green alert must not wake the staged garrison"
+    );
+
+    // Sustained Yellow alert on a decision frame calls the same body in.
+    engine.ai.global.yellow_alert_soldiers = 1;
+    engine.ai.global.overall_villain_alert_status = AlertLevel::Yellow;
+    engine.hourglass_phase_adaptive_pressure(TickCtx::new(&sim, &assets));
+    assert!(
+        !engine
+            .get_entity(body)
+            .expect("body")
+            .soldier_data()
+            .expect("soldier data")
+            .staged,
+        "a noisy mission must draw a staged body through the director"
+    );
+}
+
+#[test]
+fn adaptive_pressure_respects_the_opt_in_and_draws_no_rng() {
+    use crate::ai::AlertLevel;
+    use crate::engine::adaptive_pressure::AdaptivePressureSettings;
+
+    let (mut engine, body) = staged_garrison_engine();
+    engine.control.frame_counter = AdaptivePressureSettings::default().start_after_frames;
+    engine.ai.global.yellow_alert_soldiers = 1;
+    engine.ai.global.overall_villain_alert_status = AlertLevel::Yellow;
+    let assets = engine.test_runtime_assets();
+    let sim = crate::sim_rng::test_context();
+    let rng_before = engine.rng_seed();
+    engine.hourglass_phase_adaptive_pressure(TickCtx::new(&sim, &assets));
+    assert_eq!(engine.rng_seed(), rng_before, "director must not draw RNG");
+    assert!(
+        engine
+            .get_entity(body)
+            .expect("body")
+            .soldier_data()
+            .expect("soldier data")
+            .staged,
+        "without the opt-in the staged encounter is untouched"
+    );
+}
+
+#[test]
 fn the_native_host_command_summons_a_body() {
     use crate::element::Camp;
     use crate::natives::EngineCommand;

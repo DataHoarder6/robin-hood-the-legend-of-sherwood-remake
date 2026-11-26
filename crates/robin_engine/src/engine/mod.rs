@@ -10,6 +10,7 @@
 
 mod ability_execution;
 mod accessors_short;
+mod adaptive_pressure;
 mod ai;
 use crate::sequence::SequenceElementRef;
 pub(crate) use ai::debug_detectable_mutation_load_snapshot;

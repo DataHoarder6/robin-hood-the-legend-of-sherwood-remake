@@ -1414,6 +1414,16 @@ impl EngineInner {
             return code;
         }
 
+        // Named director step between MissionAndMessages and Paths. It has no
+        // hourglass-enum variant so the phase-order trace and its tests stay
+        // byte-identical for opt-out sessions.
+        tracing::trace!(
+            target: "robin_engine::engine::tick::phases",
+            phase = "AdaptivePressure",
+            "perform_hourglass phase"
+        );
+        self.hourglass_phase_adaptive_pressure(tcx);
+
         time_hourglass_phase(HourglassPhase::ControlAndCleanup, || {
             self.hourglass_phase_control_and_cleanup(tcx)
         });
