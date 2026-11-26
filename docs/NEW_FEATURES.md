@@ -1582,7 +1582,7 @@ A list of which additional features we have added, which ones we might still wan
   Yellow/Red play wakes staged reinforcement bodies; stealthy Green play leaves
   them asleep. Default and replay hashes are untouched.
 - **Hidden-ground outlines.** Ground hidden behind buildings gets dotted
-  outlines; hold Super (Left or Right) to reveal every hidden zone in the map.
+  outlines; hold Shift (Left or Right) to reveal every hidden zone in the map.
   This is presentation-only.
 
 - **Compass heading on `<`/`>`.** Shift+Comma and Shift+Period turn the world
