@@ -12,6 +12,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import contextlib
+import io
+import os
 import socket
 import tempfile
 import threading
@@ -20,7 +23,9 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
+import issue_smoke
 import receiver
 
 CRASH_TOKEN = "test-token"
@@ -402,6 +407,20 @@ class BugReportTests(ReceiverFixture):
         )
         self.assertLess(body.index(line), body.index("### Description"))
 
+    def test_an_unavailable_section_names_its_reason_in_the_issue(self) -> None:
+        report = bug_bundle()
+        report["build"]["git_rev"] = {
+            "available": False,
+            "reason": "stamped commit missing from this build",
+        }
+        self.assertEqual(self.post_bug(report)[0], 202)
+        body = self.github.issues[0]["body"]
+        self.assertIn("### Unavailable evidence", body)
+        self.assertIn("`build.git_rev`", body)
+        self.assertIn("stamped commit missing from this build", body)
+        self.assertIn("`session.players[0].build_rev`", body)
+        self.assertIn("no wire field", body)
+
     def test_a_cursor_miss_names_every_layer_that_was_tested(self) -> None:
         bundle = bug_bundle()
         bundle["cursor"]["element"] = None
@@ -496,6 +515,177 @@ class BugReportTests(ReceiverFixture):
         status, _ = self.post_bug(bug_bundle())
         self.assertEqual(status, 502)
         self.assertEqual(len(self.stored_bug_bundles()), 1)
+
+
+class StubEndpoint:
+    """A deterministic `POST /bug-report` stand-in; never a deployed service."""
+
+    def __init__(self, receipt: dict) -> None:
+        self.requests: list[dict] = []
+        self.receipt = receipt
+        endpoint = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self) -> None:  # noqa: N802 - http.server's spelling
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length)
+                endpoint.requests.append(
+                    {
+                        "path": self.path,
+                        "authorization": self.headers.get("Authorization"),
+                        "bundle": json.loads(raw),
+                    }
+                )
+                payload = json.dumps(endpoint.receipt).encode()
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/bug-report"
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class IssueSmokeTests(unittest.TestCase):
+    """#51's live layer, dry-run against a stub endpoint and a stub `gh`."""
+
+    BUNDLE_ID = "cafebabedeadbeef"
+
+    def setUp(self) -> None:
+        self.state = tempfile.TemporaryDirectory()
+        self.addCleanup(self.state.cleanup)
+        self.state_dir = Path(self.state.name)
+        self.endpoint = StubEndpoint(
+            {
+                "fingerprint": "fedcba9876543210",
+                "bundle": self.BUNDLE_ID,
+                "issue": 7,
+                "occurrences": 1,
+            }
+        )
+        self.addCleanup(self.endpoint.close)
+        self.gh_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.gh_dir.cleanup)
+        self.gh = self.fake_gh(Path(self.gh_dir.name))
+
+    @staticmethod
+    def fake_gh(directory: Path) -> Path:
+        """A GitHub CLI stand-in with a local state file, never a tracker."""
+        script = directory / "fake-gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "state = Path(os.environ['SMOKE_GH_STATE']) / 'issue.json'\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['issue', 'view']:\n"
+            "    print(json.dumps(json.loads(state.read_text())))\n"
+            "elif args[:2] == ['issue', 'close']:\n"
+            "    data = json.loads(state.read_text())\n"
+            "    data['state'] = 'CLOSED'\n"
+            "    state.write_text(json.dumps(data))\n"
+            "    (state.parent / 'closed').write_text(' '.join(args))\n"
+            "else:\n"
+            "    sys.exit(3)\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def environment(self, opt_in: str) -> dict:
+        return {
+            issue_smoke.OPT_IN_ENV: opt_in,
+            issue_smoke.ENDPOINT_ENV: self.endpoint.url,
+            issue_smoke.TOKEN_ENV: CRASH_TOKEN,
+            issue_smoke.CLI_ENV: str(self.gh),
+            "SMOKE_GH_STATE": str(self.state_dir),
+        }
+
+    def write_bundle(self, report: dict | None = None) -> Path:
+        path = self.state_dir / "bundle.json"
+        path.write_text(json.dumps(report or bug_bundle()))
+        return path
+
+    def record_issue(self, *, title: str, labels: list[str], body: str) -> None:
+        (self.state_dir / "issue.json").write_text(
+            json.dumps(
+                {
+                    "number": 7,
+                    "title": title,
+                    "labels": labels,
+                    "body": body,
+                    "state": "OPEN",
+                }
+            )
+        )
+
+    def test_the_harness_refuses_to_start_without_the_opt_in(self) -> None:
+        bundle_path = self.write_bundle()
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, self.environment("")), contextlib.redirect_stderr(stderr):
+            result = issue_smoke.main(["--bundle", str(bundle_path), "--repo", "owner/repo"])
+        self.assertEqual(result, 2)
+        self.assertIn("refusing to run", stderr.getvalue())
+        self.assertFalse((self.state_dir / "closed").exists(), "the CLI was never called")
+        self.assertEqual(self.endpoint.requests, [], "no POST without the opt-in")
+
+    def test_a_dry_run_proves_readback_labels_facts_and_close(self) -> None:
+        report = bug_bundle()
+        report["build"]["git_rev"] = {
+            "available": False,
+            "reason": "stamped commit missing from this build",
+        }
+        bundle_path = self.write_bundle(report)
+        body = receiver.bug_issue_body(report, self.BUNDLE_ID, self.state_dir / "bundle.json")
+        self.record_issue(
+            title=receiver.bug_title(report),
+            labels=list(receiver.BUG_LABELS),
+            body=body,
+        )
+
+        stdout = io.StringIO()
+        with mock.patch.dict(os.environ, self.environment("1")), contextlib.redirect_stdout(stdout):
+            result = issue_smoke.main(["--bundle", str(bundle_path), "--repo", "owner/repo"])
+        self.assertEqual(result, 0, stdout.getvalue())
+        proof = json.loads(stdout.getvalue())
+        self.assertEqual(proof["issue"], 7)
+        self.assertEqual(proof["bundle"], self.BUNDLE_ID)
+        self.assertEqual(proof["labels"], ["bug", "bug-report"])
+        self.assertGreater(proof["facts_checked"], 5)
+        self.assertEqual(proof["unavailable_reasons_checked"], 2)
+        self.assertEqual(proof["state_at_read"], "OPEN")
+        self.assertIn("close", (self.state_dir / "closed").read_text())
+        self.assertEqual(
+            json.loads((self.state_dir / "issue.json").read_text())["state"],
+            "CLOSED",
+            "the harness closes the issue it created",
+        )
+        self.assertEqual(len(self.endpoint.requests), 1, "one report, one receipt")
+        self.assertEqual(
+            self.endpoint.requests[0]["authorization"], f"Bearer {CRASH_TOKEN}"
+        )
+        self.assertEqual(self.endpoint.requests[0]["bundle"], report)
+
+    def test_a_failed_readback_still_closes_the_created_issue(self) -> None:
+        bundle_path = self.write_bundle()
+        self.record_issue(title="a different title", labels=["bug"], body="no facts")
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, self.environment("1")), contextlib.redirect_stderr(stderr):
+            result = issue_smoke.main(["--bundle", str(bundle_path), "--repo", "owner/repo"])
+        self.assertEqual(result, 2)
+        self.assertIn("title was", stderr.getvalue())
+        self.assertIn("close", (self.state_dir / "closed").read_text())
 
 
 if __name__ == "__main__":

@@ -499,6 +499,31 @@ def bug_facts(bundle: dict) -> list[str]:
     ]
 
 
+def unavailable_evidence(bundle: object, prefix: str = "") -> list[tuple[str, str]]:
+    """Every section explicitly recorded as unavailable, with its reason.
+
+    A section that is simply missing is a silent omission. A section that says
+    ``{"available": false, "reason": ...}`` is a fact the reader is owed, so the
+    filed issue names both its path and why it could not be captured.
+    """
+    found: list[tuple[str, str]] = []
+    if isinstance(bundle, dict):
+        if bundle.get("available") is False:
+            reason = bundle.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
+                reason = "no reason recorded"
+            found.append((prefix or "bundle", reason.strip()))
+        for key, value in bundle.items():
+            if key == "reason":
+                continue
+            path = f"{prefix}.{key}" if prefix else str(key)
+            found.extend(unavailable_evidence(value, path))
+    elif isinstance(bundle, list):
+        for index, value in enumerate(bundle):
+            found.extend(unavailable_evidence(value, f"{prefix}[{index}]"))
+    return found
+
+
 def bug_issue_body(bundle: dict, bundle_id: str, bundle_path: Path) -> str:
     """The issue body: reproduction facts first, the bundle summarised, not pasted."""
     script = _dig(bundle, "game", "script", default={}) or {}
@@ -540,6 +565,19 @@ def bug_issue_body(bundle: dict, bundle_id: str, bundle_path: Path) -> str:
         "### Note",
         "",
         fenced(bounded(bundle.get("note") or "not given", 4000)),
+    ]
+    unavailable = unavailable_evidence(bundle)
+    if unavailable:
+        sections += [
+            "",
+            "### Unavailable evidence",
+            "",
+            *(
+                f"- `{bounded(path, 120)}`: {bounded(reason, 200)}"
+                for path, reason in unavailable
+            ),
+        ]
+    sections += [
         "",
         "### Script state",
         "",
