@@ -210,6 +210,42 @@ fn substitute_printf(template: &str, values: &[&str]) -> String {
     out
 }
 
+/// Whether `template` contains a printf conversion expecting a value —
+/// the same conversions [`substitute_printf`] consumes.
+fn has_printf_conversion(template: &str) -> bool {
+    let mut chars = template.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            continue;
+        }
+        if chars.peek() == Some(&'l') {
+            chars.next();
+        }
+        if matches!(chars.peek().copied(), Some('i' | 'u' | 'd' | 's')) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Resolve a production item's display text for a count.
+///
+/// The loaded `Level.res` bonus strings are printf templates that carry the
+/// count (`"Arrows: %i"`); the host's fallback uses a bare noun (`"arrows"`).
+/// Fill in the template when it has a conversion, otherwise prefix the noun.
+fn bonus_item_text(menu_text: &dyn MenuTextLookup, prod_type: Type, count: u16) -> String {
+    let template = menu_text.get(bonus_text_id(prod_type));
+    if has_printf_conversion(&template) {
+        substitute_printf(&template, &[&count.to_string()])
+    } else {
+        format!("{count} {template}")
+    }
+}
+
 // ─── SherwoodStat ──────────────────────────────────────────────────
 
 /// Sherwood Forest debriefing statistics.
@@ -383,7 +419,9 @@ impl SherwoodStat {
         {
             let specialist = find_specialist(sector, characters, profiles).is_some();
             let forecast = sector.forecast(cycle_seconds, specialist);
-            let item = menu_text.get(bonus_text_id(sector.prod_type));
+            // The item label is a `%s` value in the forecast line; loaded
+            // data supplies a count template there too, not a bare noun.
+            let item = bonus_item_text(menu_text, sector.prod_type, forecast.current_stock);
             let specialist_suffix = if specialist {
                 menu_text.get(MT_STR_PRODUCTION_FORECAST_SPECIALIST)
             } else {
@@ -410,8 +448,7 @@ impl SherwoodStat {
     /// Format the item-production line for a single sector.
     /// Returns the item name and quantity string.
     fn get_ammo_text(sector: &SectorProduction, menu_text: &dyn MenuTextLookup) -> String {
-        let item = menu_text.get(bonus_text_id(sector.prod_type));
-        format!("{} {item}", sector.get_produced_amount())
+        bonus_item_text(menu_text, sector.prod_type, sector.get_produced_amount())
     }
 
     /// Append production text for one sector if it produced anything.
@@ -554,6 +591,31 @@ mod tests {
     }
 
     impl FakeMenuText {
+        /// Templates as the retail `Level.res` ships them: the training and
+        /// production item strings carry a count placeholder, not a bare
+        /// noun. The host's English fallbacks use plain nouns, so both
+        /// shapes must render without leaking a literal placeholder.
+        fn loaded() -> Self {
+            let mut text = Self::english();
+            for (id, template) in [
+                (MT_STR_DB_S01, "Merry Men trained in combat: %i"),
+                (MT_STR_DB_S02, "Merry Men trained in archery: %i"),
+                (MT_STR_DB_S03, "Merry Men treated: %i"),
+                (MT_STR_DB_BONUS_ARROW, "Arrows: %i"),
+                (MT_STR_DB_BONUS_APPLE, "Apples: %i"),
+                (MT_STR_DB_BONUS_WASP_NEST, "Wasps Nests: %i"),
+                (MT_STR_DB_BONUS_LAMB_LEGG, "Legs of Meat: %i"),
+                (MT_STR_DB_BONUS_PLANTS, "Medicinal Herbs: %i"),
+                (MT_STR_DB_BONUS_STONE, "Stones: %i"),
+                (MT_STR_DB_BONUS_ALE, "Ale: %i"),
+                (MT_STR_DB_BONUS_NET, "Nets: %i"),
+                (MT_STR_DB_BONUS_PURSE, "Purses: %i"),
+            ] {
+                text.map.insert(id, template);
+            }
+            text
+        }
+
         fn english() -> Self {
             let mut map = HashMap::new();
             map.insert(MT_STR_SCORE, "Score");
@@ -663,6 +725,95 @@ mod tests {
 
         let s = make_sector(Type::MakeWaspNest, 5, vec![]);
         assert_eq!(SherwoodStat::get_ammo_text(&s, &text), "5 wasp nests");
+    }
+
+    #[test]
+    fn production_line_expands_the_loaded_item_i_template() {
+        // Level.res ships id 89 as "Arrows: %i". It is a format string, not a
+        // label to prefix with a count: "{count} {item}" left the literal
+        // token on screen.
+        let text = FakeMenuText::loaded();
+        let sector = make_sector(Type::MakeArrow, 20, vec![]);
+        let line = SherwoodStat::get_ammo_text(&sector, &text);
+        assert_eq!(line, "Arrows: 20");
+        assert!(
+            !line.contains("%i"),
+            "the production line leaked %i: {line:?}"
+        );
+    }
+
+    #[test]
+    fn training_report_with_loaded_templates_shows_real_counts_without_i_tokens() {
+        let text = FakeMenuText::loaded();
+        let (characters, profiles) = make_party(&["Robin des bois", "Peasant"]);
+        let sectors = vec![
+            make_sector(Type::TrainBow, 0, vec![0, 1]),
+            make_sector(Type::MakeArrow, 20, vec![]),
+        ];
+        let report = SherwoodStat.get_text(
+            &sectors,
+            &characters,
+            &profiles,
+            &ScoreInfo::default(),
+            &text,
+        );
+        assert!(
+            report.contains("Merry Men trained in archery: 1"),
+            "the training count must be substituted: {report:?}"
+        );
+        assert!(
+            report.contains("Arrows: 20"),
+            "the arrow count must be substituted: {report:?}"
+        );
+        assert!(
+            !report.contains("%i"),
+            "the report leaked a literal %i: {report:?}"
+        );
+    }
+
+    #[test]
+    fn forecast_item_label_expands_the_loaded_i_template() {
+        // The item text is injected into the forecast line as a `%s` value;
+        // a format string there leaks `%i` a second way.
+        let text = FakeMenuText::loaded();
+        let (characters, profiles) = make_party(&["Peasant"]);
+        let mut sector = make_sector(Type::MakeArrow, 0, vec![0]);
+        sector.amount = 9;
+        sector.production_points = vec![crate::sector_production::Point::default()];
+        let mut out = String::new();
+        SherwoodStat::append_forecast_text(
+            &[sector],
+            &characters,
+            &profiles,
+            &ProductionForecastCycle::default(),
+            &text,
+            &mut out,
+        );
+        assert!(out.contains("Arrows: 9"), "forecast label: {out:?}");
+        assert!(
+            !out.contains('%'),
+            "the forecast leaked a placeholder: {out:?}"
+        );
+    }
+
+    #[test]
+    fn every_loaded_bonus_item_template_renders_its_count() {
+        let text = FakeMenuText::loaded();
+        for (prod_type, expected) in [
+            (Type::MakeArrow, "Arrows: 7"),
+            (Type::MakeApple, "Apples: 7"),
+            (Type::MakeWaspNest, "Wasps Nests: 7"),
+            (Type::MakeLamblegg, "Legs of Meat: 7"),
+            (Type::MakePlant, "Medicinal Herbs: 7"),
+            (Type::MakeStone, "Stones: 7"),
+            (Type::MakeAle, "Ale: 7"),
+            (Type::MakeNet, "Nets: 7"),
+            (Type::MakePurse, "Purses: 7"),
+        ] {
+            let rendered = SherwoodStat::get_ammo_text(&make_sector(prod_type, 7, vec![]), &text);
+            assert_eq!(rendered, expected);
+            assert!(!rendered.contains("%i"));
+        }
     }
 
     #[test]
