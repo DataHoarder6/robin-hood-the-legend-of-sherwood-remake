@@ -147,6 +147,7 @@ test("cancelled preload forwards the signal, stops dequeuing and never installs 
   const controller = new AbortController();
   let installed = false;
   let requested = 0;
+  let assetSignal: AbortSignal | undefined;
   await assert.rejects(
     preloadRuntimeAssets(
       {
@@ -161,9 +162,13 @@ test("cancelled preload forwards the signal, stops dequeuing and never installs 
       {
         signal: controller.signal,
         fetch: async (input, init) => {
-          assert.equal(init?.signal, controller.signal);
+          // The shell's signal is composed with each asset's deadline and the
+          // sibling-failure abort, so identity is not preserved — propagation
+          // is what matters: aborting the shell must abort the request.
+          assert.ok(init?.signal instanceof AbortSignal);
           if (String(input).endsWith("preload-assets.json"))
             return Response.json(Array.from({ length: 30 }, (_, i) => String(i)));
+          assetSignal = init?.signal;
           requested++;
           controller.abort();
           return new Response(new Uint8Array([1]));
@@ -174,8 +179,69 @@ test("cancelled preload forwards the signal, stops dequeuing and never installs 
     ),
     { name: "AbortError" },
   );
+  assert.ok(assetSignal?.aborted, "the injected browser signal must reach the asset fetch");
   assert.equal(installed, false);
   assert.ok(requested > 0 && requested <= 12);
+});
+
+test("a stalled asset times out with its URL and releases the remaining workers", async () => {
+  const started: string[] = [];
+  const base = "https://runtime.example/build";
+  await assert.rejects(
+    preloadRuntimeAssets(
+      { default: async () => {}, wasm_boot: () => {}, wasm_preload_asset: () => {} },
+      base,
+      false,
+      {
+        assetTimeoutMs: 30,
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.endsWith("preload-assets.json"))
+            return Response.json(Array.from({ length: 30 }, (_, i) => (i === 0 ? "hung.bin" : `${i}.bin`)));
+          started.push(url);
+          if (url.endsWith("hung.bin")) return new Promise<Response>(() => {});
+          // Slow enough that the 30 ms deadline wins before a worker can
+          // dequeue the next asset.
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return new Response(new Uint8Array([1]));
+        },
+        log: () => {},
+        progress: () => {},
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /preload .*hung\.bin: timed out after 30ms/u);
+      return true;
+    },
+  );
+  assert.equal(started.length, 12, "the first failure must stop dequeuing the rest");
+});
+
+test("a failed asset aborts its siblings before the next batch is fetched", async () => {
+  const started: string[] = [];
+  await assert.rejects(
+    preloadRuntimeAssets(
+      { default: async () => {}, wasm_boot: () => {}, wasm_preload_asset: () => {} },
+      "https://runtime.example/build",
+      false,
+      {
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.endsWith("preload-assets.json"))
+            return Response.json(Array.from({ length: 30 }, (_, i) => (i === 0 ? "bad.bin" : `${i}.bin`)));
+          started.push(url);
+          if (url.endsWith("bad.bin")) return new Response(null, { status: 404 });
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return new Response(new Uint8Array([1]));
+        },
+        log: () => {},
+        progress: () => {},
+      },
+    ),
+    /bad\.bin/u,
+  );
+  assert.equal(started.length, 12);
 });
 
 for (const stage of ["manifest", "asset", "body"] as const) {

@@ -126,13 +126,14 @@ test("e2e: a hung asset fails boot naming it inside the boot budget", async () =
     { assets: ["ready.bin", "hung.bin", "after.bin"], hang: ["/build/hung.bin"] },
     async (base) => {
       const record = emptyRecord();
-      const error = await assert.rejects(bootWithBudget(base, record), (cause: unknown) => {
+      let message = "";
+      await assert.rejects(bootWithBudget(base, record), (cause: unknown) => {
         assert.ok(cause instanceof Error);
-        assert.match(cause.message, /hung\.bin/u);
+        message = cause.message;
+        assert.match(message, /hung\.bin/u);
         return true;
       });
-      assert.ok(error instanceof Error);
-      assert.ok(!error.message.includes("did not settle"), "the budget, not the boot, must not decide the outcome");
+      assert.ok(!message.includes("did not settle"), "the budget, not the boot, must not decide the outcome");
       assert.equal(record.booted, false);
       assert.equal(record.started, false);
       assert.ok(

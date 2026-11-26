@@ -2,12 +2,18 @@ import type { RobinWasmModule } from "./boot-lifecycle.js";
 import { withAbort } from "./cancellation.ts";
 
 const PRELOAD_FETCH_CONCURRENCY = 12;
+// A single stalled request must not hold the whole boot at 0/N forever. The
+// budget is per asset, not per preload: twelve workers may be in flight and
+// each one gets its own deadline from the moment its worker starts it.
+const PRELOAD_ASSET_TIMEOUT_MS = 3_000;
 type PreloadEntry = string | { readonly path?: unknown; readonly url?: unknown };
 export type PreloadDependencies = {
   readonly signal?: AbortSignal;
   fetch: typeof fetch;
   log: (message: string) => void;
   progress: (fraction: number, detail: string) => void;
+  /** Override only for tests; production uses `PRELOAD_ASSET_TIMEOUT_MS`. */
+  readonly assetTimeoutMs?: number;
 };
 
 export function resolvePreloadEntries(
@@ -55,6 +61,38 @@ async function readPreloadResource<T>(
   }
 }
 
+/** One asset's abort set: either the caller/sibling failure or its own deadline. */
+function assetFetchSignal(
+  parent: AbortSignal,
+  timeoutMs: number,
+): { readonly signal: AbortSignal; readonly timeout: AbortSignal } {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return { signal: AbortSignal.any([parent, timeout]), timeout };
+}
+
+async function readAssetResource<T>(
+  parent: AbortSignal,
+  timed: AbortSignal,
+  timeout: AbortSignal,
+  url: string,
+  timeoutMs: number,
+  read: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await withAbort(timed, read);
+  } catch (cause) {
+    // A sibling's failure is the authoritative error: it names the asset
+    // that failed first. Only otherwise report this asset's own timeout.
+    parent.throwIfAborted();
+    if (timeout.aborted) {
+      throw new Error(`preload ${url}: timed out after ${timeoutMs}ms`, { cause });
+    }
+    throw new Error(`preload ${url}: ${cause instanceof Error ? cause.message : String(cause)}`, {
+      cause,
+    });
+  }
+}
+
 export async function preloadRuntimeAssets(
   wasm: RobinWasmModule,
   buildBase: string,
@@ -66,15 +104,20 @@ export async function preloadRuntimeAssets(
   if (wasm.wasm_preload_asset === undefined) {
     return;
   }
+  // The first asset failure aborts this controller so the other workers stop
+  // dequeuing and their in-flight fetches are cancelled. An external abort
+  // keeps its own reason: `AbortSignal.any` retains whichever aborts first.
+  const failed = new AbortController();
+  const runSignal = AbortSignal.any([signal, failed.signal]);
   const preloadAsset = wasm.wasm_preload_asset;
   // Browser fetch rejects a dependency object as its receiver. Invoke the
   // injected function detached, as the normal global fetch call would be.
   const fetchAsset = deps.fetch;
   const manifestUrl = `${buildBase}/preload-assets.json`;
-  const manifestResp = await readPreloadResource(signal, manifestUrl, () =>
+  const manifestResp = await readPreloadResource(runSignal, manifestUrl, () =>
     fetchAsset(manifestUrl, {
       cache: noCache ? "no-cache" : "force-cache",
-      signal,
+      signal: runSignal,
     }),
   );
   if (manifestResp.status === 404) {
@@ -83,10 +126,11 @@ export async function preloadRuntimeAssets(
   if (!manifestResp.ok) {
     throw new Error(`fetch ${manifestUrl}: HTTP ${manifestResp.status}`);
   }
-  const raw = (await readPreloadResource(signal, manifestUrl, () =>
+  const raw = (await readPreloadResource(runSignal, manifestUrl, () =>
     manifestResp.json(),
   )) as unknown;
   const entries = resolvePreloadEntries(raw, manifestUrl, buildBase);
+  const timeoutMs = deps.assetTimeoutMs ?? PRELOAD_ASSET_TIMEOUT_MS;
 
   // Fetch and install in the same bounded worker. Keeping every completed
   // ArrayBuffer until all requests finish doubles the preload peak: JS owns
@@ -96,25 +140,47 @@ export async function preloadRuntimeAssets(
     entries,
     PRELOAD_FETCH_CONCURRENCY,
     async ({ path, assetUrl }) => {
-      const assetResp = await readPreloadResource(signal, assetUrl, () =>
-        fetchAsset(assetUrl, {
-          cache: noCache ? "no-cache" : "force-cache",
-          signal,
-        }),
-      );
-      if (!assetResp.ok) {
-        throw new Error(`fetch ${assetUrl}: HTTP ${assetResp.status}`);
+      try {
+        const fetchState = assetFetchSignal(runSignal, timeoutMs);
+        const assetResp = await readAssetResource(
+          runSignal,
+          fetchState.signal,
+          fetchState.timeout,
+          assetUrl,
+          timeoutMs,
+          () =>
+            fetchAsset(assetUrl, {
+              cache: noCache ? "no-cache" : "force-cache",
+              signal: fetchState.signal,
+            }),
+        );
+        if (!assetResp.ok) {
+          throw new Error(`fetch ${assetUrl}: HTTP ${assetResp.status}`);
+        }
+        const bodyState = assetFetchSignal(runSignal, timeoutMs);
+        const bytes = new Uint8Array(
+          await readAssetResource(
+            runSignal,
+            bodyState.signal,
+            bodyState.timeout,
+            assetUrl,
+            timeoutMs,
+            () => assetResp.arrayBuffer(),
+          ),
+        );
+        runSignal.throwIfAborted();
+        preloadAsset(path, bytes);
+        preloaded += 1;
+        deps.progress(preloaded / entries.length, `${preloaded} / ${entries.length}`);
+        deps.log(`[preloaded ${path}: ${bytes.byteLength} bytes]`);
+      } catch (error) {
+        // `forEachConcurrent` deliberately waits for every worker; aborting
+        // here is what lets the first failure surface before its peers finish.
+        failed.abort(error);
+        throw error;
       }
-      const bytes = new Uint8Array(
-        await readPreloadResource(signal, assetUrl, () => assetResp.arrayBuffer()),
-      );
-      signal.throwIfAborted();
-      preloadAsset(path, bytes);
-      preloaded += 1;
-      deps.progress(preloaded / entries.length, `${preloaded} / ${entries.length}`);
-      deps.log(`[preloaded ${path}: ${bytes.byteLength} bytes]`);
     },
-    signal,
+    runSignal,
   );
 }
 
