@@ -37,7 +37,14 @@ try {
     };
     cleanups.push(
       render(
-        () => <><Show when={visible()}><AssetPreview entry={entry} root={directory(files)} renderer={renderer} /></Show><span data-revision>{revision()}</span></>,
+        () => (
+          <>
+            <Show when={visible()}>
+              <AssetPreview entry={entry} root={directory(files)} renderer={renderer} />
+            </Show>
+            <span data-revision>{revision()}</span>
+          </>
+        ),
         card,
       ),
     );
@@ -63,7 +70,12 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 20));
   setRevision(1);
   await new Promise((resolve) => setTimeout(resolve, 20));
-  if (cards.some(card => card.querySelector("canvas") || card.querySelector("[data-revision]")?.textContent !== "1"))
+  if (
+    cards.some(
+      (card) =>
+        card.querySelector("canvas") || card.querySelector("[data-revision]")?.textContent !== "1",
+    )
+  )
     throw new Error("Filtering previews halted surviving reactive controls");
   document.querySelector("#result")!.textContent =
     "PASS scenery palette: pinned frames, legacy transparency, RGBA color, no model fallback, filtering cleanup preserves reactive controls";

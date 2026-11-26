@@ -139,83 +139,94 @@ test("fractional alpha fails without silently changing color-space blending", ()
 });
 
 for (const kind of ["map-animation", "mission-target"] as const)
-test(`${kind} physical substitution rejects stale identity and unsampled phases`, async () => {
-  const { NativePhysicalEffectPreview } = await import("./native-physical-effect-preview.ts");
-  const hash = "a".repeat(64);
-  const element = {
-    id: "b05",
-    source: { kind, index: 12, sha256: hash },
-    active: true,
-    frames: [
-      { path: "a.png", sha256: hash, width: 1, height: 1, offset: [0, 0], delay: 1 },
-      { path: "b.png", sha256: hash, width: 1, height: 1, offset: [0, 0], delay: 1 },
-    ],
-    loop: true,
-    display_position: [0, 0],
-    sort_position: [0, 0],
-    display_order: 0,
-    creation_order: 0,
-    polyline: [],
-  };
-  const native = {
-    mission: "S03",
-    camera_elevation_deg: 35,
-    elements: [element],
-  } as unknown as import("../../shared/src/native-state-presentation.ts").NativeStatePresentationContract;
-  const binding = {
-    source_kind: kind === "map-animation" ? kind : undefined,
-    target_index: 12,
-    target_sha256: hash,
-  } as import("../../shared/src/mission-state.ts").MissionStateContract["targets"][number];
-  const object = new THREE.Group();
-  assert.throws(
-    () =>
-      new NativePhysicalEffectPreview(native, [
-        { object, tick: () => 0, binding: { ...binding, target_sha256: "b".repeat(64) } },
-      ]),
-    /source identity/,
-  );
-  const preview = new NativePhysicalEffectPreview(native, [{ object, tick: () => 0, binding }]);
-  const pixels = { width: 1, height: 1, data: new Uint8Array(4) };
-  const snapshot = {
-    mission: "S03",
-    revision: 1,
-    origin: [0, 0],
-    background: pixels,
-    draws: [{ element, frame: 1, sourceTick: 0, sourceActive: true, pixels, x: 0, y: 0 }],
-  } as import("./native-state-presentation.ts").NativeLoopDrawSnapshot;
-  assert.throws(
-    () => preview.sample({} as THREE.WebGLRenderer, snapshot),
-    /pose and native frame differ/,
-  );
-  snapshot.draws[0]!.frame = 0;
-  snapshot.draws[0]!.sourceTick = 1;
-  assert.throws(
-    () => preview.sample({} as THREE.WebGLRenderer, snapshot),
-    /pose and native frame differ/,
-  );
-  snapshot.draws[0]!.sourceTick = 0;
-  snapshot.draws[0]!.element = {
-    ...snapshot.draws[0]!.element,
-    source: { ...snapshot.draws[0]!.element.source, sha256: "b".repeat(64) },
-  };
-  assert.throws(() => preview.sample({} as THREE.WebGLRenderer, snapshot), /snapshot identity/);
-  assert.throws(
-    () => new NativePhysicalEffectPreview(native, [{ object, tick: () => 0,
-      binding: { ...binding, source_kind: kind === "map-animation" ? "mission-target" : "map-animation" } }]),
-    /source identity/,
-  );
-  snapshot.draws[0]!.element = element as typeof snapshot.draws[number]["element"];
-  object.visible = false;
-  const unbound = { ...snapshot.draws[0]!, element: { ...snapshot.draws[0]!.element, id: "unbound" } };
-  snapshot.draws.push(unbound);
-  const sampled = preview.sample({} as THREE.WebGLRenderer, snapshot);
-  assert.equal(sampled.draws[1], unbound);
-  assert.equal(sampled.draws[0]!.element, element);
-  assert.equal(sampled.draws[0]!.sourceTick, 0);
-  assert.deepEqual(Array.from(sampled.draws[0]!.pixels.data), [0, 0, 0, 0]);
-
-});
+  test(`${kind} physical substitution rejects stale identity and unsampled phases`, async () => {
+    const { NativePhysicalEffectPreview } = await import("./native-physical-effect-preview.ts");
+    const hash = "a".repeat(64);
+    const element = {
+      id: "b05",
+      source: { kind, index: 12, sha256: hash },
+      active: true,
+      frames: [
+        { path: "a.png", sha256: hash, width: 1, height: 1, offset: [0, 0], delay: 1 },
+        { path: "b.png", sha256: hash, width: 1, height: 1, offset: [0, 0], delay: 1 },
+      ],
+      loop: true,
+      display_position: [0, 0],
+      sort_position: [0, 0],
+      display_order: 0,
+      creation_order: 0,
+      polyline: [],
+    };
+    const native = {
+      mission: "S03",
+      camera_elevation_deg: 35,
+      elements: [element],
+    } as unknown as import("../../shared/src/native-state-presentation.ts").NativeStatePresentationContract;
+    const binding = {
+      source_kind: kind === "map-animation" ? kind : undefined,
+      target_index: 12,
+      target_sha256: hash,
+    } as import("../../shared/src/mission-state.ts").MissionStateContract["targets"][number];
+    const object = new THREE.Group();
+    assert.throws(
+      () =>
+        new NativePhysicalEffectPreview(native, [
+          { object, tick: () => 0, binding: { ...binding, target_sha256: "b".repeat(64) } },
+        ]),
+      /source identity/,
+    );
+    const preview = new NativePhysicalEffectPreview(native, [{ object, tick: () => 0, binding }]);
+    const pixels = { width: 1, height: 1, data: new Uint8Array(4) };
+    const snapshot = {
+      mission: "S03",
+      revision: 1,
+      origin: [0, 0],
+      background: pixels,
+      draws: [{ element, frame: 1, sourceTick: 0, sourceActive: true, pixels, x: 0, y: 0 }],
+    } as import("./native-state-presentation.ts").NativeLoopDrawSnapshot;
+    assert.throws(
+      () => preview.sample({} as THREE.WebGLRenderer, snapshot),
+      /pose and native frame differ/,
+    );
+    snapshot.draws[0]!.frame = 0;
+    snapshot.draws[0]!.sourceTick = 1;
+    assert.throws(
+      () => preview.sample({} as THREE.WebGLRenderer, snapshot),
+      /pose and native frame differ/,
+    );
+    snapshot.draws[0]!.sourceTick = 0;
+    snapshot.draws[0]!.element = {
+      ...snapshot.draws[0]!.element,
+      source: { ...snapshot.draws[0]!.element.source, sha256: "b".repeat(64) },
+    };
+    assert.throws(() => preview.sample({} as THREE.WebGLRenderer, snapshot), /snapshot identity/);
+    assert.throws(
+      () =>
+        new NativePhysicalEffectPreview(native, [
+          {
+            object,
+            tick: () => 0,
+            binding: {
+              ...binding,
+              source_kind: kind === "map-animation" ? "mission-target" : "map-animation",
+            },
+          },
+        ]),
+      /source identity/,
+    );
+    snapshot.draws[0]!.element = element as (typeof snapshot.draws)[number]["element"];
+    object.visible = false;
+    const unbound = {
+      ...snapshot.draws[0]!,
+      element: { ...snapshot.draws[0]!.element, id: "unbound" },
+    };
+    snapshot.draws.push(unbound);
+    const sampled = preview.sample({} as THREE.WebGLRenderer, snapshot);
+    assert.equal(sampled.draws[1], unbound);
+    assert.equal(sampled.draws[0]!.element, element);
+    assert.equal(sampled.draws[0]!.sourceTick, 0);
+    assert.deepEqual(Array.from(sampled.draws[0]!.pixels.data), [0, 0, 0, 0]);
+  });
 
 test("refined receiver isolates terrain and static solids, excluding effects, actors and helpers", async () => {
   const { withNativeReceiverVisibility } = await import("./native-physical-effect-preview.ts");
@@ -368,27 +379,45 @@ test("ownership display hook cannot launder prior or subsequently changed shader
   assert.throws(() => validateNativeEffectMaterial(after));
 });
 
-
 test("opaque source-only emission accepts the sign material without allowing lighting or coverage modifiers", () => {
-  const make = () => new THREE.MeshStandardMaterial({
-    color: 0,
-    emissive: 0xffffff,
-    emissiveMap: new THREE.Texture(),
-    metalness: 1,
-    roughness: 1,
-    side: THREE.DoubleSide,
-  });
+  const make = () =>
+    new THREE.MeshStandardMaterial({
+      color: 0,
+      emissive: 0xffffff,
+      emissiveMap: new THREE.Texture(),
+      metalness: 1,
+      roughness: 1,
+      side: THREE.DoubleSide,
+    });
   assert.doesNotThrow(() => validateNativeEffectMaterial(make()));
   for (const alter of [
-    (m: THREE.MeshStandardMaterial) => { m.color.set(0xffffff); },
-    (m: THREE.MeshStandardMaterial) => { m.emissiveIntensity = 0.8; },
-    (m: THREE.MeshStandardMaterial) => { m.map = new THREE.Texture(); },
-    (m: THREE.MeshStandardMaterial) => { m.envMap = new THREE.Texture(); },
-    (m: THREE.MeshStandardMaterial) => { m.alphaTest = 0.5; },
-    (m: THREE.MeshStandardMaterial) => { m.vertexColors = true; },
-    (m: THREE.MeshStandardMaterial) => { m.onBeforeCompile = () => {}; },
-    (m: THREE.MeshStandardMaterial) => { m.userData.source_ownership_semantics = "separate-mask"; },
-    (m: THREE.MeshStandardMaterial) => { m.emissiveMap!.channel = 1; },
+    (m: THREE.MeshStandardMaterial) => {
+      m.color.set(0xffffff);
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.emissiveIntensity = 0.8;
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.map = new THREE.Texture();
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.envMap = new THREE.Texture();
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.alphaTest = 0.5;
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.vertexColors = true;
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.onBeforeCompile = () => {};
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.userData.source_ownership_semantics = "separate-mask";
+    },
+    (m: THREE.MeshStandardMaterial) => {
+      m.emissiveMap!.channel = 1;
+    },
   ]) {
     const material = make();
     alter(material);
@@ -502,21 +531,40 @@ test("receiver prepass failure restores renderer state and never draws owner", (
   f.restored();
 });
 
-
 test("required extraction context cannot fall back to cloning, including after binding changes", async () => {
   const { NativePhysicalEffectPreview } = await import("./native-physical-effect-preview.ts");
   const hash = "a".repeat(64);
   const element = { id: "required", source: { kind: "map-animation", index: 5, sha256: hash } };
-  const native = { mission: "S03", camera_elevation_deg: 35, elements: [element] } as unknown as import("../../shared/src/native-state-presentation.ts").NativeStatePresentationContract;
-  const binding = { source_kind: "map-animation", target_index: 5, target_sha256: hash } as import("../../shared/src/mission-state.ts").MissionStateContract["targets"][number];
+  const native = {
+    mission: "S03",
+    camera_elevation_deg: 35,
+    elements: [element],
+  } as unknown as import("../../shared/src/native-state-presentation.ts").NativeStatePresentationContract;
+  const binding = {
+    source_kind: "map-animation",
+    target_index: 5,
+    target_sha256: hash,
+  } as import("../../shared/src/mission-state.ts").MissionStateContract["targets"][number];
   const required = { path: "components.json", sha256: hash };
   const row = { object: new THREE.Group(), tick: () => 0, binding };
-  assert.throws(() => new NativePhysicalEffectPreview(native, [{ ...row, binding: { ...binding, extraction_context: required } }]), /requires verified extraction context/);
+  assert.throws(
+    () =>
+      new NativePhysicalEffectPreview(native, [
+        { ...row, binding: { ...binding, extraction_context: required } },
+      ]),
+    /requires verified extraction context/,
+  );
   const preview = new NativePhysicalEffectPreview(native, [row]);
   binding.extraction_context = required;
-  const snapshot = { mission: "S03", draws: [{ element }] } as unknown as import("./native-state-presentation.ts").NativeLoopDrawSnapshot;
+  const snapshot = {
+    mission: "S03",
+    draws: [{ element }],
+  } as unknown as import("./native-state-presentation.ts").NativeLoopDrawSnapshot;
   // This must reject before accessing the renderer, timing, or cloning geometry.
-  assert.throws(() => preview.sample({} as THREE.WebGLRenderer, snapshot), /requires verified extraction context/);
+  assert.throws(
+    () => preview.sample({} as THREE.WebGLRenderer, snapshot),
+    /requires verified extraction context/,
+  );
 });
 
 test("complementary roots accept only the explicit two-UV binary emission contract", () => {
@@ -524,37 +572,139 @@ test("complementary roots accept only the explicit two-UV binary emission contra
     const map = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1);
     map.channel = 1;
     const emissiveMap = new THREE.DataTexture(new Uint8Array([23, 45, 67, 255]), 1, 1);
-    const material = new THREE.MeshStandardMaterial({ color: 0, emissive: 0xffffff,
-      map, emissiveMap, metalness: 0, roughness: 1, alphaTest: 0.5, side: THREE.DoubleSide });
-    material.userData = { export_complementary_binary_ownership: true, export_composite_role: role };
+    const material = new THREE.MeshStandardMaterial({
+      color: 0,
+      emissive: 0xffffff,
+      map,
+      emissiveMap,
+      metalness: 0,
+      roughness: 1,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+    });
+    material.userData = {
+      export_complementary_binary_ownership: true,
+      export_composite_role: role,
+    };
     return material;
   };
-  for (const role of ["native", "inferred"] as const) assert.doesNotThrow(() => validateNativeEffectMaterial(create(role)));
+  for (const role of ["native", "inferred"] as const)
+    assert.doesNotThrow(() => validateNativeEffectMaterial(create(role)));
   const mutations: Record<string, (m: THREE.MeshStandardMaterial) => void> = {
-    metadata: m => { delete m.userData.export_complementary_binary_ownership; },
-    role: m => { m.userData.export_composite_role = "anything"; },
-    base: m => { m.color.r = 0.01; }, emission: m => { m.emissive.g = 0.99; },
-    intensity: m => { m.emissiveIntensity = 0.5; },
-    alphaUV: m => { m.map!.channel = 0; }, colorUV: m => { m.emissiveMap!.channel = 1; },
-    noAlpha: m => { m.map = null; }, noColor: m => { m.emissiveMap = null; },
-    metal: m => { m.metalness = 0.1; }, rough: m => { m.roughness = 0.5; },
-    vertexColors: m => { m.vertexColors = true; }, side: m => { m.side = THREE.FrontSide; },
-    opacity: m => { m.opacity = 0.9; }, blend: m => { m.transparent = true; },
-    cutoff: m => { m.alphaTest = 0.4; }, hash: m => { m.alphaHash = true; },
-    coverage: m => { m.alphaToCoverage = true; }, premultiplied: m => { m.premultipliedAlpha = true; },
-    blending: m => { m.blending = THREE.AdditiveBlending; },
-    depthTest: m => { m.depthTest = false; }, depthWrite: m => { m.depthWrite = false; },
-    stencil: m => { m.stencilWrite = true; }, offset: m => { m.polygonOffset = true; },
-    hook: m => { m.onBeforeCompile = () => {}; }, cacheHook: m => { m.customProgramCacheKey = () => "foreign"; },
-    wireframe: m => { m.wireframe = true; }, flat: m => { m.flatShading = true; },
-    clip: m => { m.clippingPlanes = [new THREE.Plane()]; }, defines: m => { m.defines = { FOREIGN: 1 }; },
-    foliage: m => { m.userData.foliage_physical_opacity = true; },
-    ownership: m => { m.userData.source_ownership_fill = "synthesized"; },
+    metadata: (m) => {
+      delete m.userData.export_complementary_binary_ownership;
+    },
+    role: (m) => {
+      m.userData.export_composite_role = "anything";
+    },
+    base: (m) => {
+      m.color.r = 0.01;
+    },
+    emission: (m) => {
+      m.emissive.g = 0.99;
+    },
+    intensity: (m) => {
+      m.emissiveIntensity = 0.5;
+    },
+    alphaUV: (m) => {
+      m.map!.channel = 0;
+    },
+    colorUV: (m) => {
+      m.emissiveMap!.channel = 1;
+    },
+    noAlpha: (m) => {
+      m.map = null;
+    },
+    noColor: (m) => {
+      m.emissiveMap = null;
+    },
+    metal: (m) => {
+      m.metalness = 0.1;
+    },
+    rough: (m) => {
+      m.roughness = 0.5;
+    },
+    vertexColors: (m) => {
+      m.vertexColors = true;
+    },
+    side: (m) => {
+      m.side = THREE.FrontSide;
+    },
+    opacity: (m) => {
+      m.opacity = 0.9;
+    },
+    blend: (m) => {
+      m.transparent = true;
+    },
+    cutoff: (m) => {
+      m.alphaTest = 0.4;
+    },
+    hash: (m) => {
+      m.alphaHash = true;
+    },
+    coverage: (m) => {
+      m.alphaToCoverage = true;
+    },
+    premultiplied: (m) => {
+      m.premultipliedAlpha = true;
+    },
+    blending: (m) => {
+      m.blending = THREE.AdditiveBlending;
+    },
+    depthTest: (m) => {
+      m.depthTest = false;
+    },
+    depthWrite: (m) => {
+      m.depthWrite = false;
+    },
+    stencil: (m) => {
+      m.stencilWrite = true;
+    },
+    offset: (m) => {
+      m.polygonOffset = true;
+    },
+    hook: (m) => {
+      m.onBeforeCompile = () => {};
+    },
+    cacheHook: (m) => {
+      m.customProgramCacheKey = () => "foreign";
+    },
+    wireframe: (m) => {
+      m.wireframe = true;
+    },
+    flat: (m) => {
+      m.flatShading = true;
+    },
+    clip: (m) => {
+      m.clippingPlanes = [new THREE.Plane()];
+    },
+    defines: (m) => {
+      m.defines = { FOREIGN: 1 };
+    },
+    foliage: (m) => {
+      m.userData.foliage_physical_opacity = true;
+    },
+    ownership: (m) => {
+      m.userData.source_ownership_fill = "synthesized";
+    },
   };
-  for (const property of ["alphaMap", "envMap", "lightMap", "aoMap", "normalMap", "bumpMap", "displacementMap", "metalnessMap", "roughnessMap"] as const)
-    mutations[property] = m => { m[property] = new THREE.Texture(); };
+  for (const property of [
+    "alphaMap",
+    "envMap",
+    "lightMap",
+    "aoMap",
+    "normalMap",
+    "bumpMap",
+    "displacementMap",
+    "metalnessMap",
+    "roughnessMap",
+  ] as const)
+    mutations[property] = (m) => {
+      m[property] = new THREE.Texture();
+    };
   for (const [name, mutate] of Object.entries(mutations)) {
-    const material = create(); mutate(material);
+    const material = create();
+    mutate(material);
     assert.throws(() => validateNativeEffectMaterial(material), /rejected unsupported/, name);
   }
 });

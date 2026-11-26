@@ -216,14 +216,20 @@ test("authored room floors keep depth priority without changing shared wall mate
   assert.equal(floor.material, configured);
 });
 
-
 test("complementary masks stay nearest while RGB keeps the smooth display preference", () => {
   const shared = new THREE.Texture();
-  const composite = new THREE.MeshStandardMaterial({ map: shared, emissiveMap: shared, alphaTest: 0.5 });
+  const composite = new THREE.MeshStandardMaterial({
+    map: shared,
+    emissiveMap: shared,
+    alphaTest: 0.5,
+  });
   composite.userData.export_complementary_binary_ownership = true;
   const ordinary = new THREE.MeshBasicMaterial({ map: shared });
   const root = new THREE.Group();
-  root.add(new THREE.Mesh(new THREE.PlaneGeometry(), composite), new THREE.Mesh(new THREE.PlaneGeometry(), ordinary));
+  root.add(
+    new THREE.Mesh(new THREE.PlaneGeometry(), composite),
+    new THREE.Mesh(new THREE.PlaneGeometry(), ordinary),
+  );
   const display = new TextureDisplay();
   display.apply(root, 8);
   const mask = composite.map;
@@ -250,7 +256,10 @@ test("complementary masks stay nearest while RGB keeps the smooth display prefer
 test("complementary ownership rejects a nonbinary material contract", () => {
   const material = new THREE.MeshStandardMaterial({ map: new THREE.Texture() });
   material.userData.export_complementary_binary_ownership = true;
-  assert.throws(() => new TextureDisplay().apply(new THREE.Mesh(new THREE.PlaneGeometry(), material)), /binary MASK/);
+  assert.throws(
+    () => new TextureDisplay().apply(new THREE.Mesh(new THREE.PlaneGeometry(), material)),
+    /binary MASK/,
+  );
 });
 
 test("explicit projected RGB sampling stays nearest without affecting shared wall RGB", () => {
@@ -261,7 +270,10 @@ test("explicit projected RGB sampling stays nearest without affecting shared wal
   const wall = new THREE.MeshStandardMaterial({ map: shared, emissiveMap: shared, alphaTest: 0.5 });
   wall.userData.export_complementary_binary_ownership = true;
   const root = new THREE.Group();
-  root.add(new THREE.Mesh(new THREE.PlaneGeometry(), hole), new THREE.Mesh(new THREE.PlaneGeometry(), wall));
+  root.add(
+    new THREE.Mesh(new THREE.PlaneGeometry(), hole),
+    new THREE.Mesh(new THREE.PlaneGeometry(), wall),
+  );
   const display = new TextureDisplay();
   display.apply(root, 8);
   const rgb = hole.emissiveMap;

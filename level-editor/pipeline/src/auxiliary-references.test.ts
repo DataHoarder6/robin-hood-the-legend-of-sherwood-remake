@@ -11,12 +11,31 @@ const sha = (bytes: Buffer) => crypto.createHash("sha256").update(bytes).digest(
 test("Material examples carry distinct provenance and reject stale image bytes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "texture-material-"));
   try {
-    const input = await sharp({ create: { width: 8, height: 8, channels: 4, background: "gray" } }).png().toBuffer();
-    const example = await sharp({ create: { width: 16, height: 12, channels: 4, background: "green" } }).png().toBuffer();
+    const input = await sharp({ create: { width: 8, height: 8, channels: 4, background: "gray" } })
+      .png()
+      .toBuffer();
+    const example = await sharp({
+      create: { width: 16, height: 12, channels: 4, background: "green" },
+    })
+      .png()
+      .toBuffer();
     const file = path.join(directory, "references.json");
-    const reference = { file: "example.png", sha256: sha(example), source: "material", asset_id: "permitted-tree", role: "Leaf and bark texture character" };
+    const reference = {
+      file: "example.png",
+      sha256: sha(example),
+      source: "material",
+      asset_id: "permitted-tree",
+      role: "Leaf and bark texture character",
+    };
     await fs.writeFile(path.join(directory, "example.png"), example);
-    await fs.writeFile(file, JSON.stringify({ input_sha256: sha(input), lighting_sha256: sha(input), references: [reference] }));
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        input_sha256: sha(input),
+        lighting_sha256: sha(input),
+        references: [reference],
+      }),
+    );
     const loaded = await auxiliaryReferences(file, input, input);
     assert.deepEqual(loaded.images, [example]);
     assert.deepEqual(loaded.evidence?.references, [reference]);
@@ -84,13 +103,34 @@ test("Auxiliary crop evidence binds exact approved pixels and rejects altered ar
 test("An ordinary region guide accompanies four references and remains canvas-bound", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "texture-region-guide-"));
   try {
-    const input = await sharp({ create: { width: 8, height: 8, channels: 4, background: "gray" } }).png().toBuffer();
-    const guide = await sharp({ create: { width: 8, height: 8, channels: 4, background: "yellow" } }).png().toBuffer();
+    const input = await sharp({ create: { width: 8, height: 8, channels: 4, background: "gray" } })
+      .png()
+      .toBuffer();
+    const guide = await sharp({
+      create: { width: 8, height: 8, channels: 4, background: "yellow" },
+    })
+      .png()
+      .toBuffer();
     await fs.writeFile(path.join(directory, "input.png"), input);
     await fs.writeFile(path.join(directory, "guide.png"), guide);
-    const material = { source: "material", asset_id: "native-ground", role: "floor", file: "input.png", sha256: sha(input) };
-    const region = { source: "region-guide", role: "Yellow is editable", file: "guide.png", sha256: sha(guide) };
-    const manifest = { input_sha256: sha(input), lighting_sha256: sha(input), references: [material, material, material, material, region] };
+    const material = {
+      source: "material",
+      asset_id: "native-ground",
+      role: "floor",
+      file: "input.png",
+      sha256: sha(input),
+    };
+    const region = {
+      source: "region-guide",
+      role: "Yellow is editable",
+      file: "guide.png",
+      sha256: sha(guide),
+    };
+    const manifest = {
+      input_sha256: sha(input),
+      lighting_sha256: sha(input),
+      references: [material, material, material, material, region],
+    };
     const file = path.join(directory, "references.json");
     await fs.writeFile(file, JSON.stringify(manifest));
     const loaded = await auxiliaryReferences(file, input, input);

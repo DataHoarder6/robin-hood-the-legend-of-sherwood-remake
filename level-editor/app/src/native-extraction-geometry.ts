@@ -39,14 +39,19 @@ type Json = {
 };
 /** One private byte snapshot shared by all accessor checks for a loaded model. */
 export function createNativeExtractionGeometryVerifier(bytes: Uint8Array, json: Json) {
-  const owned = Uint8Array.from(bytes), metadata = structuredClone(json);
+  const owned = Uint8Array.from(bytes),
+    metadata = structuredClone(json);
   return (mesh: THREE.Mesh, meshIndex: number, primitiveIndex: number) =>
     verifyOwnedGeometry(owned, metadata, mesh, meshIndex, primitiveIndex);
 }
 
 /** Standalone verification owns its input; contexts share one verifier instead. */
 export function verifyNativeExtractionGeometry(
-  bytes: Uint8Array, json: Json, mesh: THREE.Mesh, meshIndex: number, primitiveIndex: number,
+  bytes: Uint8Array,
+  json: Json,
+  mesh: THREE.Mesh,
+  meshIndex: number,
+  primitiveIndex: number,
 ): () => void {
   return createNativeExtractionGeometryVerifier(bytes, json)(mesh, meshIndex, primitiveIndex);
 }
