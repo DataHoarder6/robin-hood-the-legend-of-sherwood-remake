@@ -57,6 +57,49 @@ const LIST_RECT: MenuRect = MenuRect {
     h: 340,
 };
 
+/// The difficulty button sits below the roster in the same left-hand band.
+const DIFFICULTY_BUTTON_Y: i32 = 418;
+/// Clear space kept between the last roster row and that button.
+const ROSTER_BOTTOM_GAP: i32 = 4;
+const ROW_GAP: i32 = 2;
+
+/// Shared row stride and height for drawing, hit testing and the layout test.
+///
+/// A roster with `MAX_PROFILES` entries has to fit between `LIST_RECT.y` and
+/// the difficulty button. When an input-field sprite is taller than that band
+/// allows, rows shrink instead of overflowing into the button; a short sprite
+/// keeps its natural stride.
+fn roster_row_geometry(field_h: i32) -> (i32, i32) {
+    let available = DIFFICULTY_BUTTON_Y - LIST_RECT.y - ROSTER_BOTTOM_GAP;
+    let stride = (field_h + ROW_GAP)
+        .min(available / MAX_PROFILES as i32)
+        .max(1);
+    let row_h = field_h.min(stride - ROW_GAP).max(1);
+    (stride, row_h)
+}
+
+fn profile_row_rect(index: usize, field_w: i32, field_h: i32) -> Option<MenuRect> {
+    if index >= MAX_PROFILES {
+        return None;
+    }
+    let (stride, row_h) = roster_row_geometry(field_h);
+    Some(MenuRect {
+        x: LIST_RECT.x,
+        y: LIST_RECT.y + index as i32 * stride,
+        w: field_w,
+        h: row_h,
+    })
+}
+
+fn difficulty_button_rect(btn_w: i32, btn_h: i32) -> MenuRect {
+    MenuRect {
+        x: LIST_RECT.x,
+        y: DIFFICULTY_BUTTON_Y,
+        w: btn_w,
+        h: btn_h,
+    }
+}
+
 const ID_SELECT: u32 = 0;
 const ID_NEW: u32 = 1;
 const ID_RENAME: u32 = 2;
@@ -165,14 +208,15 @@ impl SelectPlayerState {
         }
         // Difficulty editing is intentionally exposed only from this
         // between-mission profile screen. It cannot mutate a running simulation.
+        let difficulty = difficulty_button_rect(btn_w, btn_h);
         frame.add_widget_absolute(widget_bridge::make_button_enabled(
             ID_DIFFICULTY,
             difficulty_button_label,
             true,
-            LIST_RECT.x,
-            418,
-            btn_w,
-            btn_h,
+            difficulty.x,
+            difficulty.y,
+            difficulty.w,
+            difficulty.h,
         ));
 
         Self {
@@ -449,25 +493,19 @@ impl SelectPlayerState {
             draw_screen_background(renderer, &bg);
         }
 
-        // Profile fields: ten input fields at `(30, 72)`, aligned
-        // vertically with two pixels of spacing.
+        // Profile rows share the band above the difficulty button; the
+        // geometry helper keeps a full roster clear of it.
         for (i, profile) in profiles.iter().enumerate() {
-            if i >= MAX_PROFILES {
+            let Some(row) = profile_row_rect(i, self.profile_field_w, self.profile_field_h) else {
                 break;
-            }
-            let row_y = LIST_RECT.y + i as i32 * (self.profile_field_h + 2);
+            };
             let is_selected = self.selected == Some(i);
             if let Some(surf) = resources.input_field_surface(is_selected) {
                 widget_bridge::draw_menu_surface_rect(
                     renderer,
                     transform,
                     surf,
-                    MenuRect {
-                        x: LIST_RECT.x,
-                        y: row_y,
-                        w: self.profile_field_w,
-                        h: self.profile_field_h,
-                    },
+                    row,
                     MenuRect {
                         x: 0,
                         y: 0,
@@ -477,29 +515,13 @@ impl SelectPlayerState {
                     true,
                 );
             } else {
-                draw_fallback_panel(
-                    renderer,
-                    transform,
-                    &MenuRect {
-                        x: LIST_RECT.x,
-                        y: row_y,
-                        w: self.profile_field_w,
-                        h: self.profile_field_h,
-                    },
-                );
+                draw_fallback_panel(renderer, transform, &row);
             }
             let Some(font) = resources.label_font_any() else {
                 continue;
             };
             let label = format_profile_row(profile, resources);
-            render_text_virt_font(
-                renderer,
-                font,
-                transform,
-                &label,
-                LIST_RECT.x + 10,
-                row_y + 10,
-            );
+            render_text_virt_font(renderer, font, transform, &label, row.x + 10, row.y + 10);
         }
 
         if !self.status.is_empty()
@@ -557,13 +579,10 @@ fn profile_row_at(vx: i32, vy: i32, field_w: i32, field_h: i32) -> Option<usize>
     if vx < LIST_RECT.x || vx >= LIST_RECT.x + field_w || vy < LIST_RECT.y {
         return None;
     }
-    let stride = field_h + 2;
-    if stride <= 0 {
-        return None;
-    }
+    let (stride, row_h) = roster_row_geometry(field_h);
     let rel_y = vy - LIST_RECT.y;
     let row = rel_y / stride;
-    if row < 0 || row as usize >= MAX_PROFILES || rel_y % stride >= field_h {
+    if row < 0 || row as usize >= MAX_PROFILES || rel_y % stride >= row_h {
         return None;
     }
     Some(row as usize)
@@ -2103,6 +2122,36 @@ mod tests {
         assert_eq!(row.difficulty, DifficultyLevel::Medium);
         assert_eq!(row.progression, 42);
         assert!(row.active);
+    }
+
+    fn rects_intersect(a: MenuRect, b: MenuRect) -> bool {
+        a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    }
+
+    /// Layout fixture for issue #97: a maximum-size roster with a tall
+    /// input-field sprite must keep every row clear of the difficulty
+    /// button, and a click on that button must not select a row.
+    #[test]
+    fn a_full_roster_never_intersects_the_difficulty_button() {
+        let field_w = 440;
+        let field_h = 40;
+        let (button_w, button_h) = (128, 25);
+        let difficulty = difficulty_button_rect(button_w, button_h);
+
+        for i in 0..MAX_PROFILES {
+            let row = profile_row_rect(i, field_w, field_h).expect("roster row");
+            assert!(
+                !rects_intersect(row, difficulty),
+                "roster row {i} at y={} overlaps the difficulty button at y={}",
+                row.y,
+                difficulty.y
+            );
+        }
+        assert_eq!(
+            profile_row_at(difficulty.x + 1, difficulty.y + 1, field_w, field_h),
+            None,
+            "a click on the difficulty button must not select a roster row"
+        );
     }
 
     #[test]
