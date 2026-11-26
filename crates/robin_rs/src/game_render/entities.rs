@@ -847,7 +847,8 @@ struct OutlineDecision {
     npc_in_building: bool,
     carried: bool,
     fog_visible: bool,
-    controlled_or_allied: bool,
+    is_player_controlled: bool,
+    is_hostile: bool,
     reveal_hidden: bool,
     is_focused: bool,
     is_action_marked: bool,
@@ -857,16 +858,18 @@ struct OutlineDecision {
 
 /// Outline alpha percentage (0..=100), or `None` when no outline is drawn.
 ///
-/// Hidden-in-building characters use a constant alpha of 100 — persistent
-/// for the player's own/allied characters, and only after the reveal key
-/// for hostiles/NPCs. Fog always takes priority. No pulsing (XAG 118).
+/// Inside a building only a directly controlled (green) character keeps a
+/// constant-alpha outline; allied NPCs and blue-outlined troops need the
+/// reveal key, as before. Outside the interior, roof/wall occlusion keeps
+/// friendly troops outlined and now does the same for hostiles where fog facts
+/// allow. Fog always takes priority. No pulsing (XAG 118).
 fn outline_alpha_pct(d: OutlineDecision) -> Option<u16> {
     if !d.fog_visible {
         return None;
     }
 
     if d.hidden_in_building {
-        if d.carried || (!d.controlled_or_allied && !d.reveal_hidden) {
+        if d.carried || (!d.is_player_controlled && !d.reveal_hidden) {
             return None;
         }
         return Some(100);
@@ -876,11 +879,11 @@ fn outline_alpha_pct(d: OutlineDecision) -> Option<u16> {
         return None;
     }
 
-    let indoor_outline = d.npc_in_building && !d.carried;
-    if !d.is_focused && !d.is_action_marked && !d.hulk_running && !indoor_outline {
+    let occluded_outline = !d.carried && (d.npc_in_building || d.is_hostile);
+    if !d.is_focused && !d.is_action_marked && !d.hulk_running && !occluded_outline {
         return None;
     }
-    if d.is_focused || d.is_action_marked || indoor_outline {
+    if d.is_focused || d.is_action_marked || occluded_outline {
         Some(100)
     } else {
         Some(d.hulk_level)
@@ -916,14 +919,13 @@ pub(crate) fn render_selection_outlines_gpu(
         };
         let elem = entity.element_data();
 
-        // Whether this character belongs to the player, either as a
-        // directly controlled unit or an allied camp. Hidden characters in
-        // this set keep a persistent outline; hostiles need the reveal key.
-        let controlled_or_allied = engine.hero_selection(host.local_seat).contains(&entity_id)
+        // Only a directly controlled (green) character keeps a persistent
+        // outline inside a building. Allied camp membership alone does not:
+        // friendly NPCs there must need the reveal key like everyone else.
+        let is_player_controlled = engine.hero_selection(host.local_seat).contains(&entity_id)
             || engine
                 .tactical_selection(host.local_seat)
-                .contains(&entity_id)
-            || outline_camp_is_allied(entity.camp(), |camp| engine.is_player_aligned_camp(camp));
+                .contains(&entity_id);
 
         // The selection set on its own does NOT draw the outline —
         // `refresh_pc_selection_hulk` seeds `running_hulk` on the first
@@ -945,7 +947,8 @@ pub(crate) fn render_selection_outlines_gpu(
             npc_in_building: npc_in_building(engine, entity),
             carried: elem.posture() == Posture::Carried,
             fog_visible: engine.fog_entity_visible(entity_id),
-            controlled_or_allied,
+            is_player_controlled,
+            is_hostile: engine.fog_entity_is_hostile(entity_id),
             reveal_hidden: host.frontend.input.feedback.reveal_hidden,
             is_focused,
             is_action_marked,
@@ -1209,35 +1212,9 @@ pub(super) fn render_fx_entities_gpu<I>(
     }
 }
 
-/// Render-only camp guard. A freshly spawned mission-team member can reach the
-/// first rendered frame before its camp has an authored allegiance. That is a
-/// presentation-time gap, not a corruption of the diplomacy table: without an
-/// allegiance the entity is simply not yet known to be allied. Authoritative
-/// callers keep `DiplomacyState::valid_id`'s panic, so a mission-setup bug still
-/// fails loudly there.
-fn outline_camp_is_allied(
-    camp: robin_engine::element::Camp,
-    is_aligned: impl FnOnce(robin_engine::element::Camp) -> bool,
-) -> bool {
-    if camp.allegiance_id().is_some() {
-        is_aligned(camp)
-    } else {
-        false
-    }
-}
 #[cfg(test)]
 mod outline_decision_tests {
     use super::*;
-
-    #[test]
-    fn unresolved_camp_is_not_allied_for_outlines() {
-        use robin_engine::element::Camp;
-        assert!(!outline_camp_is_allied(Camp::Error, |_| panic!(
-            "unresolved camp must never reach the diplomacy query"
-        )));
-        assert!(outline_camp_is_allied(Camp::Royalists, |_| true));
-        assert!(!outline_camp_is_allied(Camp::Royalists, |_| false));
-    }
 
     fn decision() -> OutlineDecision {
         OutlineDecision {
@@ -1246,7 +1223,8 @@ mod outline_decision_tests {
             npc_in_building: false,
             carried: false,
             fog_visible: true,
-            controlled_or_allied: false,
+            is_player_controlled: false,
+            is_hostile: false,
             reveal_hidden: false,
             is_focused: false,
             is_action_marked: false,
@@ -1260,12 +1238,12 @@ mod outline_decision_tests {
         let mut d = decision();
         d.hidden_in_building = true;
         d.is_active = false;
-        d.controlled_or_allied = true;
+        d.is_player_controlled = true;
         assert_eq!(outline_alpha_pct(d), Some(100));
 
         // Without either condition the hidden character stays invisible.
         let mut uncontrolled = d;
-        uncontrolled.controlled_or_allied = false;
+        uncontrolled.is_player_controlled = false;
         assert_eq!(outline_alpha_pct(uncontrolled), None);
     }
 
@@ -1294,15 +1272,67 @@ mod outline_decision_tests {
     fn carried_hidden_body_never_gets_an_outline() {
         let mut d = decision();
         d.hidden_in_building = true;
-        d.controlled_or_allied = true;
+        d.is_player_controlled = true;
         d.carried = true;
         assert_eq!(outline_alpha_pct(d), None);
+    }
+
+    #[test]
+    fn allied_non_controlled_hidden_character_has_no_persistent_outline() {
+        let mut d = decision();
+        d.hidden_in_building = true;
+        // Allied camp membership is not player control: this is a blue NPC.
+        d.is_player_controlled = false;
+        d.reveal_hidden = false;
+        assert_eq!(
+            outline_alpha_pct(d),
+            None,
+            "inside a building only green controlled characters keep the new outline"
+        );
+        d.reveal_hidden = true;
+        assert_eq!(
+            outline_alpha_pct(d),
+            Some(100),
+            "allied NPCs behave as before once the reveal key is held"
+        );
+    }
+
+    #[test]
+    fn friendly_troop_inside_a_building_is_not_outlined() {
+        let mut d = decision();
+        d.hidden_in_building = true; // authoritative interior state
+        d.npc_in_building = true; // the sector is a building
+        d.is_player_controlled = false; // blue/friendly, not a green PC
+        assert_eq!(outline_alpha_pct(d), None, "inside is hidden, not outlined");
+    }
+
+    #[test]
+    fn friendly_troop_occluded_outside_keeps_its_outline() {
+        let mut d = decision();
+        d.npc_in_building = true; // outside the interior, but roof/wall occludes
+        d.is_player_controlled = false;
+        assert_eq!(
+            outline_alpha_pct(d),
+            Some(100),
+            "the useful blue occlusion case must survive the inside-building fix"
+        );
+    }
+
+    #[test]
+    fn hostile_troop_occluded_outside_gets_an_outline() {
+        let mut d = decision();
+        d.is_hostile = true;
+        assert_eq!(
+            outline_alpha_pct(d),
+            Some(100),
+            "red troops behind walls are shown where fog facts allow"
+        );
     }
 }
 
 // ─── Dotted outlines of ground hidden behind buildings ───────────
 
-use geo::{Area as _, BooleanOps as _, ConvexHull as _, Intersects as _};
+use geo::{Area as _, Intersects as _};
 
 /// Ground region occluded by one opaque obstacle volume, in map coordinates.
 #[derive(Debug, Clone, PartialEq)]
@@ -1311,7 +1341,7 @@ pub(crate) struct HiddenGroundZone {
 }
 
 /// Distance between dots and dot thickness in map units.
-const HIDDEN_ZONE_DOT_SPACING: f32 = 9.0;
+const HIDDEN_ZONE_DOT_SPACING: f32 = 24.0;
 const HIDDEN_ZONE_DOT_THICKNESS: f32 = 1.5;
 const HIDDEN_ZONE_COLOR: u32 = 0x7F_DF;
 const MIN_HIDDEN_ZONE_AREA: f32 = 1.0;
@@ -1332,62 +1362,30 @@ impl HiddenGroundZone {
     }
 }
 
-/// The ground hidden by one obstacle is the sweep of its footprint to its
-/// projected top surface, minus the footprint itself. A ground point projects
-/// to `(x, y)`, while the top of an obstacle projects to `(x, y - z_top)`, so
-/// the convex hull of both sets is the volume's map-space silhouette. No
-/// building footprint is invented where level data has none.
+/// The walkable-floor boundary is the obstacle's ground footprint: the line
+/// where a character stops being able to stand. `obstacle.polygon` already
+/// lives in ground coordinates, the same space as character positions. The
+/// old projection sweep mixed `(x, y - z)` roof points with ground points and
+/// subtracted one from the other, which traced building tops across the map.
 fn zone_for_obstacle(obstacle: &engine_sight_obstacle::SightObstacle) -> Option<HiddenGroundZone> {
-    if obstacle.is_projection_area() || !obstacle.is_opaque() {
+    if obstacle.is_projection_area() || !obstacle.is_opaque() || !obstacle.is_solid() {
         return None;
     }
-    let points = &obstacle.obstacle_points;
-    if points.len() < 3 {
+    // A zero-height volume is floor geometry, not a building hiding ground.
+    if !obstacle
+        .obstacle_points
+        .iter()
+        .any(|point| point.z_top > point.z_bottom)
+    {
         return None;
     }
     let footprint = obstacle.polygon.as_geo();
     if footprint.exterior().0.len() < 3 || footprint.unsigned_area() < MIN_HIDDEN_ZONE_AREA {
         return None;
     }
-
-    let mut hull_points: Vec<geo::Coord<f32>> = footprint.exterior().0.clone();
-    hull_points.extend(points.iter().flat_map(|point| {
-        let top = geo::Coord {
-            x: point.x,
-            y: point.y - point.z_top,
-        };
-        let bottom = geo::Coord {
-            x: point.x,
-            y: point.y
-                - if obstacle.on_ground {
-                    0.0
-                } else {
-                    point.z_bottom
-                },
-        };
-        [top, bottom]
-    }));
-    let silhouette =
-        geo::MultiPoint::new(hull_points.into_iter().map(geo::Point::from).collect()).convex_hull();
-    if silhouette.unsigned_area() < MIN_HIDDEN_ZONE_AREA {
-        return None;
-    }
-
-    let difference = geo::MultiPolygon::new(vec![silhouette]).difference(footprint);
-    let mut best: Option<geo::Polygon<f32>> = None;
-    for candidate in difference.0 {
-        let area = candidate.unsigned_area();
-        if !area.is_finite() || area < MIN_HIDDEN_ZONE_AREA || candidate.exterior().0.len() < 3 {
-            continue;
-        }
-        if best
-            .as_ref()
-            .is_none_or(|current| area > current.unsigned_area())
-        {
-            best = Some(candidate);
-        }
-    }
-    best.map(|polygon| HiddenGroundZone { polygon })
+    Some(HiddenGroundZone {
+        polygon: footprint.clone(),
+    })
 }
 
 /// Derive every occluded ground region from the active opaque obstacles.
@@ -1407,7 +1405,8 @@ pub(crate) fn derive_hidden_ground_zones(
 }
 
 /// Indices to reveal: all of them for the whole-map override, otherwise only
-/// zones containing at least one character's feet.
+/// zones containing at least one local player character's feet. Callers must
+/// pass those feet only — NPC positions elsewhere on the map are irrelevant.
 pub(crate) fn visible_hidden_zone_indices(
     zones: &[HiddenGroundZone],
     feet: &[GroundPoint],
@@ -1460,8 +1459,12 @@ fn render_hidden_ground_outlines(
     if zones.is_empty() {
         return;
     }
+    // Only the local player's characters make a zone relevant. NPCs occupy
+    // buildings all over a castle map and made every zone visible every frame.
     let feet: Vec<GroundPoint> = engine
-        .entities_iter()
+        .pc_ids()
+        .iter()
+        .filter_map(|&id| engine.get_entity(id))
         .filter(|entity| entity.is_active())
         .map(|entity| {
             let position = entity.element_data().position();
@@ -1532,42 +1535,81 @@ mod hidden_ground_tests {
         )
     }
 
+    fn one_building_zones() -> Vec<HiddenGroundZone> {
+        let obstacles = [building(1, 0.0, 0.0, 5.0)];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        derive_hidden_ground_zones(&list)
+    }
+
     fn zone_area(zone: &HiddenGroundZone) -> f32 {
         zone.polygon.unsigned_area()
     }
 
     #[test]
-    fn hidden_zone_is_the_footprint_projection_sweep_minus_the_footprint() {
-        let obstacles = [building(1, 0.0, 0.0, 5.0)];
-        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
-        let zones = derive_hidden_ground_zones(&list);
+    fn hidden_zone_is_the_walkable_floor_boundary_not_the_building_top() {
+        let zones = one_building_zones();
         assert_eq!(zones.len(), 1, "one opaque building yields one hidden zone");
         assert!(
-            (zone_area(&zones[0]) - 50.0).abs() < 0.01,
-            "a 10x10 footprint projected 5 units north hides 50 map units: {}",
+            (zone_area(&zones[0]) - 100.0).abs() < 0.01,
+            "the boundary of a 10x10 unwalkable footprint encloses 100 map units: {}",
             zone_area(&zones[0])
         );
-        assert!(zones[0].contains_feet(GroundPoint::new(5.0, -2.0)));
-        assert!(!zones[0].contains_feet(GroundPoint::new(5.0, 5.0)));
+        assert!(
+            zones[0].contains_feet(GroundPoint::new(5.0, 5.0)),
+            "the zone covers the ground a character cannot stand on"
+        );
+        assert!(
+            !zones[0].contains_feet(GroundPoint::new(5.0, -2.0)),
+            "the projection of the roof is not a walkable-floor boundary"
+        );
     }
 
     #[test]
-    fn flat_transparent_and_inactive_volumes_invent_no_hidden_zone() {
-        let flat = building(1, 0.0, 0.0, 0.0);
+    fn only_opaque_solid_obstacles_have_hidden_ground_zones() {
+        let solid = building(1, 0.0, 0.0, 5.0);
         let transparent = prism(2, 20.0, 0.0, 5.0, SIGHTOBSTACLE_SOLID);
         let mut projection_area = building(3, 40.0, 0.0, 5.0);
         projection_area.obstacle_type |= SIGHTOBSTACLE_PROJECTION_AREA;
-        let obstacles = [flat, transparent, projection_area];
+        let non_solid = prism(4, 60.0, 0.0, 5.0, SIGHTOBSTACLE_OPAQUE);
+        let obstacles = [solid, transparent, projection_area, non_solid];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        assert_eq!(
+            derive_hidden_ground_zones(&list).len(),
+            1,
+            "a floor-marker, a transparent volume and a non-solid volume mark no unwalkable floor"
+        );
+    }
+
+    #[test]
+    fn flat_and_inactive_volumes_invent_no_hidden_zone() {
+        let flat = building(1, 0.0, 0.0, 0.0);
+        let building_2 = building(2, 40.0, 0.0, 5.0);
+        let obstacles = [flat, building_2];
         let list = engine_sight_obstacle::ObstacleList {
             static_obstacles: &obstacles,
             dynamic_obstacles: &[],
-            static_active: &[true, true, false],
+            static_active: &[true, false],
         };
         assert!(derive_hidden_ground_zones(&list).is_empty());
     }
 
     #[test]
-    fn reveal_all_is_a_superset_of_character_occupancy() {
+    fn ground_zone_visibility_follows_the_pc_inside_the_footprint() {
+        let zones = one_building_zones();
+        assert_eq!(
+            visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, 5.0)], false),
+            vec![0],
+            "a player character under the building makes its floor boundary visible"
+        );
+        assert_eq!(
+            visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, -2.0)], false),
+            Vec::<usize>::new(),
+            "standing on the walkable side draws no line"
+        );
+    }
+
+    #[test]
+    fn reveal_all_is_a_superset_of_zone_occupancy() {
         let obstacles = [building(1, 0.0, 0.0, 5.0), building(2, 40.0, 0.0, 5.0)];
         let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
         let zones = derive_hidden_ground_zones(&list);
@@ -1578,13 +1620,13 @@ mod hidden_ground_tests {
         );
         assert_eq!(visible_hidden_zone_indices(&zones, &[], true), vec![0, 1]);
         assert_eq!(
-            visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, -2.0)], false),
+            visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, 5.0)], false),
             vec![0]
         );
         assert_eq!(
             visible_hidden_zone_indices(
                 &zones,
-                &[GroundPoint::new(45.0, -2.0), GroundPoint::new(5.0, -2.0)],
+                &[GroundPoint::new(45.0, 5.0), GroundPoint::new(5.0, 5.0)],
                 false,
             ),
             vec![0, 1]
@@ -1592,32 +1634,34 @@ mod hidden_ground_tests {
     }
 
     #[test]
-    fn outline_segments_are_closed_and_only_cover_shown_zones() {
-        let obstacles = [building(1, 0.0, 0.0, 5.0), building(2, 40.0, 0.0, 5.0)];
-        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
-        let zones = derive_hidden_ground_zones(&list);
-        let shown = visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, -2.0)], false);
-        let segments = hidden_zone_outline_segments(&zones, &shown);
-        assert!(
-            segments.len() >= 3,
-            "one shown zone must produce a closed dotted loop"
+    fn one_rectangular_zone_draws_four_floor_edges() {
+        let zones = one_building_zones();
+        let segments = hidden_zone_outline_segments(&zones, &[0]);
+        assert_eq!(
+            segments.len(),
+            4,
+            "a rectangular footprint has four boundary edges, not a roof silhouette"
         );
         assert_eq!(segments.first().map(|s| s.0), segments.last().map(|s| s.1));
-
-        let none = hidden_zone_outline_segments(&zones, &[]);
-        assert!(none.is_empty(), "no shown zone draws no line");
+        assert!(hidden_zone_outline_segments(&zones, &[]).is_empty());
     }
 
     #[test]
-    fn leaving_a_zone_or_clearing_the_override_removes_lines_the_same_frame() {
-        let obstacles = [building(1, 0.0, 0.0, 5.0)];
-        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
-        let zones = derive_hidden_ground_zones(&list);
-        let inside = [GroundPoint::new(5.0, -2.0)];
-        let outside = [GroundPoint::new(5.0, 5.0)];
+    fn dot_spacing_is_restrained() {
+        assert!(
+            HIDDEN_ZONE_DOT_SPACING >= 20.0,
+            "dots must not carpet the whole map: spacing is {HIDDEN_ZONE_DOT_SPACING}"
+        );
+    }
+
+    #[test]
+    fn leaving_the_floor_zone_removes_lines_the_same_frame() {
+        let zones = one_building_zones();
+        let inside = [GroundPoint::new(5.0, 5.0)];
+        let outside = [GroundPoint::new(5.0, -2.0)];
 
         assert_eq!(visible_hidden_zone_indices(&zones, &inside, false), vec![0]);
-        assert!(hidden_zone_outline_segments(&zones, &[0]).len() >= 3);
+        assert_eq!(hidden_zone_outline_segments(&zones, &[0]).len(), 4);
         assert_eq!(
             visible_hidden_zone_indices(&zones, &outside, false),
             Vec::<usize>::new(),

@@ -33,11 +33,12 @@ pub(super) struct CollectedFrameInput {
     pub(super) step_back_pressed: bool,
 }
 
-/// Whole-map hidden-ground reveal uses a free modifier; Shift is already
-/// owned by GoBehindBuildings and PlanQuickActions.
+/// Whole-map hidden-ground reveal uses Shift. Both presets already bind Shift
+/// to GoBehindBuildings and PlanQuickActions; the owner chose to share those
+/// physical keys rather than introduce a new modifier.
 fn reveal_all_hidden_ground(keys: &std::collections::BTreeSet<winit::keyboard::KeyCode>) -> bool {
-    keys.contains(&winit::keyboard::KeyCode::SuperLeft)
-        || keys.contains(&winit::keyboard::KeyCode::SuperRight)
+    keys.contains(&winit::keyboard::KeyCode::ShiftLeft)
+        || keys.contains(&winit::keyboard::KeyCode::ShiftRight)
 }
 
 pub(super) enum EventHudOutcome {
@@ -452,8 +453,11 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         .minimap_fast_key
         .is_some_and(|fast_key| input.translator.was_key_released(fast_key, keys));
     use winit::keyboard::KeyCode;
-    let shift_held = keys.contains(&KeyCode::ShiftLeft) || keys.contains(&KeyCode::ShiftRight);
-    dev.debug.hidden_areas_all = reveal_all_hidden_ground(keys);
+    // One physical Shift reading feeds both the reveal and the gameplay
+    // modifiers; the overlap with GoBehindBuildings/PlanQuickActions is
+    // deliberate (see `reveal_all_hidden_ground`).
+    let shift_held = reveal_all_hidden_ground(keys);
+    dev.debug.hidden_areas_all = shift_held;
     let step_keys_gated =
         ui.console_overlay.is_visible() || ui.pause_menu.is_some() || modal_input_active;
     // Camera rotation is a host presentation edge on the same physical-key
@@ -609,15 +613,15 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
 #[cfg(test)]
 mod tests {
     #[test]
-    fn super_modifier_reveals_all_hidden_ground() {
+    fn shift_reveals_all_hidden_ground() {
         use winit::keyboard::KeyCode;
+        let shift_left = [KeyCode::ShiftLeft].into_iter().collect();
+        let shift_right = [KeyCode::ShiftRight].into_iter().collect();
         let super_left = [KeyCode::SuperLeft].into_iter().collect();
-        let super_right = [KeyCode::SuperRight].into_iter().collect();
-        let shift = [KeyCode::ShiftLeft].into_iter().collect();
         let none = std::collections::BTreeSet::new();
-        assert!(reveal_all_hidden_ground(&super_left));
-        assert!(reveal_all_hidden_ground(&super_right));
-        assert!(!reveal_all_hidden_ground(&shift));
+        assert!(reveal_all_hidden_ground(&shift_left));
+        assert!(reveal_all_hidden_ground(&shift_right));
+        assert!(!reveal_all_hidden_ground(&super_left));
         assert!(!reveal_all_hidden_ground(&none));
     }
 
