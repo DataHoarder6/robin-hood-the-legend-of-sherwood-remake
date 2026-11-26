@@ -33,6 +33,13 @@ pub(super) struct CollectedFrameInput {
     pub(super) step_back_pressed: bool,
 }
 
+/// Whole-map hidden-ground reveal uses a free modifier; Shift is already
+/// owned by GoBehindBuildings and PlanQuickActions.
+fn reveal_all_hidden_ground(keys: &[winit::keyboard::KeyCode]) -> bool {
+    keys.contains(&winit::keyboard::KeyCode::SuperLeft)
+        || keys.contains(&winit::keyboard::KeyCode::SuperRight)
+}
+
 pub(super) enum EventHudOutcome {
     Ready(CollectedFrameInput),
     Control(HandlerAction),
@@ -446,6 +453,7 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         .is_some_and(|fast_key| input.translator.was_key_released(fast_key, keys));
     use winit::keyboard::KeyCode;
     let shift_held = keys.contains(&KeyCode::ShiftLeft) || keys.contains(&KeyCode::ShiftRight);
+    dev.debug.hidden_areas_all = reveal_all_hidden_ground(keys);
     let step_keys_gated =
         ui.console_overlay.is_visible() || ui.pause_menu.is_some() || modal_input_active;
     // Camera rotation is a host presentation edge on the same physical-key
@@ -600,6 +608,15 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn super_modifier_reveals_all_hidden_ground() {
+        use winit::keyboard::KeyCode;
+        assert!(reveal_all_hidden_ground(&[KeyCode::SuperLeft]));
+        assert!(reveal_all_hidden_ground(&[KeyCode::SuperRight]));
+        assert!(!reveal_all_hidden_ground(&[KeyCode::ShiftLeft]));
+        assert!(!reveal_all_hidden_ground(&[]));
+    }
+
     use super::*;
     use winit::keyboard::KeyCode;
 
