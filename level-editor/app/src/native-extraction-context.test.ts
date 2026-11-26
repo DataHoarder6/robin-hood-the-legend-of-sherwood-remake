@@ -312,7 +312,9 @@ test("loader rebinds a complete placed copy and rejects substituted geometry", a
   const placed = f.object.clone(true);
   placed.position.set(80, 20, 30);
   const pin = { path: "roles/tree.json", sha256: f.input.manifestSha256 };
-  const wrapper = new THREE.Group(); wrapper.position.set(5, 6, 7); wrapper.add(placed);
+  const wrapper = new THREE.Group();
+  wrapper.position.set(5, 6, 7);
+  wrapper.add(placed);
   const context = await loader.bind(f.object, placed, f.input.binding, pin, () => true, wrapper);
   const prepared = prepareNativeExtractionContext(context, wrapper, f.input.binding);
   assert.equal(prepared.owner.children[0]!.children.length, placed.children.length);
@@ -381,27 +383,48 @@ test("pinned session isolates arbitrary source writes, follows poses, and retire
   const session = await createNativeExtractionSession(context, f.object, f.input.binding);
   const draws: THREE.Scene[] = [];
   const renderer = {
-    xr: { enabled: false }, capabilities: { maxTextureSize: 4096 },
-    shadowMap: { enabled: false, needsUpdate: false }, autoClear: true,
-    getRenderTarget: () => null, getActiveCubeFace: () => 0, getActiveMipmapLevel: () => 0,
-    getViewport: (v: THREE.Vector4) => v, getScissor: (v: THREE.Vector4) => v,
-    getScissorTest: () => false, getClearColor: (c: THREE.Color) => c, getClearAlpha: () => 0,
-    setRenderTarget() {}, setViewport() {}, setScissor() {}, setScissorTest() {}, setClearColor() {}, clear() {},
-    render(scene: THREE.Scene) { draws.push(scene); }, readRenderTargetPixels() {},
+    xr: { enabled: false },
+    capabilities: { maxTextureSize: 4096 },
+    shadowMap: { enabled: false, needsUpdate: false },
+    autoClear: true,
+    getRenderTarget: () => null,
+    getActiveCubeFace: () => 0,
+    getActiveMipmapLevel: () => 0,
+    getViewport: (v: THREE.Vector4) => v,
+    getScissor: (v: THREE.Vector4) => v,
+    getScissorTest: () => false,
+    getClearColor: (c: THREE.Color) => c,
+    getClearAlpha: () => 0,
+    setRenderTarget() {},
+    setViewport() {},
+    setScissor() {},
+    setScissorTest() {},
+    setClearColor() {},
+    clear() {},
+    render(scene: THREE.Scene) {
+      draws.push(scene);
+    },
+    readRenderTargetPixels() {},
   } as unknown as THREE.WebGLRenderer;
   const frame = { x: 0, y: 0, width: 1, height: 1 };
   session.render(renderer, 35, frame);
   const privateOwner = draws[1]!.children[0]!.children[0] as THREE.Mesh;
-  const privateReceiver = draws[0]!.children[0]!.children[1] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  const privateReceiver = draws[0]!.children[0]!.children[1] as THREE.Mesh<
+    THREE.BufferGeometry,
+    THREE.MeshBasicMaterial
+  >;
   const originalPosition = privateOwner.geometry.attributes.position!.getX(0);
   const originalTexel = privateReceiver.material.map!.image.data[0];
   const oldGeometry = f.owner.geometry;
   const originalMorph = privateOwner.geometry.morphAttributes.position![0]!.getX(0);
-  let originalDisposed = 0, textureDisposed = 0, materialDisposed = 0;
+  let originalDisposed = 0,
+    textureDisposed = 0,
+    materialDisposed = 0;
   oldGeometry.addEventListener("dispose", () => originalDisposed++);
   privateReceiver.material.map!.addEventListener("dispose", () => textureDisposed++);
   privateReceiver.material.addEventListener("dispose", () => materialDisposed++);
-  let disposed = 0; privateOwner.geometry.addEventListener("dispose", () => disposed++);
+  let disposed = 0;
+  privateOwner.geometry.addEventListener("dispose", () => disposed++);
   f.owner.geometry.attributes.position!.setX(0, 1234);
   f.owner.geometry.morphAttributes.position![0]!.setX(0, 999);
   f.receiver.material.map!.image.data[0] = 12;
@@ -415,12 +438,16 @@ test("pinned session isolates arbitrary source writes, follows poses, and retire
   assert.equal(privateOwner.geometry.morphAttributes.position![0]!.getX(0), originalMorph);
   assert.equal(privateOwner.matrix.elements[12], 10);
   assert.deepEqual(privateOwner.morphTargetInfluences, [0.5, 0.5]);
-  assert.throws(() => prepareNativeExtractionContext(context, f.object, f.input.binding), /immutable accessor changed/);
+  assert.throws(
+    () => prepareNativeExtractionContext(context, f.object, f.input.binding),
+    /immutable accessor changed/,
+  );
   assert.notEqual(privateOwner.geometry, oldGeometry);
   session.invalidate("supported edit");
   assert.equal(disposed, 1);
   assert.throws(() => session.render(renderer, 35, frame), /retired: supported edit/);
-  session.dispose(); assert.equal(disposed, 1);
+  session.dispose();
+  assert.equal(disposed, 1);
   assert.equal(originalDisposed, 0);
   assert.equal(textureDisposed, 1);
   assert.equal(materialDisposed, 1);
@@ -429,11 +456,19 @@ test("pinned session isolates arbitrary source writes, follows poses, and retire
 test("pinned session rejects hierarchy, resource identity and binding changes", async () => {
   const { createNativeExtractionSession } = await import("./native-extraction-session.ts");
   const f = await fixture();
-  const session = await createNativeExtractionSession(await bindNativeExtractionContext(f.input), f.object, f.input.binding);
+  const session = await createNativeExtractionSession(
+    await bindNativeExtractionContext(f.input),
+    f.object,
+    f.input.binding,
+  );
   f.object.add(new THREE.Group());
-  assert.throws(() => session.synchronize(), /hierarchy changed/); f.object.remove(f.object.children.at(-1)!);
-  const geometry = f.owner.geometry; f.owner.geometry = geometry.clone();
-  assert.throws(() => session.synchronize(), /resources changed/); f.owner.geometry.dispose(); f.owner.geometry = geometry;
+  assert.throws(() => session.synchronize(), /hierarchy changed/);
+  f.object.remove(f.object.children.at(-1)!);
+  const geometry = f.owner.geometry;
+  f.owner.geometry = geometry.clone();
+  assert.throws(() => session.synchronize(), /resources changed/);
+  f.owner.geometry.dispose();
+  f.owner.geometry = geometry;
   f.input.binding.target_sha256 = "c".repeat(64);
   assert.throws(() => session.synchronize(), /binding changed/);
   session.dispose();
@@ -456,7 +491,10 @@ test("retiring strict verification leaves an independent session usable and reje
   const session = await createNativeExtractionSession(context, f.object, f.input.binding);
   retireNativeExtractionContext(context);
   assert.throws(() => context.prepare(f.object, f.input.binding), /retired/);
-  assert.throws(() => prepareNativeExtractionContext(context, f.object, f.input.binding), /Unverified/);
+  assert.throws(
+    () => prepareNativeExtractionContext(context, f.object, f.input.binding),
+    /Unverified/,
+  );
   f.owner.geometry.attributes.position!.setX(0, 1234);
   f.owner.position.x = 7;
   assert.doesNotThrow(() => session.synchronize());
@@ -473,5 +511,8 @@ test("binding owns GLB, manifest and parser inputs before asynchronous hashing",
   const context = await pending;
   prepareNativeExtractionContext(context, f.object, f.input.binding).dispose();
   f.owner.geometry.attributes.position!.setX(0, 321);
-  assert.throws(() => prepareNativeExtractionContext(context, f.object, f.input.binding), /immutable accessor changed/);
+  assert.throws(
+    () => prepareNativeExtractionContext(context, f.object, f.input.binding),
+    /immutable accessor changed/,
+  );
 });
