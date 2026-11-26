@@ -71,3 +71,71 @@ the desktop script-RPC HTTP listener. Hosting the standalone lobby broker
 with `--lobby-server` is not supported. Multiplayer clients do not use a
 hard-coded server: a custom launcher may provide `ROBINHOOD_LOBBY_WS`, and
 the lobby UI reports that multiplayer is unavailable when it is unset.
+
+## APK boot evidence
+
+`validateCoreOverlay` and `buildRustAndroid` stop at `librobin_rs.so`; they are
+not an APK boot test. Two explicit Gradle tasks close that gap:
+
+```sh
+android/gradlew :app:verifyApkPackaging # host only: packaged APK + overlay hashes
+android/gradlew :app:verifyApkBoot      # requires an adb-attached device
+```
+
+`verifyApkPackaging` is wired into `:app:check`. It inspects the assembled APK
+for `lib/arm64-v8a/librobin_rs.so` and validates every declared core-overlay
+asset by size and SHA-256. `verifyApkBoot` drives a clean install, launch, boot
+poll and log-evidence probe for overlay load, mission start and touch input, and
+retains `app/build/reports/apk-boot-evidence.json`.
+
+The checker is `android/scripts/apk_boot_check.py`. Its deterministic fixtures run
+without a device or APK:
+
+```sh
+python3 android/scripts/apk_boot_check.py --self-test
+```
+
+A device run is **BLOCKED** when there is no Android device/emulator reachable
+through `adb` and no signed APK built with the operator's signing key. The
+checker prints the named capability and exits 3; it never reports a pass from a
+native-library check. Boot evidence is a device observation, not a simulation
+or state-hash assertion.
+
+## Deliberate limits
+
+- **Operator game data.** `android/assets/Data/` is generated content and stays
+  out of the tree. A core-overlay-only APK is reproducible from the repository;
+  reaching a mission requires the operator to supply the full `Data/` closure.
+  A reproducible *playable* APK therefore needs that operator-supplied content,
+  which is a capability limit rather than a packaging defect.
+- **Multiplayer lobby.** There is no default lobby in standard builds. The
+  custom-launcher `ROBINHOOD_LOBBY_WS` requirement is a deliberate limit; the
+  lobby reports multiplayer unavailable when it is unset.
+- **On-device controls.** The device/emulator gesture check is BLOCKED here.
+  Code-level fixtures prove the typed mapping, not that a finger reached the
+  mission on glass.
+
+## Touch gesture map (code-level fixtures)
+
+`crates/robin_rs/src/input_translator.rs` defines the typed touch vocabulary and
+pure mapping; `crates/robin_rs/src/game_input.rs` converts the sticky modifier
+latch into the existing click modifiers; `crates/robin_rs/src/host/viewport.rs`
+holds the touch-camera paths whose tests consume the finger-sized hit-target
+helper in `input_translator.rs`.
+
+| Gesture | Mapped action |
+| --- | --- |
+| tap | primary pointer down/up |
+| long press (450 ms) | secondary pointer down/up — cancel/stop, deselect, plan cancel |
+| two-finger tap (250 ms) | secondary pointer down/up |
+| long drag | secondary drag start |
+| latched modifier + tap | Shift edges around the primary click (add to selection) |
+| quick-group HUD buttons | typed assign/recall commands for slots 1-9 |
+| finger down/up | presentation-only press feedback, no command side effect |
+
+Hit targets grow to at least 48x48 logical pixels around the widget centre from
+one shared `touch_target_rect()` helper; boundary points count as hits.
+
+The real recogniser (`touch_input.rs`), dispatch (`window.rs`) and HUD gates
+remain the integration point for these mappings: a device/emulator run that
+drives a mission with these gestures is the retained evidence still owed.

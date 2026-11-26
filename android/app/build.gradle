@@ -166,3 +166,56 @@ tasks.named("preBuild") {
     dependsOn tasks.named("validateCoreOverlay")
     dependsOn tasks.named("syncRustJniLibs")
 }
+
+// Host-runnable packaging evidence: inspects the *packaged* APK for the native
+// library and the exact core-overlay inventory/size/SHA-256. No device needed.
+def bootCheckScript = repoRoot.file("android/scripts/apk_boot_check.py")
+
+tasks.register("verifyApkPackaging", Exec) {
+    group = "verification"
+    description = "Verify the packaged APK carries the native library and a valid core overlay"
+    dependsOn tasks.named("assembleDebug")
+    def apk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+    commandLine "python3", bootCheckScript.asFile.absolutePath,
+        "--check-apk", apk.get().asFile.absolutePath
+}
+
+tasks.named("check") {
+    dependsOn tasks.named("verifyApkPackaging")
+}
+
+// Device evidence: clean install, boot, overlay load, mission start and touch
+// input. The checker reports the missing capability and exits 3 when no device
+// or signing key is available; Gradle surfaces that as BLOCKED rather than
+// quietly treating a native-library check as an APK boot test.
+tasks.register("verifyApkBoot", Exec) {
+    group = "verification"
+    description = "Boot a packaged APK on an adb-attached device and retain evidence (BLOCKED without one)"
+    dependsOn tasks.named("assembleDebug")
+    def apk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+    def evidence = layout.buildDirectory.file("reports/apk-boot-evidence.json")
+    inputs.file(bootCheckScript)
+    inputs.file(apk)
+    outputs.file(evidence)
+    commandLine "python3", bootCheckScript.asFile.absolutePath,
+        "--boot", apk.get().asFile.absolutePath,
+        "--evidence", evidence.get().asFile.absolutePath
+    ignoreExitValue = true
+    doLast {
+        def code = execResult.exitValue
+        if (code == 3) {
+            throw new GradleException(
+                "APK boot check BLOCKED: an Android device/emulator reachable by adb " +
+                "and a signed APK built with the operator signing key are required"
+            )
+        }
+        if (code != 0) {
+            throw new GradleException("APK boot check failed with exit code ${code}")
+        }
+        def outcome = new JsonSlurper().parse(evidence.get().asFile)
+        if (outcome.status != "PASS") {
+            throw new GradleException("APK boot check ${outcome.status}: ${outcome.failures}")
+        }
+        logger.lifecycle("APK boot evidence retained at ${evidence.get().asFile}")
+    }
+}
