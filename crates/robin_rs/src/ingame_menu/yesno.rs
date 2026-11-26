@@ -3,8 +3,9 @@
 //! A 400x200 window using `RHID_MENU_BACKGROUND_SMALL` with the message
 //! word-wrapped inside a `(25,50)..(375,120)` label, the round Yes / No
 //! wax-seal buttons (`RHID_OK` / `RHID_CANCEL`) centred horizontally at
-//! y=130 with 18px spacing, and shortcuts binding Return / Numpad Enter
-//! → Yes and Escape → No.
+//! y=130 with 18px spacing, and shortcuts binding Return / Numpad Enter /
+//! Space → Yes and Escape → No. The visible hint lists Enter and Escape only;
+//! Space is a second confirm-OK path, not a new message.
 //!
 //! Buttons are driven by the [`crate::widget`] system: a [`FrameWnd`]
 //! holds two [`WidgetButton`]s whose state machines handle hover, push
@@ -189,17 +190,8 @@ impl YesNoModalState {
             w.base_mut().set_tooltip_text(&no_tooltip);
         }
 
-        // Menu creation registers both
-        // buttons as non-navigable horizontal groupables, then binds Return
-        // and Numpad Enter to Yes and Escape to No. Keeping the buttons
-        // non-navigable is intentional: Left/Right must not change the
-        // original shortcut-only dialog behavior.
         let mut focus = FrameButtonFocusManager::new();
-        focus.add_button(&frame, ID_YES);
-        focus.add_shortcut(ID_YES, KeyCode::Enter);
-        focus.add_shortcut(ID_YES, KeyCode::NumpadEnter);
-        focus.add_button(&frame, ID_NO);
-        focus.add_shortcut(ID_NO, KeyCode::Escape);
+        configure_focus(&mut focus, &frame);
 
         let input_state = ModalInputState::from_window(event_pump, transform);
 
@@ -498,6 +490,20 @@ struct FrameButtonEntry {
     widget_id: crate::widget::WidgetId,
 }
 
+/// Register the dialog's two non-navigable seals and their shortcuts.
+///
+/// Both the production constructor and the modal-state test helper go through
+/// this one seam, so a binding added here is the binding the player gets — a
+/// test cannot exercise a shortcut the dialog never registers.
+fn configure_focus(focus: &mut FrameButtonFocusManager, frame: &crate::widget::FrameWnd) {
+    focus.add_button(frame, ID_YES);
+    focus.add_shortcut(ID_YES, KeyCode::Enter);
+    focus.add_shortcut(ID_YES, KeyCode::NumpadEnter);
+    focus.add_shortcut(ID_YES, KeyCode::Space);
+    focus.add_button(frame, ID_NO);
+    focus.add_shortcut(ID_NO, KeyCode::Escape);
+}
+
 impl FrameButtonFocusManager {
     fn new() -> Self {
         Self {
@@ -712,11 +718,7 @@ mod tests {
             (ID_NO, "No", 100, 0, 80, 30),
         ]);
         let mut focus = FrameButtonFocusManager::new();
-        focus.add_button(&frame, ID_YES);
-        focus.add_button(&frame, ID_NO);
-        focus.add_shortcut(ID_YES, KeyCode::Enter);
-        focus.add_shortcut(ID_YES, KeyCode::NumpadEnter);
-        focus.add_shortcut(ID_NO, KeyCode::Escape);
+        configure_focus(&mut focus, &frame);
 
         let input_state = ModalInputState::new();
 
@@ -827,6 +829,26 @@ mod tests {
 
         send_key(&mut state, Keycode::Escape, KeyCode::Escape, false);
         assert_eq!(state.choice, Some(YesNoChoice::No));
+    }
+
+    #[test]
+    fn space_and_enter_confirm_while_escape_cancels() {
+        for (keycode, physical, expected, expected_focus) in [
+            (Keycode::Space, KeyCode::Space, YesNoChoice::Yes, ID_YES),
+            (Keycode::Return, KeyCode::Enter, YesNoChoice::Yes, ID_YES),
+            (Keycode::Escape, KeyCode::Escape, YesNoChoice::No, ID_NO),
+        ] {
+            let mut state = modal_state();
+            send_key(&mut state, keycode, physical, true);
+            assert_eq!(state.choice, None, "{keycode:?} must resolve on release");
+            assert_eq!(state.focus.focused_button(), Some(expected_focus));
+
+            send_key(&mut state, keycode, physical, false);
+            assert_eq!(state.choice, Some(expected), "{keycode:?}");
+            assert!(state.pressed_frame_pending, "{keycode:?}");
+            let seal = state.frame.widget(expected_focus).expect("focused seal");
+            assert_eq!(seal.base().state, crate::ui::UiState::Pushed);
+        }
     }
 
     #[test]
