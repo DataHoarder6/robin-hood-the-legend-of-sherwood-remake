@@ -135,7 +135,7 @@ fn toggle_coop_pause(context: &mut LiveGameplayContext<'_>) {
     }
     let frame = engine.frame_counter();
     let decision = robin_engine::multiplayer::CoopPauseDecision {
-        decision_id: u64::from(frame) + 1,
+        decision_id: engine.next_coop_pause_decision_id(commands),
         frame,
         paused: !engine.coop_pause_active(),
     };

@@ -898,6 +898,29 @@ impl EngineInner {
         )
     }
 
+    /// Nonce for the host's next coop-pause toggle. Reads only committed
+    /// deterministic state and the commands already staged for this frame;
+    /// the frame counter being frozen by a pause cannot make two toggles
+    /// share an id.
+    pub fn next_coop_pause_decision_id(
+        &self,
+        staged: &crate::player_command::FrameCommands,
+    ) -> u64 {
+        crate::coop::next_coop_pause_decision_id(
+            self.control.coop_pause_decision_id(),
+            self.frame_counter(),
+            staged
+                .commands
+                .iter()
+                .filter_map(|input| match &input.command {
+                    crate::player_command::PlayerCommand::SetCoopPause { decision_id, .. } => {
+                        Some(*decision_id)
+                    }
+                    _ => None,
+                }),
+        )
+    }
+
     /// Sim-state portion of the sound system (source list + finished
     /// exclamation queue).  Host sound pipeline reads this when
     /// flushing sources.

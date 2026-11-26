@@ -3,6 +3,34 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_PLAYERS: usize = 5;
 
+/// Allocate the host's next cooperative-pause decision nonce.
+///
+/// The simulation frame is frozen while a pause holds, so a nonce derived
+/// from the frame alone is reused by every toggle at that boundary and a
+/// guest's duplicate guard discards the genuine resume. The last id committed
+/// in the hashed simulation gate and the ids already staged for this frame
+/// make the sequence monotonic while staying a pure function of deterministic
+/// state — no clock or entropy enters the command stream.
+pub fn next_coop_pause_decision_id(
+    last_committed: u64,
+    frame: u32,
+    staged_ids: impl IntoIterator<Item = u64>,
+) -> u64 {
+    // Keep the original frame-derived seed so the first toggle still matches
+    // existing replays, then advance past every id already committed or
+    // staged at this boundary.
+    u64::from(frame)
+        .saturating_add(1)
+        .max(last_committed.saturating_add(1))
+        .max(
+            staged_ids
+                .into_iter()
+                .map(|id| id.saturating_add(1))
+                .max()
+                .unwrap_or(0),
+        )
+}
+
 /// Stable character codes shared by lobby rules and campaign construction.
 pub const TEAM_CHARACTERS: &[(u8, &str, &str)] = &[
     (b'R', "Robin Hood", "Robin des bois"),
@@ -170,6 +198,30 @@ impl CoopRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_coop_pause_toggles_at_a_frozen_frame_get_distinct_nonces() {
+        let frozen_frame = 8_994;
+        let first = next_coop_pause_decision_id(0, frozen_frame, []);
+        let second = next_coop_pause_decision_id(first, frozen_frame, []);
+        let third = next_coop_pause_decision_id(second, frozen_frame, []);
+        assert_ne!(
+            first, second,
+            "a resume at the frozen frame must not reuse the pause's id"
+        );
+        assert_ne!(second, third, "every genuine toggle needs its own id");
+        assert!(second > first && third > second, "nonces must be monotonic");
+    }
+
+    #[test]
+    fn coop_pause_nonce_accounts_for_decisions_staged_in_the_same_frame() {
+        let next = next_coop_pause_decision_id(7, 2, [9, 11]);
+        assert_eq!(
+            next, 12,
+            "a second press before the frame drains must not reuse the first's id"
+        );
+    }
+
     #[test]
     fn exact_team_allows_repeats_and_is_independent_of_shared_player_count() {
         let rules = CoopRules {

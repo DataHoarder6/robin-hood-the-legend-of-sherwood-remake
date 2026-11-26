@@ -127,6 +127,42 @@ fn coop_pause_non_host_cannot_halt_but_host_can() {
 }
 
 #[test]
+fn repeated_coop_pause_toggles_at_a_frozen_frame_reach_both_seats() {
+    let (mut host, host_assets, _) = setup_pc_engine(&[]);
+    let (mut peer, peer_assets, _) = setup_pc_engine(&[]);
+    let sim = crate::sim_rng::test_context();
+    let frozen_frame = 8_994;
+    let pause_id = crate::coop::next_coop_pause_decision_id(0, frozen_frame, []);
+    let resume_id = crate::coop::next_coop_pause_decision_id(pause_id, frozen_frame, []);
+    assert_ne!(
+        pause_id, resume_id,
+        "the regression: frame + 1 reuses the id at a frozen frame"
+    );
+
+    for (decision_id, paused) in [(pause_id, true), (resume_id, false)] {
+        let command = PlayerCommand::SetCoopPause {
+            paused,
+            frame: frozen_frame,
+            decision_id,
+        };
+        for (engine, assets) in [(&mut host, &host_assets), (&mut peer, &peer_assets)] {
+            engine.apply_frame_commands_with_mode(
+                TickCtx::new(&sim, assets),
+                &[PlayerInput::host(command.clone())],
+                SelectionCommandBatchMode::InferNestedSelection,
+            );
+        }
+        assert_eq!(host.coop_pause_state(), peer.coop_pause_state());
+        assert_eq!(
+            crate::replay::state_hash(&host),
+            crate::replay::state_hash(&peer),
+            "both seats must adopt the toggle at the frozen boundary"
+        );
+    }
+    assert_eq!(host.coop_pause_state(), (false, frozen_frame, resume_id));
+}
+
+#[test]
 fn coop_pause_boundary_frame_hash_equality_is_exact_and_frame_sensitive() {
     let (mut host, host_assets, _) = setup_pc_engine(&[]);
     let (mut peer, peer_assets, _) = setup_pc_engine(&[]);
