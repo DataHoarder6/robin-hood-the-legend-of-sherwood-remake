@@ -24,8 +24,7 @@ export class ComponentNodePoses {
       c.stages.flatMap((s) => s.node_frames).find((f) => f !== null)!,
     );
     // Check every component together, including ambiguous names and nested mesh ownership.
-    const reviewed = new ReviewedNodePoses(applied, [all]);
-    void reviewed;
+    new ReviewedNodePoses(applied, [all]);
     const names = new Set(all.map((p) => p.node));
     applied.traverse((object) => {
       if ((object as THREE.Mesh).isMesh && !names.has(object.name))

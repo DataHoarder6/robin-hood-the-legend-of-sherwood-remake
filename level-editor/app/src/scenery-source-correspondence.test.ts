@@ -96,35 +96,22 @@ test('an unrelated missing scenery preview does not prevent a verified source ow
   internal.resources.set('unrelated', unrelated);
   assert.equal(await layer.bindNativeSourceClocks(f.native, f.level), true);
 });
-/** A real promise resource plus a signal for when the layer has admitted it. */
-function deferredFixtureResource(internal: any) {
-  let release!: () => void,
-    admitted!: () => void;
-  const resource = new Promise<void>(resolve => { release = resolve; });
-  const admission = new Promise<void>(resolve => { admitted = resolve; });
-  const originalGet = internal.resources.get.bind(internal.resources);
-  internal.resources.get = (key: string) => {
-    const value = originalGet(key);
-    if (key === 'fixture') admitted();
-    return value;
-  };
-  internal.resources.set('fixture', resource);
-  return { admission, release };
-}
 test('retired missions cannot bind after a matching resource finishes loading', async () => {
   const f = await fixture(), { layer, internal } = attachLayer(f);
-  const { admission, release } = deferredFixtureResource(internal);
+  let waiting = false, release!: () => void;
+  internal.resources.set('fixture', { then(resolve: (value: unknown) => void) { waiting = true; release = () => resolve({}); } });
   const pending = layer.bindNativeSourceClocks(f.native, f.level);
-  await admission;
+  while (!waiting) await new Promise(resolve => setImmediate(resolve));
   layer.clearSourceClocks(); release();
   assert.equal(await pending, false);
   assert.equal(layer.sourceClocks.frame('placed/fire', 'b'.repeat(64), 2), undefined);
 });
 test('placement mismatch during resource admission rejects without leaving a partial binding', async () => {
   const f = await fixture(), { layer, internal } = attachLayer(f);
-  const { admission, release } = deferredFixtureResource(internal);
+  let waiting = false, release!: () => void;
+  internal.resources.set('fixture', { then(resolve: (value: unknown) => void) { waiting = true; release = () => resolve({}); } });
   const pending = layer.bindNativeSourceClocks(f.native, f.level);
-  await admission;
+  while (!waiting) await new Promise(resolve => setImmediate(resolve));
   f.document.objects[0]!.transform.dx = 12; release();
   await assert.rejects(pending, /placement changed during/);
   assert.equal(layer.sourceClocks.frame('placed/fire', 'b'.repeat(64), 2), undefined);

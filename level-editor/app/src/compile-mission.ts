@@ -224,7 +224,7 @@ export async function prepareNativeMissionSource(
     files.set(resource.path, bytes);
   }
   const parse = (path: string) =>
-    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get(path)));
+    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get(path)!));
   const mission = parse(spec.mission_data.path),
     level = parse(spec.level_data.path);
   if (mission.header?.map_filename !== spec.map || mission.format !== level.format)

@@ -214,7 +214,7 @@ export default function StatePreview(props: {
           identity: `soldiers:${index}`,
           preview: { kind: "editable", editorId: id },
           active: true,
-          layer: soldiers[index].layer,
+          layer: soldiers[index]!.layer,
           drawHidden: hidden,
           outlineColor: 0xf800,
         },

@@ -120,7 +120,9 @@ export async function loadMissionStatePreview(
   if (patch) validateNativePatchPreview(contract);
   else if (loop) validateNativeLoopPreview(contract);
   else validateStateDelivery(contract);
-  const native = contract.native;
+  const native = (
+    contract as StateDeliveryContract | NativeLoopPreviewContract | NativePatchPreviewContract
+  ).native;
   if (native.mission !== entry.mission)
     throw new Error("State catalog mission differs from its contract");
   for (const family of loop || patch ? [] : (contract as StateDeliveryContract).families)
