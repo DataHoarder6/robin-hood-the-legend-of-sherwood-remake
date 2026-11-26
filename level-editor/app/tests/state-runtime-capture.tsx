@@ -140,7 +140,7 @@ async function main() {
     showElevation: () => false,
     onSelection: () => {},
     commitTransform: () => {},
-    onError: (e) => errors.push(String(e)),
+    onError: (e) => errors.push(e),
   });
   viewport.setup(document.querySelector<HTMLDivElement>("#view")!);
   viewport.replaceMap(new THREE.Group(), null, new Map());
@@ -221,7 +221,7 @@ async function main() {
   const images: Record<string, string> = {};
   const imageScopes: Record<string, string> = {};
   const focusedNativeCanvases = new WeakSet<HTMLCanvasElement>();
-  async function captureViews(label: string) {
+  async function captureViews() {
     const selector = document.querySelector<HTMLSelectElement>(
       '[aria-label="State preview view"]',
     )!;
@@ -339,7 +339,7 @@ async function main() {
     ) {
       seenPhases.add(phase);
       const label = `${phase}-engine${batch.simulation_tick}`;
-      const pair = await captureViews(label);
+      const pair = await captureViews();
       images[`${label}-native`] = pair.native;
       images[`${label}-physical`] = pair.physical;
       imageScopes[`${label}-native.png`] = `Actual native artwork canvas, recorded ${label}`;
@@ -360,7 +360,7 @@ async function main() {
       "Physical viewport never changed across transition records",
     );
   } else {
-    const pair = await captureViews(`initial-engine${config.expected_frames.at(-1)}`);
+    const pair = await captureViews();
     images.before = pair.native;
     images.after = pair.physical;
     imageScopes["before.png"] = "Actual native artwork initial state, focused";

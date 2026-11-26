@@ -174,13 +174,14 @@ test("retirement during fetch cannot publish into a replacement viewport", async
   const t = setup();
   let release!: () => void,
     wait = new Promise<void>((r) => (release = r));
-  let requested = false;
+  let markRequested!: () => void;
+  const requested = new Promise<void>((r) => (markRequested = r));
   const source = new LiveStateCaptureSource(
     t.f.contract,
     (b) => t.batches.push(b),
     async (p) => {
       if (p.startsWith("packet/")) {
-        requested = true;
+        markRequested();
         await wait;
       }
       return new Response(JSON.stringify(t.routes[p]));
@@ -188,7 +189,7 @@ test("retirement during fetch cannot publish into a replacement viewport", async
   );
   await source.connect();
   const pending = source.next();
-  while (!requested) await new Promise((r) => setTimeout(r, 0));
+  await requested;
   source.invalidate();
   release();
   await assert.rejects(pending, /reload/);
