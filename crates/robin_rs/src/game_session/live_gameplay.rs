@@ -40,6 +40,23 @@ pub(super) struct LiveGameplayInput<'a> {
     pub(super) pause_closed_this_frame: &'a mut bool,
 }
 
+/// Keep the local cursor shape in step with the Esc menu. While it covers the
+/// map the world interaction shapes must give way to the default arrow; a
+/// host co-op pause leaves the map visible and keeps them unchanged.
+fn sync_pause_cursor(context: &mut LiveGameplayContext<'_>) {
+    let LiveGameplayContext {
+        presentation,
+        resources,
+        ui,
+        ..
+    } = context;
+    let esc_menu_open = ui.pause_menu.is_some();
+    presentation
+        .sprites
+        .cursor_renderer
+        .set_world_cursor_suppressed(esc_menu_open, &mut resources.cursor, &presentation.renderer);
+}
+
 fn toggle_pause_menu(context: &mut LiveGameplayContext<'_>, pause_closed: &mut bool) {
     let LiveGameplayContext {
         host,
@@ -173,12 +190,12 @@ fn portrait_selection_command(
     }
 }
 
-/// Camera placement for a keyboard portrait selection. The mouse click path
-/// centres the chosen character; #101 asks the number keys to use that same
-/// placement rather than the XAG 117 ensure-on-screen pan.
-// TODO: reconcile with XAG 117 if ordinary selections should stay minimal.
+/// Camera placement for a keyboard portrait selection. An ordinary selection
+/// (mouse click or number key) only ensures the character is visible — it
+/// must not hard-centre, and the player can turn the pan off (XAG 117).
+/// Hard-centring remains reserved for explicit double-click navigation.
 fn place_keyboard_selection_camera(viewport: &mut crate::host::ViewportState, point: MapPoint) {
-    viewport.center_on_point(point);
+    viewport.ensure_on_screen(point);
 }
 
 /// Commands emitted for one number-key press. A press on an already-selected
@@ -516,6 +533,7 @@ pub(super) async fn drive_live_gameplay_input(
             }
             GameAction::DisplayMenu => {
                 toggle_pause_menu(&mut context, pause_closed_this_frame);
+                sync_pause_cursor(&mut context);
             }
             GameAction::CoopPause => {
                 toggle_coop_pause(&mut context);
@@ -527,9 +545,14 @@ pub(super) async fn drive_live_gameplay_input(
         }
     }
 
+    sync_pause_cursor(&mut context);
     match handle_pause_menu_events(&mut context, pause_closed_this_frame, events) {
-        HandlerAction::Continue => return HandlerAction::Continue,
+        HandlerAction::Continue => {
+            sync_pause_cursor(&mut context);
+            return HandlerAction::Continue;
+        }
         HandlerAction::Exit(code) => {
+            sync_pause_cursor(&mut context);
             execute_app_effects(
                 &mut context.callbacks.app_effects,
                 &mut context.host.audio.sound,
@@ -562,6 +585,7 @@ pub(super) async fn drive_live_gameplay_input(
             *pause_closed_this_frame,
         );
     }
+    sync_pause_cursor(&mut context);
     HandlerAction::Proceed
 }
 
@@ -662,10 +686,11 @@ mod tests {
         assert_eq!(spellforge_virtual_key(Keycode::Unknown), None);
     }
 
-    /// The number-key path must put the character where the mouse click puts
-    /// it, at angle zero and under rotation, at every ladder stop.
+    /// #112: number-key selection is an ordinary selection, so it must use
+    /// the same minimal ensure-on-screen pan as a mouse click — no movement
+    /// for an already visible character, and a just-enough pan otherwise.
     #[test]
-    fn number_key_centres_the_character_like_a_mouse_click() {
+    fn number_key_uses_minimal_ensure_on_screen_pan() {
         for steps in [0_i8, 1] {
             for zoom_steps in 0..2 {
                 let mut keyed = ViewportState::new(1024.0, 768.0);
@@ -678,18 +703,30 @@ mod tests {
                     keyed.zoom_step(ZoomDirection::In, None);
                 }
 
-                let character = MapPoint::new(1400.0, 1000.0);
-                let mut clicked = keyed.clone();
-                clicked.center_on_point(character);
-                place_keyboard_selection_camera(&mut keyed, character);
-
+                // An on-screen target must leave the camera untouched.
+                let visible = MapPoint::new(1200.0, 900.0);
+                let before = keyed.view_position;
+                place_keyboard_selection_camera(&mut keyed, visible);
                 assert_eq!(
-                    keyed.view_position, clicked.view_position,
-                    "camera differs at rotation step {steps}, zoom steps {zoom_steps}"
+                    keyed.view_position, before,
+                    "on-screen target panned at rotation step {steps}, zoom steps {zoom_steps}"
                 );
+
+                // An off-screen target must pan by the minimum, matching
+                // the ensure-on-screen primitive rather than a hard centre.
+                let off_screen = MapPoint::new(4000.0, 900.0);
+                let mut minimally_panned = keyed.clone();
+                minimally_panned.ensure_on_screen(off_screen);
+                place_keyboard_selection_camera(&mut keyed, off_screen);
                 assert_eq!(
-                    keyed.map_to_screen_unclamped(character),
-                    clicked.map_to_screen_unclamped(character)
+                    keyed.view_position, minimally_panned.view_position,
+                    "off-screen target did not get a minimal pan at rotation step {steps}, zoom steps {zoom_steps}"
+                );
+                let mut centred = keyed.clone();
+                centred.center_on_point(off_screen);
+                assert_ne!(
+                    keyed.view_position, centred.view_position,
+                    "number-key selection must not hard-centre the character"
                 );
             }
         }

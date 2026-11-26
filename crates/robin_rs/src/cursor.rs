@@ -19,7 +19,20 @@ const CURSOR_DRAW_SHADOWED: u16 = 2;
 const CURSOR_DRAW_MASK: u16 = 0xF;
 use robin_assets::picture::Picture;
 use robin_assets::resource_manager::{ResourceId, ResourceManager};
+use robin_engine::resource_ids;
 use robin_engine::sprite::BBox;
+
+/// Which cursor shape a mission frame should load. While the Esc menu is up
+/// the map is not visible, so the world interaction shapes (go / no-go /
+/// enter building) must give way to the default arrow. A host co-op pause
+/// without the menu leaves the map visible and keeps the world shape.
+fn cursor_id_for_screen(requested: ResourceId, esc_menu_open: bool) -> ResourceId {
+    if esc_menu_open {
+        resource_ids::RHMOUSE_DEFAULT
+    } else {
+        requested
+    }
+}
 
 /// One uploaded animation frame.
 struct CursorFrame {
@@ -122,6 +135,12 @@ pub struct CursorRenderer {
     /// Local presentation clock; never saved or tied to simulation/replay time.
     pulse_clock: web_time::Instant,
     ui_animation_accumulated_us: u64,
+
+    /// True while the Esc menu covers the map: world shapes give way to the
+    /// default arrow. Presentation-only, never part of engine or replay state.
+    world_cursor_suppressed: bool,
+    /// Last shape the caller requested, restored when the menu closes.
+    last_world_cursor_id: ResourceId,
 }
 
 impl CursorRenderer {
@@ -138,6 +157,8 @@ impl CursorRenderer {
             ui_animation_sample: None,
             pulse_clock: web_time::Instant::now(),
             ui_animation_accumulated_us: 0,
+            world_cursor_suppressed: false,
+            last_world_cursor_id: resource_ids::RHMOUSE_DEFAULT,
         }
     }
 
@@ -256,7 +277,43 @@ impl CursorRenderer {
     /// Every animation frame (picture) is uploaded to its own renderer
     /// surface so `advance_animation` can swap between them by index
     /// without re-uploading pixels.
+    ///
+    /// While the Esc menu covers the map (`set_world_cursor_suppressed`),
+    /// the requested world shape is remembered but the default arrow is
+    /// loaded instead. Nothing here touches simulation or replay state.
     pub fn load_cursor(
+        &mut self,
+        cursor_id: ResourceId,
+        resource_manager: &mut ResourceManager,
+        renderer: &Renderer,
+    ) -> bool {
+        // Modal dialogs may request the default cursor while the menu is up;
+        // that must not erase the world shape we will restore on close.
+        if !self.world_cursor_suppressed || cursor_id != resource_ids::RHMOUSE_DEFAULT {
+            self.last_world_cursor_id = cursor_id;
+        }
+        let cursor_id = cursor_id_for_screen(cursor_id, self.world_cursor_suppressed);
+        self.load_cursor_inner(cursor_id, resource_manager, renderer)
+    }
+
+    /// Switch the world-shape override on or off. The menu's open/close
+    /// path calls this so the non-blocking pause menu shows the default
+    /// arrow without a `load_cursor` call from the frame cursor update.
+    pub fn set_world_cursor_suppressed(
+        &mut self,
+        suppressed: bool,
+        resource_manager: &mut ResourceManager,
+        renderer: &Renderer,
+    ) {
+        if self.world_cursor_suppressed == suppressed {
+            return;
+        }
+        self.world_cursor_suppressed = suppressed;
+        let cursor_id = cursor_id_for_screen(self.last_world_cursor_id, suppressed);
+        self.load_cursor_inner(cursor_id, resource_manager, renderer);
+    }
+
+    fn load_cursor_inner(
         &mut self,
         cursor_id: ResourceId,
         resource_manager: &mut ResourceManager,
@@ -670,6 +727,18 @@ fn scaled_cursor_dst_box(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #116: the Esc menu owns the screen, so no world shape may leak
+    /// through it; co-op pause (map still visible) keeps the world shape.
+    #[test]
+    fn esc_menu_forces_default_cursor_but_coop_pause_keeps_world_shape() {
+        let world = resource_ids::RHMOUSE_CANTGOTHERE;
+        assert_eq!(
+            cursor_id_for_screen(world, true),
+            resource_ids::RHMOUSE_DEFAULT
+        );
+        assert_eq!(cursor_id_for_screen(world, false), world);
+    }
 
     #[test]
     fn scaled_cursor_dst_box_keeps_hotspot_and_scales_dimensions() {
