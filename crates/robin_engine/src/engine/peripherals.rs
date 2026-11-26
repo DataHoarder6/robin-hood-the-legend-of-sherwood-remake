@@ -523,4 +523,8 @@ pub struct DebugFlags {
     /// Draw sprite occlusion-mask debug geometry for masked/flying sprites.
     /// Rust-only dev overlay for renderer parity investigations.
     pub sprite_masks_display: bool,
+    /// Reveal every occluded ground zone at once. Presentation-only stand-in
+    /// for the whole-map modifier until that key is bound in the client.
+    #[serde(default)]
+    pub hidden_areas_all: bool,
 }

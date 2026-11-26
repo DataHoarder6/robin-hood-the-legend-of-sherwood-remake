@@ -152,6 +152,10 @@ pub(crate) fn render_entities_gpu(
     let display_anim = graphic_config.display_anim;
     let apply_fog_to_all_sprites = graphic_config.apply_fog_to_all_sprites;
 
+    // Ground-only overlay: drawn before sprites so characters stand on top
+    // of the dotted boundary, and recomputed from this frame's inputs only.
+    render_hidden_ground_outlines(host, engine, assets, dev, renderer);
+
     for &entity_id in &presentation.draw_order_ids {
         let entity = match engine.get_entity(entity_id) {
             Some(e) => e,
@@ -1293,5 +1297,338 @@ mod outline_decision_tests {
         d.controlled_or_allied = true;
         d.carried = true;
         assert_eq!(outline_alpha_pct(d), None);
+    }
+}
+
+// ─── Dotted outlines of ground hidden behind buildings ───────────
+
+use geo::{Area as _, BooleanOps as _, ConvexHull as _, Intersects as _};
+
+/// Ground region occluded by one opaque obstacle volume, in map coordinates.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HiddenGroundZone {
+    polygon: geo::Polygon<f32>,
+}
+
+/// Distance between dots and dot thickness in map units.
+const HIDDEN_ZONE_DOT_SPACING: f32 = 9.0;
+const HIDDEN_ZONE_DOT_THICKNESS: f32 = 1.5;
+const HIDDEN_ZONE_COLOR: u32 = 0x7F_DF;
+const MIN_HIDDEN_ZONE_AREA: f32 = 1.0;
+
+impl HiddenGroundZone {
+    /// Closed exterior boundary; ground points project to themselves.
+    fn boundary(&self) -> Vec<MapPoint> {
+        self.polygon
+            .exterior()
+            .0
+            .iter()
+            .map(|coord| MapPoint::new(coord.x, coord.y))
+            .collect()
+    }
+
+    fn contains_feet(&self, feet: GroundPoint) -> bool {
+        self.polygon.intersects(&geo::Point::new(feet.x, feet.y))
+    }
+}
+
+/// The ground hidden by one obstacle is the sweep of its footprint to its
+/// projected top surface, minus the footprint itself. A ground point projects
+/// to `(x, y)`, while the top of an obstacle projects to `(x, y - z_top)`, so
+/// the convex hull of both sets is the volume's map-space silhouette. No
+/// building footprint is invented where level data has none.
+fn zone_for_obstacle(obstacle: &engine_sight_obstacle::SightObstacle) -> Option<HiddenGroundZone> {
+    if obstacle.is_projection_area() || !obstacle.is_opaque() {
+        return None;
+    }
+    let points = &obstacle.obstacle_points;
+    if points.len() < 3 {
+        return None;
+    }
+    let footprint = obstacle.polygon.as_geo();
+    if footprint.exterior().0.len() < 3 || footprint.unsigned_area() < MIN_HIDDEN_ZONE_AREA {
+        return None;
+    }
+
+    let mut hull_points: Vec<geo::Coord<f32>> = footprint.exterior().0.clone();
+    hull_points.extend(points.iter().flat_map(|point| {
+        let top = geo::Coord {
+            x: point.x,
+            y: point.y - point.z_top,
+        };
+        let bottom = geo::Coord {
+            x: point.x,
+            y: point.y
+                - if obstacle.on_ground {
+                    0.0
+                } else {
+                    point.z_bottom
+                },
+        };
+        [top, bottom]
+    }));
+    let silhouette =
+        geo::MultiPoint::new(hull_points.into_iter().map(geo::Point::from).collect()).convex_hull();
+    if silhouette.unsigned_area() < MIN_HIDDEN_ZONE_AREA {
+        return None;
+    }
+
+    let difference = geo::MultiPolygon::new(vec![silhouette]).difference(footprint);
+    let mut best: Option<geo::Polygon<f32>> = None;
+    for candidate in difference.0 {
+        let area = candidate.unsigned_area();
+        if !area.is_finite() || area < MIN_HIDDEN_ZONE_AREA || candidate.exterior().0.len() < 3 {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|current| area > current.unsigned_area())
+        {
+            best = Some(candidate);
+        }
+    }
+    best.map(|polygon| HiddenGroundZone { polygon })
+}
+
+/// Derive every occluded ground region from the active opaque obstacles.
+pub(crate) fn derive_hidden_ground_zones(
+    obstacles: &engine_sight_obstacle::ObstacleList<'_>,
+) -> Vec<HiddenGroundZone> {
+    let mut zones = Vec::new();
+    for (index, obstacle) in obstacles.iter_indexed() {
+        if !obstacles.is_active(index as usize) {
+            continue;
+        }
+        if let Some(zone) = zone_for_obstacle(obstacle) {
+            zones.push(zone);
+        }
+    }
+    zones
+}
+
+/// Indices to reveal: all of them for the whole-map override, otherwise only
+/// zones containing at least one character's feet.
+pub(crate) fn visible_hidden_zone_indices(
+    zones: &[HiddenGroundZone],
+    feet: &[GroundPoint],
+    reveal_all: bool,
+) -> Vec<usize> {
+    if reveal_all {
+        return (0..zones.len()).collect();
+    }
+    (0..zones.len())
+        .filter(|&index| feet.iter().any(|&foot| zones[index].contains_feet(foot)))
+        .collect()
+}
+
+/// Closed segment loops for the given zones, for a render pass or a test.
+pub(crate) fn hidden_zone_outline_segments(
+    zones: &[HiddenGroundZone],
+    indices: &[usize],
+) -> Vec<(MapPoint, MapPoint)> {
+    let mut segments = Vec::new();
+    for &index in indices {
+        // Missing zone: skip it rather than drawing a made-up boundary.
+        let Some(zone) = zones.get(index) else {
+            continue;
+        };
+        let boundary = zone.boundary();
+        for edge in boundary.windows(2) {
+            segments.push((edge[0], edge[1]));
+        }
+        if let (Some(first), Some(last)) = (boundary.first(), boundary.last())
+            && first != last
+        {
+            segments.push((*last, *first));
+        }
+    }
+    segments
+}
+
+/// Draw this frame's dotted zone boundaries. Every input is read fresh, so
+/// releasing the override or moving the last actor out removes the lines on
+/// the same frame; nothing is latched into presentation state.
+fn render_hidden_ground_outlines(
+    host: &HostDraw<'_>,
+    engine: &PresentationView<'_>,
+    assets: &robin_engine::engine::LevelAssets,
+    dev: &robin_engine::engine::DevState,
+    renderer: &mut Renderer,
+) {
+    let obstacles = engine.sight_obstacles(assets);
+    let zones = derive_hidden_ground_zones(&obstacles);
+    if zones.is_empty() {
+        return;
+    }
+    let feet: Vec<GroundPoint> = engine
+        .entities_iter()
+        .filter(|entity| entity.is_active())
+        .map(|entity| {
+            let position = entity.element_data().position();
+            GroundPoint::new(position.x, position.y)
+        })
+        .collect();
+    let shown = visible_hidden_zone_indices(&zones, &feet, dev.debug.hidden_areas_all);
+    if shown.is_empty() {
+        return;
+    }
+    let draw_manager = host.draw_manager();
+    let color = draw_manager.pack_color(HIDDEN_ZONE_COLOR);
+    let mut phase = 0.0;
+    let mut previous_end = None;
+    for edge in hidden_zone_outline_segments(&zones, &shown) {
+        if previous_end != Some(edge.0) {
+            phase = 0.0;
+        }
+        draw_manager.draw_dotted_line(
+            renderer,
+            edge.0,
+            edge.1,
+            &mut phase,
+            HIDDEN_ZONE_DOT_SPACING,
+            HIDDEN_ZONE_DOT_THICKNESS,
+            color,
+        );
+        previous_end = Some(edge.1);
+    }
+}
+
+#[cfg(test)]
+mod hidden_ground_tests {
+    use super::*;
+    use engine_sight_obstacle::{
+        ObstaclePoint, SIGHTOBSTACLE_OPAQUE, SIGHTOBSTACLE_PROJECTION_AREA, SIGHTOBSTACLE_SOLID,
+        SightObstacle,
+    };
+
+    fn prism(id: u32, min_x: f32, min_y: f32, z_top: f32, flags: u32) -> SightObstacle {
+        let corners = [
+            (min_x, min_y),
+            (min_x + 10.0, min_y),
+            (min_x + 10.0, min_y + 10.0),
+            (min_x, min_y + 10.0),
+        ];
+        let mut obstacle = SightObstacle::new(id, flags);
+        obstacle.obstacle_points = corners
+            .iter()
+            .map(|&(x, y)| ObstaclePoint {
+                x,
+                y,
+                z_top,
+                z_bottom: 0.0,
+            })
+            .collect();
+        obstacle.rebuild_geometry();
+        obstacle
+    }
+
+    fn building(id: u32, min_x: f32, min_y: f32, z_top: f32) -> SightObstacle {
+        prism(
+            id,
+            min_x,
+            min_y,
+            z_top,
+            SIGHTOBSTACLE_SOLID | SIGHTOBSTACLE_OPAQUE,
+        )
+    }
+
+    fn zone_area(zone: &HiddenGroundZone) -> f32 {
+        zone.polygon.unsigned_area()
+    }
+
+    #[test]
+    fn hidden_zone_is_the_footprint_projection_sweep_minus_the_footprint() {
+        let obstacles = [building(1, 0.0, 0.0, 5.0)];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        let zones = derive_hidden_ground_zones(&list);
+        assert_eq!(zones.len(), 1, "one opaque building yields one hidden zone");
+        assert!(
+            (zone_area(&zones[0]) - 50.0).abs() < 0.01,
+            "a 10x10 footprint projected 5 units north hides 50 map units: {}",
+            zone_area(&zones[0])
+        );
+        assert!(zones[0].contains_feet(GroundPoint::new(5.0, -2.0)));
+        assert!(!zones[0].contains_feet(GroundPoint::new(5.0, 5.0)));
+    }
+
+    #[test]
+    fn flat_transparent_and_inactive_volumes_invent_no_hidden_zone() {
+        let flat = building(1, 0.0, 0.0, 0.0);
+        let transparent = prism(2, 20.0, 0.0, 5.0, SIGHTOBSTACLE_SOLID);
+        let mut projection_area = building(3, 40.0, 0.0, 5.0);
+        projection_area.obstacle_type |= SIGHTOBSTACLE_PROJECTION_AREA;
+        let obstacles = [flat, transparent, projection_area];
+        let list = engine_sight_obstacle::ObstacleList {
+            static_obstacles: &obstacles,
+            dynamic_obstacles: &[],
+            static_active: &[true, true, false],
+        };
+        assert!(derive_hidden_ground_zones(&list).is_empty());
+    }
+
+    #[test]
+    fn reveal_all_is_a_superset_of_character_occupancy() {
+        let obstacles = [building(1, 0.0, 0.0, 5.0), building(2, 40.0, 0.0, 5.0)];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        let zones = derive_hidden_ground_zones(&list);
+        assert_eq!(zones.len(), 2);
+        assert_eq!(
+            visible_hidden_zone_indices(&zones, &[], false),
+            Vec::<usize>::new()
+        );
+        assert_eq!(visible_hidden_zone_indices(&zones, &[], true), vec![0, 1]);
+        assert_eq!(
+            visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, -2.0)], false),
+            vec![0]
+        );
+        assert_eq!(
+            visible_hidden_zone_indices(
+                &zones,
+                &[GroundPoint::new(45.0, -2.0), GroundPoint::new(5.0, -2.0)],
+                false,
+            ),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn outline_segments_are_closed_and_only_cover_shown_zones() {
+        let obstacles = [building(1, 0.0, 0.0, 5.0), building(2, 40.0, 0.0, 5.0)];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        let zones = derive_hidden_ground_zones(&list);
+        let shown = visible_hidden_zone_indices(&zones, &[GroundPoint::new(5.0, -2.0)], false);
+        let segments = hidden_zone_outline_segments(&zones, &shown);
+        assert!(
+            segments.len() >= 3,
+            "one shown zone must produce a closed dotted loop"
+        );
+        assert_eq!(segments.first().map(|s| s.0), segments.last().map(|s| s.1));
+
+        let none = hidden_zone_outline_segments(&zones, &[]);
+        assert!(none.is_empty(), "no shown zone draws no line");
+    }
+
+    #[test]
+    fn leaving_a_zone_or_clearing_the_override_removes_lines_the_same_frame() {
+        let obstacles = [building(1, 0.0, 0.0, 5.0)];
+        let list = engine_sight_obstacle::ObstacleList::from_slice_all_active(&obstacles);
+        let zones = derive_hidden_ground_zones(&list);
+        let inside = [GroundPoint::new(5.0, -2.0)];
+        let outside = [GroundPoint::new(5.0, 5.0)];
+
+        assert_eq!(visible_hidden_zone_indices(&zones, &inside, false), vec![0]);
+        assert!(hidden_zone_outline_segments(&zones, &[0]).len() >= 3);
+        assert_eq!(
+            visible_hidden_zone_indices(&zones, &outside, false),
+            Vec::<usize>::new(),
+            "feet leaving the zone remove the outline immediately"
+        );
+        assert_eq!(
+            hidden_zone_outline_segments(
+                &zones,
+                &visible_hidden_zone_indices(&zones, &outside, false),
+            ),
+            Vec::<(MapPoint, MapPoint)>::new()
+        );
     }
 }
