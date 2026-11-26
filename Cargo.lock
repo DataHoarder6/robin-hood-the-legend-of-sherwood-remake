@@ -850,7 +850,7 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cexpr"
-version = "0.7.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
 dependencies = [
@@ -6223,7 +6223,7 @@ dependencies = [
 
 [[package]]
 name = "robin_rs"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
