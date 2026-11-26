@@ -98,6 +98,35 @@ page that was shown.
   [ADR 0010](../adr/0010-linux-first-unattended-goal.md). A fixture or a
   Linux-only run never proves them.
 
+## RED/GREEN evidence
+
+Written test-first. RED, with only `campaign_proof_test.py` present:
+
+```text
+$ python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
+ImportError: Failed to import test module: campaign_proof_test
+ModuleNotFoundError: No module named 'campaign_proof'
+Ran 1 test in 0.000s
+FAILED (errors=1)
+```
+
+GREEN on the same tests after the checker and claim fixtures were added:
+
+```text
+$ python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
+............................
+Ran 28 tests in 0.302s
+OK
+$ python3 scripts/validation/scenario_corpus.py --check
+scenario corpus: 38 scenarios (15 core, 19 process, 4 transport) prove
+12 matrix cells with 123 machine-checked assertions
+```
+
+The four committed claims were also run against the committed conforming
+fixture (`--claim … --observation … --criterion …`); each exited `0`. A broken
+observation exits `1` naming the failing tick, mission, action or seat; an
+absent observation exits `3`.
+
 ## Gate status
 
 No gate was run for this proof: no push, gate or landing belongs to this slice.
