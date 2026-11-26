@@ -287,3 +287,43 @@ Tag summary: v0.5.0
 - `e44b02d3f` Fix final review findings on unattended loop policy
 - `0c9de3b60` Fix review round 1 on unattended loop hardening
 - `83d6ae42a` Harden unattended loop policy with research-backed ceilings
+
+## v0.6.0
+
+Tag summary: v0.6.0
+
+### What's new
+
+
+### Source commits
+
+- `fde30d56b` fix(save): preserve exact header-rejection error text
+- `64e37e47c` fix(dialog): red decline cannot repeat blue accept (#108)
+- `4e152dbc9` feat(hud): show centred local-pause indicator (#104)
+- `a8f47d4b0` chore(dialog): inline the removed flight-x helpers into tests (#103 follow-up)
+- `18aa4eb41` fix(dialog): scale the confirmation slide toward the HUD rail (#103)
+- `9e53e8b90` feat(shortcuts): list fixed camera rotation keys in Options (#98)
+- `43d98500a` feat(dialog): Space confirms the Yes/No dialog like Enter (#72)
+- `5caa76653` fix(dialog): every leave prompt offers accept and cancel (#71)
+- `4c641791d` fix(81): write browser QuickSave and Continue through localStorage
+- `a0478488a` test(81): browser QuickSave/Continue localStorage seam fails
+- `f88ce91f1` fix(109): gate cross-mission QuickLoad warning on mission identity
+- `023997e6e` test(109): same-mission quickload must not open cross-mission confirmation
+- `67a2221a8` fix(engine): render loaded bonus item templates with their count
+- `28f85c2ea` fix(main-menu): label New Game and hide Continue without a save (#100)
+- `d456ccb3d` fix(main-menu): keep a full roster clear of the difficulty button (#97)
+- `1c0d12374` fix(sherwood): selecting the next mission sends the deployment interaction
+- `bee6d2129` fix(zoom): refuse stops and pinches that cannot fill a rotated view
+- `ea2de4e99` fix(web): copy datadir contents into an existing staged directory
+- `f390ea4a0` fix(web): use scoped sudo for web root atomic swap
+- `66226b053` fix(web): create deploy staging root before staging files
+- `187f6b26a` fix(web): keep deploy staging outside the gate prune root
+- `4a7152cf7` fix(web): stage the current origin verifier on the build host
+- `52e75aae8` fix(web): run the deploy-time origin verifier against tagged artifacts
+- `0934b424a` fix(web): verify the configured game origin instead of hard-coding upstream
+- `a6c84c570` fix(web): prune stale worktree registrations before deploy staging
+- `b90f5b202` fix: keep click anchors, centre number-key selection and reseed its glow
+- `dbbd30c62` test: reproduce click drift, number-key centring and hulk reseed
+- `70d218d50` docs: supersede ADR 0002 with reviewed parked-work recovery
+- `d9c605a39` feat(camera): add 360-degree compass heading on Shift+Comma/Period
+- `f77fc2028` fix(web): read Demo identity from versioned manifest when latest.json is minimal
