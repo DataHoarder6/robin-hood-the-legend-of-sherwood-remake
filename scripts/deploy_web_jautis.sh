@@ -118,8 +118,14 @@ REMOTE
 
 public_new=${public_root}.$short.new
 signer_new=${signer_root}.$short.new
-rm -rf "$public_new" "$signer_new"
-mkdir -p "$public_new" "$signer_new"
+# /var/www is root-owned but the published roots are owner-managed. Use the
+# operator's scoped NOPASSWD sudo only for the sibling swap paths.
+as_root() {
+    if [ -w /var/www ]; then "$@"; else sudo -n "$@"; fi
+}
+as_root rm -rf "$public_new" "$signer_new"
+as_root mkdir -p "$public_new" "$signer_new"
+as_root chown "$(id -u):$(id -g)" "$public_new" "$signer_new"
 scp -q -r "$build_host:$stage_remote/." "$public_new/"
 scp -q -r "$build_host:${stage_remote}-signer/." "$signer_new/"
 
@@ -254,12 +260,12 @@ gate_get "$demo_rel" || gate_fail "Demo datadir fetch failed"
 echo "deploy_web_jautis: pre-swap fetch gate passed for $short"
 
 # Atomic swap, one root at a time; each prior tree is kept for rollback.
-[ -e "$public_root.prev" ] && rm -rf "$public_root.prev"
-[ -e "$signer_root.prev" ] && rm -rf "$signer_root.prev"
-mv "$public_root" "$public_root.prev"
-mv "$public_new" "$public_root"
-mv "$signer_root" "$signer_root.prev"
-mv "$signer_new" "$signer_root"
+[ ! -e "$public_root.prev" ] || as_root rm -rf "$public_root.prev"
+[ ! -e "$signer_root.prev" ] || as_root rm -rf "$signer_root.prev"
+as_root mv "$public_root" "$public_root.prev"
+as_root mv "$public_new" "$public_root"
+as_root mv "$signer_root" "$signer_root.prev"
+as_root mv "$signer_new" "$signer_root"
 
 echo "deploy_web_jautis: $short live at $public_root and $signer_root"
 echo "deploy_web_jautis: rollback: mv $public_root.prev $public_root; mv $signer_root.prev $signer_root"
