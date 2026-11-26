@@ -1737,6 +1737,17 @@ fn render_world_pass(
     render_door_overlays(host, engine, assets, renderer, physical_shift_held);
 }
 
+/// Text for the centred, non-blocking pause indicator. The local pause menu
+/// is the only pause source exposed at this render boundary, so its label
+/// names the local player; `None` while the mission runs.
+///
+/// TODO: name the host's co-op-pause gate here too. The transport's pause
+/// state is not reachable from `RenderContext`, so threading it needs a field
+/// at the render-view construction boundary (outside this file).
+fn paused_indicator_label(pause_menu_open: bool) -> Option<&'static str> {
+    pause_menu_open.then_some("Paused by local player")
+}
+
 /// Shared read-only HUD inputs of one [`render_overlay_pass`], copied out of
 /// its [`RenderContext`] so the per-widget draw helpers below can borrow them
 /// while the pass keeps the mutable renderer.
@@ -1946,6 +1957,23 @@ fn render_overlay_pass(
         // `short_briefing_strings` after Level.res was attached.
         let text_lookup = |id: u32| -> Option<String> { short_briefing_strings.get(&id).cloned() };
         menu.render(renderer, resources, briefings, &text_lookup);
+    }
+
+    // ── GPU phase: centred pause status ──
+    // Text only — it never captures input or opens a modal. Drawn after the
+    // pause menu so the panel cannot paint over the source label.
+    if let (Some(label), Some(fonts)) = (paused_indicator_label(pause_menu.is_some()), hud_fonts) {
+        let font = &fonts.tooltip_font;
+        let x = (i32::from(renderer.screen_width()) - font.text_width(label)) / 2;
+        let y = (i32::from(renderer.screen_height()) - font.height() as i32) / 2;
+        crate::hud_text::render_text_with_shadow_gpu(
+            renderer,
+            font,
+            fonts.shadow_font.as_ref(),
+            label,
+            x,
+            y,
+        );
     }
 
     // ── GPU phase: console overlay ──
@@ -2635,6 +2663,12 @@ pub(super) fn draw_rewind_icon(
 mod tests {
     use super::*;
     use robin_engine::level_data::{RawHikingPath, RawWaypoint, WaypointCommand};
+
+    #[test]
+    fn paused_indicator_names_the_local_source_and_hides_when_running() {
+        assert_eq!(paused_indicator_label(false), None);
+        assert_eq!(paused_indicator_label(true), Some("Paused by local player"));
+    }
 
     fn presentation_host() -> Host {
         use crate::host::ApplicationContext;
