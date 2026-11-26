@@ -21,7 +21,7 @@ commit=$(git -C "$repo" rev-parse "$tag^{commit}")
 # An annotated tag names a tag object; the artifact short is the commit it
 # points at. Resolving the tag itself bakes the tag object's id instead.
 short=$(git -C "$repo" rev-parse --short=12 "$tag^{commit}")
-verifier_remote=/home/admin/build/robin/verify-cloudflare-deployment-$short.mjs
+verifier_remote=/home/admin/build/robin-deploy/verify-cloudflare-deployment-$short.mjs
 scp -q "$PWD/wasm-www/scripts/verify-cloudflare-deployment.mjs" "$build_host:$verifier_remote"
 echo "deploy_web_jautis: $tag -> $short ($commit)"
 
@@ -43,7 +43,7 @@ demo_sha=$(printf '%s\n' "$demo" | jq -r .sha256)
 demo_bytes=$(printf '%s\n' "$demo" | jq -r .byteLength)
 demo_native_sha=$(printf '%s\n' "$demo" | jq -r .nativeContentSha256)
 
-stage_remote=/home/admin/build/robin/jautis-deploy-$short
+stage_remote=/home/admin/build/robin-deploy/jautis-deploy-$short
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$build_host" bash -s <<REMOTE
 set -euo pipefail
 tag=$tag
@@ -51,7 +51,7 @@ short=$short
 verifier_remote=$verifier_remote
 stage=$stage_remote
 repo=/home/admin/git/robin-hood-remake
-wt=/home/admin/build/robin/jautis-src-$short
+wt=/home/admin/build/robin-deploy/jautis-src-$short
 toolchain=/home/admin/.local/share/robin_hood/deployment-toolchain
 bindgen=/home/admin/build/robin/.tools/wasm-bindgen-0.2.129/bin/wasm-bindgen
 
