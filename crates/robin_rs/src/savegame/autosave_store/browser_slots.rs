@@ -28,10 +28,32 @@ pub(crate) fn write_payload<S: QuickSlotStore + ?Sized>(
     filename: &str,
     save: &GameSaveFile,
 ) -> Result<()> {
-    let _ = (store, save_directory, filename, save);
-    // TODO(81): mirror the current browser refusal until the failing test is
-    // red at this seam.
-    anyhow::bail!("browser manual-save persistence is unavailable; use durable autosaves")
+    let value = encode_browser_blob(save)
+        .with_context(|| format!("encoding browser save slot {filename:?}"))?;
+    store
+        .write(&slot_key(save_directory, filename), &value)
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "browser storage limit reached writing save slot {filename:?}: {error}; free browser storage and retry"
+            )
+        })
+}
+
+/// Rotate the published QuickSave blob to ExQuickSave before the new capture is
+/// written. A missing previous payload is not a failure; a storage rejection
+/// is, and keeps its actionable message.
+pub(crate) fn rotate_previous<S: QuickSlotStore + ?Sized>(
+    store: &S,
+    save_directory: &str,
+) -> Result<()> {
+    if let Some(value) = store.read(&slot_key(save_directory, "QuickSave"))? {
+        store
+            .write(&slot_key(save_directory, "ExQuickSave"), &value)
+            .map_err(|error| {
+                anyhow::anyhow!("browser storage limit reached rotating QuickSave: {error}; free browser storage and retry")
+            })?;
+    }
+    Ok(())
 }
 
 /// Decode one immutable save payload from a browser slot.
@@ -84,15 +106,17 @@ impl QuickSlotStore for BrowserSlotStore {
 
     fn write(&self, key: &str, value: &str) -> Result<()> {
         use crate::blob_store::BlobStore as _;
-        self.0.write_text(key, value).map_err(|error| {
-            anyhow::anyhow!("browser storage limit reached writing a save: {error}; free browser storage and retry")
-        })
+        self.0
+            .write_text(key, value)
+            .map_err(|error| anyhow::anyhow!("{error}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{QuickSlotStore, payload_exists, read_payload, slot_key, write_payload};
+    use super::{
+        QuickSlotStore, payload_exists, read_payload, rotate_previous, slot_key, write_payload,
+    };
     use crate::save_file::GameSaveFile;
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -168,7 +192,22 @@ mod tests {
                 serde_json::to_value(&save).unwrap()
             );
         }
-        assert!(slot_key("browser-save", "QuickSave").contains("browser-save"));
+        assert!(
+            slot_key("browser-save", "QuickSave").starts_with(super::super::BROWSER_STORAGE_PREFIX)
+        );
+    }
+
+    #[test]
+    fn browser_quick_save_rotation_preserves_the_previous_payload() {
+        let save = fixture();
+        let store = MemoryStore::default();
+        write_payload(&store, "browser-save", "QuickSave", &save).unwrap();
+        rotate_previous(&store, "browser-save").unwrap();
+        let rotated = read_payload(&store, "browser-save", "ExQuickSave").unwrap();
+        assert_eq!(
+            serde_json::to_value(rotated).unwrap(),
+            serde_json::to_value(save).unwrap()
+        );
     }
 
     #[test]

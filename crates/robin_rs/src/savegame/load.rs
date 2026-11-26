@@ -141,6 +141,24 @@ impl SaveGameManager {
                     )
                 });
         }
+        #[cfg(target_arch = "wasm32")]
+        if matches!(
+            slot.filename.as_str(),
+            save_file::special_slots::QUICK
+                | save_file::special_slots::EX_QUICK
+                | save_file::special_slots::CONTINUE
+        ) {
+            use autosave_store::browser_slots::{BrowserSlotStore, read_payload};
+            let store = BrowserSlotStore::open()?;
+            return read_payload(&store, &self.save_directory, &slot.filename)
+                .map(PreparedGameSave::from)
+                .with_context(|| {
+                    format!(
+                        "failed to decode browser quick slot {index} ({})",
+                        slot.filename
+                    )
+                });
+        }
         let path = self.save_path(index);
         GameSaveFile::read_from(&path)
             .map(PreparedGameSave::from)
@@ -267,6 +285,27 @@ impl SaveGameManager {
                     tracing::error!(
                         filename = slot.filename,
                         "could not check autosave payload existence: {error:#}"
+                    );
+                    false
+                }
+            };
+        }
+        #[cfg(target_arch = "wasm32")]
+        if matches!(
+            slot.filename.as_str(),
+            save_file::special_slots::QUICK
+                | save_file::special_slots::EX_QUICK
+                | save_file::special_slots::CONTINUE
+        ) {
+            use autosave_store::browser_slots::{BrowserSlotStore, payload_exists};
+            return match BrowserSlotStore::open()
+                .and_then(|store| payload_exists(&store, &self.save_directory, &slot.filename))
+            {
+                Ok(exists) => exists,
+                Err(error) => {
+                    tracing::error!(
+                        filename = slot.filename,
+                        "could not check browser quick slot existence: {error:#}"
                     );
                     false
                 }

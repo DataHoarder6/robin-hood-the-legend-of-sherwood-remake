@@ -997,8 +997,21 @@ impl GameSaveFile {
     pub fn read_from(path: &Path) -> Result<Self> {
         let json = fs::read_to_string(path)
             .with_context(|| format!("reading save file {}", path.display()))?;
-        let document: serde_json::Value = serde_json::from_str(&json)
-            .with_context(|| format!("parsing save file {}", path.display()))?;
+        Self::decode_from_str(&json)
+            .with_context(|| format!("decoding save file {}", path.display()))
+    }
+
+    /// Decode the exact same payload representation `read_from` accepts, from
+    /// bytes already in memory (browser localStorage slots).
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn decode_bytes(bytes: &[u8]) -> Result<Self> {
+        let json = std::str::from_utf8(bytes).context("save payload is not UTF-8")?;
+        Self::decode_from_str(json)
+    }
+
+    fn decode_from_str(json: &str) -> Result<Self> {
+        let document: serde_json::Value =
+            serde_json::from_str(json).context("parsing save file")?;
         let header_document = document
             .get("header")
             .cloned()
@@ -1013,23 +1026,22 @@ impl GameSaveFile {
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("save header has no version"))?,
         )
-        .with_context(|| format!("parsing save header version {}", path.display()))?;
+        .context("parsing save header version")?;
         if !is_supported_save_version(version) {
             bail!("unsupported save file version: expected {SAVE_FORMAT_VERSION}, got {version}");
         }
-        let header: SaveHeader = serde_json::from_value(header_document)
-            .with_context(|| format!("parsing save header {}", path.display()))?;
+        let header: SaveHeader =
+            serde_json::from_value(header_document).context("parsing save header")?;
         header.validate()?;
         // Value is appropriate for header preflight, but its object maps are
         // key-sorted. Decode the payload from the original stream so ordered
         // sequence maps retain their persisted execution order.
-        let save: Self = serde_json::from_str(&json)
-            .with_context(|| format!("parsing save payload {}", path.display()))?;
+        let save: Self = serde_json::from_str(json).context("parsing save payload")?;
         save.engine
             .campaign()
             .validate_history_schema()
             .map_err(anyhow::Error::msg)
-            .with_context(|| format!("validating campaign history {}", path.display()))?;
+            .context("validating campaign history")?;
         save.validate_current_schema()?;
         Ok(save)
     }

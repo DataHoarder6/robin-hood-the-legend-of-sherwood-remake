@@ -523,6 +523,12 @@ impl SaveGameManager {
         &mut self,
         capture: SaveCapture<'_>,
     ) -> Result<save_file::SerializedSave> {
+        // The browser has no desktop filesystem; QuickSave and its Continue
+        // mirror use the same localStorage backend as durable autosaves.
+        #[cfg(target_arch = "wasm32")]
+        return self.write_quick_save_browser(capture);
+
+        #[cfg(not(target_arch = "wasm32"))]
         let SaveCapture {
             host,
             mission_id,
@@ -530,43 +536,118 @@ impl SaveGameManager {
             thumbnail,
             ..
         } = capture;
-        Self::require_synchronous_storage()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::require_synchronous_storage()?;
+            self.finish_background()?;
+            self.ensure_no_pending_delete()?;
+            self.reconcile_quick_slots()?;
+            // Validate and serialize before touching either published quick slot.
+            // A failed capture must not rotate a player's recoverable saves.
+            let quick_index = self.find_by_filename(save_file::special_slots::QUICK);
+            let mut current = quick_index
+                .map(|index| self.catalog[index].clone())
+                .unwrap_or_else(|| {
+                    SaveGame::new(
+                        save_file::special_slots::QUICK.to_owned(),
+                        "Quick Save".to_owned(),
+                        mission_id,
+                    )
+                });
+            let mut save = capture_save(capture, current.text.clone())?;
+            host.application_context()
+                .replay_recording()
+                .attach_save_boundary(&mut save)?;
+            let payload = save_file::SerializedSave::new(&save)?;
+            let bytes = payload.encode(&current.text)?;
+            current.update_snapshot_metadata(
+                &save.header,
+                save.engine.campaign(),
+                profiles.context("quick save requires profiles")?,
+            );
+            let mut recovery = QuickSaveRecovery {
+                slots: vec![(current, Sha256::digest(&bytes).into())],
+            };
+            if let Some(index) = quick_index
+                && self.slot_file_exists(index)
+            {
+                let previous_digest = recovery::payload_digest(&self.save_path(index))
+                    .context("preparing previous quick save")?
+                    .context("previous quick save disappeared during preparation")?;
+                let mut previous = self.catalog[index].clone();
+                previous.filename = save_file::special_slots::EX_QUICK.to_owned();
+                previous.special = Some(SpecialSlot::ExQuickSave);
+                previous.text = self
+                    .find_by_filename(save_file::special_slots::EX_QUICK)
+                    .map(|index| self.catalog[index].text.clone())
+                    .unwrap_or_else(|| "Previous Quick Save".to_owned());
+                previous.validate_published_metadata()?;
+                recovery.slots.push((previous, previous_digest));
+            }
+            save_file::atomic_write(&self.quick_recovery_path(), &serde_json::to_vec(&recovery)?)?;
+            // Rotate: QuickSave → ExQuickSave
+            if let Some(quick_idx) = quick_index
+                && self.slot_file_exists(quick_idx)
+            {
+                // Ensure an ExQuickSave slot exists, then copy the file.
+                let ex_idx = self.ensure_special_slot(
+                    save_file::special_slots::EX_QUICK,
+                    "Previous Quick Save",
+                )?;
+                self.copy_files(quick_idx, ex_idx)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                self.copy_display_metadata(quick_idx, ex_idx)?;
+            }
+            let idx = self.ensure_special_slot(save_file::special_slots::QUICK, "Quick Save")?;
+            save_file::atomic_write(&self.save_path(idx), &bytes)?;
+            self.publish_thumbnail(idx, thumbnail);
+            self.sync_slot_metadata_from_save(idx, &save, profiles)?;
+            self.publish_index().map_err(anyhow::Error::msg)?;
+            Ok(payload)
+        }
+    }
+
+    /// Browser QuickSave: publish to localStorage and register in-memory slots.
+    /// The browser store is already opened by `autosave_store`; this reuses its
+    /// compressed, checksummed envelope rather than a new persistence backend.
+    #[cfg(target_arch = "wasm32")]
+    fn write_quick_save_browser(
+        &mut self,
+        capture: SaveCapture<'_>,
+    ) -> Result<save_file::SerializedSave> {
+        use super::autosave_store::browser_slots::{self, BrowserSlotStore};
+
+        let SaveCapture { host, profiles, .. } = capture;
         self.finish_background()?;
         self.ensure_no_pending_delete()?;
-        self.reconcile_quick_slots()?;
-        // Validate and serialize before touching either published quick slot.
-        // A failed capture must not rotate a player's recoverable saves.
-        let quick_index = self.find_by_filename(save_file::special_slots::QUICK);
-        let mut current = quick_index
-            .map(|index| self.catalog[index].clone())
-            .unwrap_or_else(|| {
-                SaveGame::new(
-                    save_file::special_slots::QUICK.to_owned(),
-                    "Quick Save".to_owned(),
-                    mission_id,
-                )
-            });
-        let mut save = capture_save(capture, current.text.clone())?;
+        let previous_index = self.find_by_filename(save_file::special_slots::QUICK);
+        let previous_metadata = previous_index.map(|index| self.catalog[index].clone());
+        let display_text = previous_metadata
+            .as_ref()
+            .map(|slot| slot.text.clone())
+            .unwrap_or_else(|| "Quick Save".to_owned());
+        let mut save = capture_save(capture, display_text)?;
         host.application_context()
             .replay_recording()
             .attach_save_boundary(&mut save)?;
         let payload = save_file::SerializedSave::new(&save)?;
-        let bytes = payload.encode(&current.text)?;
-        current.update_snapshot_metadata(
-            &save.header,
-            save.engine.campaign(),
-            profiles.context("quick save requires profiles")?,
-        );
-        let mut recovery = QuickSaveRecovery {
-            slots: vec![(current, Sha256::digest(&bytes).into())],
-        };
-        if let Some(index) = quick_index
-            && self.slot_file_exists(index)
-        {
-            let previous_digest = recovery::payload_digest(&self.save_path(index))
-                .context("preparing previous quick save")?
-                .context("previous quick save disappeared during preparation")?;
-            let mut previous = self.catalog[index].clone();
+        let profiles = profiles.context("quick save requires profiles")?;
+
+        // Validate and capture before touching either published slot. Rotation
+        // copies the previous blob verbatim so its bytes and provenance survive.
+        let store = BrowserSlotStore::open()?;
+        browser_slots::rotate_previous(&store, &self.save_directory)?;
+        browser_slots::write_payload(
+            &store,
+            &self.save_directory,
+            save_file::special_slots::QUICK,
+            &save,
+        )?;
+
+        let quick = self.ensure_special_slot(save_file::special_slots::QUICK, "Quick Save")?;
+        self.sync_slot_metadata_from_save(quick, &save, Some(profiles))?;
+        if let Some(previous) = previous_metadata {
+            let mut previous = previous;
             previous.filename = save_file::special_slots::EX_QUICK.to_owned();
             previous.special = Some(SpecialSlot::ExQuickSave);
             previous.text = self
@@ -574,25 +655,13 @@ impl SaveGameManager {
                 .map(|index| self.catalog[index].text.clone())
                 .unwrap_or_else(|| "Previous Quick Save".to_owned());
             previous.validate_published_metadata()?;
-            recovery.slots.push((previous, previous_digest));
-        }
-        save_file::atomic_write(&self.quick_recovery_path(), &serde_json::to_vec(&recovery)?)?;
-        // Rotate: QuickSave → ExQuickSave
-        if let Some(quick_idx) = quick_index
-            && self.slot_file_exists(quick_idx)
-        {
-            // Ensure an ExQuickSave slot exists, then copy the file.
-            let ex_idx = self
+            let ex = self
                 .ensure_special_slot(save_file::special_slots::EX_QUICK, "Previous Quick Save")?;
-            self.copy_files(quick_idx, ex_idx)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            self.copy_display_metadata(quick_idx, ex_idx)?;
+            self.catalog.replace(ex, previous, SlotState::Published)?;
         }
-        let idx = self.ensure_special_slot(save_file::special_slots::QUICK, "Quick Save")?;
-        save_file::atomic_write(&self.save_path(idx), &bytes)?;
-        self.publish_thumbnail(idx, thumbnail);
-        self.sync_slot_metadata_from_save(idx, &save, profiles)?;
-        self.publish_index().map_err(anyhow::Error::msg)?;
+
+        // The Continue mirror is published by `mirror_captured_continue` from
+        // this exact payload, so it cannot capture a second replay boundary.
         Ok(payload)
     }
 
