@@ -35,7 +35,7 @@ pub(super) struct CollectedFrameInput {
 
 /// Whole-map hidden-ground reveal uses a free modifier; Shift is already
 /// owned by GoBehindBuildings and PlanQuickActions.
-fn reveal_all_hidden_ground(keys: &[winit::keyboard::KeyCode]) -> bool {
+fn reveal_all_hidden_ground(keys: &std::collections::BTreeSet<winit::keyboard::KeyCode>) -> bool {
     keys.contains(&winit::keyboard::KeyCode::SuperLeft)
         || keys.contains(&winit::keyboard::KeyCode::SuperRight)
 }
@@ -611,10 +611,14 @@ mod tests {
     #[test]
     fn super_modifier_reveals_all_hidden_ground() {
         use winit::keyboard::KeyCode;
-        assert!(reveal_all_hidden_ground(&[KeyCode::SuperLeft]));
-        assert!(reveal_all_hidden_ground(&[KeyCode::SuperRight]));
-        assert!(!reveal_all_hidden_ground(&[KeyCode::ShiftLeft]));
-        assert!(!reveal_all_hidden_ground(&[]));
+        let super_left = [KeyCode::SuperLeft].into_iter().collect();
+        let super_right = [KeyCode::SuperRight].into_iter().collect();
+        let shift = [KeyCode::ShiftLeft].into_iter().collect();
+        let none = std::collections::BTreeSet::new();
+        assert!(reveal_all_hidden_ground(&super_left));
+        assert!(reveal_all_hidden_ground(&super_right));
+        assert!(!reveal_all_hidden_ground(&shift));
+        assert!(!reveal_all_hidden_ground(&none));
     }
 
     use super::*;
