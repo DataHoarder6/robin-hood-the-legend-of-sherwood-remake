@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "campaign/terminal-matrix",
+  "criterion": "terminal",
+  "mission_indices": [1, 2],
+  "actions": ["continue", "restart", "next", "abort"],
+  "seats": [0, 1],
+  "budget_s": 30,
+  "pages": "gone"
+}

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "id": "campaign/hash-chain",
+  "criterion": "hash-chain",
+  "every": 25,
+  "include_transitions": true,
+  "seats": [0, 1]
+}

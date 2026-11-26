@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "campaign/rejoin-N2",
+  "criterion": "rejoin",
+  "min_mission_index": 2,
+  "seat": 1,
+  "guest_saves": 0,
+  "require_same_identity": true,
+  "seats": [0, 1]
+}

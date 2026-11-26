@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "campaign/two-session",
+  "criterion": "persistence",
+  "sessions": 2,
+  "same_slot": true,
+  "same_assignments": true,
+  "guest_saves": 0,
+  "resume_mission_index": 2
+}
