@@ -559,10 +559,15 @@ impl ViewportState {
     }
 
     /// Whether the level covers the whole view at `zoom`. Mirrors the engine's
-    /// `is_zoom_down_possible` rule against the host's own canvas.
+    /// `is_zoom_down_possible` rule against the host's own canvas, using the
+    /// same minimum-zoom coverage rule that caps the rotation step: at an
+    /// angle, the rotated playfield needs more zoom than the unrotated one, and
+    /// a stop below that floor would expose un-baked pixels.
     fn view_fits(&self, zoom: f32) -> bool {
-        self.screen_size.x / zoom <= self.level_size.x
-            && (self.screen_size.y - PANNEL_HEIGHT) / zoom <= self.level_size.y
+        if self.level_size.x <= 0.0 || self.level_size.y <= 0.0 {
+            return false;
+        }
+        minimum_zoom(self.screen_size, self.level_size, self.effective_angle()) <= zoom
     }
 
     fn zoom_to(&mut self, next: f32, anchor: Option<ScreenPoint>) {
@@ -623,9 +628,14 @@ impl ViewportState {
         let previous_centroid = ScreenPoint::new(centroid.x - pan.x, centroid.y - pan.y);
         let anchor = self.screen_to_map_unchecked(previous_centroid);
         let unrotated = self.camera_rotation().screen_inverse(centroid);
+        // A rotated playfield needs a larger zoom to stay inside the baked
+        // level. Apply the same crispness rule as `zoom_by` before placing the
+        // anchor, so a pinch cannot drop below the floor and expose edges.
+        let needed = self.rotation_min_zoom();
+        let floor = MIN_ZOOM.max(needed).min(MAX_ZOOM);
         self.old_view_position = self.view_position;
         self.old_zoom_factor = self.zoom_factor;
-        self.zoom_factor = (self.zoom_factor * scale).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom_factor = (self.zoom_factor * scale).clamp(floor, MAX_ZOOM);
         self.view_position = MapPoint::new(
             anchor.x - unrotated.x / self.zoom_factor,
             anchor.y - unrotated.y / self.zoom_factor,
@@ -1497,6 +1507,81 @@ mod viewport_touch_tests {
                 close(after.y, before.y);
             }
             close(viewport.zoom_factor, 1.0);
+        }
+    }
+
+    /// A rotated playfield needs a larger zoom to stay inside the baked level.
+    /// The stop below that floor must be refused by the same coverage rule
+    /// that caps the rotation step, not accepted and then silently replaced by
+    /// an off-ladder zoom (issue #99).
+    #[test]
+    fn rotated_zoom_out_refuses_a_stop_the_map_cannot_fill() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(800.0, 600.0);
+        assert!(viewport.rotate_by(2));
+        viewport.advance_rotation(0);
+        viewport.advance_rotation(u32::MAX);
+        let crisp_floor = viewport.rotation_min_zoom();
+        assert!(
+            crisp_floor > 1.5 && crisp_floor < 1.75,
+            "test needs a rotated map whose floor sits between two stops: {crisp_floor}"
+        );
+
+        assert!(
+            !viewport.can_zoom_step(ZoomDirection::Out),
+            "the 1.5 stop cannot fill a 45-degree view of this level"
+        );
+        viewport.zoom_step(ZoomDirection::Out, None);
+        assert!(
+            viewport.zoom_factor >= crisp_floor - 0.001,
+            "zoom-out must not fall below the crisp rotation floor: {} < {crisp_floor}",
+            viewport.zoom_factor
+        );
+    }
+
+    /// Pinch zoom must respect the same crispness rule as the rotation cap:
+    /// dropping below the rotated view's minimum zoom exposes un-baked pixels
+    /// at the edges (issue #99).
+    #[test]
+    fn pinch_zoom_out_keeps_the_rotated_view_inside_the_level() {
+        let mut viewport = ViewportState::new(800.0, 680.0);
+        viewport.set_level_size(800.0, 600.0);
+        assert!(viewport.rotate_by(2));
+        viewport.advance_rotation(0);
+        viewport.advance_rotation(u32::MAX);
+        let crisp_floor = viewport.rotation_min_zoom();
+        assert!(
+            crisp_floor > 1.0,
+            "test needs a rotated map that forces extra zoom: {crisp_floor}"
+        );
+
+        viewport.begin_touch_transform(true);
+        viewport.apply_touch_transform(
+            ScreenPoint::new(400.0, 300.0),
+            ScreenVec::new(0.0, 0.0),
+            0.5,
+        );
+        assert!(
+            viewport.zoom_factor >= crisp_floor - 0.001,
+            "pinch dropped zoom to {} below the crisp rotation floor {crisp_floor}",
+            viewport.zoom_factor
+        );
+        for corner in screen_corners_to_map(
+            viewport.view_position,
+            viewport.screen_size,
+            viewport.zoom_factor,
+            viewport.camera_rotation(),
+        ) {
+            assert!(
+                corner.x >= -0.01 && corner.x <= 800.01,
+                "corner x {:.2} outside the baked level",
+                corner.x
+            );
+            assert!(
+                corner.y >= -0.01 && corner.y <= 600.01,
+                "corner y {:.2} outside the baked level",
+                corner.y
+            );
         }
     }
 }
