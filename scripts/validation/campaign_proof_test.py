@@ -246,6 +246,42 @@ class CampaignProofTests(unittest.TestCase):
             proof.evaluate(claim("rejoin"), observed)
         self.assertIn("schema", str(caught.exception))
 
+    def test_cli_binds_an_observation_to_an_exact_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim_path = root / "claim.json"
+            observation_path = root / "observation.json"
+            claim_path.write_text(json.dumps(claim("rejoin")))
+            observed = observation()
+            observed["commit"] = "6a86371f3930"
+            observation_path.write_text(json.dumps(observed))
+            argv = [sys.executable, str(Path(proof.__file__).resolve()),
+                    "--claim", str(claim_path), "--observation", str(observation_path)]
+            bound = subprocess.run(argv + ["--commit", "6a86371f3930"],
+                                   capture_output=True, text=True)
+            wrong = subprocess.run(argv + ["--commit", "000000000000"],
+                                   capture_output=True, text=True)
+            unbound = subprocess.run(argv, capture_output=True, text=True)
+        self.assertEqual(bound.returncode, 0, bound.stderr)
+        self.assertIn('"commit": "6a86371f3930"', bound.stdout)
+        self.assertEqual(wrong.returncode, 3, wrong.stderr)
+        self.assertIn("commit", wrong.stdout + wrong.stderr)
+        self.assertEqual(unbound.returncode, 0, unbound.stderr)
+
+    def test_cli_refuses_to_bind_an_unattributed_observation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim_path = root / "claim.json"
+            observation_path = root / "observation.json"
+            claim_path.write_text(json.dumps(claim("rejoin")))
+            observation_path.write_text(json.dumps(observation()))
+            argv = [sys.executable, str(Path(proof.__file__).resolve()),
+                    "--claim", str(claim_path), "--observation", str(observation_path),
+                    "--commit", "6a86371f3930"]
+            result = subprocess.run(argv, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("commit", result.stdout + result.stderr)
+
     def test_cli_green_and_red_exit_codes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

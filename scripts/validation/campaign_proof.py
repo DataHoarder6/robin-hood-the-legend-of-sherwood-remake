@@ -294,6 +294,8 @@ def main(argv=None):
                         help="JSON evidence from a two-seat run")
     parser.add_argument("--criterion", choices=CRITERIA,
                         help="fail closed if the claim names a different criterion")
+    parser.add_argument("--commit", metavar="SHA",
+                        help="bind the observation to the exact integration ref it was run on")
     arguments = parser.parse_args(argv)
     try:
         claim = load(arguments.claim, "claim")
@@ -302,6 +304,16 @@ def main(argv=None):
         if arguments.criterion and claim.get("criterion") != arguments.criterion:
             raise ProofError(
                 f"claim: names {claim.get('criterion')!r}, not {arguments.criterion!r}")
+        if arguments.commit:
+            recorded = observed.get("commit")
+            if not isinstance(recorded, str) or not recorded:
+                raise ProofError(
+                    "observation: no commit, so it cannot be read as evidence at "
+                    f"{arguments.commit}")
+            if recorded != arguments.commit:
+                raise ProofError(
+                    f"observation: commit {recorded!r} is not the requested "
+                    f"{arguments.commit!r}")
     except ProofError as error:
         print(json.dumps({"verdict": "unreadable", "reason": str(error)}, indent=2))
         return 3
@@ -310,9 +322,12 @@ def main(argv=None):
     except ProofError as error:
         print(json.dumps({"verdict": "failed", "reason": str(error)}, indent=2))
         return 1
-    print(json.dumps({"verdict": "observed", "criterion": claim["criterion"],
-                      "claim": str(arguments.claim), "observation": str(arguments.observation),
-                      "proof": result}, indent=2))
+    answer = {"verdict": "observed", "criterion": claim["criterion"],
+              "claim": str(arguments.claim), "observation": str(arguments.observation),
+              "proof": result}
+    if arguments.commit:
+        answer["commit"] = arguments.commit
+    print(json.dumps(answer, indent=2))
     return 0
 
 
