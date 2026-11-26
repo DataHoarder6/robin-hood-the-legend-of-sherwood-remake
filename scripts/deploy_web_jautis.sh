@@ -136,6 +136,24 @@ cp -a "$public_root/datadirs/." "$public_new/datadirs/"
 manifest=$public_new/wasm/latest.json
 manifest_sha=$(jq -er '.multiplayerContent.demo.sha256' "$manifest")
 demo_url=$(jq -er '.multiplayerContent.demo.url' "$manifest")
+# The retained corpus names the canonical Demo bytes at demo-local/datadir.bin.
+# A new manifest may name the same bytes under a versioned path. Publish an
+# alias at that path only when it hashes to the manifest's exact sha; a changed
+# content closure must be rebuilt, not aliased.
+demo_rel_alias=${demo_url#"$public_origin"/}
+case $demo_rel_alias in
+    datadirs/*) ;;
+    *) demo_rel_alias='' ;;
+esac
+if [ -n "$demo_rel_alias" ] && [ ! -f "$public_new/$demo_rel_alias" ]; then
+    canonical=$public_new/datadirs/demo-local/datadir.bin
+    if [ -f "$canonical" ] &&
+       [ "$(sha256sum "$canonical" | cut -d' ' -f1)" = "$manifest_sha" ]; then
+        mkdir -p "$public_new/$(dirname "$demo_rel_alias")"
+        cp -a "$canonical" "$public_new/$demo_rel_alias"
+        echo "deploy_web_jautis: aliased canonical Demo datadir to $demo_rel_alias"
+    fi
+fi
 case $demo_url in
     "$public_origin"/*) ;;
     *) echo "deploy_web_jautis: Demo URL $demo_url is not on $public_origin" >&2; exit 1 ;;
