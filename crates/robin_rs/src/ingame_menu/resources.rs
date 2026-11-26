@@ -110,6 +110,9 @@ pub const MT_STR_DIFFICULTY_HARD: usize = 36;
 // the retail numeric table. This prevents unrelated port features from silently
 // overwriting each other's fallback strings.
 pub const MT_PORT_BTN_DIFFICULTY: &str = "difficulty.button";
+/// Port-owned label for the new-campaign button. The retail table's
+/// "Start Game" reads as a second Continue/Play entry (issue #100).
+pub const MT_PORT_BTN_NEW_GAME: &str = "main_menu.new_game";
 pub const MT_PORT_STR_DIFFICULTY_LEGENDARY: &str = "difficulty.legendary";
 pub const MT_PORT_STR_DIFFICULTY_CUSTOM: &str = "difficulty.custom";
 pub const MT_PORT_TTL_ADVANCED_DIFFICULTY: &str = "difficulty.advanced.title";
@@ -898,6 +901,7 @@ static DEFAULT_FALLBACKS: &[(usize, &str)] = &[
 fn port_fallback(key: &str) -> Option<&'static str> {
     Some(match key {
         MT_PORT_BTN_DIFFICULTY => "Difficulty",
+        MT_PORT_BTN_NEW_GAME => "New Game",
         MT_PORT_STR_DIFFICULTY_LEGENDARY => "Legendary",
         MT_PORT_STR_DIFFICULTY_CUSTOM => "Custom",
         MT_PORT_TTL_ADVANCED_DIFFICULTY => "Advanced difficulty",

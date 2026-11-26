@@ -27,7 +27,7 @@ use crate::ingame_menu::layout::{
 use crate::ingame_menu::resources::MenuSurface;
 use crate::ingame_menu::resources::{
     MT_BTN_CONTINUE, MT_BTN_LOAD, MT_BTN_OPTIONS, MT_BTN_QUIT_GAME, MT_BTN_SELECT_PLAYER,
-    MT_BTN_SHOW_CREDITS, MT_BTN_SHOW_MOVIES, MT_BTN_START_GAME, MT_MSG_RETURN_TO_WINDOWS,
+    MT_BTN_SHOW_CREDITS, MT_BTN_SHOW_MOVIES, MT_MSG_RETURN_TO_WINDOWS, MT_PORT_BTN_NEW_GAME,
     MT_PORT_STR_DIFFICULTY_CUSTOM, MT_PORT_STR_DIFFICULTY_LEGENDARY, MT_STR_CARNAGE_FACTOR,
     MT_STR_DIFFICULTY_EASY, MT_STR_DIFFICULTY_HARD, MT_STR_DIFFICULTY_LEVEL,
     MT_STR_DIFFICULTY_MEDIUM, MT_STR_MONEY, MT_STR_PLAYING_TIME, MT_STR_PROGRESSION, MT_STR_SCORE,
@@ -329,8 +329,6 @@ pub(crate) async fn show_main_menu(
         }
     }
 
-    let (buttons, frame) = main_menu_layout(&menu_resources);
-
     // ── First-launch default-profile prompt ──────────────────────────
     //
     // When the profile manager was initialised from an empty
@@ -384,6 +382,13 @@ pub(crate) async fn show_main_menu(
         | crate::save_recovery::OpenedSaveStore::ExitRequested => return Ok(MainMenuChoice::Exit),
     };
 
+    // Continue is an action on a concrete resume slot; with no slot it is
+    // absent, not a disabled button. The manager is now authoritative, so the
+    // layout can be built once with the correct entry set. Select Player can
+    // replace the manager later; `sync_continue_presence` rebuilds then.
+    let (buttons, frame) =
+        main_menu_layout(&menu_resources, save_manager.find_resume_target().is_some());
+
     if open_options_initially
         && options::show_main_menu_options(
             application_context,
@@ -398,10 +403,6 @@ pub(crate) async fn show_main_menu(
     }
 
     let mut state = MainMenuState::new(frame, buttons, bg, menu_audio);
-    // Issue #76 (criterion 2): derive Continue availability from the current
-    // manager instead of caching it at construction; it is re-derived after
-    // every dispatched click (the only path that can replace the manager).
-    state.sync_continue_availability(&save_manager);
     let mut io = MainMenuIo {
         window,
         renderer: &mut renderer,
@@ -424,22 +425,30 @@ pub(crate) async fn show_main_menu(
 
 /// Main-menu buttons (bottom-right column, `align_bottom_right` spacing=2)
 /// and the widget frame that arms them.
-fn main_menu_layout(resources: &IngameMenuResources) -> (Vec<(String, ClickAction)>, FrameWnd) {
+fn main_menu_layout(
+    resources: &IngameMenuResources,
+    continue_available: bool,
+) -> (Vec<(String, ClickAction)>, FrameWnd) {
     let (btn_w, btn_h) = resources.button_dimensions();
 
     let mut buttons: Vec<(String, ClickAction)> = vec![(
-        resources.menu_text.get(MT_BTN_START_GAME),
+        resources
+            .menu_text
+            .get_port(MT_PORT_BTN_NEW_GAME)
+            .to_owned(),
         ClickAction::Return(MainMenuChoice::Start),
     )];
     #[cfg(feature = "multiplayer")]
     buttons.push(("Multiplayer".to_string(), ClickAction::Multiplayer));
-    buttons.extend([
-        // Issue #76 (criterion 2): a visible Continue entry resumes the saved
-        // campaign instead of starting a new game.
-        (
+    // Issue #100: Continue names a concrete resume slot. With no slot it is
+    // absent rather than a second, disabled "Play" button next to New Game.
+    if continue_available {
+        buttons.push((
             resources.menu_text.get(MT_BTN_CONTINUE),
             ClickAction::Continue,
-        ),
+        ));
+    }
+    buttons.extend([
         (resources.menu_text.get(MT_BTN_LOAD), ClickAction::LoadGame),
         // TODO: Localize this label with the campaign history UI.
         ("Campaign Manager".to_string(), ClickAction::CampaignManager),
@@ -553,31 +562,28 @@ impl MainMenuState {
         }
     }
 
-    /// Refresh the Continue widget from the authoritative save manager.
+    /// Rebuild the button column when the authoritative save manager changes.
     ///
-    /// Called once at construction and after every dispatched click — the only
-    /// path that can replace `session.save_manager` (Select Player). No
-    /// construction-time boolean is retained, so the presentation cannot drift
-    /// from the manager the click handler re-checks. Reading the manager is
-    /// read-only; only this widget's presentation flag is written.
-    fn sync_continue_availability(&mut self, save_manager: &SaveGameManager) {
-        let Some(continue_id) = self
+    /// Continue is laid out only when the current manager has a resume slot.
+    /// Button ids are indices in the column, so adding or removing that entry
+    /// shifts every later id; a partial widget update cannot express it.
+    fn sync_continue_presence(
+        &mut self,
+        resources: &IngameMenuResources,
+        save_manager: &SaveGameManager,
+    ) {
+        let available = save_manager.find_resume_target().is_some();
+        let present = self
             .buttons
             .iter()
-            .position(|(_, action)| matches!(action, ClickAction::Continue))
-            .map(|index| index as u32)
-        else {
+            .any(|(_, action)| matches!(action, ClickAction::Continue));
+        if present == available {
             return;
-        };
-        let enabled = save_manager.find_resume_target().is_some();
-        if let Some(widget) = self.frame.widget_mut(continue_id) {
-            widget.base_mut().enabled = enabled;
         }
-        if !enabled && self.keyboard_selection == continue_id {
-            // The confirm key activates the focused id without an enabled
-            // check, so focus must leave a newly-disabled Continue.
-            move_keyboard_selection(&self.frame, &mut self.keyboard_selection, 1);
-        }
+        let (buttons, frame) = main_menu_layout(resources, available);
+        self.buttons = buttons;
+        self.frame = frame;
+        self.keyboard_selection = 0;
     }
 
     fn process_events(
@@ -717,9 +723,9 @@ impl MainMenuState {
         }
 
         // Select Player swaps `session.save_manager` in place inside dispatch;
-        // re-derive Continue availability from the current manager before this
+        // re-derive Continue's presence from the current manager before this
         // frame renders, so the button never advertises a stale resume target.
-        self.sync_continue_availability(session.save_manager);
+        self.sync_continue_presence(io.resources, session.save_manager);
 
         if exit_requested && confirm_exit(io, session.application_context).await {
             return Ok(Some(MainMenuChoice::Exit));
@@ -1395,6 +1401,55 @@ mod tests {
             (Some(0), true)
         );
         assert_eq!(state.keyboard_selection, 0);
+    }
+
+    /// Issue #100: the new-campaign button must read as a distinct action,
+    /// not as a second version of Continue/Play.
+    #[test]
+    fn start_button_is_labelled_new_game() {
+        let resources = IngameMenuResources::stub();
+        let (buttons, _) = main_menu_layout(&resources, false);
+        assert!(
+            buttons.iter().any(|(label, _)| label == "New Game"),
+            "expected an unambiguous New Game entry, got {buttons:?}"
+        );
+        assert!(
+            !buttons.iter().any(|(label, _)| label == "Start Game"),
+            "the old ambiguous label must be gone, got {buttons:?}"
+        );
+    }
+
+    /// Issue #100: Continue is only meaningful when there is a resume slot.
+    #[test]
+    fn continue_entry_is_absent_without_a_save() {
+        let resources = IngameMenuResources::stub();
+        let (buttons, _) = main_menu_layout(&resources, false);
+        assert!(
+            !buttons.iter().any(|(label, _)| label == "Continue"),
+            "Continue must not be advertised without a resume slot, got {buttons:?}"
+        );
+    }
+
+    #[test]
+    fn continue_entry_is_present_and_distinct_when_a_save_exists() {
+        let resources = IngameMenuResources::stub();
+        let (buttons, _) = main_menu_layout(&resources, true);
+        assert_eq!(
+            buttons
+                .iter()
+                .filter(|(label, _)| *label == "Continue")
+                .count(),
+            1,
+            "Continue must be present exactly once with a resume slot: {buttons:?}"
+        );
+        assert_eq!(
+            buttons
+                .iter()
+                .filter(|(label, _)| *label == "New Game")
+                .count(),
+            1,
+            "New Game and Continue must stay distinct: {buttons:?}"
+        );
     }
 
     #[test]
