@@ -102,11 +102,11 @@ impl TradingModalState {
                     });
                 TradingRow {
                     prod_type: definition.prod_type,
-                    name: resources
-                        .menu_text
-                        .get(robin_engine::sherwood_stat::bonus_text_id(
-                            definition.prod_type,
-                        )),
+                    name: robin_engine::sherwood_stat::bonus_item_text(
+                        &resources.menu_text,
+                        definition.prod_type,
+                        sector.amount,
+                    ),
                     stock: sector.amount,
                     unit_price: definition.unit_price,
                 }

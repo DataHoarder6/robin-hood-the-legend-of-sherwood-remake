@@ -237,7 +237,7 @@ fn has_printf_conversion(template: &str) -> bool {
 /// The loaded `Level.res` bonus strings are printf templates that carry the
 /// count (`"Arrows: %i"`); the host's fallback uses a bare noun (`"arrows"`).
 /// Fill in the template when it has a conversion, otherwise prefix the noun.
-fn bonus_item_text(menu_text: &dyn MenuTextLookup, prod_type: Type, count: u16) -> String {
+pub fn bonus_item_text(menu_text: &dyn MenuTextLookup, prod_type: Type, count: u16) -> String {
     let template = menu_text.get(bonus_text_id(prod_type));
     if has_printf_conversion(&template) {
         substitute_printf(&template, &[&count.to_string()])

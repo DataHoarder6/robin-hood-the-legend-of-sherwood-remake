@@ -23,8 +23,14 @@ pub fn hit_test(screen_width: u16, x: i32, y: i32) -> bool {
     (left..=right).contains(&x) && (top..=bottom).contains(&y)
 }
 
+/// In the browser build the idle box reads as a permanent UI artifact; show
+/// it only while a plan is latched. Native touch builds keep the idle affordance.
+pub fn should_render(active: bool, is_browser: bool) -> bool {
+    active || !is_browser
+}
+
 pub fn render(renderer: &mut Renderer, fonts: Option<&crate::hud_text::HudFonts>, active: bool) {
-    if !platform_has_touch_planning_hud() {
+    if !platform_has_touch_planning_hud() || !should_render(active, cfg!(target_arch = "wasm32")) {
         return;
     }
     let (left, top, right, bottom) = rect(renderer.screen_width());
@@ -55,6 +61,13 @@ pub fn render(renderer: &mut Renderer, fonts: Option<&crate::hud_text::HudFonts>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_hides_the_idle_plan_actions_box() {
+        assert!(!should_render(false, true));
+        assert!(should_render(true, true));
+        assert!(should_render(false, false));
+    }
 
     #[test]
     fn hit_box_tracks_right_edge_and_includes_boundary() {
