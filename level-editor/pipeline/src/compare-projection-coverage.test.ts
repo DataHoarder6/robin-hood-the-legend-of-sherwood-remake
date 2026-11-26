@@ -12,11 +12,14 @@ function fixture() {
 test("projection coverage ignores subdivision while preserving height and receiving rules", () => {
   const before = fixture(),
     after = structuredClone(before),
-    quad = after.sight_obstacles.shift()!;
-  assert.equal(quad.points.length, 4);
+    shape = after.sight_obstacles.shift()!;
+  assert.ok(shape.points.length >= 4);
+  // Fan-triangulate the authored polygon: subdivision must not change coverage.
   after.sight_obstacles.push(
-    { ...quad, points: [quad.points[0]!, quad.points[1]!, quad.points[2]!] },
-    { ...quad, points: [quad.points[0]!, quad.points[2]!, quad.points[3]!] },
+    ...shape.points.slice(1, -1).map((_, index) => ({
+      ...shape,
+      points: [shape.points[0]!, shape.points[index + 1]!, shape.points[index + 2]!],
+    })),
   );
   assert.equal(compareProjectionCoverage(before, after).equal, true);
   after.sight_obstacles.pop();
