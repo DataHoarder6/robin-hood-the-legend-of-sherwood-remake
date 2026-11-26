@@ -348,21 +348,27 @@ impl YesNoModalState {
     }
 
     fn apply_widget_events(&mut self, events: &[UiEvent]) {
+        let mut accepted = false;
+        let mut declined = false;
         for event in events {
             if event.msg_type != UiMsg::WidgetActivated {
                 continue;
             }
             match event.origin_widget_id {
-                ID_YES => {
-                    self.note_pressed(ID_YES);
-                    self.resolve(YesNoChoice::Yes);
-                }
-                ID_NO => {
-                    self.note_pressed(ID_NO);
-                    self.resolve(YesNoChoice::No);
-                }
+                ID_YES => accepted = true,
+                ID_NO => declined = true,
                 id => panic!("yes/no modal received activation from unknown widget {id}"),
             }
+        }
+        // A stale keyboard focus can emit the blue seal's activation in the
+        // same batch as a red click. The decline wins: the two seals must be
+        // mutually exclusive, and treating red as accept is the worse error.
+        if declined {
+            self.note_pressed(ID_NO);
+            self.resolve(YesNoChoice::No);
+        } else if accepted {
+            self.note_pressed(ID_YES);
+            self.resolve(YesNoChoice::Yes);
         }
     }
 
@@ -860,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn resolution_is_reentrant_and_first_choice_wins() {
+    fn red_decline_never_repeats_the_blue_accept_in_one_event_batch() {
         let mut state = modal_state();
         state.apply_widget_events(&[
             UiEvent {
@@ -874,6 +880,28 @@ mod tests {
                 data: None,
             },
         ]);
+        assert_eq!(
+            state.choice,
+            Some(YesNoChoice::No),
+            "a simultaneous red activation must decline, not repeat accept"
+        );
+    }
+
+    #[test]
+    fn resolution_is_reentrant_and_first_choice_wins() {
+        let mut state = modal_state();
+        let accept = UiEvent {
+            msg_type: UiMsg::WidgetActivated,
+            origin_widget_id: ID_YES,
+            data: None,
+        };
+        let decline = UiEvent {
+            msg_type: UiMsg::WidgetActivated,
+            origin_widget_id: ID_NO,
+            data: None,
+        };
+        state.apply_widget_events(&[accept]);
+        state.apply_widget_events(&[decline]);
         state.resolve(YesNoChoice::No);
         assert_eq!(state.choice, Some(YesNoChoice::Yes));
     }
