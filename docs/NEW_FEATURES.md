@@ -1578,6 +1578,13 @@ A list of which additional features we have added, which ones we might still wan
   unchanged; when a cutscene releases the view, the camera returns to the zoom
   the player chose.
 
+- **Adaptive pressure (opt-in).** With `extra_guards` enabled, sustained noisy
+  Yellow/Red play wakes staged reinforcement bodies; stealthy Green play leaves
+  them asleep. Default and replay hashes are untouched.
+- **Hidden-ground outlines.** Ground hidden behind buildings gets dotted
+  outlines; hold Super (Left or Right) to reveal every hidden zone in the map.
+  This is presentation-only.
+
 - **Compass heading on `<`/`>`.** Shift+Comma and Shift+Period turn the world
   heading in 15° steps through a full circle, wrapping at 360°. This is a
   second, host-only presentation control: it composes with the existing ±45°
