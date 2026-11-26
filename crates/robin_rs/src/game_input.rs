@@ -8,6 +8,7 @@
 //! for deterministic replay and rollback networking.
 
 use crate::host::Host;
+use crate::input_translator::TouchModifierLatch;
 use crate::mouse_way::{GestureCoachFeedback, MouseWayPattern};
 use crate::shadow_polygon::ASPECT_RATIO;
 use robin_engine::campaign as engine_campaign;
@@ -46,6 +47,19 @@ impl ClickModifiers {
     pub const fn hover(planning: bool) -> Self {
         Self {
             shift: false,
+            planning,
+            control: false,
+            double: false,
+        }
+    }
+
+    /// Convert the sticky touch modifier latch into the same modifier struct
+    /// the physical mouse path already passes to click resolution. Only Shift
+    /// is latched on touch; control and double-click stay with their own
+    /// gesture recognisers.
+    pub fn from_touch_latch(latch: &TouchModifierLatch, planning: bool) -> Self {
+        Self {
+            shift: latch.add_to_selection,
             planning,
             control: false,
             double: false,

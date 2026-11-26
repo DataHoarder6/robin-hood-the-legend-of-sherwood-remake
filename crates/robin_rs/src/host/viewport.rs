@@ -805,6 +805,7 @@ impl Default for ViewportState {
 #[cfg(test)]
 mod viewport_touch_tests {
     use super::*;
+    use crate::input_translator::{touch_target_padding, touch_target_rect};
 
     fn close(actual: f32, expected: f32) {
         assert!(
@@ -1583,5 +1584,38 @@ mod viewport_touch_tests {
                 corner.y
             );
         }
+    }
+
+    #[test]
+    fn small_hud_fallback_targets_are_enlarged_to_finger_size() {
+        // The old zoom fallback was 24x24 and the plan button 118x34 logical
+        // pixels. Both gates must use the same helper, so one contract covers
+        // the rectangle they test against.
+        const MIN_FINGER_TARGET: f32 = 48.0;
+        let zoom = touch_target_rect(100.0, 100.0, 24.0, 24.0);
+        assert_eq!(zoom.2 - zoom.0, MIN_FINGER_TARGET);
+        assert_eq!(zoom.3 - zoom.1, MIN_FINGER_TARGET);
+
+        let plan = touch_target_rect(500.0, 700.0, 118.0, 34.0);
+        assert_eq!(plan.2 - plan.0, 118.0, "wide targets keep their width");
+        assert_eq!(plan.3 - plan.1, MIN_FINGER_TARGET);
+    }
+
+    #[test]
+    fn touch_target_rect_keeps_the_widget_center() {
+        let rect = touch_target_rect(200.0, 150.0, 24.0, 24.0);
+        assert_eq!((rect.0 + rect.2) / 2.0, 200.0);
+        assert_eq!((rect.1 + rect.3) / 2.0, 150.0);
+        assert!(touch_target_padding() > 0.0);
+    }
+
+    #[test]
+    fn touch_point_on_enlarged_edge_hits_the_target() {
+        let rect = touch_target_rect(100.0, 100.0, 24.0, 24.0);
+        // 11 px from the centre is outside the 24x24 sprite but inside the
+        // finger-sized hit rect; boundary points must count as hits.
+        let point = ScreenPoint::new(111.0, 100.0);
+        assert!(point.x >= rect.0 && point.x <= rect.2);
+        assert!(point.y >= rect.1 && point.y <= rect.3);
     }
 }

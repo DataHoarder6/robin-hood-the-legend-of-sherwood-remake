@@ -2121,3 +2121,36 @@ fn contest_disguise_can_shoot_archery_targets_but_refuses_npcs() {
         }]
     );
 }
+
+// --- Touch modifier bridge (issue #58) ---------------------------------
+
+#[test]
+fn touch_add_to_selection_latch_reaches_click_modifiers() {
+    use crate::input_translator::TouchModifierLatch;
+
+    let latched = TouchModifierLatch {
+        add_to_selection: true,
+    };
+    let modifiers = ClickModifiers::from_touch_latch(&latched, true);
+    assert!(
+        modifiers.shift,
+        "touch latch must feed the shift add-to-selection path"
+    );
+    assert!(modifiers.planning);
+    assert!(!modifiers.control);
+    assert!(!modifiers.double);
+}
+
+#[test]
+fn touch_latch_off_leaves_click_modifiers_plain() {
+    use crate::input_translator::TouchModifierLatch;
+
+    let modifiers = ClickModifiers::from_touch_latch(&TouchModifierLatch::default(), false);
+    assert!(!modifiers.shift);
+    assert!(!modifiers.planning);
+    assert_eq!(
+        format!("{modifiers:?}"),
+        format!("{NO_MODS:?}"),
+        "an unlatched touch click must equal the plain click fixture"
+    );
+}

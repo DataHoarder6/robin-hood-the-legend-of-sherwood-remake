@@ -681,6 +681,244 @@ impl InputTranslator {
 }
 
 // ---------------------------------------------------------------------------
+// Touch input mapping
+// ---------------------------------------------------------------------------
+//
+// The platform recogniser (winit -> touch_input.rs) arbitrates contacts, then
+// hands a *classified* gesture to this layer.  This module deliberately has no
+// engine or winit dependency: it is the typed vocabulary and mapping contract
+// that the touch path consumes, and it is fully testable without a device.
+// Adding a variant here does not touch replay or state-hash serialization —
+// these actions are produced per poll and dispatched immediately.
+
+/// A finger held this long without a slop breach is a secondary (right-button)
+/// press: cancel/stop, right-drag deselect, macro commit, plan cancel.
+pub const TOUCH_LONG_PRESS_MS: u32 = 450;
+/// A second contact inside this window is a two-finger secondary tap.
+pub const TOUCH_TWO_FINGER_TAP_MS: u32 = 250;
+/// Travel beyond this distance cancels a pending tap (the recogniser's slop).
+pub const TOUCH_GESTURE_SLOP_PX: f64 = 12.0;
+pub const TOUCH_PRIMARY_BUTTON: u8 = 1;
+pub const TOUCH_SECONDARY_BUTTON: u8 = 3;
+pub const TOUCH_QUICK_GROUP_MIN: u8 = 1;
+pub const TOUCH_QUICK_GROUP_MAX: u8 = 9;
+
+/// Expand a widget's base rect about its centre to at least 48x48 logical
+/// pixels. The old zoom fallback was 24x24 and the plan button 118x34; both are
+/// thumb-hostile at the scaled logical canvas. Both touch hit-test gates must
+/// call this one helper rather than duplicating a padded rectangle. Returns
+/// `(min_x, min_y, max_x, max_y)`, boundary-inclusive, matching the dead-zone
+/// convention used by translation.
+pub fn touch_target_padding() -> f32 {
+    const MIN_FINGER_TARGET: f32 = 48.0;
+    MIN_FINGER_TARGET / 2.0
+}
+
+pub fn touch_target_rect(
+    center_x: f32,
+    center_y: f32,
+    base_width: f32,
+    base_height: f32,
+) -> (f32, f32, f32, f32) {
+    let half_w = (base_width / 2.0).max(touch_target_padding());
+    let half_h = (base_height / 2.0).max(touch_target_padding());
+    (
+        center_x - half_w,
+        center_y - half_h,
+        center_x + half_w,
+        center_y + half_h,
+    )
+}
+
+/// Classification of a touch contact from caller-supplied monotonic timing and
+/// motion.  Kept pure so the thresholds are provable without a device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchClassification {
+    /// Still inside the long-press window: releasing now is a primary tap.
+    PrimaryTap,
+    /// Long-press threshold crossed: releasing is a secondary click.
+    SecondaryHold,
+    /// A second contact arrived inside the two-finger window.
+    TwoFingerTap,
+    /// Slop breached, or the second contact came too late: no click.
+    Cancelled,
+}
+
+/// Classify a contact by how long it was held, how far it travelled and when a
+/// second contact arrived. A slop breach outranks every other classification
+/// (it is the recogniser's cancel condition); a timely second contact is a
+/// two-finger secondary tap; otherwise the long-press threshold decides.
+pub fn classify_touch(
+    held_ms: u32,
+    travel_px: f64,
+    second_contact_ms: Option<u32>,
+) -> TouchClassification {
+    if travel_px > TOUCH_GESTURE_SLOP_PX {
+        return TouchClassification::Cancelled;
+    }
+    if let Some(ms) = second_contact_ms {
+        return if ms <= TOUCH_TWO_FINGER_TAP_MS {
+            TouchClassification::TwoFingerTap
+        } else {
+            TouchClassification::Cancelled
+        };
+    }
+    if held_ms >= TOUCH_LONG_PRESS_MS {
+        TouchClassification::SecondaryHold
+    } else {
+        TouchClassification::PrimaryTap
+    }
+}
+
+/// A gesture after the recogniser has arbitrated the contacts. `PressDown` and
+/// `PressUp` are presentation-only: they must never carry a command.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TouchGesture {
+    PrimaryTap {
+        x: f32,
+        y: f32,
+    },
+    /// Long-press release — secondary click.
+    LongPress {
+        x: f32,
+        y: f32,
+    },
+    /// Two-finger tap — secondary click.
+    TwoFingerTap {
+        x: f32,
+        y: f32,
+    },
+    /// Long-press then movement — secondary drag has started; the recogniser
+    /// emits the matching move/up events separately.
+    LongDragStart {
+        x: f32,
+        y: f32,
+    },
+    /// HUD quick-group button: store the current selection in a slot (1-9).
+    AssignQuickGroup {
+        slot: u8,
+    },
+    /// HUD quick-group button: select the stored slot (1-9).
+    RecallQuickGroup {
+        slot: u8,
+    },
+    /// Finger down, for press feedback only.
+    PressDown {
+        contact: u64,
+        x: f32,
+        y: f32,
+    },
+    /// Finger up, for press feedback only.
+    PressUp {
+        contact: u64,
+        x: f32,
+        y: f32,
+    },
+}
+
+/// Sticky HUD modifier state consumed alongside a touch click. This is the
+/// touch counterpart of physical Shift; it is *not* a persisted input mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TouchModifierLatch {
+    pub add_to_selection: bool,
+}
+
+/// One typed output of touch mapping. Pointer actions carry an explicit button
+/// number so the existing right-button handlers need no new code path.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TouchMappedAction {
+    PointerDown {
+        button: u8,
+        x: f32,
+        y: f32,
+    },
+    PointerUp {
+        button: u8,
+        x: f32,
+        y: f32,
+    },
+    /// Shift-equivalent latch edge, emitted around a click so click resolution
+    /// sees add-to-selection while it runs.
+    ShiftLatch(bool),
+    QuickGroup {
+        slot: u8,
+        assign: bool,
+    },
+    /// Presentation-only pressed state for a HUD widget; no command.
+    PressFeedback {
+        contact: u64,
+        x: f32,
+        y: f32,
+        pressed: bool,
+    },
+}
+
+/// Map one classified touch gesture into typed actions for the existing input
+/// handlers. A latched add-to-selection wraps a primary click in Shift edges;
+/// secondary gestures deliberately ignore the latch (cancel is unconditional).
+/// Out-of-range quick-group slots produce no action rather than a synthetic
+/// command.
+pub fn map_touch_gesture(
+    gesture: TouchGesture,
+    latch: &TouchModifierLatch,
+) -> Vec<TouchMappedAction> {
+    let pointer_click = |button: u8, x: f32, y: f32| {
+        vec![
+            TouchMappedAction::PointerDown { button, x, y },
+            TouchMappedAction::PointerUp { button, x, y },
+        ]
+    };
+    match gesture {
+        TouchGesture::PrimaryTap { x, y } => {
+            let mut actions = Vec::with_capacity(4);
+            if latch.add_to_selection {
+                actions.push(TouchMappedAction::ShiftLatch(true));
+            }
+            actions.extend(pointer_click(TOUCH_PRIMARY_BUTTON, x, y));
+            if latch.add_to_selection {
+                actions.push(TouchMappedAction::ShiftLatch(false));
+            }
+            actions
+        }
+        TouchGesture::LongPress { x, y } | TouchGesture::TwoFingerTap { x, y } => {
+            pointer_click(TOUCH_SECONDARY_BUTTON, x, y)
+        }
+        TouchGesture::LongDragStart { x, y } => {
+            vec![TouchMappedAction::PointerDown {
+                button: TOUCH_SECONDARY_BUTTON,
+                x,
+                y,
+            }]
+        }
+        TouchGesture::AssignQuickGroup { slot } | TouchGesture::RecallQuickGroup { slot }
+            if (TOUCH_QUICK_GROUP_MIN..=TOUCH_QUICK_GROUP_MAX).contains(&slot) =>
+        {
+            vec![TouchMappedAction::QuickGroup {
+                slot,
+                assign: matches!(gesture, TouchGesture::AssignQuickGroup { .. }),
+            }]
+        }
+        TouchGesture::AssignQuickGroup { .. } | TouchGesture::RecallQuickGroup { .. } => Vec::new(),
+        TouchGesture::PressDown { contact, x, y } => {
+            vec![TouchMappedAction::PressFeedback {
+                contact,
+                x,
+                y,
+                pressed: true,
+            }]
+        }
+        TouchGesture::PressUp { contact, x, y } => {
+            vec![TouchMappedAction::PressFeedback {
+                contact,
+                x,
+                y,
+                pressed: false,
+            }]
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1176,5 +1414,200 @@ mod tests {
         assert_eq!(back.screen_width, 1024.0);
         assert_eq!(back.get_binding(GameKey::ZoomIn), Some(KeyCode::NumpadAdd));
         assert_eq!(back.dead_zones.len(), 1);
+    }
+
+    // --- Touch mapping fixtures (issues #57/#58) -----------------------
+
+    #[rstest::rstest]
+    #[case::short_tap(100, 0.0, None, TouchClassification::PrimaryTap)]
+    #[case::long_press(TOUCH_LONG_PRESS_MS, 0.0, None, TouchClassification::SecondaryHold)]
+    #[case::longer_press(900, 0.0, None, TouchClassification::SecondaryHold)]
+    #[case::slop_breach(100, TOUCH_GESTURE_SLOP_PX + 0.5, None, TouchClassification::Cancelled)]
+    #[case::two_finger_tap(
+        100,
+        0.0,
+        Some(TOUCH_TWO_FINGER_TAP_MS),
+        TouchClassification::TwoFingerTap
+    )]
+    #[case::late_second_contact(100, 0.0, Some(TOUCH_TWO_FINGER_TAP_MS + 1), TouchClassification::Cancelled)]
+    fn touch_timing_classification(
+        #[case] held_ms: u32,
+        #[case] travel_px: f64,
+        #[case] second_contact_ms: Option<u32>,
+        #[case] expected: TouchClassification,
+    ) {
+        assert_eq!(
+            classify_touch(held_ms, travel_px, second_contact_ms),
+            expected
+        );
+    }
+
+    #[test]
+    fn long_press_maps_to_secondary_button_down_and_up() {
+        let actions = map_touch_gesture(
+            TouchGesture::LongPress { x: 12.0, y: 34.0 },
+            &TouchModifierLatch::default(),
+        );
+        assert_eq!(
+            actions,
+            vec![
+                TouchMappedAction::PointerDown {
+                    button: TOUCH_SECONDARY_BUTTON,
+                    x: 12.0,
+                    y: 34.0,
+                },
+                TouchMappedAction::PointerUp {
+                    button: TOUCH_SECONDARY_BUTTON,
+                    x: 12.0,
+                    y: 34.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn two_finger_tap_maps_to_secondary_button() {
+        let actions = map_touch_gesture(
+            TouchGesture::TwoFingerTap { x: 5.0, y: 6.0 },
+            &TouchModifierLatch::default(),
+        );
+        assert!(actions.iter().all(|a| match a {
+            TouchMappedAction::PointerDown { button, .. }
+            | TouchMappedAction::PointerUp { button, .. } => *button == TOUCH_SECONDARY_BUTTON,
+            _ => false,
+        }));
+        assert_eq!(actions.len(), 2);
+    }
+
+    #[test]
+    fn long_drag_starts_a_secondary_drag() {
+        let actions = map_touch_gesture(
+            TouchGesture::LongDragStart { x: 7.0, y: 8.0 },
+            &TouchModifierLatch::default(),
+        );
+        assert_eq!(
+            actions,
+            vec![TouchMappedAction::PointerDown {
+                button: TOUCH_SECONDARY_BUTTON,
+                x: 7.0,
+                y: 8.0,
+            }]
+        );
+    }
+
+    #[test]
+    fn plain_tap_stays_on_the_primary_button() {
+        let actions = map_touch_gesture(
+            TouchGesture::PrimaryTap { x: 1.0, y: 2.0 },
+            &TouchModifierLatch::default(),
+        );
+        assert_eq!(
+            actions,
+            vec![
+                TouchMappedAction::PointerDown {
+                    button: TOUCH_PRIMARY_BUTTON,
+                    x: 1.0,
+                    y: 2.0,
+                },
+                TouchMappedAction::PointerUp {
+                    button: TOUCH_PRIMARY_BUTTON,
+                    x: 1.0,
+                    y: 2.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn latched_add_to_selection_wraps_the_primary_click() {
+        let latch = TouchModifierLatch {
+            add_to_selection: true,
+        };
+        let actions = map_touch_gesture(TouchGesture::PrimaryTap { x: 3.0, y: 4.0 }, &latch);
+        assert_eq!(
+            actions,
+            vec![
+                TouchMappedAction::ShiftLatch(true),
+                TouchMappedAction::PointerDown {
+                    button: TOUCH_PRIMARY_BUTTON,
+                    x: 3.0,
+                    y: 4.0,
+                },
+                TouchMappedAction::PointerUp {
+                    button: TOUCH_PRIMARY_BUTTON,
+                    x: 3.0,
+                    y: 4.0,
+                },
+                TouchMappedAction::ShiftLatch(false),
+            ]
+        );
+    }
+
+    #[test]
+    fn quick_group_gestures_emit_typed_assign_and_recall_commands() {
+        let latch = TouchModifierLatch::default();
+        assert_eq!(
+            map_touch_gesture(TouchGesture::AssignQuickGroup { slot: 3 }, &latch),
+            vec![TouchMappedAction::QuickGroup {
+                slot: 3,
+                assign: true,
+            }]
+        );
+        assert_eq!(
+            map_touch_gesture(TouchGesture::RecallQuickGroup { slot: 7 }, &latch),
+            vec![TouchMappedAction::QuickGroup {
+                slot: 7,
+                assign: false,
+            }]
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::zero(0)]
+    #[case::too_high(TOUCH_QUICK_GROUP_MAX + 1)]
+    fn quick_group_slot_out_of_range_is_ignored(#[case] slot: u8) {
+        let actions =
+            map_touch_gesture(TouchGesture::AssignQuickGroup { slot }, &Default::default());
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn press_feedback_is_presentation_only() {
+        let down = map_touch_gesture(
+            TouchGesture::PressDown {
+                contact: 9,
+                x: 20.0,
+                y: 21.0,
+            },
+            &TouchModifierLatch {
+                add_to_selection: true,
+            },
+        );
+        assert_eq!(
+            down,
+            vec![TouchMappedAction::PressFeedback {
+                contact: 9,
+                x: 20.0,
+                y: 21.0,
+                pressed: true,
+            }]
+        );
+        let up = map_touch_gesture(
+            TouchGesture::PressUp {
+                contact: 9,
+                x: 20.0,
+                y: 21.0,
+            },
+            &TouchModifierLatch::default(),
+        );
+        assert_eq!(
+            up,
+            vec![TouchMappedAction::PressFeedback {
+                contact: 9,
+                x: 20.0,
+                y: 21.0,
+                pressed: false,
+            }]
+        );
     }
 }
