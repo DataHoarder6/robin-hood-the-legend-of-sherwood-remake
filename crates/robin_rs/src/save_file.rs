@@ -997,8 +997,9 @@ impl GameSaveFile {
     pub fn read_from(path: &Path) -> Result<Self> {
         let json = fs::read_to_string(path)
             .with_context(|| format!("reading save file {}", path.display()))?;
+        // Decode errors are already named by the contract; wrapping them with
+        // the path would change the exact header-rejection text callers match.
         Self::decode_from_str(&json)
-            .with_context(|| format!("decoding save file {}", path.display()))
     }
 
     /// Decode the exact same payload representation `read_from` accepts, from
