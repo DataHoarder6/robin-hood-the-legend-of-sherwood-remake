@@ -88,14 +88,6 @@ fn confirmation_pose(progress: f32, direction: TransitionDirection) -> Confirmat
     }
 }
 
-fn fly_in_x(progress: f32) -> i32 {
-    confirmation_pose(progress, TransitionDirection::Open).x
-}
-
-fn fly_out_x(progress: f32) -> i32 {
-    confirmation_pose(progress, TransitionDirection::Close).x
-}
-
 /// Popup small-background dimensions.
 const POPUP_W: i32 = 400;
 const POPUP_H: i32 = 200;
@@ -301,9 +293,10 @@ mod tests {
     #[test]
     fn popup_flies_in_from_the_right_edge_and_eases_out() {
         let final_x = (MENU_W - POPUP_W) / 2;
-        assert_eq!(fly_in_x(0.0), MENU_W);
-        assert_eq!(fly_in_x(1.0), final_x);
-        let quarter = fly_in_x(0.25) as f32;
+        let in_x = |p| confirmation_pose(p, TransitionDirection::Open).x;
+        assert_eq!(in_x(0.0), MENU_W);
+        assert_eq!(in_x(1.0), final_x);
+        let quarter = in_x(0.25) as f32;
         let linear_quarter = MENU_W as f32 + (final_x - MENU_W) as f32 * 0.25;
         assert!(
             quarter < linear_quarter,
@@ -314,9 +307,10 @@ mod tests {
     #[test]
     fn popup_flies_back_to_the_right_edge_on_dismiss() {
         let final_x = (MENU_W - POPUP_W) / 2;
-        assert_eq!(fly_out_x(0.0), final_x);
-        assert_eq!(fly_out_x(1.0), MENU_W);
-        assert!(fly_out_x(0.5) < (final_x + MENU_W) / 2);
+        let out_x = |p| confirmation_pose(p, TransitionDirection::Close).x;
+        assert_eq!(out_x(0.0), final_x);
+        assert_eq!(out_x(1.0), MENU_W);
+        assert!(out_x(0.5) < (final_x + MENU_W) / 2);
     }
 
     #[test]
