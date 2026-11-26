@@ -606,6 +606,33 @@ mod tests {
         assert!(ROW_Y + ROW_H * TRADE_ITEMS.len() as i32 <= STATUS_Y);
     }
 
+    #[test]
+    fn loaded_count_templates_are_expanded_in_trading_rows() {
+        // The loaded Level.res strings are printf templates ("Arrows: %i").
+        // Passing them straight through leaks the token onto the trading row.
+        let mut resources = IngameMenuResources::stub();
+        let mut strings =
+            vec![String::new(); crate::ingame_menu::resources::MT_STR_DB_BONUS_ARROW + 1];
+        strings[crate::ingame_menu::resources::MT_STR_DB_BONUS_ARROW] = "Arrows: %i".to_string();
+        resources.menu_text.replace_strings_for_test(strings);
+        let sectors: Vec<_> = TRADE_ITEMS
+            .iter()
+            .map(|item| {
+                let mut sector = SectorProduction::new(item.prod_type);
+                sector.amount = 7;
+                sector
+            })
+            .collect();
+
+        let state = TradingModalState::build(&resources, &sectors, 100, ModalInputState::new());
+        assert_eq!(state.rows[0].name, "Arrows: 7");
+        assert!(
+            state.rows.iter().all(|row| !row.name.contains('%')),
+            "a trading row leaked a printf placeholder: {:?}",
+            state.rows.iter().map(|row| &row.name).collect::<Vec<_>>()
+        );
+    }
+
     fn trading_state(stock: u16) -> (IngameMenuResources, TradingModalState) {
         let resources = IngameMenuResources::stub();
         let sectors: Vec<_> = TRADE_ITEMS
