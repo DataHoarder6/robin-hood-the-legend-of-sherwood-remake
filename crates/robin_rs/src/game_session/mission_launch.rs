@@ -428,6 +428,20 @@ pub(crate) fn install_and_validate_saved_profile(
     Ok(mission_idx)
 }
 
+/// Decide which reload target deserves the cross-mission confirmation modal.
+///
+/// `reload_target` also fires for same-mission asset or catalog changes; those
+/// still need a mission reload but are not "another mission" to the player.
+pub(super) fn quickload_confirmation_target(
+    current_mission_id: u32,
+    reload_target: Option<u32>,
+) -> Option<u32> {
+    let _ = current_mission_id;
+    // TODO(109): mirror the current all-reload-target behaviour until the test
+    // below is red for the same-mission case.
+    reload_target
+}
+
 /// Run a single mission game loop.
 ///
 /// Creates a Game + Engine, runs frames until the mission ends.
@@ -520,7 +534,7 @@ pub(super) fn prepare_quickload_cross_mission(
             ));
         }
     };
-    if target_mission_id.is_none() {
+    if quickload_confirmation_target(current, target_mission_id).is_none() {
         callbacks.queue_operation(SaveLoadRequest::ApplyLoad(load));
         return None;
     }
@@ -715,4 +729,20 @@ pub(super) fn pending_decoded_saved_world(callbacks: &RustCallbacks) -> bool {
         callbacks.pending_request(),
         Some(SaveLoadRequest::ApplyLoad(_))
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quickload_confirmation_target;
+
+    #[test]
+    fn same_mission_quickload_never_opens_the_cross_mission_confirmation() {
+        // A co-op host quick-saves and quick-loads inside one mission: the
+        // reload target may be `Some` for asset/catalog reasons, but the
+        // "save was made in another mission" modal must not appear.
+        assert_eq!(quickload_confirmation_target(17, None), None);
+        assert_eq!(quickload_confirmation_target(17, Some(17)), None);
+        assert_eq!(quickload_confirmation_target(1, Some(17)), Some(17));
+        assert_eq!(quickload_confirmation_target(17, Some(1)), Some(1));
+    }
 }
