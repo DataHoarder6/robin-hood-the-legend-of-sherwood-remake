@@ -48,6 +48,18 @@ const LIST_RECT: MenuRect = MenuRect {
     h: 450,
 };
 
+/// Camera rotation is sampled from physical keys outside the bindable
+/// `GameKey` set, so it has no row in the rebindable list. Show it as a fixed
+/// legend under the list instead of adding a startup modal.
+///
+/// TODO: point this at one shared binding table when the input path exposes
+/// one; until then the three keys below are the ones `event_hud` samples.
+const FIXED_CAMERA_KEYS: &[(&str, KeyCode)] = &[
+    ("rotate left", KeyCode::BracketLeft),
+    ("rotate right", KeyCode::BracketRight),
+    ("reset rotation", KeyCode::Backslash),
+];
+
 /// Column-split ratio: 70% of the row width is the key-name column,
 /// 30% is the key-value column.
 const COLUMN_SPLIT_RATIO: f32 = 0.700;
@@ -263,6 +275,19 @@ impl ShortcutsScreen {
         // cap, not a background to stretch across the key list.
 
         self.draw_key_rows(renderer, resources, transform);
+
+        // Fixed camera keys sit below the rebindable list: discoverable in
+        // Options without a modal at startup or a new menu page.
+        if let Some(font) = resources.label_font_any() {
+            render_text_virt_font(
+                renderer,
+                font,
+                transform,
+                &fixed_camera_key_hint(&resources.menu_text),
+                LIST_RECT.x + 10,
+                LIST_RECT.y + LIST_RECT.h + 2,
+            );
+        }
 
         self.scroll_view
             .draw_scrollbar(renderer, transform, resources);
@@ -544,6 +569,15 @@ fn play_rebind_noise(audio: &mut ScreenAudio<'_>) {
 /// without changing anything.
 use crate::options_model::is_reserved_shortcut_key as is_reserved_key;
 
+/// Legend for the fixed camera keys, drawn once under the rebindable list.
+fn fixed_camera_key_hint(menu_text: &MenuText) -> String {
+    let labels: Vec<String> = FIXED_CAMERA_KEYS
+        .iter()
+        .map(|(action, key)| format!("{} {}", key_display_name(menu_text, Some(*key)), action))
+        .collect();
+    format!("Fixed camera keys: {}", labels.join(" · "))
+}
+
 /// Convert a winit physical key to its localised display name.
 /// Named keys come from the `MT_STR_KEY_*` menu-text table.
 fn key_display_name(menu_text: &MenuText, key: Option<KeyCode>) -> String {
@@ -807,6 +841,21 @@ mod tests {
         assign_key_with_conflict_resolution(&mut cfg, action1_idx, key);
 
         assert_eq!(cfg.get_key_by_index(action1_idx), key);
+    }
+
+    #[test]
+    fn shortcuts_screen_lists_camera_rotation_bindings() {
+        let menu_text = MenuText::english_fallbacks_only();
+        let hint = fixed_camera_key_hint(&menu_text);
+        assert_eq!(
+            hint, "Fixed camera keys: [ rotate left · ] rotate right · \\ reset rotation",
+            "the Shortcuts screen must list the physical camera keys"
+        );
+        for (label, key) in FIXED_CAMERA_KEYS {
+            assert!(hint.contains(label), "{label} is missing from {hint}");
+            let shown = key_display_name(&menu_text, Some(*key));
+            assert!(hint.contains(&shown), "{shown} is missing from {hint}");
+        }
     }
 
     #[test]
