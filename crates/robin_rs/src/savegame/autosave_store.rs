@@ -158,6 +158,24 @@ pub(crate) fn validate_generated_filename(filename: &str) -> Result<()> {
     Ok(())
 }
 
+/// Page-global localStorage namespace shared by every browser save slot.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn browser_namespace(save_directory: &str) -> String {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(save_directory.as_bytes());
+    format!(
+        "{BROWSER_STORAGE_PREFIX}.{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+    )
+}
+
+/// One localStorage key inside the page-global save namespace.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn browser_key(save_directory: &str, suffix: &str) -> String {
+    format!("{}.{}", browser_namespace(save_directory), suffix)
+}
+
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn browser_autosave_filename_from_key<'a>(
     namespace: &str,
@@ -174,8 +192,13 @@ pub(crate) fn browser_autosave_filename_from_key<'a>(
 // Browser autosaves use compressed, checksummed localStorage records. The
 // browser's storage API commits each key atomically, and the separate manifest
 // is published only after the immutable payload key succeeds.
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) const BROWSER_STORAGE_PREFIX: &str = "robinhood.autosave.v1";
+
+/// QuickSave and Continue share the autosave namespace but use their own key
+/// suffix so the generated-autosave admission rules stay separate.
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod browser_slots;
 
 #[cfg(any(test, target_arch = "wasm32"))]
 #[derive(Debug, Serialize, Deserialize)]

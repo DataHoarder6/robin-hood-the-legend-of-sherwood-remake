@@ -1,20 +1,6 @@
 use super::*;
 use crate::blob_store::{BlobStore as _, BrowserLocalStorage};
 
-pub(crate) fn browser_namespace(save_directory: &str) -> String {
-    use base64::Engine as _;
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(save_directory.as_bytes());
-    format!(
-        "{BROWSER_STORAGE_PREFIX}.{}",
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
-    )
-}
-
-pub(crate) fn browser_key(save_directory: &str, suffix: &str) -> String {
-    format!("{}.{}", browser_namespace(save_directory), suffix)
-}
-
 pub(crate) fn load_manifest(save_directory: &str) -> Result<Option<AutosaveManifest>> {
     let storage = BrowserLocalStorage::open()?;
     let key = browser_key(save_directory, "manifest");
