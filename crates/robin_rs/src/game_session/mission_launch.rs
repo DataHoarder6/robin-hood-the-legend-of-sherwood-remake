@@ -436,10 +436,7 @@ pub(super) fn quickload_confirmation_target(
     current_mission_id: u32,
     reload_target: Option<u32>,
 ) -> Option<u32> {
-    let _ = current_mission_id;
-    // TODO(109): mirror the current all-reload-target behaviour until the test
-    // below is red for the same-mission case.
-    reload_target
+    reload_target.filter(|target| *target != current_mission_id)
 }
 
 /// Run a single mission game loop.
