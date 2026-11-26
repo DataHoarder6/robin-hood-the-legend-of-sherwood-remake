@@ -188,7 +188,13 @@ test("retirement during fetch cannot publish into a replacement viewport", async
   );
   await source.connect();
   const pending = source.next();
-  while (!requested) await new Promise((r) => setTimeout(r, 0));
+  await new Promise<void>((resolve) => {
+    const waitForRequest = (): void => {
+      if (requested) resolve();
+      else setTimeout(waitForRequest, 0);
+    };
+    waitForRequest();
+  });
   source.invalidate();
   release();
   await assert.rejects(pending, /reload/);

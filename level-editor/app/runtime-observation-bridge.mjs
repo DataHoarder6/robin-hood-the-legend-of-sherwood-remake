@@ -35,11 +35,11 @@ export async function createObservationBridge(directory) {
         !["same-origin", "none"].includes(request.headers["sec-fetch-site"]))
     ) {
       response.writeHead(403).end();
-      return;
+      return undefined;
     }
     if (request.method !== "GET") {
       response.writeHead(405).end();
-      return;
+      return undefined;
     }
     try {
       if (retired || hash(await read("session.json")) !== pin)
@@ -65,7 +65,7 @@ export async function createObservationBridge(directory) {
         if (sequence === head.count) {
           if (!head.closed) {
             response.writeHead(204, { "Cache-Control": "no-store" }).end();
-            return;
+            return undefined;
           }
           bytes = Buffer.from(
             JSON.stringify({ session_id: manifest.session_id, sequence, closed: true }),
@@ -91,7 +91,7 @@ export async function createObservationBridge(directory) {
         }
       } else {
         response.writeHead(404).end();
-        return;
+        return undefined;
       }
       response.writeHead(200, {
         "Content-Type": "application/json",
@@ -105,6 +105,7 @@ export async function createObservationBridge(directory) {
         .writeHead(409, { "Content-Type": "application/json", "Cache-Control": "no-store" })
         .end(JSON.stringify({ error: String(error) }));
     }
+    return undefined;
   };
 }
 export function observationBridgePlugin(directory) {
@@ -120,11 +121,12 @@ export function observationBridgePlugin(directory) {
         .then((result) => {
           if (result.error) {
             res.writeHead(503).end(String(result.error));
-            return;
+            return undefined;
           }
           return result.handler(req, res, next);
         })
         .catch((error) => res.writeHead(503).end(String(error)));
+      return undefined;
     });
   };
   return {

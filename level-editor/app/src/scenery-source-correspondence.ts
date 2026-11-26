@@ -61,7 +61,7 @@ export async function resolveScenerySourceCorrespondence(
     if (matching.length !== 1) throw new Error('Ambiguous placed scenery source animation');
     const element = matching[0]!;
     if (owned.has(element.source.index)) throw new Error('Duplicate placed scenery source owner');
-    if (await missionStateDataHash(level.animations![element.source.index]) !== element.source.sha256)
+    if (await missionStateDataHash(level.animations[element.source.index]) !== element.source.sha256)
       throw new Error('Scenery source animation pin changed');
     const bank = await loadSceneryBank(candidate.descriptor, candidate.animation, read);
     if (bank.profile.rows[0]!.frames.length !== element.frames.length)

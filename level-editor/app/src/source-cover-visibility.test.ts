@@ -8,7 +8,6 @@ import {
   validateSourceCoverVisibility,
   verifySourceCoverPlacements,
 } from "../../shared/src/source-cover-visibility.ts";
-import { missionStateDataHash } from "./mission-state-layer.ts";
 import { sourceCoverFixture as fixture } from "./source-cover-visibility.fixture.ts";
 test("placed roof appearance binding controls effect and overlay without resetting source time", async () => {
   const { c, source, cover, document, reader } = await fixture();
@@ -76,7 +75,7 @@ test("placed roof appearance binding controls effect and overlay without resetti
   assert.throws(() => clocks.setCoverRevealed("patch-002", true), /retired/);
 });
 test("source, appearance placement and lifetime reject mismatch rather than showing through a roof", async () => {
-  const { c, source, cover, document, reader } = await fixture();
+  const { c, source, cover, document } = await fixture();
   const clocks = new SourceContractClockBinding();
   const wrong = structuredClone(cover);
   wrong.source.sha256 = "0".repeat(64);

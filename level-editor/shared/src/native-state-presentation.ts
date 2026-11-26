@@ -575,12 +575,16 @@ export function nativePresentationOrder<T extends Omit<NativePresentationElement
     if (JSON.stringify(other) === JSON.stringify(baseline)) continue;
     if (!verifiedDisjointPair) throw new Error("Ambiguous native animation ordering tie");
     const changed = baseline.flatMap((id, index) => (id !== other[index] ? [index] : []));
+    const first = changed[0],
+      second = changed[1];
     if (
       changed.length !== 2 ||
-      changed[1] !== changed[0]! + 1 ||
+      first === undefined ||
+      second === undefined ||
+      second !== first + 1 ||
       !changed.every((index) => verifiedDisjointPair.includes(baseline[index]!)) ||
-      baseline[changed[0]!] !== other[changed[1]!] ||
-      baseline[changed[1]!] !== other[changed[0]!]
+      baseline[first] !== other[second] ||
+      baseline[second] !== other[first]
     )
       throw new Error("Painted ordering equivalence changes another element");
   }
