@@ -1125,14 +1125,15 @@ async fn run_main_menu(
         if let Some(callbacks) =
             RustCallbacks::new_for_window(menu.application_context.clone(), menu.window).await?
         {
-            let resume = callbacks
+            let resume_index = callbacks
                 .save_manager
-                .find_resume_target()
-                .and_then(|index| {
-                    let slot = callbacks.save_manager.slot_name(index).ok()?;
-                    let mission_id = callbacks.save_manager.slot_mission_id(index)?;
-                    Some((slot, mission_id))
-                });
+                .find_resume_target_without_terminal()
+                .map_err(|error| LaunchError::save(format!("{error:#}")))?;
+            let resume = resume_index.and_then(|index| {
+                let slot = callbacks.save_manager.slot_name(index).ok()?;
+                let mission_id = callbacks.save_manager.slot_mission_id(index)?;
+                Some((slot, mission_id))
+            });
             drop(callbacks);
             if let Some((slot, mission_id)) = resume {
                 tracing::info!("Resuming browser campaign from durable checkpoint at boot");
@@ -1184,7 +1185,11 @@ async fn run_main_menu(
                     }
                     continue;
                 };
-                if let Some(index) = callbacks.save_manager.find_resume_target() {
+                let resume_index = callbacks
+                    .save_manager
+                    .find_resume_target_without_terminal()
+                    .map_err(|error| LaunchError::save(format!("{error:#}")))?;
+                if let Some(index) = resume_index {
                     let slot = callbacks
                         .save_manager
                         .slot_name(index)

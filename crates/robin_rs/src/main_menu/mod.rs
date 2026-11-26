@@ -1002,9 +1002,15 @@ async fn dispatch_click(
             // Same resume target the browser's boot auto-resume uses. When no
             // compatible checkpoint exists the menu stays put rather than
             // fabricating a fresh campaign under the Continue label.
-            let Some(index) = session.save_manager.find_resume_target() else {
-                tracing::info!("Continue: no compatible checkpoint to resume");
-                return Ok(None);
+            let resume_index = session
+                .save_manager
+                .find_resume_target_without_terminal()
+                .map_err(|error| format!("Continue: cannot preflight checkpoints: {error:#}"))?;
+            let Some(index) = resume_index else {
+                // Only terminal saves remain: start the mission from its
+                // beginning instead of reopening the lost/won debriefing.
+                tracing::info!("Continue: no in-mission checkpoint; starting fresh");
+                return Ok(Some(MainMenuChoice::Start));
             };
             let slot = session
                 .save_manager

@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn automatic_resume_excludes_frozen_terminal_outcomes() {
+    use super::super::load::resume_allows_terminal_outcome;
+    use robin_engine::game_operation::GameCode;
+
+    assert!(resume_allows_terminal_outcome(None));
+    assert!(!resume_allows_terminal_outcome(Some(GameCode::LevelFailed)));
+    assert!(!resume_allows_terminal_outcome(Some(
+        GameCode::LevelSucceeded
+    )));
+}
+
+#[test]
 fn play_resumes_newer_mission_autosave_instead_of_stale_continue() {
     let mut manager = SaveGameManager::new(String::new());
     assert_eq!(manager.find_resume_target(), None);

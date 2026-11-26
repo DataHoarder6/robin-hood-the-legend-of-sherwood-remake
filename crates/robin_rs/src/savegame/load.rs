@@ -2,6 +2,26 @@
 //! identity validation, thumbnails, and payload existence.
 use super::*;
 
+/// #119: only genuine in-mission checkpoints are eligible for automatic
+/// resume. A payload carrying a frozen terminal outcome (won or lost)
+/// reopens the debriefing page, so it must be skipped by Play/Continue.
+pub(crate) fn resume_allows_terminal_outcome(
+    terminal_outcome: Option<robin_engine::game_operation::GameCode>,
+) -> bool {
+    terminal_outcome.is_none()
+}
+
+fn resume_rank(save: &SaveGame) -> (u64, bool, bool, &str) {
+    (
+        save.timestamp
+            .parse::<u64>()
+            .expect("published resume checkpoint has an invalid timestamp"),
+        save.is_continue(),
+        save.is_autosave(),
+        save.filename.as_str(),
+    )
+}
+
 impl SaveGameManager {
     pub(crate) fn clear_session_restart(&mut self) {
         self.session_restart = None;
@@ -55,6 +75,12 @@ impl SaveGameManager {
     /// Incompatible checkpoints remain available for explicit
     /// selection, where payload preflight reports the version error.
     pub fn find_resume_target(&self) -> Option<usize> {
+        self.resume_candidates()
+            .max_by_key(|(_, save)| resume_rank(save))
+            .map(|(index, _)| index)
+    }
+
+    fn resume_candidates(&self) -> impl Iterator<Item = (usize, &SaveGame)> {
         self.saves()
             .enumerate()
             .filter(|(_, save)| save.is_continue() || save.is_restart() || save.is_autosave())
@@ -71,17 +97,38 @@ impl SaveGameManager {
                     false
                 }
             })
-            .max_by_key(|(_, save)| {
-                (
-                    save.timestamp
-                        .parse::<u64>()
-                        .expect("published resume checkpoint has an invalid timestamp"),
-                    save.is_continue(),
-                    save.is_autosave(),
-                    save.filename.as_str(),
-                )
-            })
-            .map(|(index, _)| index)
+    }
+
+    /// Automatic resume target with frozen terminal saves excluded. The
+    /// catalog has no terminal-outcome metadata, so each candidate payload is
+    /// preflighted read-only; a payload that cannot be decoded stays eligible
+    /// (it will report its own error at load time) rather than being silently
+    /// dropped. Explicit Load still sees every slot.
+    pub(crate) fn find_resume_target_without_terminal(&self) -> Result<Option<usize>> {
+        let mut eligible = Vec::new();
+        for (index, _) in self.resume_candidates() {
+            match self.preflight_exact_slot(index) {
+                Ok(save)
+                    if resume_allows_terminal_outcome(save.engine.mission().terminal_outcome) =>
+                {
+                    eligible.push(index);
+                }
+                Ok(_) => {
+                    tracing::info!(index, "Skipping terminal save for automatic resume");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, index, "Cannot preflight resume candidate; keeping it");
+                    eligible.push(index);
+                }
+            }
+        }
+        Ok(eligible.into_iter().max_by_key(|&index| {
+            resume_rank(
+                self.catalog
+                    .get(index)
+                    .expect("resume candidate is in the catalog"),
+            )
+        }))
     }
 
     /// Decode and validate the selected save before constructing a
