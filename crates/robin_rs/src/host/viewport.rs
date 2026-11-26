@@ -1454,6 +1454,30 @@ mod viewport_touch_tests {
         close(viewport.camera_angle(), std::f32::consts::FRAC_PI_8);
     }
 
+    /// #113 acceptance: a heading must produce a scene rendered for that
+    /// direction, not the wrapped 16-row view-transform frame. Current code
+    /// always returns one of those wrapped rows, so this fails on the shipped
+    /// implementation.
+    ///
+    /// TODO(#113): enable once the host renderer can re-render from a scene
+    /// direction. Blocked here: the map is one baked 2-D texture sampled by
+    /// `map_quad.wgsl` with a rotation uniform, sprites have only the 16
+    /// pre-rendered view rows, and there are no 3-D re-bake sources
+    /// (docs/NEW_FEATURES.md). The renderers and shader that must consume a
+    /// new direction path are outside this change's ownership.
+    #[test]
+    #[ignore = "#113: no scene re-render path; needs renderer/shader and source art outside this change"]
+    fn compass_heading_does_not_reuse_the_wrapped_view_transform_row() {
+        let mut viewport = ViewportState::new(1024.0, 768.0);
+        viewport.set_level_size(5000.0, 5000.0);
+        viewport.rotate_heading(12);
+        let row = viewport.camera_steps();
+        assert!(
+            !(-8_i8..=8).contains(&row),
+            "at a half turn the renderer still selects wrapped view row {row}"
+        );
+    }
+
     #[test]
     fn compass_heading_is_not_refused_by_the_crispness_cap() {
         let mut viewport = ViewportState::new(1024.0, 768.0);
