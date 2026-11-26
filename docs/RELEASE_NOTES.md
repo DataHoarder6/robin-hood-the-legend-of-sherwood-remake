@@ -327,3 +327,61 @@ Tag summary: v0.6.0
 - `70d218d50` docs: supersede ADR 0002 with reviewed parked-work recovery
 - `d9c605a39` feat(camera): add 360-degree compass heading on Shift+Comma/Period
 - `f77fc2028` fix(web): read Demo identity from versioned manifest when latest.json is minimal
+
+## v0.7.0
+
+Tag summary: v0.7.0
+
+### What's new
+
+
+### Source commits
+
+- `474f1f50c` Revert "fix(editor): clear type-aware oxlint errors (#95)"
+- `b458c08a0` fix(input): accept the keyboard BTreeSet in reveal-all helper
+- `cd85b92db` docs: record adaptive pressure and hidden-ground outlines
+- `0c2cdb698` feat(input): bind whole-map hidden-ground reveal to Super modifier
+- `b877caa2d` render: dotted outlines for ground hidden behind buildings
+- `627ef7418` engine: opt-in adaptive pressure director for noisy play
+- `a0c5a0ce1` fix(ui): substitute trading labels and hide idle browser plan box
+- `17e1d4cdd` fix(editor): clear type-aware oxlint errors (#95)
+- `4684dc37c` fix(web): fill the viewport with the game canvas (#78)
+- `dba158feb` test(trading): pin loaded Arrows: %i leak in trading rows (#111)
+- `6048de669` docs(defects): record the fixed frame-42 teleport fallback panic
+- `5b5d39114` fix(engine): reclaim the frame's whole fallback tail on a late teleport (#94)
+- `13cd61e05` touch: add typed gesture mapping, modifier bridge and finger-sized targets
+- `505dc88ec` android: add scriptable APK boot evidence and documented capability limits
+- `b5ffd3320` test(#86): bind the new-character Play path to the camp guard
+- `cb7247aaa` feat(receiver): prove a bug report files an issue (#51)
+- `fd9ad2923` test(campaign): gate the campaign proof checker in tooling
+- `20f4d70e9` docs(campaign): retain the RED/GREEN proof evidence
+- `3601edd30` docs(campaign): reconcile #55 and record the deterministic proof contract
+- `0abcd7f1d` test(campaign): prove rejoin, hash chain, persistence and terminal claims
+- `6a86371f3` fix(nix): refresh cargo vendor hash for 0.6.0 lockfile
+- `810bba773` docs: record corrected corpus and first map proof
+- `ca4aa995f` docs: drop the legacy private capability link
+- `cfe754134` test(browser): assert clean first map load evidence
+- `aa6ae4f46` fix(web): finish removing the legacy capability token
+- `c45b81b96` refactor(web): remove the legacy capability URL path
+- `db02f5e77` feat(crash-receiver): accept browser diagnostics as redacted issues
+- `399db34bf` docs: plan automatic browser crash triage
+- `16f3480e6` fix(web): register the service worker as an ES module
+- `757e5706f` docs: research automatic browser crash triage
+- `7c8103a8c` test(browser): assert the first map loads in browser-game harness
+- `6db544d8b` docs: verify whole-site private login
+- `5a292493c` docs: update private-origin and credential details
+- `4ec6ee1a2` feat(web): default the private origin to the full campaign
+- `29062de18` docs: record private browser campaign publication and proof
+- `06bff4ca8` fix(web): hide desktop cursor controls on touch devices
+- `d65f35631` docs: record full web corpus conversion blocker
+- `8cf134fc6` style(web): format browser client changes
+- `e4745b038` feat(web): resolve private full-campaign content generation
+- `282532a67` feat(web): add fail-closed Demo-only service worker
+- `4176ac2e6` feat(web): add PWA manifest, icons and CSP allowance
+- `61d0d6590` feat(web): add on-screen touch controls via player commands
+- `37c55dd20` feat(web): make canvas touch-safe and safe-area aware
+- `fed77f662` docs: plan browser/WASM Android client implementation
+- `b512e81da` docs: scope browser full campaign to a private password-gated corpus
+- `27e64cb03` docs: triage builder-check for browser Android design
+- `6a2748b1a` docs: design browser/WASM Android client with campaign and relay cross-play
+- `d1729a8bd` fix(web): alias canonical Demo datadir when the manifest path is versioned
