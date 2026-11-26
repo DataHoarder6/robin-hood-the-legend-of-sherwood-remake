@@ -76,7 +76,7 @@ pub use save_load::{
     SaveLoadMode, SaveLoadOutcome, SavePickerConfig, SavePickerModalState, show_load_picker,
 };
 pub use trading::{TradingModalState, TradingOutcome};
-pub use yesno::{ConfirmButtons, YesNoModalState, show_yesno};
+pub use yesno::{YesNoModalState, show_yesno};
 
 /// Terminal result from a one-frame menu state.
 ///

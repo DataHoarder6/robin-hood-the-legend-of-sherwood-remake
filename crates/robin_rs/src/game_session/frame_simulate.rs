@@ -16,7 +16,6 @@ use super::ui_task_state::{ActiveUiTask, UiTaskKind, UiTaskOutcome};
 use super::*;
 use crate::game::Game;
 use crate::host::HostSignal;
-use crate::ingame_menu::ConfirmButtons;
 use crate::ingame_menu::widget_bridge::ModalScreenIo;
 use crate::ingame_menu::widget_bridge::default_modal_cursor;
 
@@ -775,18 +774,6 @@ fn leave_prompt(
     (end, menu_text.get(end.leave_prompt_id()))
 }
 
-/// Every leave prompt is a real confirmation: accept and cancel, whatever the
-/// mission. The mission name is kept in the signature because callers derive
-/// the prompt from the running mission; there is no longer a one-seal
-/// exception for `H01_Lin_VL`.
-fn leave_prompt_buttons(mission_name: Option<&str>) -> ConfirmButtons {
-    if mission_name == Some("H01_Lin_VL") {
-        ConfirmButtons::YesOnly
-    } else {
-        ConfirmButtons::YesNo
-    }
-}
-
 /// Drive the mission-state leave/abandon confirmation after scripted modal
 /// lanes: the engine's first "you may leave now" banner and the rail's ✗
 /// both raise the same signal.
@@ -831,7 +818,6 @@ fn drive_leave_mission_prompt(
                     menu_resources,
                     message,
                     end,
-                    leave_prompt_buttons(assets.scripts.mission_name.as_deref()),
                 ),
                 replay_result,
                 dismissal: crate::ingame_menu::modal_net::ModalDismissalGate::default(),
@@ -1876,8 +1862,7 @@ fn manual_step_ui_block_reason(
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfirmButtons, ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, leave_prompt,
-        ui_task_modal_admission,
+        ScriptedModalMode, UiTaskKind, UiTaskModalAdmission, leave_prompt, ui_task_modal_admission,
     };
 
     /// Distinct markers in the two question slots prove which retail entry
@@ -2077,52 +2062,49 @@ mod tests {
     }
 
     #[test]
-    fn first_mission_leave_prompt_offers_only_the_confirm_button() {
-        use super::leave_prompt_buttons;
+    fn every_leave_prompt_offers_both_confirm_and_cancel() {
+        use super::{ActiveModalOutcome, dispatch_active_modal_outcome};
+        use robin_engine::player_command::{FrameCommands, PlayerCommand};
 
-        // The first mission has no Sherwood map to return to, so its leave
-        // prompt offers only the confirm seal.
-        assert_eq!(
-            leave_prompt_buttons(Some("H01_Lin_VL")),
-            ConfirmButtons::YesOnly
+        // There is no button-count chooser left to special-case a mission:
+        // every mission-state confirmation opens the same accept/cancel
+        // dialog. The driver's two outcomes are therefore distinct — declining
+        // queues no exit, accepting queues exactly one.
+        let mut host = crate::host::Host::scratch(640.0, 480.0);
+        let mut cancelled = FrameCommands::new();
+        dispatch_active_modal_outcome(ActiveModalOutcome::None, &mut host, &mut cancelled);
+        assert!(cancelled.commands.is_empty(), "cancel must not quit");
+
+        let mut accepted = FrameCommands::new();
+        dispatch_active_modal_outcome(
+            ActiveModalOutcome::QuitMissionRequested,
+            &mut host,
+            &mut accepted,
         );
-        assert_eq!(
-            leave_prompt_buttons(Some("H02_Not_EC")),
-            ConfirmButtons::YesNo
-        );
-        assert_eq!(leave_prompt_buttons(None), ConfirmButtons::YesNo);
+        assert_eq!(accepted.commands.len(), 1);
+        assert!(matches!(
+            accepted.commands[0].command,
+            PlayerCommand::QuitMissionRequested
+        ));
     }
 
-    /// The first campaign mission has no Sherwood map to return to, so its
-    /// leave prompt offers only the confirm seal. That seal is the one driver
-    /// decision available: a dismissed prompt ends the mission through the
-    /// same `QuitMissionRequested` command any other leave prompt uses.
+    /// The first mission's leave prompt asks its own question but offers the
+    /// same accept/cancel choice as every other leave prompt. Accepting queues
+    /// the mission-exit command; cancelling leaves the mission running.
     #[test]
-    fn yes_only_leave_prompt_confirms_first_mission() {
+    fn first_mission_leave_prompt_still_confirms_on_accept() {
         use super::{ActiveModalOutcome, dispatch_active_modal_outcome};
         use crate::ingame_menu::MissionEndKind;
         use robin_engine::game_operation::GameCode;
         use robin_engine::player_command::{FrameCommands, PlayerCommand};
 
         let menu_text = question_table();
-        // Both states the first mission can be left from keep the single seal,
-        // and each asks the question its own mission-end page titles.
         for (mission_won, question_id) in [(false, 238), (true, 235)] {
-            assert_eq!(
-                super::leave_prompt_buttons(Some("H01_Lin_VL")),
-                ConfirmButtons::YesOnly
-            );
             let (end, _message) = leave_prompt(&menu_text, mission_won);
             assert_eq!(end.leave_prompt_id(), question_id);
         }
-        // A later mission still has a map to go back to, hence a real cancel.
-        assert_eq!(
-            super::leave_prompt_buttons(Some("H02_Not_EC")),
-            ConfirmButtons::YesNo
-        );
 
-        // The only seal resolves to the confirm: the driver queues exactly one
-        // mission-exit command and no cancel.
+        // Accepting resolves to the quit command; cancelling resolves to none.
         let mut host = crate::host::Host::scratch(640.0, 480.0);
         let mut commands = FrameCommands::new();
         dispatch_active_modal_outcome(

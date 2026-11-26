@@ -13,7 +13,7 @@ use super::layout::{
     render_clipped_text_in_box_font,
 };
 use super::resources::IngameMenuResources;
-use super::yesno::{ConfirmButtons, YesNoModalState};
+use super::yesno::YesNoModalState;
 
 /// The panel travels the short distance from the right edge in nine ticks
 /// (~150 ms at 60 Hz), rather than growing from wherever a button happened
@@ -62,7 +62,6 @@ enum MissionStatePopupPhase {
 pub struct MissionStatePopupState {
     message: String,
     end: MissionEndKind,
-    buttons: ConfirmButtons,
     phase: MissionStatePopupPhase,
 }
 
@@ -72,7 +71,6 @@ impl MissionStatePopupState {
         resources: &IngameMenuResources,
         message: String,
         end: MissionEndKind,
-        buttons: ConfirmButtons,
     ) -> Self {
         let phase = MissionStatePopupPhase::Opening(MissionStateTransition::new(
             renderer,
@@ -84,7 +82,6 @@ impl MissionStatePopupState {
         Self {
             message,
             end,
-            buttons,
             phase,
         }
     }
@@ -93,15 +90,13 @@ impl MissionStatePopupState {
         match &mut self.phase {
             MissionStatePopupPhase::Opening(transition) => {
                 if transition.tick(io) {
-                    self.phase = MissionStatePopupPhase::Confirming(Box::new(
-                        YesNoModalState::new_with_buttons(
+                    self.phase =
+                        MissionStatePopupPhase::Confirming(Box::new(YesNoModalState::new(
                             io.window,
                             io.renderer,
                             io.resources,
                             self.message.clone(),
-                            self.buttons,
-                        ),
-                    ));
+                        )));
                 }
                 None
             }
