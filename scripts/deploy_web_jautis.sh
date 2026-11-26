@@ -131,7 +131,8 @@ scp -q -r "$build_host:${stage_remote}-signer/." "$signer_new/"
 
 # The existing datadir corpus is retained across deploys; the built runtime's
 # Demo sha must match it exactly, or the site would serve a mismatched game.
-cp -a "$public_root/datadirs" "$public_new/datadirs"
+mkdir -p "$public_new/datadirs"
+cp -a "$public_root/datadirs/." "$public_new/datadirs/"
 manifest=$public_new/wasm/latest.json
 manifest_sha=$(jq -er '.multiplayerContent.demo.sha256' "$manifest")
 demo_url=$(jq -er '.multiplayerContent.demo.url' "$manifest")
