@@ -3,9 +3,9 @@
 Issue #44: a campaign host never opened a session an ambush host would. This
 records what was measured, what the fix changed, and what is still unproved.
 
-Last verified: 2026-11-19 — H30 observed on the tree that landed
-(`build-host:~/campaign-e2e-H30-20261119-165539`; its `summary.json` names the
-snapshot, so this line cannot go stale under a rebase).
+Last verified: 2026-11-26 against `fork/main` `6a86371f3930` — H30's evidence
+is `build-host:~/campaign-e2e-H30-20261119-165539` and the rows below are read
+from the corpus contract, not from a new gate run.
 
 ## What could be measured pre-fix
 
@@ -98,7 +98,7 @@ conversion.
   `lincoln`, the guest comparing 24 frames, 0 desyncs). Evidence:
   `build-host:~/campaign-e2e-H30-20261119-165539` (`verdict: observed`).
 
-## Found, not fixed (all reproduced on this base)
+## Found on this base, now covered by corpus rows
 
 1. **`WIN` at mission end panics a joining seat.** `POST /console
    {"command":"WIN"}` on the host ends the mission; the host's
@@ -129,3 +129,13 @@ conversion.
    the eviction live in the terminal matrix (#25, H21-H27).
    Until those land, the mission-end handoff has no process row; H30 stops at
    "both seats are in the campaign's current mission".
+
+The three conditions above were reproduced on the 2026-11-19 base; they are no
+longer "found, not fixed" at this ref. H33 covers the `WIN` command path (the
+cheat is staged as the replicated mission-result command), H35 the
+same-identity reclaim, and H34 the `LOOSE` debriefing path. H33/H34 assert no
+post-finalization achievement effect; H35 asserts the seat returns to `running`
+without exhausting its reconnect budget. H36 and H38 then carry the handoff to
+mission 2 through the game's own debriefing. The checks are the corpus rows in
+[the harness](../multiplayer/HARNESS.md); this paragraph does not claim a gate
+was run for them here.

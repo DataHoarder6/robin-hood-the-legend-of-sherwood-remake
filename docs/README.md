@@ -9,6 +9,8 @@
 - [Game data distributions](DATADIRS.md)
 - [Multiplayer](MULTIPLAYER.md), [campaign history](slop/CAMPAIGN_HISTORY.md), and [Spellforge](slop/SPELLFORGE.md)
 - [Multiplayer harness decisions](multiplayer/HARNESS.md) — coverage matrix, scenario format, layer rules, isolation and bootstrap for the e2e gate
+- [Deterministic campaign proof](multiplayer/CAMPAIGN_PROOF.md) — CP01–CP04 claim fixtures, evidence shape and what a fixture cannot prove
+- [Campaign endgame plan](multiplayer/CAMPAIGN_ENDGAME_PLAN.md) — #55 reconciled with the integration ref, work order and owner gates
 - [E2e RED diagnosis: connect-string hang vs display race](slop/multiplayer-e2e-display-race.md) — D05 was already fixed; the remaining hang was an X display allocation race
 - [Presentation decisions](PRESENTATION.md) — the zoom ladder and what a viewport larger than the level shows
 - [Defect ledger](DEFECTS.md) — one row per diagnosed defect: class, reproduction, the check that proves it, status

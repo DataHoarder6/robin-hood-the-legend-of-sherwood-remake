@@ -68,12 +68,13 @@ campaign — the listing says `campaign` and the fixed party size, and no roster
 and a second seat from its own install that joins it with no local save, both
 then running the same mission at equal hashes. Its failure cells are the ordinary ones — a drop
 before or after a mission-end commit is H13/H14, a reconnect during one is H07 —
-so the row adds no column to the matrix. The mission-end handoff itself has no
-process row yet: ending a live mission from outside needs a rollback-safe
-mission-end command and the two-seat debriefing acknowledgement, which the
-terminal matrix rows (H21-H27) own; until they land, the handoff is stated by
-the session route (`crates/robin_rs/src/game_session/mod.rs:run_session_body`)
-and its unit tests rather than by a process row.
+so the row adds no column to the matrix. The mission-end handoff is now a
+process row: H36 drives it with `/mission-result` and H38 with a gameplay win;
+both reach mission 2 through the game's own debriefing and the session route
+(`crates/robin_rs/src/game_session/mod.rs:run_session_body`). No row goes
+beyond mission two: the runner binds a fault to the host's frame counter, not
+to a mission index, so a longer chain needs the runner change recorded in
+[CAMPAIGN_ENDGAME_PLAN.md](CAMPAIGN_ENDGAME_PLAN.md).
 
 ### Corpus
 
@@ -119,7 +120,7 @@ case; `invariant` and `vocabulary` are not cells.
 | H35 | process | fault | a client is killed and relaunched on the same install mid-mission: its joining key is the durable, domain-separated install identity, so the host reclaims the same seat and the client returns to `running` with hash agreement instead of exhausting its reconnect budget. asserts: `log(absent=giving up on reconnection,count=0)`; `barrier(name=begin-sim,state=released)`; `hash-equal(peers=1,every=25)`; `mission(peers=0,1,count=1)`; `exit(peers=0,1,status=running)` | `.../multiplayer/identity.rs` + `.../multiplayer/native/peer_sessions.rs` |
 | H36 | process | baseline | a campaign host ends a won mission with `/mission-result`, both seats acknowledge the debriefing with Continue, and the single host-owned session hands the whole party to the next campaign mission instead of leaving each install on its own save: both seats enter the second mission together at equal hashes and keep running. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)` | `H30` + `crates/robin_rs/src/game_session/mod.rs` session loop |
 | H37 | core | baseline | the host commits a cooperative-pause decision at an exact sim frame into the hashed simulation gate; every seat that applies the same decision at that frame reaches the identical state hash, and committing one frame off the boundary diverges. A second decision resumes. The process layer cannot express this row: `/state.frame` is `engine.frame_counter()`, which deliberately stops while the gate holds, so a frame-anchored resume fault can never fire. The two-engine prover is the evidence. asserts: `hash-equal(peers=0,1,every=25)` | `crates/robin_engine/src/engine/commands/tests.rs::coop_pause_boundary_frame_hash_equality_is_exact_and_frame_sensitive` |
-| H38 | process | baseline | the host plays a campaign mission to a real in-game success with gameplay `PlayerCommand`s — a `TeleportSelectedToPoint` places Robin at H01_Lin_VL's objective scroll, and `LaunchInteraction { Take }` reads it, whose script's `IsTaken` sets the victory global that `CheckVictoryCondition` returns — so the engine's own `LevelSucceeded` opens the debriefing, both seats acknowledge it, and the host-owned session hands the party to mission 2 at equal hashes. No `/mission-result` (or `WIN`) dev trigger is involved. Precondition: the driver waits for zero frame-cursor skew before injecting commands, so no late input forces a teleport rollback; the separate late-input teleport desync is tracked as D12 ([#83](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/83)) and is out of this row's scope. The commands bind the Leicester demo data's entity ids (`Pc:126`, `Scroll:114`); for a different dataset, edit the two `faults[].command` bodies in `scripts/validation/scenarios/H38.json`. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(absent=developer trigger ended the mission,count=0)` | `H30` + `crates/robin_engine/src/engine/tick/mission.rs` victory gate + `crates/robin_rs/src/game_session/mod.rs` session loop |
+| H38 | process | baseline | the host plays a campaign mission to a real in-game success with gameplay `PlayerCommand`s — a `TeleportSelectedToPoint` places Robin at H01_Lin_VL's objective scroll, and `LaunchInteraction { Take }` reads it, whose script's `IsTaken` sets the victory global that `CheckVictoryCondition` returns — so the engine's own `LevelSucceeded` opens the debriefing, both seats acknowledge it, and the host-owned session hands the party to mission 2 at equal hashes. No `/mission-result` (or `WIN`) dev trigger is involved. Precondition: the driver waits for zero frame-cursor skew before injecting commands, so no late input forces a teleport rollback; the separate late-input teleport desync is tracked as D12 ([#83](https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake/issues/83)) and is out of this row's scope. The commands bind the Leicester demo data's entity ids (`Pc:126`, `Scroll:114`); for a different dataset, edit the two `faults[].command` bodies in `scripts/validation/scenarios/H38.json`. asserts: `mission(peers=0,1,count=2)`; `hash-equal(peers=1,every=25)`; `exit(peers=0,1,status=running)`; `log(contains=opening debriefing exit_code=LevelSucceeded,at_least=1)`; `log(absent=developer trigger ended the mission,count=0)`; `log(contains=harness native victory path: HarnessMarkMissionWon yielded the scripted Win command,count=2)` | `H30` + `crates/robin_engine/src/engine/tick/mission.rs` victory gate + `crates/robin_rs/src/game_session/mod.rs` session loop |
 
 The mission-end rows are H22–H29, H32–H34; H35 is the same-identity reclaim, H36 the dev-triggered campaign handoff and H38 the same handoff after a gameplay-driven victory: H21 is a core row about the same
 page, and H30 opens a campaign session a second seat joins. The sketch in
@@ -466,3 +467,24 @@ failing if any relay URL or lookup is configured. Any missing prerequisite —
 data, overlay, binary, namespace tool, X server — exits 3 naming the item before
 a peer launches. There is no skip path: a scenario that cannot bootstrap fails,
 and never passes.
+
+## 7. Campaign proof rows (#110)
+
+The four `CPnn` rows below check an observation against a claim fixture. They
+are not `Hnn` cells, add no fault or assertion verb to sections 1 and 2, and do
+not run in this suite. The claim, the observation shape, the exit codes and the
+limit on what a fixture proves are owned by
+[CAMPAIGN_PROOF.md](CAMPAIGN_PROOF.md); the reconciliation order is in
+[CAMPAIGN_ENDGAME_PLAN.md](CAMPAIGN_ENDGAME_PLAN.md).
+
+| CP row | claim fixture | checked by | claim |
+| --- | --- | --- | --- |
+| CP01 | `scripts/validation/scenarios/campaign/rejoin-N2.json` | `scripts/validation/campaign_proof.py` | mid-campaign rejoin at mission index 2 with host progress, one seat and no guest slot |
+| CP02 | `scripts/validation/scenarios/campaign/hash-chain.json` | same | one continuous hash chain over all missions and transition snapshots, with the tick on a mismatch |
+| CP03 | `scripts/validation/scenarios/campaign/two-session.json` | same | host slot and player assignments survive two sessions without a guest save |
+| CP04 | `scripts/validation/scenarios/campaign/terminal-matrix.json` | same | each terminal action from either seat settles within budget with no seat left on a page the other left |
+
+**Decision:** a `CPnn` verdict is a check of evidence, never the production of
+it. A fixture observation proves the checker only; a game claim needs an
+observation from a two-seat Linux run at the exact tree. The `Hnn` corpus
+contract check stays the source for scenario layers and `asserts:` clauses.
