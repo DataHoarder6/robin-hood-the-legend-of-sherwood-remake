@@ -87,7 +87,7 @@ test("synthetic session delegates observed clocks and empty final phase without 
     await s.deliver(p.e, p.a, p.manifest);
   }
   assert.deepEqual(
-    batches.map((b) => b.samples[0].tick),
+    batches.map((b) => b.samples[0]!.tick),
     [5, 0],
   );
   assert.deepEqual(

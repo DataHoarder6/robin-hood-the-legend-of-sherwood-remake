@@ -94,26 +94,26 @@ test("prepared identities keep target, collision and visual patch clocks indepen
     [0, 0, 0],
   );
   observed.engine_frame = 20;
-  Object.assign(observed.owners[0].sprite, {
+  Object.assign(observed.owners[0]!.sprite, {
     last_action: "TransitionSittingWaitingUpright",
     row: 1,
     frame: 1,
     count: 2,
   });
-  observed.patches[1].sprite!.count = 2;
+  observed.patches[1]!.sprite!.count = 2;
   const second = adapter.sample(observed);
   assert.deepEqual(
     second.samples.map((s) => s.tick),
     [5, 0, 2],
   );
   observed.engine_frame = 21;
-  observed.owners[0].sprite.active = false;
+  observed.owners[0]!.sprite.active = false;
   const third = adapter.sample(observed);
-  assert.equal(third.samples[0].kind, "element");
-  assert.deepEqual(third.samples[0], {
+  assert.equal(third.samples[0]!.kind, "element");
+  assert.deepEqual(third.samples[0]!, {
     kind: "element",
     id: "owner",
-    source: bindings[0].source,
+    source: bindings[0]!.source,
     active: true,
     visible: false,
     tick: 5,
@@ -128,26 +128,26 @@ test("rejected identity, action, frame and phase observations do not consume a s
       o.mission = "wrong";
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].index = 999;
+      o.owners[0]!.index = 999;
     },
     (o: RuntimeStateObservation) => {
-      o.owners.push(o.owners[0]);
+      o.owners.push(o.owners[0]!);
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].sprite.last_action = "ShootBow";
+      o.owners[0]!.sprite.last_action = "ShootBow";
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].sprite.row = 9;
+      o.owners[0]!.sprite.row = 9;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].sprite!.row = 8;
+      o.patches[1]!.sprite!.row = 8;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].sprite!.frame = 1;
-      o.patches[1].sprite!.count = 65535;
+      o.patches[1]!.sprite!.frame = 1;
+      o.patches[1]!.sprite!.count = 65535;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].applied = true;
+      o.patches[1]!.applied = true;
     },
   ]) {
     const bad = structuredClone(observed);
@@ -164,9 +164,9 @@ test("rejected identity, action, frame and phase observations do not consume a s
 test("construction requires exact source pins and complete family identities", () => {
   const { contract, bindings } = fixture();
   assert.throws(() => new StateRuntimeAdapter(contract, bindings.slice(1)), /Incomplete/);
-  assert.throws(() => new StateRuntimeAdapter(contract, [...bindings, bindings[0]]), /Invalid/);
+  assert.throws(() => new StateRuntimeAdapter(contract, [...bindings, bindings[0]!]), /Invalid/);
   const bad = structuredClone(bindings);
-  bad[0].source.sha256 = "f".repeat(64);
+  bad[0]!.source.sha256 = "f".repeat(64);
   assert.throws(() => new StateRuntimeAdapter(contract, bad), /Invalid/);
 });
 
@@ -175,14 +175,14 @@ test("final reset has a new phase clock even when engine elapsed time is large",
   const adapter = new StateRuntimeAdapter(contract, bindings);
   adapter.sample(observed);
   observed.engine_frame = 900;
-  Object.assign(observed.patches[1], {
+  Object.assign(observed.patches[1]!, {
     applied: true,
     in_transition: false,
     sprite: { active: true, row: 2, frame: 0, count: 65535, last_action: "NonanimationEnd" },
   });
   const batch = adapter.sample(observed);
-  assert.equal(batch.samples[2].tick, 0);
-  assert.equal((batch.samples[2] as { phase: string }).phase, "applied");
+  assert.equal(batch.samples[2]!.tick, 0);
+  assert.equal((batch.samples[2]! as { phase: string }).phase, "applied");
 });
 
 test("prepared progression distinguishes a startup action already selected before freeze", () => {
