@@ -2404,6 +2404,55 @@ mod tests {
         }
     }
 
+    /// Issue #86: the 0.4.0 crash bundle (`diplomacy query requires a valid
+    /// allegiance, got Error`, captured on the first rendered frame after Play)
+    /// came from the selection-outline pass asking the diplomacy table about a
+    /// non-actor entity's `Camp::Error` sentinel. The new-character path must
+    /// commit the created profile before Play and the render-time query must
+    /// resolve that sentinel without reaching the strict diplomacy guard.
+    #[test]
+    fn new_character_play_path_resolves_unresolved_camps_without_a_diplomacy_query() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = root.path().to_string_lossy().into_owned();
+        let mut profiles = PlayerProfileManager::new(root_path.clone());
+        let placeholder = profiles.create_profile("Robin".into(), DifficultyLevel::Medium);
+        profiles.set_active(placeholder);
+        profiles.default_profiles = true;
+        crate::player_profile_store::PlayerProfileStore::for_directory(&profiles.save_directory)
+            .save(&profiles)
+            .unwrap();
+        let mut keys = KeyConfigStore::new(root_path.clone());
+        keys.entry_or_default(profiles.profiles[placeholder].id);
+        keys.save().unwrap();
+
+        let context = ApplicationContext::complete(
+            crate::player_profile_store::PlayerProfileStore::for_directory(&root_path),
+            GlobalOptions::default(),
+            profiles,
+            keys,
+            None,
+        )
+        .unwrap();
+        let new_id = context
+            .complete_first_launch_profile(
+                Some(("Marian".into(), DifficultyLevel::Hard)),
+                (1280, 720),
+            )
+            .unwrap();
+        assert_eq!(context.active_profile_snapshot().unwrap().id, new_id);
+        assert_eq!(context.sim_config().difficulty, DifficultyLevel::Hard);
+
+        // `MainMenuChoice::Start` resets the campaign from this profile and the
+        // startup-save thumbnail renders before the first frame. A fresh
+        // engine's real diplomacy state must answer "not aligned" for the
+        // sentinel instead of panicking in `DiplomacyState::valid_id`.
+        let (engine, _assets) = robin_engine::test_support::fresh_engine();
+        assert!(
+            !engine.is_player_aligned_camp(robin_engine::element::Camp::Error),
+            "the unresolved camp sentinel must not reach the diplomacy guard"
+        );
+    }
+
     #[test]
     fn profile_difficulty_change_refreshes_future_simulation_config() {
         let root = tempfile::tempdir().unwrap();
