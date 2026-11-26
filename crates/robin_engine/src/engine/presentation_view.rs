@@ -102,6 +102,9 @@ impl<'world> PresentationView<'world> {
         fn is_zoom_up_possible(&self) -> bool;
         fn is_zoom_down_possible(&self) -> bool;
         fn is_recording_macro(&self) -> bool;
+        // Host-authoritative co-op pause, committed into the shared timeline;
+        // HUD presentation reads it on every seat, never local input state.
+        fn coop_pause_active(&self) -> bool;
         fn selected_view_cone_params(&self, selected_view_element: Option<EntityId>) -> Option<ViewConeParams>;
         fn all_npc_view_cone_params(&self) -> Vec<ViewConeParams>;
         fn display_ai_log_for_selected(&self, selected_view_element: Option<EntityId>);

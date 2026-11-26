@@ -1737,15 +1737,25 @@ fn render_world_pass(
     render_door_overlays(host, engine, assets, renderer, physical_shift_held);
 }
 
-/// Text for the centred, non-blocking pause indicator. The local pause menu
-/// is the only pause source exposed at this render boundary, so its label
-/// names the local player; `None` while the mission runs.
-///
-/// TODO: name the host's co-op-pause gate here too. The transport's pause
-/// state is not reachable from `RenderContext`, so threading it needs a field
-/// at the render-view construction boundary (outside this file).
-fn paused_indicator_label(pause_menu_open: bool) -> Option<&'static str> {
-    pause_menu_open.then_some("Paused by local player")
+/// Text for the centred, non-blocking pause indicator. Both sources belong
+/// to the live frame: the host-authoritative co-op gate (identical on every
+/// seat) and this machine's menu. `None` while the mission runs.
+fn paused_indicator_label(coop_pause_active: bool, pause_menu_open: bool) -> Option<&'static str> {
+    crate::hud_text::PauseIndicatorState {
+        coop_pause: coop_pause_active,
+        local_menu: pause_menu_open,
+    }
+    .label()
+}
+
+/// The exact decision the overlay pass makes for one frame. Keeping the menu
+/// as an `Option` here pins the regression: a co-op pause must show even when
+/// no menu is open, including on guests and in the browser.
+fn pause_label_for_frame(
+    coop_pause_active: bool,
+    pause_menu: Option<&PauseMenu>,
+) -> Option<&'static str> {
+    paused_indicator_label(coop_pause_active, pause_menu.is_some())
 }
 
 /// Shared read-only HUD inputs of one [`render_overlay_pass`], copied out of
@@ -1960,9 +1970,13 @@ fn render_overlay_pass(
     }
 
     // ── GPU phase: centred pause status ──
-    // Text only — it never captures input or opens a modal. Drawn after the
-    // pause menu so the panel cannot paint over the source label.
-    if let (Some(label), Some(fonts)) = (paused_indicator_label(pause_menu.is_some()), hud_fonts) {
+    // Persistent HUD text, independent of the menu: text only, no input
+    // capture and no modal. Drawn after the pause menu so the panel cannot
+    // paint over the source label, and before the cursor/fade passes.
+    if let (Some(label), Some(fonts)) = (
+        pause_label_for_frame(engine.coop_pause_active(), pause_menu),
+        hud_fonts,
+    ) {
         let font = &fonts.tooltip_font;
         let x = (i32::from(renderer.screen_width()) - font.text_width(label)) / 2;
         let y = (i32::from(renderer.screen_height()) - font.height() as i32) / 2;
@@ -2665,9 +2679,21 @@ mod tests {
     use robin_engine::level_data::{RawHikingPath, RawWaypoint, WaypointCommand};
 
     #[test]
-    fn paused_indicator_names_the_local_source_and_hides_when_running() {
-        assert_eq!(paused_indicator_label(false), None);
-        assert_eq!(paused_indicator_label(true), Some("Paused by local player"));
+    fn paused_indicator_names_every_source_and_hides_when_running() {
+        use crate::hud_text::{PAUSED_BY_HOST, PAUSED_BY_LOCAL_PLAYER};
+
+        assert_eq!(paused_indicator_label(false, false), None);
+        assert_eq!(
+            paused_indicator_label(false, true),
+            Some(PAUSED_BY_LOCAL_PLAYER)
+        );
+        assert_eq!(paused_indicator_label(true, false), Some(PAUSED_BY_HOST));
+        assert_eq!(paused_indicator_label(true, true), Some(PAUSED_BY_HOST));
+
+        // The render-frame decision keeps the indicator alive when the local
+        // menu is absent but the authoritative co-op gate is active.
+        assert_eq!(pause_label_for_frame(false, None), None);
+        assert_eq!(pause_label_for_frame(true, None), Some(PAUSED_BY_HOST));
     }
 
     fn presentation_host() -> Host {

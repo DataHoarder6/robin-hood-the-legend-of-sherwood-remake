@@ -64,6 +64,35 @@ const ACTION3_WIDTH: u16 = 40;
 const ACTIONA_WIDTH: u16 = 56;
 const ACTIONB_WIDTH: u16 = 56;
 
+// ─── Persistent pause indicator ─────────────────────────────────
+
+/// Pause sources observable at the presentation boundary. `coop_pause` comes
+/// from authoritative engine state committed by the host, so every seat —
+/// native or browser — reads the same value; `local_menu` is the Esc surface
+/// opened on this machine. Neither is simulation input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PauseIndicatorState {
+    pub local_menu: bool,
+    pub coop_pause: bool,
+}
+
+pub const PAUSED_BY_LOCAL_PLAYER: &str = "Paused by local player";
+pub const PAUSED_BY_HOST: &str = "Paused by host";
+
+impl PauseIndicatorState {
+    /// `None` only while the mission runs. A host co-op pause wins over a
+    /// local menu: it stops the shared timeline every seat is watching.
+    pub fn label(self) -> Option<&'static str> {
+        if self.coop_pause {
+            Some(PAUSED_BY_HOST)
+        } else if self.local_menu {
+            Some(PAUSED_BY_LOCAL_PLAYER)
+        } else {
+            None
+        }
+    }
+}
+
 // ─── HUD font set ────────────────────────────────────────────────
 
 /// Loaded fonts for in-game HUD text rendering.
@@ -930,6 +959,34 @@ fn render_ammo_counts_gpu(
 
 #[cfg(test)]
 mod tests {
+    use super::{PAUSED_BY_HOST, PAUSED_BY_LOCAL_PLAYER, PauseIndicatorState};
+
+    #[test]
+    fn pause_indicator_names_every_source_and_hides_while_running() {
+        let running = PauseIndicatorState {
+            local_menu: false,
+            coop_pause: false,
+        };
+        assert_eq!(running.label(), None);
+        let local = PauseIndicatorState {
+            local_menu: true,
+            coop_pause: false,
+        };
+        assert_eq!(local.label(), Some(PAUSED_BY_LOCAL_PLAYER));
+        // Co-op pause is host-authoritative on host and guests alike, and is
+        // visible with no menu open on either.
+        let host = PauseIndicatorState {
+            local_menu: false,
+            coop_pause: true,
+        };
+        assert_eq!(host.label(), Some(PAUSED_BY_HOST));
+        let both = PauseIndicatorState {
+            local_menu: true,
+            coop_pause: true,
+        };
+        assert_eq!(both.label(), Some(PAUSED_BY_HOST));
+    }
+
     use super::*;
 
     #[test]
