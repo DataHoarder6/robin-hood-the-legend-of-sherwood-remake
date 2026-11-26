@@ -2456,6 +2456,22 @@ fn dispatch_sherwood_mission_choice(
                 &mut frame.stage_commands(),
                 &PlayerCommand::SetMenToBlazonConversionMode { on: men_to_blazon },
             );
+            // Selecting the mission on the HUD is the interaction itself: the
+            // script answers startup message 1000 by walking the selection
+            // across the log to the deployment zone. Without it the click only
+            // highlights the element and the men stay on the near side. The
+            // blazon-conversion choice starts no mission, so it sends nobody.
+            if !men_to_blazon {
+                dispatch_local_command(
+                    &host.transport,
+                    &mut frame.stage_commands(),
+                    &PlayerCommand::DispatchStartupMessage {
+                        msg: GO_TO_EXIT_STARTUP_MESSAGE,
+                        arg1: 0,
+                        arg2: 0,
+                    },
+                );
+            }
             *enable = SherwoodButtonEnable::post_commit();
         }
         MissionChoice::ShowPendingMissions => {
@@ -3679,6 +3695,64 @@ mod sherwood_outcome_tests {
         let (net, _incoming, _outgoing, _, _) = crate::multiplayer::NetChannels::new();
         host.transport = crate::host::HostTransport::test_session(net, seat);
         host
+    }
+
+    /// Clicking the Sherwood HUD mission element commits the next mission, but
+    /// it must also send the deployment interaction: selecting a mission that
+    /// only highlights the element leaves the men on the near side of the log.
+    #[test]
+    fn selecting_the_next_mission_issues_the_deployment_command() {
+        let (mut game, host, mut frame, _callbacks) = fresh();
+        let mut enable = SherwoodButtonEnable::pre_commit();
+        dispatch_sherwood_mission_choice(
+            MissionChoice::StartMission,
+            3,
+            false,
+            &mut game,
+            &host,
+            &mut frame,
+            &mut enable,
+        );
+        assert!(
+            matches!(
+                staged(&frame).as_slice(),
+                [
+                    PlayerCommand::CampaignSelectNextMission {
+                        mission_idx: Some(3)
+                    },
+                    PlayerCommand::SetMenToBlazonConversionMode { on: false },
+                    PlayerCommand::DispatchStartupMessage {
+                        msg: GO_TO_EXIT_STARTUP_MESSAGE,
+                        arg1: 0,
+                        arg2: 0,
+                    },
+                ]
+            ),
+            "the mission-element click must select the mission and then issue \
+             the cross-the-log command: {:?}",
+            staged(&frame)
+        );
+
+        // The blazon-conversion choice selects no mission to deploy to, so it
+        // must not send the walking interaction.
+        let (mut game, host, mut frame, _callbacks) = fresh();
+        let mut enable = SherwoodButtonEnable::pre_commit();
+        dispatch_sherwood_mission_choice(
+            MissionChoice::StartMission,
+            3,
+            true,
+            &mut game,
+            &host,
+            &mut frame,
+            &mut enable,
+        );
+        assert!(
+            !staged(&frame)
+                .iter()
+                .any(|cmd| matches!(cmd, PlayerCommand::DispatchStartupMessage { .. })),
+            "blazon conversion sends no one across the log: {:?}",
+            staged(&frame)
+        );
     }
 
     /// Every `SherwoodConfirmationAction` and every `MissionChoice` arm of the
