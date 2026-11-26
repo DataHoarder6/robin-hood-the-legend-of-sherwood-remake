@@ -248,9 +248,11 @@ The separate browser-audio gate runs
 synthetic browser tests, not full-game browser rendering or audible-output
 acceptance. Native-lifecycle is a local
 provisioned gate, not public CI: it needs licensed data and a compatible host.
-Runtime publication retains its existing emitted-artifact checks. Consult the
-platform runbooks for native packaging and Android checks; this matrix does
-not claim Android or Windows execution coverage.
+Runtime publication retains its existing emitted-artifact checks. Platform
+runbooks are [android-apk-evidence.md](slop/android-apk-evidence.md) for the APK
+and device gates and [first-run-crash-live-repro.md](slop/first-run-crash-live-repro.md)
+for the owner-laptop repro; this matrix does not claim Android or Windows
+execution coverage.
 
 The scripting LLVM gate selects only its two fixture-free unwind cases and
 overrides the relevant package code generation backend explicitly. It verifies
@@ -813,6 +815,11 @@ fixtures (`scripts/test_director_state.sh`, `scripts/test_director_select_issue.
 `scripts/test_director_writeback.sh`, `scripts/tests/director-loop.sh`) run here:
 they are fixture-only and assert the handoff ledger, admissible selection,
 explicit write-back target and bounded one-run driver.
+The opt-in live bug-report smoke is not a gate step: its exact owner command is
+in [issue-smoke-owner-run.md](slop/issue-smoke-owner-run.md). The
+campaign-proof checker's exact-commit commands and remaining gates are in
+[campaign-proof-evidence.md](slop/campaign-proof-evidence.md); the full-corpus
+flake quarantine is in [full-corpus-flake-evidence.md](slop/full-corpus-flake-evidence.md).
 
 The web suite delegates to `pnpm --dir wasm-www verify:web` and requires the
 pinned Node/pnpm versions and a frozen-lockfile install in `wasm-www`. It runs
