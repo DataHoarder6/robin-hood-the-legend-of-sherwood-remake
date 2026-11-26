@@ -4374,3 +4374,46 @@ fn post_seek_sequence_is_one_level_and_native_bitcode_roundtrips() {
         Err(SequenceInvariantError::NestedPostSeekSequence)
     ));
 }
+
+/// #94: a late `TeleportSelectedToPoint` on the real mission has a soldier's
+/// frame-42 `Wait` as the newest sequence, not the selected PC's. The rewind
+/// must reclaim the whole trailing run of that frame's fallbacks and re-home
+/// every one of them, instead of asserting that the newest slot belongs to the
+/// PC and panicking both game processes (`selection.rs` owner assertion).
+#[test]
+fn late_teleport_rewind_reclaims_another_actors_wait_in_the_tail() {
+    let pc = EntityId::Pc(crate::entity_id::PcId(126));
+    let soldier = EntityId::Soldier(crate::entity_id::SoldierId(82));
+    let mut mgr = SequenceManager::new();
+    let pc_wait = mgr.insert_element(SequenceElement::new(1, Command::Wait, Some(pc)));
+    let soldier_wait = mgr.insert_element(SequenceElement::new(1, Command::Wait, Some(soldier)));
+    assert_eq!(pc_wait, SequenceId(1));
+    assert_eq!(soldier_wait, SequenceId(2));
+
+    // No panic: the soldier's newer Wait is the target frame's fallback too.
+    let reclaimed = mgr.rewind_latest_wait_slots(&[pc]);
+
+    assert_eq!(
+        reclaimed.iter().map(|seq| seq.id).collect::<Vec<_>>(),
+        vec![pc_wait, soldier_wait],
+        "both frame fallbacks must be re-homed, in their original order"
+    );
+    assert_eq!(
+        mgr.next_sequence_id, 1,
+        "allocator must rewind to the PC's slot"
+    );
+    assert_eq!(mgr.next_element_id, 1, "element allocator must rewind too");
+    assert!(mgr.get_sequence(pc_wait).is_none());
+    assert!(mgr.get_sequence(soldier_wait).is_none());
+
+    // The ordinary launch now claims the rewound ids, exactly as on the
+    // forward seat, and the reclaimed fallbacks are appended after them.
+    let teleport = mgr.insert_element(SequenceElement::new(1, Command::Teleport, Some(pc)));
+    assert_eq!(teleport, pc_wait);
+    mgr.rehome_sequences(reclaimed);
+    assert_eq!(
+        mgr.sequences.keys().copied().collect::<Vec<_>>(),
+        vec![SequenceId(1), SequenceId(2), SequenceId(3)],
+        "re-homed fallbacks keep the frame's relative order at the tail"
+    );
+}

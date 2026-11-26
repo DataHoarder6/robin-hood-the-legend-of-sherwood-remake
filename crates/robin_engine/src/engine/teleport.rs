@@ -92,13 +92,13 @@ impl EngineInner {
         let displaced = if late {
             // Rewind before launching anything: a launched teleport installs a
             // new fallback for its owner and would hide a sibling's target-
-            // frame slot. The newest sequences are the fallbacks created at
-            // the target frame, one per selected actor. Keep them so they can
-            // be re-homed after the teleport claims their ids — dropping them
-            // would make the late seat one fallback per actor short.
-            // TODO: a PC busy with a real order then has no Wait, and a lag
-            // beyond one frame creates more fallbacks — generalise the rewind
-            // to both cases.
+            // frame slot. The target frame's actor update creates a Wait per
+            // idle actor, so the tail can hold other actors' fallbacks as well
+            // as the selected PCs' (#94). The manager reclaims the whole run
+            // bounded by the selected actors' Waits, and every reclaimed slot
+            // is re-homed after the teleport claims its ids.
+            // TODO: a PC busy with a real order has no Wait; a lag beyond one
+            // frame creates more fallbacks — generalise the rewind to both.
             let owners: Vec<_> = destinations.iter().map(|(pc_id, _)| *pc_id).collect();
             self.orders
                 .sequence_manager

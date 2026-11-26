@@ -376,53 +376,59 @@ impl SequenceManager {
     /// ids, element ids and `IndexMap` tail the forward tick used (D12 / #83).
     ///
     /// At its target frame the forward tick launches the command *before* the
-    /// actor update creates any fallback; a late seat already created one
-    /// `Wait` per selected actor. Those fallbacks are the manager's newest
-    /// sequences. Removing them and rewinding the two counters to the oldest
-    /// removed id puts the late seat back at the forward tick's allocator
-    /// state; the shared `launch_element` path is then deterministic on both
-    /// seats. Every slot is checked against its owner before removal — fail
-    /// rather than invent a value when the shape does not match.
+    /// actor update creates any fallback; a late seat has already created one
+    /// `Wait` per idle actor — not only per selected PC. A soldier's Wait can
+    /// therefore be the newest slot when the command arrives (#94). Find each
+    /// selected actor's Wait from the tail, bound the target frame's
+    /// allocations by the oldest match, and reclaim every sequence from there
+    /// to the tail. Removing them and rewinding both counters puts the late
+    /// seat back at the forward tick's allocator state; the shared
+    /// `launch_element` path is then deterministic on both seats and each
+    /// reclaimed fallback is re-homed with its state intact.
     pub(crate) fn rewind_latest_wait_slots(&mut self, owners: &[EntityId]) -> Vec<Sequence> {
         assert!(!owners.is_empty(), "cannot rewind no wait slots");
-        assert!(
-            self.sequences.len() >= owners.len(),
-            "not enough sequences to hold the target frame's fallbacks"
-        );
 
-        // Newest-first from the tail, reversed so each slot lines up with the
-        // actor that created it at the target frame.
-        let mut anchors: Vec<SequenceId> = self
-            .sequences
-            .keys()
+        let newest_first: Vec<SequenceId> = self.sequences.keys().rev().copied().collect();
+        let mut reclaim_from: Option<usize> = None;
+        for owner in owners {
+            let index = newest_first.iter().position(|id| {
+                self.sequences.get(id).is_some_and(|seq| {
+                    seq.elements.len() == 1
+                        && seq.elements[0].command == crate::element::Command::Wait
+                        && seq.elements[0].owner == Some(*owner)
+                })
+            });
+            match index {
+                Some(index) => {
+                    // `newest_first` indices grow older, so the oldest match
+                    // is the largest index; everything newer than it belongs
+                    // to the same frame and must be reclaimed too.
+                    reclaim_from = Some(reclaim_from.map_or(index, |old| old.max(index)));
+                }
+                None => tracing::warn!(
+                    ?owner,
+                    "late teleport: no target-frame Wait fallback to rewind"
+                ),
+            }
+        }
+        let Some(reclaim_from) = reclaim_from else {
+            return Vec::new();
+        };
+
+        // Oldest-first, so the caller re-homes the frame's fallbacks in the
+        // order the forward seat's actor update created them.
+        let anchors: Vec<SequenceId> = newest_first[..=reclaim_from]
+            .iter()
             .rev()
-            .take(owners.len())
             .copied()
             .collect();
-        anchors.reverse();
-        let mut element_ids = Vec::with_capacity(anchors.len());
-        for (owner, anchor) in owners.iter().zip(&anchors) {
+        let mut element_ids = Vec::new();
+        for anchor in &anchors {
             let seq = self
                 .sequences
                 .get(anchor)
                 .unwrap_or_else(|| panic!("missing target-frame fallback slot {anchor:?}"));
-            assert_eq!(
-                seq.elements.len(),
-                1,
-                "target-frame fallback {anchor:?} is not a single-element Wait"
-            );
-            let element = &seq.elements[0];
-            assert_eq!(
-                element.command,
-                crate::element::Command::Wait,
-                "target-frame fallback {anchor:?} is not a Wait"
-            );
-            assert_eq!(
-                element.owner,
-                Some(*owner),
-                "target-frame fallback {anchor:?} is not owned by {owner:?}"
-            );
-            element_ids.push(element.id);
+            element_ids.extend(seq.elements.iter().map(|element| element.id));
         }
 
         let mut removed = Vec::with_capacity(anchors.len());
@@ -439,7 +445,7 @@ impl SequenceManager {
             removed.push(old);
         }
 
-        // The rewound slots must be the newest allocations; otherwise the
+        // The reclaimed slots must be the newest allocations; otherwise the
         // counters cannot be restored to their target-frame values.
         let max_seq = anchors
             .iter()
