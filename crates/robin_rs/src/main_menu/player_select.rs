@@ -487,7 +487,16 @@ impl SelectPlayerState {
         let transform = screen.transform;
         let renderer = &mut *io.renderer;
         let resources = io.resources;
-        screen.begin_draw(renderer);
+        // #117: the selection screen is a full-screen surface, not a modal
+        // over the main menu. Own the frame so any nested dialog (the
+        // erase-profile confirmation included) freezes this screen rather
+        // than the stale main-menu composite left in the render target.
+        if selection_owns_frame() {
+            renderer.begin_gpu_frame_clear();
+            renderer.begin_ui_only_frame();
+        } else {
+            screen.begin_draw(renderer);
+        }
 
         if let Some(bg) = resources.menu_bg[2] {
             draw_screen_background(renderer, &bg);
@@ -546,6 +555,13 @@ struct PlayerProfileRow {
     difficulty: DifficultyLevel,
     progression: u32,
     active: bool,
+}
+
+/// #117: player selection is a full-screen surface, so it must own its GPU
+/// frame rather than inherit the main-menu composite through `begin_draw`.
+/// A nested dialog then freezes the selection screen behind itself.
+pub(super) fn selection_owns_frame() -> bool {
+    true
 }
 
 impl From<&PlayerProfile> for PlayerProfileRow {
@@ -2000,6 +2016,14 @@ mod tests {
             input_state: ModalInputState::new(),
             empty_keyboard: UiKeyboard::default(),
         }
+    }
+
+    #[test]
+    fn nested_dialogs_freeze_the_player_selection_screen_not_the_main_menu() {
+        assert!(
+            selection_owns_frame(),
+            "selection must own its frame so nested dialogs inherit its background"
+        );
     }
 
     #[test]
