@@ -37,7 +37,9 @@ On the owner laptop, with the stable 0.4.0 install and the full-game data root:
    reproduction, failing check) before a fix.
 
 The runtime here cannot perform steps 1–3: the stable native install is on
-`laptop` (and the Windows seat in [PLAY.md](../PLAY.md)), not on this host, and
-no full-game data root or replay is available here. No live repro is claimed.
+`laptop` (and the Windows seat in [PLAY.md](../PLAY.md)), not on this host. The
+replays in this runtime's `~/.local/share/robin_hood/replays/` are earlier
+session recordings, not an owner-supplied #86 repro; no full-game data root is
+present here either. No live repro is claimed.
 The regression test remains the only check bound to the issue until the owner
 supplies a bundle or a replay.
