@@ -28,7 +28,9 @@ function browserEnvironment(canvas: HTMLCanvasElement): CanvasEnvironment {
   };
   return {
     viewport: () => ({
-      fullscreen: document.fullscreenElement === canvas,
+      // The fullscreen button can promote the document rather than the
+      // canvas. Any element in fullscreen means the browser chrome is gone.
+      fullscreen: document.fullscreenElement !== null,
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio,
@@ -64,8 +66,10 @@ function browserEnvironment(canvas: HTMLCanvasElement): CanvasEnvironment {
 }
 
 /**
- * Keep CSS layout pixels separate from the WebGPU backing store. The canvas
- * fits the browser viewport in CSS while its drawable size follows device
+ * Keep CSS layout pixels separate from the WebGPU backing store. The shell
+ * gives the canvas the whole viewport (minus safe-area insets) and lets the
+ * engine's own aspect-fit letterbox inside it; a second aspect clamp here
+ * would double-letterbox and leave gutters. The drawable size follows device
  * pixels, allowing winit to report native-resolution resize events on HiDPI
  * and fullscreen displays.
  */
@@ -79,21 +83,10 @@ export function installCanvasBackingStore(
     const { fullscreen, innerWidth, innerHeight, devicePixelRatio, insets } =
       environment.viewport();
     const safe = fullscreen ? NO_INSETS : (insets ?? NO_INSETS);
-    const availableWidth = Math.max(1, innerWidth - (fullscreen ? 0 : 16) - safe.left - safe.right);
-    const availableHeight = Math.max(
-      1,
-      innerHeight - (fullscreen ? 0 : 16) - safe.top - safe.bottom,
-    );
-    const availableAspect = availableWidth / availableHeight;
-    const targetAspect = fullscreen
-      ? availableAspect
-      : Math.min(16 / 9, Math.max(4 / 3, availableAspect));
-    const cssWidth =
-      availableAspect >= targetAspect ? availableHeight * targetAspect : availableWidth;
-    const cssHeight =
-      availableAspect >= targetAspect ? availableHeight : availableWidth / targetAspect;
-    canvas.style.width = `${Math.round(cssWidth)}px`;
-    canvas.style.height = `${Math.round(cssHeight)}px`;
+    const availableWidth = Math.max(1, innerWidth - safe.left - safe.right);
+    const availableHeight = Math.max(1, innerHeight - safe.top - safe.bottom);
+    canvas.style.width = `${Math.round(availableWidth)}px`;
+    canvas.style.height = `${Math.round(availableHeight)}px`;
 
     const bounds = canvas.getBoundingClientRect();
     const scale = devicePixelRatio || 1;
