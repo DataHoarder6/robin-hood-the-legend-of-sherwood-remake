@@ -385,9 +385,12 @@ pub(crate) async fn show_main_menu(
     // Continue is an action on a concrete resume slot; with no slot it is
     // absent, not a disabled button. The manager is now authoritative, so the
     // layout can be built once with the correct entry set. Select Player can
-    // replace the manager later; `sync_continue_presence` rebuilds then.
-    let (buttons, frame) =
-        main_menu_layout(&menu_resources, save_manager.find_resume_target().is_some());
+    // replace the manager later; `sync_save_buttons` rebuilds then.
+    let (buttons, frame) = main_menu_layout(
+        &menu_resources,
+        save_manager.find_resume_target().is_some(),
+        load_button_enabled(&save_manager),
+    );
 
     if open_options_initially
         && options::show_main_menu_options(
@@ -423,11 +426,18 @@ pub(crate) async fn show_main_menu(
     }
 }
 
+/// #118: Load names a concrete save slot, so it is visible but disabled when
+/// the active profile's index has no entries at all.
+fn load_button_enabled(save_manager: &SaveGameManager) -> bool {
+    save_manager.saves().len() > 0
+}
+
 /// Main-menu buttons (bottom-right column, `align_bottom_right` spacing=2)
 /// and the widget frame that arms them.
 fn main_menu_layout(
     resources: &IngameMenuResources,
     continue_available: bool,
+    load_available: bool,
 ) -> (Vec<(String, ClickAction)>, FrameWnd) {
     let (btn_w, btn_h) = resources.button_dimensions();
 
@@ -479,7 +489,12 @@ fn main_menu_layout(
 
     let labels: Vec<(&str, bool)> = buttons
         .iter()
-        .map(|(label, _)| (label.as_str(), true))
+        .map(|(label, action)| {
+            (
+                label.as_str(),
+                !matches!(action, ClickAction::LoadGame) || load_available,
+            )
+        })
         .collect();
     let positions = align_bottom_right(&labels, btn_w, btn_h);
 
@@ -567,20 +582,27 @@ impl MainMenuState {
     /// Continue is laid out only when the current manager has a resume slot.
     /// Button ids are indices in the column, so adding or removing that entry
     /// shifts every later id; a partial widget update cannot express it.
-    fn sync_continue_presence(
+    fn sync_save_buttons(
         &mut self,
         resources: &IngameMenuResources,
         save_manager: &SaveGameManager,
     ) {
-        let available = save_manager.find_resume_target().is_some();
-        let present = self
+        let continue_available = save_manager.find_resume_target().is_some();
+        let load_available = load_button_enabled(save_manager);
+        let continue_present = self
             .buttons
             .iter()
             .any(|(_, action)| matches!(action, ClickAction::Continue));
-        if present == available {
+        let load_enabled = self
+            .buttons
+            .iter()
+            .position(|(_, action)| matches!(action, ClickAction::LoadGame))
+            .and_then(|index| self.frame.widget(index as u32))
+            .is_some_and(|widget| widget.base().enabled);
+        if continue_present == continue_available && load_enabled == load_available {
             return;
         }
-        let (buttons, frame) = main_menu_layout(resources, available);
+        let (buttons, frame) = main_menu_layout(resources, continue_available, load_available);
         self.buttons = buttons;
         self.frame = frame;
         self.keyboard_selection = 0;
@@ -725,7 +747,7 @@ impl MainMenuState {
         // Select Player swaps `session.save_manager` in place inside dispatch;
         // re-derive Continue's presence from the current manager before this
         // frame renders, so the button never advertises a stale resume target.
-        self.sync_continue_presence(io.resources, session.save_manager);
+        self.sync_save_buttons(io.resources, session.save_manager);
 
         if exit_requested && confirm_exit(io, session.application_context).await {
             return Ok(Some(MainMenuChoice::Exit));
@@ -995,6 +1017,10 @@ async fn dispatch_click(
             Some(MainMenuChoice::Load { slot, mission_id })
         }
         ClickAction::LoadGame => {
+            if !load_button_enabled(session.save_manager) {
+                tracing::info!("Load: active profile has no save files");
+                return Ok(None);
+            }
             save_load::run_main_menu_load(
                 application_context,
                 io.window,
@@ -1361,6 +1387,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn load_button_availability_tracks_the_active_profiles_save_index() {
+        use crate::savegame::{SaveGame, SlotState};
+
+        let empty = SaveGameManager::new(String::new());
+        assert!(!load_button_enabled(&empty));
+
+        let mut with_save = SaveGameManager::new(String::new());
+        with_save.insert_test_slot(
+            SaveGame::new("Continue".into(), "Continue".into(), 1),
+            SlotState::Published,
+        );
+        assert!(load_button_enabled(&with_save));
+    }
+
+    #[test]
     fn main_menu_frame_state_retains_navigation_and_reports_close_with_activation() {
         let mut frame = FrameWnd::interactive();
         for id in 0..3 {
@@ -1408,7 +1449,7 @@ mod tests {
     #[test]
     fn start_button_is_labelled_new_game() {
         let resources = IngameMenuResources::stub();
-        let (buttons, _) = main_menu_layout(&resources, false);
+        let (buttons, _) = main_menu_layout(&resources, false, true);
         assert!(
             buttons.iter().any(|(label, _)| label == "New Game"),
             "expected an unambiguous New Game entry, got {buttons:?}"
@@ -1419,11 +1460,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn load_widget_is_greyed_when_the_profile_has_no_savefiles() {
+        let resources = IngameMenuResources::stub();
+        let (buttons, empty_frame) = main_menu_layout(&resources, false, false);
+        let load_index = buttons
+            .iter()
+            .position(|(_, action)| matches!(action, ClickAction::LoadGame))
+            .expect("Load row exists");
+        assert!(
+            !empty_frame
+                .widget(load_index as u32)
+                .expect("Load widget exists")
+                .base()
+                .enabled,
+            "Load must be visible but disabled with an empty save index"
+        );
+        let (_, populated_frame) = main_menu_layout(&resources, false, true);
+        assert!(
+            populated_frame
+                .widget(load_index as u32)
+                .expect("Load widget exists")
+                .base()
+                .enabled
+        );
+    }
+
     /// Issue #100: Continue is only meaningful when there is a resume slot.
     #[test]
     fn continue_entry_is_absent_without_a_save() {
         let resources = IngameMenuResources::stub();
-        let (buttons, _) = main_menu_layout(&resources, false);
+        let (buttons, _) = main_menu_layout(&resources, false, true);
         assert!(
             !buttons.iter().any(|(label, _)| label == "Continue"),
             "Continue must not be advertised without a resume slot, got {buttons:?}"
@@ -1433,7 +1500,7 @@ mod tests {
     #[test]
     fn continue_entry_is_present_and_distinct_when_a_save_exists() {
         let resources = IngameMenuResources::stub();
-        let (buttons, _) = main_menu_layout(&resources, true);
+        let (buttons, _) = main_menu_layout(&resources, true, true);
         assert_eq!(
             buttons
                 .iter()
