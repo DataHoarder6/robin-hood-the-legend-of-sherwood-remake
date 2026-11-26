@@ -2754,6 +2754,7 @@ function compileAssetGameplayAttempt(
       { ...mask.rules, layer },
       mask.cullBackfaces,
       mask.alphaCoverage,
+      document.camera,
     );
     maskIndices.set(
       mask.id,

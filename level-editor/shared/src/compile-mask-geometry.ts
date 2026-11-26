@@ -1,5 +1,5 @@
 import type { Mask, Point } from "./level.ts";
-import type { Vec3 } from "./scene.ts";
+import { gameToBakedMap, type MapCamera, type Vec3 } from "./scene.ts";
 import { encodeMaskBitmap } from "./encode-mask-bitmap.ts";
 import { decodeMaskAlphaCoverage, type MaskAlphaCoverage } from "./mask-alpha-sampler.ts";
 
@@ -61,7 +61,9 @@ export function maskBoundaryPolyline(boundary: Point[], closed = true): Point[] 
 }
 
 /** Rasterize placed 3D coverage in bounded tiles. Bitmap holes remain empty
- * unless covered by another triangle. Winding matters only for authored one-sided coverage. */
+ * unless covered by another triangle. Winding matters only for authored one-sided coverage.
+ * `camera` supplies the bake yaw: bitmaps land in that direction's image plane,
+ * while the gameplay coordinates they are built from remain canonical. */
 export function rasterizeMaskGeometry(
   triangles: MaskTriangle[],
   rules: Pick<
@@ -70,13 +72,19 @@ export function rasterizeMaskGeometry(
   >,
   cullBackfaces = false,
   alphaCoverage?: MaskAlphaCoverage,
+  camera?: MapCamera,
 ): Mask[] {
   if (!triangles.length) throw new Error("Mask coverage requires triangles");
   const acceptsAlpha = alphaCoverage && decodeMaskAlphaCoverage(alphaCoverage, triangles.length);
   // Scene/game matrix roundoff must not add a whole empty border row or column.
   const snap = (n: number) => (Math.abs(n - Math.round(n)) < 1e-7 ? Math.round(n) : n);
+  // Keep the yaw-zero path byte-identical: only a yawed bake rotates the basis.
   const projected = triangles.map((triangle) =>
-    triangle.map(([x, y, z]): Point => [snap(x), snap(y - z)]),
+    triangle.map((point): Point => {
+      const [x, y] =
+        camera && camera.yaw_deg ? gameToBakedMap(camera, point) : [point[0], point[1] - point[2]];
+      return [snap(x), snap(y)];
+    }),
   );
   const box = [Infinity, Infinity, -Infinity, -Infinity];
   for (const triangle of projected)

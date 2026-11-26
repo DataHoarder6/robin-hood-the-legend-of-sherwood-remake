@@ -997,6 +997,28 @@ impl Renderer {
             .upload_background_texture(&self.gpu, width, height, pixels)
     }
 
+    /// Install the second pre-baked terrain. Separate from the base upload so
+    /// an absent alternate never displaces the shipped background.
+    pub fn upload_directional_background_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: &[u16],
+    ) -> bool {
+        self.resources
+            .upload_directional_background_texture(&self.gpu, width, height, pixels)
+    }
+
+    pub(crate) fn clear_directional_background_texture(&mut self) {
+        self.resources.clear_directional_background_texture();
+    }
+
+    /// Host-only background selection, applied by `draw_background` from the
+    /// viewport's direction step. Never reaches the engine or replay stream.
+    pub(crate) fn set_direction_step(&mut self, step: u8) {
+        self.resources.set_direction_step(step);
+    }
+
     pub(crate) fn install_map_appearance(
         &mut self,
         background: &robin_engine::engine::level_loading::PreDecodedBackground,
@@ -1038,7 +1060,7 @@ impl Renderer {
         height: u32,
         angle: f32,
     ) -> bool {
-        let Some(bg) = self.resources.background_texture.as_ref() else {
+        let Some(bg) = self.resources.selected_background_texture() else {
             return false;
         };
         let texture = self.queue_cached_bg(bg.bind_group.clone());
@@ -1058,7 +1080,7 @@ impl Renderer {
         src_rect: Option<&BBox>,
         dst_rect: Option<&BBox>,
     ) -> bool {
-        let Some(bg) = self.resources.background_texture.as_ref() else {
+        let Some(bg) = self.resources.selected_background_texture() else {
             return false;
         };
         let bg_bind_group = bg.bind_group.clone();

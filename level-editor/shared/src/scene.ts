@@ -24,6 +24,13 @@ export interface MapCamera {
   kind: "oblique-orthographic";
   /** camera elevation above the ground plane in degrees */
   elevation_deg: number;
+  /**
+   * Compass yaw of the bake camera in degrees, 0 <= yaw < 360; absent means 0.
+   * Gameplay coordinates stay canonical: a game point always projects to
+   * (x, y - z). Yaw only rotates the basis used to render and rasterize maps,
+   * so the same GLB can be baked from several directions.
+   */
+  yaw_deg?: number;
 }
 
 /**
@@ -122,6 +129,36 @@ export function cameraFromFit(sinElevation: number): MapCamera {
 function sincos(cam: MapCamera): [number, number] {
   const t = (cam.elevation_deg * Math.PI) / 180;
   return [Math.sin(t), Math.cos(t)];
+}
+
+/** Sine/cosine of the camera yaw. Cardinal headings are exact, so a quarter
+ * turn never leaks 6e-17 into map pixels or mask bitmaps. */
+export function yawSinCos(cam: MapCamera): [number, number] {
+  const degrees = (((cam.yaw_deg ?? 0) % 360) + 360) % 360;
+  const quarter = Math.round(degrees / 90) % 4;
+  if (Math.abs(degrees - quarter * 90) < 1e-9)
+    return [[0, 1, 0, -1][quarter]!, [1, 0, -1, 0][quarter]!];
+  const t = (degrees * Math.PI) / 180;
+  return [Math.sin(t), Math.cos(t)];
+}
+
+/** Scene point -> baked map pixel in the camera's yawed image plane. The
+ * runtime never sees this yaw: gameplay keeps projecting as (x, y - z), and
+ * the yawed bake places geometry/masks at those same canonical pixels. */
+export function sceneToBakedMap(cam: MapCamera, p: Vec3): [number, number] {
+  const [s, c] = sincos(cam);
+  const [ys, yc] = yawSinCos(cam);
+  const x = p[0] * yc + p[1] * ys;
+  const y = -p[0] * ys + p[1] * yc;
+  return [x, -y * s - p[2] * c];
+}
+
+/** Game point -> baked map pixel for this camera yaw. At yaw zero this is
+ * exactly [x, y - z]; the helper exists so no call site may re-derive it. */
+export function gameToBakedMap(cam: MapCamera, p: Vec3): [number, number] {
+  const [s] = sincos(cam);
+  const [ys, yc] = yawSinCos(cam);
+  return [p[0] * yc - (p[1] / s) * ys, p[0] * s * ys + p[1] * yc - p[2]];
 }
 
 /** map pixel on the ground plane -> scene point */

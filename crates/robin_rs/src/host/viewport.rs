@@ -59,6 +59,11 @@ pub struct ViewportState {
     /// Rendered angle, eased towards `camera_angle` between frames.
     display_angle: f32,
     saved_camera_angle: Option<f32>,
+    /// Position on the 24-step direction ring; one step is 15°. `0` is the
+    /// shipped orientation, every other step a host-only presentation choice.
+    direction_step: u8,
+    /// Exact camera state captured when leaving step 0, restored on return.
+    saved_direction_camera: Option<(MapPoint, MapPoint, f32, f32, f32, f32, f32, f32)>,
     last_rotation_ms: Option<u32>,
     /// Uptime at which the angle readout stops showing. Host-only.
     readout_until_ms: Option<u32>,
@@ -121,6 +126,8 @@ impl ViewportState {
             compass_heading: 0.0,
             display_angle: 0.0,
             saved_camera_angle: None,
+            direction_step: 0,
+            saved_direction_camera: None,
             last_rotation_ms: None,
             readout_until_ms: None,
         }
@@ -229,6 +236,51 @@ impl ViewportState {
         self.readout_until_ms = None;
         self.apply_rotation_constraints();
         changed
+    }
+
+    /// Position on the 24-step direction ring (one step = 15°). Host-only.
+    pub fn direction_step(&self) -> u8 {
+        self.direction_step
+    }
+
+    /// Add signed steps modulo 24, so the player can turn in either direction
+    /// through a whole turn. Leaving step 0 captures the exact camera tuple;
+    /// returning to step 0 restores it, including the interpolator endpoints
+    /// the presentation pass reads. Host-only: no engine state, no GameAction.
+    pub fn step_direction(&mut self, delta: i8) {
+        let from = self.direction_step;
+        // Widen before adding: any i8 delta combined with a step in 0..24
+        // must wrap on the ring, never overflow the arithmetic type.
+        let to = (i16::from(from) + i16::from(delta)).rem_euclid(24) as u8;
+        if to == from {
+            return;
+        }
+        if from == 0 {
+            self.saved_direction_camera = Some((
+                self.view_position,
+                self.old_view_position,
+                self.zoom_factor,
+                self.old_zoom_factor,
+                self.player_zoom_factor,
+                self.camera_angle,
+                self.compass_heading,
+                self.display_angle,
+            ));
+        } else if to == 0 {
+            let saved = self
+                .saved_direction_camera
+                .take()
+                .expect("direction step left 0 without a saved camera");
+            self.view_position = saved.0;
+            self.old_view_position = saved.1;
+            self.zoom_factor = saved.2;
+            self.old_zoom_factor = saved.3;
+            self.player_zoom_factor = saved.4;
+            self.camera_angle = saved.5;
+            self.compass_heading = saved.6;
+            self.display_angle = saved.7;
+        }
+        self.direction_step = to;
     }
 
     /// Show the angle readout for a short time after a rotation input.
@@ -933,6 +985,95 @@ mod viewport_touch_tests {
             "a wider screen must cap the step"
         );
         assert!(viewport.zoom_factor <= 2.0);
+    }
+
+    #[test]
+    fn direction_step_restores_the_exact_camera_state() {
+        let mut viewport = ViewportState::new(800.0, 600.0);
+        viewport.set_level_size(2000.0, 2000.0);
+        viewport.center_on_point(MapPoint::new(500.0, 400.0));
+        viewport.rotate_by(1);
+        viewport.rotate_heading(2);
+        viewport.advance_rotation(0);
+        viewport.zoom_by(0.25, None);
+
+        let original = (
+            viewport.view_position,
+            viewport.old_view_position,
+            viewport.zoom_factor,
+            viewport.old_zoom_factor,
+            viewport.player_zoom_factor,
+            viewport.camera_angle(),
+            viewport.compass_heading(),
+            viewport.display_angle(),
+        );
+        assert_eq!(viewport.direction_step(), 0);
+
+        viewport.step_direction(1);
+        assert_eq!(viewport.direction_step(), 1);
+
+        // While stepped away from zero the player may still move and rotate.
+        viewport.center_on_point(MapPoint::new(900.0, 700.0));
+        viewport.rotate_by(-1);
+        viewport.rotate_heading(3);
+        viewport.advance_rotation(150);
+        viewport.zoom_by(0.5, None);
+
+        viewport.step_direction(-1);
+        assert_eq!(viewport.direction_step(), 0);
+        assert_eq!(viewport.view_position, original.0);
+        assert_eq!(viewport.old_view_position, original.1);
+        close(viewport.zoom_factor, original.2);
+        close(viewport.old_zoom_factor, original.3);
+        close(viewport.player_zoom_factor, original.4);
+        close(viewport.camera_angle(), original.5);
+        close(viewport.compass_heading(), original.6);
+        close(viewport.display_angle(), original.7);
+    }
+
+    #[test]
+    fn direction_step_wraps_in_both_directions_and_restores_at_zero() {
+        let mut viewport = ViewportState::new(800.0, 600.0);
+        viewport.set_level_size(2000.0, 2000.0);
+        viewport.center_on_point(MapPoint::new(500.0, 400.0));
+        let original = (
+            viewport.view_position,
+            viewport.zoom_factor,
+            viewport.camera_angle(),
+            viewport.compass_heading(),
+        );
+
+        // Negative from zero wraps to the last step of the 24-step ring.
+        viewport.step_direction(-1);
+        assert_eq!(viewport.direction_step(), 23);
+        viewport.center_on_point(MapPoint::new(800.0, 600.0));
+        viewport.rotate_heading(1);
+        // Positive from the last step lands exactly back on zero.
+        viewport.step_direction(1);
+        assert_eq!(viewport.direction_step(), 0);
+        assert_eq!(viewport.view_position, original.0);
+        close(viewport.zoom_factor, original.1);
+        close(viewport.camera_angle(), original.2);
+        close(viewport.compass_heading(), original.3);
+
+        // The mirror path: positive from zero, negative back to zero.
+        viewport.step_direction(1);
+        assert_eq!(viewport.direction_step(), 1);
+        viewport.zoom_by(0.25, None);
+        viewport.step_direction(-1);
+        assert_eq!(viewport.direction_step(), 0);
+        close(viewport.zoom_factor, original.1);
+
+        // A whole turn is a no-op: it neither changes the step nor discards
+        // the camera captured for the next return to zero.
+        viewport.step_direction(24);
+        assert_eq!(viewport.direction_step(), 0);
+        assert_eq!(viewport.view_position, original.0);
+        viewport.step_direction(6);
+        assert_eq!(viewport.direction_step(), 6);
+        viewport.step_direction(-6);
+        assert_eq!(viewport.direction_step(), 0);
+        close(viewport.zoom_factor, original.1);
     }
 
     #[test]

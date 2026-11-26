@@ -196,6 +196,14 @@ function camera(v: unknown, path: string) {
     path,
     "elevation must be between 0 and 90 degrees",
   );
+  if (c.yaw_deg !== undefined) {
+    finite(c.yaw_deg, `${path}.yaw_deg`);
+    check(
+      c.yaw_deg >= 0 && c.yaw_deg < 360,
+      `${path}.yaw_deg`,
+      "yaw must be between 0 and 360 degrees",
+    );
+  }
 }
 function base(v: unknown, path: string) {
   const d = object(v, path);
@@ -402,7 +410,8 @@ export function parseLevel3D(value: unknown, context: DocumentContext = {}): Lev
       "does not match source scene",
     );
     check(
-      d.camera.elevation_deg === context.scene.camera.elevation_deg,
+      d.camera.elevation_deg === context.scene.camera.elevation_deg &&
+        (d.camera.yaw_deg ?? 0) === (context.scene.camera.yaw_deg ?? 0),
       "level3d.camera",
       "does not match source scene",
     );

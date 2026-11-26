@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { DEFAULT_LIGHTING, sceneToMap, type MapCamera } from "@rle/shared";
+import { DEFAULT_LIGHTING, sceneToBakedMap, yawSinCos, type MapCamera } from "@rle/shared";
 import { stableOpaqueSort } from "./render-order.ts";
 import { TextureDisplay } from "./texture-display.ts";
 import { SunLighting } from "./sun-lighting.ts";
@@ -96,7 +96,7 @@ export function contentBakeBounds(
         const point = new THREE.Vector3()
           .fromBufferAttribute(positions, i)
           .applyMatrix4(node.matrixWorld);
-        bounds.expandByPoint(new THREE.Vector2(...sceneToMap(camera, point.toArray())));
+        bounds.expandByPoint(new THREE.Vector2(...sceneToBakedMap(camera, point.toArray())));
       }
     }
     for (const child of node.children) visit(child);
@@ -109,6 +109,26 @@ export function contentBakeBounds(
     bounds.max.x - bounds.min.x,
     bounds.max.y - bounds.min.y,
   ]);
+}
+
+/** Orthographic camera offset from the bake centre in the renderer's Y-up
+ * frame. Yaw orbits the camera about scene Z (GL Y); elevation is unchanged. */
+export function bakeCameraOffset(cam: MapCamera, distance: number): [number, number, number] {
+  const angle = (cam.elevation_deg * Math.PI) / 180;
+  const [yawSin, yawCos] = yawSinCos(cam);
+  return [
+    Math.cos(angle) * yawSin * distance,
+    Math.sin(angle) * distance,
+    Math.cos(angle) * yawCos * distance,
+  ];
+}
+
+/** Ground-Y written by the depth pass for a point in the bake's Y-up world
+ * frame. Yaw rotates the world into the camera frame before reading the
+ * north-south coordinate the runtime compares sprites against. */
+export function bakeDepthGroundY(cam: MapCamera, worldX: number, worldZ: number): number {
+  const [yawSin, yawCos] = yawSinCos(cam);
+  return Math.sin((cam.elevation_deg * Math.PI) / 180) * (worldX * yawSin + worldZ * yawCos);
 }
 
 function depthMaterial(source: THREE.Material, camera: MapCamera, bounds: BakeBounds) {
@@ -135,6 +155,8 @@ function depthMaterial(source: THREE.Material, camera: MapCamera, bounds: BakeBo
   material.toneMapped = false;
   const display = new TextureDisplay();
   display.material(material);
+  const yawed = Boolean(camera.yaw_deg);
+  const [yawSin, yawCos] = yawSinCos(camera);
   const prepare = material.onBeforeCompile.bind(material);
   material.onBeforeCompile = (shader, renderer) => {
     prepare(shader, renderer);
@@ -142,10 +164,20 @@ function depthMaterial(source: THREE.Material, camera: MapCamera, bounds: BakeBo
     shader.uniforms.bakeOriginY = { value: bounds[1] };
     shader.uniforms.bakeHeight = { value: bounds[3] };
     shader.vertexShader =
-      "varying float bakeGroundY;\nuniform float bakeSin;\n" + shader.vertexShader;
+      (yawed
+        ? "varying float bakeGroundY;\nuniform float bakeSin;\nuniform float bakeYawSin;\nuniform float bakeYawCos;\n"
+        : "varying float bakeGroundY;\nuniform float bakeSin;\n") + shader.vertexShader;
+    if (yawed) {
+      shader.uniforms.bakeYawSin = { value: yawSin };
+      shader.uniforms.bakeYawCos = { value: yawCos };
+    }
+    const world = "(modelMatrix * vec4(transformed, 1.0))";
+    const groundY = yawed
+      ? `bakeSin * (${world}.x * bakeYawSin + ${world}.z * bakeYawCos)`
+      : `${world}.z * bakeSin`;
     shader.vertexShader = shader.vertexShader.replace(
       "#include <project_vertex>",
-      "#include <project_vertex>\nbakeGroundY = (modelMatrix * vec4(transformed, 1.0)).z * bakeSin;",
+      `#include <project_vertex>\nbakeGroundY = ${groundY};`,
     );
     shader.fragmentShader =
       "varying float bakeGroundY;\nuniform float bakeOriginY;\nuniform float bakeHeight;\n" +
@@ -159,7 +191,7 @@ function depthMaterial(source: THREE.Material, camera: MapCamera, bounds: BakeBo
     }`;
   };
   material.customProgramCacheKey = () =>
-    "map-bake-ground-depth-v1:" + JSON.stringify(source.userData);
+    "map-bake-ground-depth-v2:" + (camera.yaw_deg ?? 0) + ":" + JSON.stringify(source.userData);
   return material;
 }
 
@@ -254,9 +286,9 @@ function* mapBakeTiles(
       0.1,
       distance * 3,
     );
-    camera.position
-      .copy(center)
-      .add(new THREE.Vector3(0, Math.sin(angle), Math.cos(angle)).multiplyScalar(distance));
+    // Orbit the orthographic camera about the scene's vertical (GL Y) axis.
+    // Geometry, bounds and gameplay stay canonical; only the view direction turns.
+    camera.position.copy(center).add(new THREE.Vector3(...bakeCameraOffset(cameraModel, distance)));
     camera.lookAt(center);
     camera.updateMatrixWorld(true);
     const tile = Math.min(tileLimit, renderer.capabilities.maxTextureSize);

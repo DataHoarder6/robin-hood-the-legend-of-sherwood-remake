@@ -15,6 +15,61 @@ use super::{
     sprite_rgba_for_upload, upload_rgba_texture,
 };
 
+/// Which pre-baked background a direction step draws. Host-only: the engine
+/// never sees this choice and no simulation state depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BackgroundVariant {
+    Base,
+    Directional,
+}
+
+/// One entry per `ViewportState::direction_step()` value (`0..24`). A table,
+/// not arithmetic, so giving an individual step its own bake is an explicit
+/// edit here rather than a change to the renderer.
+pub(super) const DIRECTION_BACKGROUND_VARIANTS: [BackgroundVariant; 24] = [
+    BackgroundVariant::Base,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+    BackgroundVariant::Directional,
+];
+
+pub(super) fn background_variant_for_direction_step(step: u8) -> BackgroundVariant {
+    DIRECTION_BACKGROUND_VARIANTS[usize::from(step)]
+}
+
+/// Pick the installed texture for the step. A missing directional bake yields
+/// no background — it is never silently replaced with the base bake.
+pub(super) fn select_background<'a, T>(
+    base: Option<&'a T>,
+    directional: Option<&'a T>,
+    step: u8,
+) -> Option<&'a T> {
+    match background_variant_for_direction_step(step) {
+        BackgroundVariant::Base => base,
+        BackgroundVariant::Directional => directional,
+    }
+}
+
 pub(super) struct GpuResources {
     pub(super) uploads: super::diagnostics::UploadCounters,
     pub(super) managed_surfaces: HashMap<u32, ManagedSurface>,
@@ -26,6 +81,9 @@ pub(super) struct GpuResources {
     pub(super) sprite_cache: SpriteTextureCache,
     pub(super) mask_alpha_cache: HashMap<u32, MaskAlpha>,
     pub(super) background_texture: Option<BackgroundTexture>,
+    /// Second pre-baked terrain, selected when `direction_step() != 0`.
+    pub(super) directional_background_texture: Option<BackgroundTexture>,
+    direction_step: u8,
     pub(super) sampler: wgpu::Sampler,
     pub(super) linear_sampler: wgpu::Sampler,
     pub(super) bgl_tex: wgpu::BindGroupLayout,
@@ -466,6 +524,8 @@ impl GpuResources {
             sprite_cache: SpriteTextureCache::default(),
             mask_alpha_cache: HashMap::new(),
             background_texture: None,
+            directional_background_texture: None,
+            direction_step: 0,
             sampler,
             linear_sampler,
             bgl_tex,
@@ -521,12 +581,13 @@ impl GpuResources {
         self.mask_alpha_cache.clear();
     }
 
-    pub(super) fn upload_background_texture(
+    fn store_background_texture(
         &mut self,
         gpu: &GpuContext,
         width: u32,
         height: u32,
         pixels: &[u16],
+        variant: BackgroundVariant,
     ) -> bool {
         if width == 0 || height == 0 || pixels.len() != width as usize * height as usize {
             return false;
@@ -547,13 +608,58 @@ impl GpuResources {
             &self.sampler,
             "background bg",
         );
-        self.background_texture = Some(BackgroundTexture {
+        let background = BackgroundTexture {
             _view: view,
             bind_group,
             width,
             height,
-        });
+        };
+        match variant {
+            BackgroundVariant::Base => self.background_texture = Some(background),
+            BackgroundVariant::Directional => {
+                self.directional_background_texture = Some(background)
+            }
+        }
         true
+    }
+
+    pub(super) fn upload_background_texture(
+        &mut self,
+        gpu: &GpuContext,
+        width: u32,
+        height: u32,
+        pixels: &[u16],
+    ) -> bool {
+        self.store_background_texture(gpu, width, height, pixels, BackgroundVariant::Base)
+    }
+
+    pub(super) fn upload_directional_background_texture(
+        &mut self,
+        gpu: &GpuContext,
+        width: u32,
+        height: u32,
+        pixels: &[u16],
+    ) -> bool {
+        self.store_background_texture(gpu, width, height, pixels, BackgroundVariant::Directional)
+    }
+
+    pub(super) fn clear_directional_background_texture(&mut self) {
+        self.directional_background_texture = None;
+    }
+
+    /// Host-only selector. The viewport owns the step; no engine state,
+    /// replay byte or hash is touched by changing it.
+    pub(super) fn set_direction_step(&mut self, step: u8) {
+        assert!(step < 24, "direction step outside 0..24: {step}");
+        self.direction_step = step;
+    }
+
+    pub(super) fn selected_background_texture(&self) -> Option<&BackgroundTexture> {
+        select_background(
+            self.background_texture.as_ref(),
+            self.directional_background_texture.as_ref(),
+            self.direction_step,
+        )
     }
 
     pub(super) fn ensure_font_atlas(
@@ -657,6 +763,69 @@ fn mask_atlas_enabled() -> bool {
             );
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod background_variant_tests {
+    use super::{
+        BackgroundVariant, DIRECTION_BACKGROUND_VARIANTS, background_variant_for_direction_step,
+        select_background,
+    };
+
+    #[test]
+    fn direction_step_zero_selects_the_base_background() {
+        assert_eq!(
+            background_variant_for_direction_step(0),
+            BackgroundVariant::Base
+        );
+    }
+
+    #[test]
+    fn every_nonzero_direction_step_selects_the_directional_background() {
+        for step in 1..24 {
+            assert_eq!(
+                background_variant_for_direction_step(step),
+                BackgroundVariant::Directional,
+                "step {step} must select the alternate bake"
+            );
+        }
+    }
+
+    #[test]
+    fn selection_uses_the_installed_slot_for_each_step() {
+        let base = 1;
+        let directional = 2;
+        assert_eq!(
+            select_background(Some(&base), Some(&directional), 0),
+            Some(&1)
+        );
+        assert_eq!(
+            select_background(Some(&base), Some(&directional), 1),
+            Some(&2)
+        );
+        assert_eq!(
+            select_background(Some(&base), Some(&directional), 23),
+            Some(&2)
+        );
+    }
+
+    #[test]
+    fn a_missing_directional_bake_yields_no_background() {
+        let base = 1;
+        assert_eq!(select_background(Some(&base), None, 0), Some(&1));
+        assert_eq!(select_background(Some(&base), None, 7), None);
+    }
+
+    #[test]
+    fn selection_table_has_one_entry_per_direction_step() {
+        assert_eq!(DIRECTION_BACKGROUND_VARIANTS.len(), 24);
+        assert_eq!(DIRECTION_BACKGROUND_VARIANTS[0], BackgroundVariant::Base);
+        assert!(
+            DIRECTION_BACKGROUND_VARIANTS[1..]
+                .iter()
+                .all(|variant| *variant == BackgroundVariant::Directional)
+        );
     }
 }
 

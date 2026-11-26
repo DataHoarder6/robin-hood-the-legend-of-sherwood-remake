@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { sceneToMap, remapPatchExtras, type Level3D, type MapCamera } from "@rle/shared";
+import { sceneToBakedMap, remapPatchExtras, type Level3D, type MapCamera } from "@rle/shared";
 import type { GameplayAssetDescriptor } from "../../shared/src/asset-gameplay.ts";
 import { compileAppearanceBindings } from "../../shared/src/compile-appearance-bindings.ts";
 import type { BakeBounds, BakePixels } from "./map-compile.ts";
@@ -186,12 +186,12 @@ export function planAppearanceRegions(
         const point = new THREE.Vector3()
           .fromBufferAttribute(positions, i)
           .applyMatrix4(node.matrixWorld);
-        box.expandByPoint(new THREE.Vector2(...sceneToMap(camera, point.toArray())));
+        box.expandByPoint(new THREE.Vector2(...sceneToBakedMap(camera, point.toArray())));
         if (shadowDirection && !node.userData.noSunShadow) {
           const shadow = point
             .clone()
             .addScaledVector(shadowDirection, -(point.z - sceneBounds.min.z) / shadowDirection.z);
-          box.expandByPoint(new THREE.Vector2(...sceneToMap(camera, shadow.toArray())));
+          box.expandByPoint(new THREE.Vector2(...sceneToBakedMap(camera, shadow.toArray())));
         }
       }
       if (shadowDirection && !node.userData.noSunShadow) box.expandByScalar(shadowPadding);

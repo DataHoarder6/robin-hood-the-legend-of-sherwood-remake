@@ -135,6 +135,31 @@ fn plan_step_shortcuts(
     }
 }
 
+/// Physical edges for the two host-only orientation controls. Factored out of
+/// the frame collector so the modifier and gating rules are testable without
+/// constructing a whole Mission session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct ViewRotationEdgeInput {
+    shift_held: bool,
+    comma_pressed: bool,
+    period_pressed: bool,
+    gated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct ViewRotationEdges {
+    comma: bool,
+    period: bool,
+}
+
+fn plan_view_rotation_edges(input: ViewRotationEdgeInput) -> ViewRotationEdges {
+    let active = input.shift_held && !input.gated;
+    ViewRotationEdges {
+        comma: active && input.comma_pressed,
+        period: active && input.period_pressed,
+    }
+}
+
 fn input_modifiers(
     keys: &std::collections::BTreeSet<winit::keyboard::KeyCode>,
     plan_binding_held: bool,
@@ -489,24 +514,30 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
                 .viewport
                 .set_rotation_readout(frame.started_at_ms);
         }
-        // Shift+Comma/Period are the compass-heading controls. They are
-        // physical edges outside GameAction, so replays stay byte-identical.
-        if shift_held
-            && input.translator.was_key_pressed(KeyCode::Comma, keys)
-            && host.frontend.viewport.rotate_heading(-1)
-        {
-            host.frontend
-                .viewport
-                .set_rotation_readout(frame.started_at_ms);
-        }
-        if shift_held
-            && input.translator.was_key_pressed(KeyCode::Period, keys)
-            && host.frontend.viewport.rotate_heading(1)
-        {
-            host.frontend
-                .viewport
-                .set_rotation_readout(frame.started_at_ms);
-        }
+    }
+    // Shift+Comma/Period step both the compass heading and the host-only
+    // direction ring. They are physical edges outside GameAction, so replays
+    // stay byte-identical; the pure planner keeps them gated exactly like the
+    // other host-only view edges above.
+    let view_edges = plan_view_rotation_edges(ViewRotationEdgeInput {
+        shift_held,
+        comma_pressed: input.translator.was_key_pressed(KeyCode::Comma, keys),
+        period_pressed: input.translator.was_key_pressed(KeyCode::Period, keys),
+        gated: step_keys_gated,
+    });
+    if view_edges.comma {
+        host.frontend.viewport.rotate_heading(-1);
+        host.frontend.viewport.step_direction(-1);
+        host.frontend
+            .viewport
+            .set_rotation_readout(frame.started_at_ms);
+    }
+    if view_edges.period {
+        host.frontend.viewport.rotate_heading(1);
+        host.frontend.viewport.step_direction(1);
+        host.frontend
+            .viewport
+            .set_rotation_readout(frame.started_at_ms);
     }
     let step_shortcuts = plan_step_shortcuts(
         StepShortcutInput {
@@ -711,6 +742,73 @@ mod tests {
 
         assert!(output.forward);
         assert_eq!(output.manual_pause, Some(false));
+    }
+
+    #[test]
+    fn shift_direction_step_edges_require_shift_and_respect_gating() {
+        let base = ViewRotationEdgeInput {
+            shift_held: true,
+            comma_pressed: false,
+            period_pressed: false,
+            gated: false,
+        };
+        assert_eq!(
+            plan_view_rotation_edges(ViewRotationEdgeInput {
+                comma_pressed: true,
+                ..base
+            }),
+            ViewRotationEdges {
+                comma: true,
+                period: false,
+            },
+        );
+        assert_eq!(
+            plan_view_rotation_edges(ViewRotationEdgeInput {
+                period_pressed: true,
+                ..base
+            }),
+            ViewRotationEdges {
+                comma: false,
+                period: true,
+            },
+        );
+        // Without Shift, Comma/Period keep belonging to the step shortcuts.
+        assert_eq!(
+            plan_view_rotation_edges(ViewRotationEdgeInput {
+                shift_held: false,
+                comma_pressed: true,
+                period_pressed: true,
+                ..base
+            }),
+            ViewRotationEdges {
+                comma: false,
+                period: false,
+            },
+        );
+        assert_eq!(
+            plan_view_rotation_edges(ViewRotationEdgeInput {
+                gated: true,
+                comma_pressed: true,
+                period_pressed: true,
+                ..base
+            }),
+            ViewRotationEdges {
+                comma: false,
+                period: false,
+            },
+        );
+        // Pressing both together still fires both edges: neither key is stolen.
+        assert_eq!(
+            plan_view_rotation_edges(ViewRotationEdgeInput {
+                comma_pressed: true,
+                period_pressed: true,
+                ..base
+            }),
+            ViewRotationEdges {
+                comma: true,
+                period: true,
+            },
+        );
     }
 
     #[test]
