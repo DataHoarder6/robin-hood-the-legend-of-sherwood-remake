@@ -37,6 +37,7 @@ use robin_engine::engine::{
     DevState, Engine, ExternalAction, ExternalActionResult, FrameConsoleResponse, LevelAssets,
     SimulationFrameInput,
 };
+use robin_engine::game_operation::MissionResult;
 
 /// Maximum characters in the input line.
 const MAX_INPUT_LEN: usize = 128;
@@ -546,6 +547,15 @@ impl ConsoleOverlay {
         } else if let Some(command) = parse_with_final(trimmed, dev.console.use_final) {
             dev.console.push_history(trimmed);
             if let Some(result) = command.mission_result() {
+                // Sherwood is the campaign hub, not a mission to finish. A
+                // forced win there would end the hub and skip the campaign
+                // handoff; refuse it on the console without staging a command.
+                if result == MissionResult::Won && engine.is_sherwood(&assets.profile_manager) {
+                    self.push_output(OutputLine::Error(
+                        "/win is not available in Sherwood Forest".to_owned(),
+                    ));
+                    return;
+                }
                 // This is a session decision, not a local cheat. Stage it for
                 // the host to send as one authoritative command; the cheat
                 // dispatcher's local mutation would desync every other seat.
@@ -1072,6 +1082,80 @@ mod tests {
                 "{line}: the request is drained once"
             );
         }
+    }
+
+    /// #126: Sherwood Forest is the campaign hub, not a mission to finish.
+    /// `/win` must be refused inline there, and the refusal must not stage a
+    /// mission-end command. The same command still works in a mission.
+    #[test]
+    fn win_is_refused_in_sherwood_but_staged_in_a_mission() {
+        use robin_engine::game_operation::MissionResult;
+
+        fn sherwood_engine() -> (Engine, LevelAssets) {
+            let mut assets = LevelAssets::new();
+            let mut profiles = robin_engine::profiles::ProfileManager::new();
+            profiles
+                .missions
+                .push(robin_engine::profiles::MissionProfile {
+                    id: 1,
+                    location: robin_engine::profiles::MissionLocation::Sherwood,
+                    ..Default::default()
+                });
+            assets.profile_manager = profiles.into();
+            let mut campaign = robin_engine::campaign::Campaign::default();
+            let mut mission = robin_engine::mission::Mission::new();
+            mission.profile_idx = Some(0);
+            campaign.missions.push(mission);
+            campaign.current_mission_idx = Some(0);
+            let engine = Engine::new_for_test(640.0, 480.0, campaign, &mut assets)
+                .expect("synthetic Sherwood engine");
+            (engine, assets)
+        }
+
+        fn submit_win(engine: &mut Engine, assets: &LevelAssets) -> ConsoleOverlay {
+            let mut host = Host::scratch(640.0, 480.0);
+            let mut overlay = ConsoleOverlay::new();
+            let mut dev = DevState::default();
+            let mut actions = Vec::new();
+            overlay.toggle();
+            overlay.input = "/WIN".into();
+            overlay.submit(&mut host, engine, assets, &mut dev, &mut actions);
+            assert!(actions.is_empty(), "a mission end is never a local action");
+            overlay
+        }
+
+        let (mut sherwood, sherwood_assets) = sherwood_engine();
+        assert!(
+            sherwood.is_sherwood(&sherwood_assets.profile_manager),
+            "the fixture must actually be Sherwood"
+        );
+        let mut refused = submit_win(&mut sherwood, &sherwood_assets);
+        assert_eq!(
+            refused.take_pending_mission_result(),
+            None,
+            "Sherwood must not dispatch a win command"
+        );
+        assert!(
+            refused.output.iter().any(|line| matches!(
+                line,
+                OutputLine::Error(reason)
+                    if reason.to_ascii_lowercase().contains("sherwood")
+            )),
+            "the console must explain the refusal inline"
+        );
+
+        let (mut mission, mission_assets) =
+            robin_engine::test_support::fresh_engine_sized(640.0, 480.0);
+        assert!(
+            !mission.is_sherwood(&mission_assets.profile_manager),
+            "the fixture must not be Sherwood"
+        );
+        let mut accepted = submit_win(&mut mission, &mission_assets);
+        assert_eq!(
+            accepted.take_pending_mission_result(),
+            Some(MissionResult::Won),
+            "a mission must still accept the forced win"
+        );
     }
 
     #[test]

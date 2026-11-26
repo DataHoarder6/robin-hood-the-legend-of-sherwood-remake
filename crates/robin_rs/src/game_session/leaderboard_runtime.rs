@@ -91,24 +91,47 @@ async fn prepare(
             board.board_id
         )));
     }
+    let (eligible_artifact, submission_unavailable_reason) =
+        submission_offer(replay, artifact, unavailable);
+    let eligible_submission = eligible_artifact.map(|artifact| MissionEndSubmissionInput {
+        board_id: board.board_id.clone(),
+        mission_id: header.mission_id.clone(),
+        requested_metrics: board.metrics.clone(),
+        // TODO: expose an anonymous-upload preference; uploads are named.
+        public_disclosure: ParticipantPublicDisclosureV1::NamedProfile,
+        replay: artifact,
+        replay_session_id,
+    });
     let bundle = MissionEndRunBundle {
         outcome: MissionEndOutcome::from_replay(replay),
         multiplayer: header.sim_config.coop.players > 1 || transcript.max_concurrent_players > 1,
         tick_duration: metadata.tick_duration,
         boards,
-        eligible_submission: artifact.map(|artifact| MissionEndSubmissionInput {
-            board_id: board.board_id.clone(),
-            mission_id: header.mission_id.clone(),
-            requested_metrics: board.metrics.clone(),
-            // TODO: expose an anonymous-upload preference; uploads are named.
-            public_disclosure: ParticipantPublicDisclosureV1::NamedProfile,
-            replay: artifact,
-            replay_session_id,
-        }),
-        submission_unavailable_reason: unavailable,
+        eligible_submission,
+        submission_unavailable_reason,
     };
     bundle.validate()?;
     Ok((bundle, bytes))
+}
+
+/// Why a forced win cannot be uploaded. Boards stay browsable; only the
+/// replay-based submission is suppressed.
+const FORCED_WIN_NO_SUBMISSION: &str =
+    "A forced win is not submitted; the leaderboards are shown for review only.";
+
+/// The single leaderboard-offer decision for one recording. A `/win` run
+/// carries an explicit `ForceMissionEnd` in its command stream; it still
+/// shows the boards, but must never produce an upload offer.
+fn submission_offer(
+    replay: &robin_engine::replay::ReplayData,
+    artifact: Option<robin_run_protocol::ReplayArtifactV1>,
+    unavailable: Option<String>,
+) -> (Option<robin_run_protocol::ReplayArtifactV1>, Option<String>) {
+    if MissionEndOutcome::forced_win_in_replay(replay) {
+        (None, Some(FORCED_WIN_NO_SUBMISSION.to_owned()))
+    } else {
+        (artifact, unavailable)
+    }
 }
 
 fn replay_submission_unavailable_reason(
@@ -631,6 +654,160 @@ mod tests {
             replay_submission_unavailable_reason(&invalid_solo)
                 .unwrap()
                 .is_some()
+        );
+    }
+
+    /// #120: a forced win is a real win for the debriefing and the boards,
+    /// but the `/win` command's explicit `ForceMissionEnd` must keep the
+    /// controller out of `AwaitingConsent`. A scripted win keeps its offer.
+    #[test]
+    fn forced_win_shows_boards_without_offering_submission() {
+        use crate::leaderboard::test_fixtures::{
+            MISSION_ID, compact_replay_bytes, replay_artifact,
+        };
+        use crate::leaderboard_mission_end::{
+            MissionEndBoard, MissionEndLeaderboardBackend, MissionEndLeaderboardController,
+            MissionEndRunBundle, MissionEndSubmissionInput, MissionEndTask, MissionSubmissionState,
+            QueuedSubmission,
+        };
+        use robin_engine::game_operation::{GameCode, MissionResult};
+        use robin_engine::player_command::{PlayerCommand, PlayerInput};
+        use robin_run_protocol::{
+            BoardMetricV1, Digest32, LeaderboardPageV2, LeaderboardQueryV2, OpaqueId,
+            ParticipantPublicDisclosureV1, SCHEMA_VERSION_V2, TickDurationV1,
+        };
+
+        struct NoCallsBackend;
+        impl MissionEndLeaderboardBackend for NoCallsBackend {
+            fn registration(
+                &mut self,
+            ) -> Result<crate::leaderboard_registration::Registration, String> {
+                Err("no registration in this seam test".to_owned())
+            }
+            fn board(
+                &mut self,
+                _query: LeaderboardQueryV2,
+            ) -> Result<Box<dyn MissionEndTask<LeaderboardPageV2>>, String> {
+                Err("no board in this seam test".to_owned())
+            }
+            fn submit(
+                &mut self,
+                _input: MissionEndSubmissionInput,
+                _replay: Arc<[u8]>,
+            ) -> Result<Box<dyn MissionEndTask<QueuedSubmission>>, String> {
+                Err("no upload in this seam test".to_owned())
+            }
+        }
+
+        fn ending_replay(force: bool) -> robin_engine::replay::ReplayData {
+            let replay = crate::leaderboard::test_fixtures::single_frame_replay(bitcode::encode(
+                &Campaign::default(),
+            ));
+            let mut file = ReplayFile::from(&replay);
+            let frame = file.frames.get_mut(&0).expect("single-frame fixture");
+            if force {
+                frame.input.commands.push(
+                    PlayerInput::host(PlayerCommand::ForceMissionEnd {
+                        result: MissionResult::Won,
+                    })
+                    .into(),
+                );
+            }
+            frame.input.post_commands.push(
+                PlayerInput::host(PlayerCommand::ApplyQuitMissionUpdates {
+                    exit_code: GameCode::LevelSucceeded,
+                    difficulty: robin_engine::player_profile::DifficultyLevel::Medium,
+                    completed_at_unix_seconds: None,
+                    campaign_run_nonce: None,
+                })
+                .into(),
+            );
+            ReplayData::try_from(file).expect("a valid terminal replay")
+        }
+
+        fn controller(
+            replay: &robin_engine::replay::ReplayData,
+            artifact: Option<robin_run_protocol::ReplayArtifactV1>,
+            unavailable: Option<String>,
+            compact: Arc<[u8]>,
+        ) -> MissionEndLeaderboardController {
+            let (eligible_artifact, submission_unavailable_reason) =
+                submission_offer(replay, artifact, unavailable);
+            let eligible_submission = eligible_artifact.map(|replay| MissionEndSubmissionInput {
+                board_id: OpaqueId::new("demo-standard-normal").unwrap(),
+                mission_id: MISSION_ID.to_owned(),
+                requested_metrics: vec![BoardMetricV1::OriginalScore],
+                public_disclosure: ParticipantPublicDisclosureV1::NamedProfile,
+                replay,
+                replay_session_id: Digest32::from_bytes([9; 32]),
+            });
+            let bundle = MissionEndRunBundle {
+                outcome: MissionEndOutcome::Won,
+                multiplayer: false,
+                tick_duration: TickDurationV1 {
+                    numerator_micros: 40_000,
+                    denominator: 1,
+                },
+                boards: vec![MissionEndBoard {
+                    tab: LeaderboardTab::Score,
+                    label: "Score".to_owned(),
+                    query: LeaderboardQueryV2 {
+                        schema_version: SCHEMA_VERSION_V2,
+                        board_id: OpaqueId::new("demo-standard-normal").unwrap(),
+                        mission_id: MISSION_ID.to_owned(),
+                        metric: BoardMetricV1::OriginalScore,
+                        max_concurrent_players: Some(1),
+                        player_public_key: None,
+                        include_metrics: None,
+                        limit: 50,
+                        cursor: None,
+                    },
+                }],
+                eligible_submission,
+                submission_unavailable_reason,
+            };
+            MissionEndLeaderboardController::new(
+                bundle,
+                compact,
+                LeaderboardPreferences::default(),
+                Box::new(NoCallsBackend),
+            )
+            .expect("a valid leaderboard-offer bundle")
+        }
+
+        let compact: Arc<[u8]> = compact_replay_bytes().into();
+        let artifact = || replay_artifact(&compact);
+
+        let forced = controller(
+            &ending_replay(true),
+            Some(artifact()),
+            None,
+            Arc::clone(&compact),
+        );
+        assert_eq!(
+            forced.outcome(),
+            MissionEndOutcome::Won,
+            "a forced win still reaches the win debriefing and boards"
+        );
+        assert!(!forced.boards().is_empty(), "boards must still be shown");
+        assert!(
+            !matches!(
+                forced.submission_state(),
+                MissionSubmissionState::AwaitingConsent
+            ),
+            "a forced win must never be offered for submission"
+        );
+
+        let scripted = controller(
+            &ending_replay(false),
+            Some(artifact()),
+            None,
+            Arc::clone(&compact),
+        );
+        assert_eq!(
+            scripted.submission_state(),
+            &MissionSubmissionState::AwaitingConsent,
+            "a scripted win keeps the current submit offer"
         );
     }
 

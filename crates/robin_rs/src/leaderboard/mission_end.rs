@@ -62,6 +62,30 @@ impl MissionEndOutcome {
         Self::Interrupted
     }
 
+    /// The explicit forced-win marker a `/win` (or HTTP mission-result)
+    /// command leaves in the recording. This reads the command itself, never
+    /// `ApplyQuitMissionUpdates.exit_code`: a scripted win and a forced win
+    /// end with the same code but only one may be uploaded.
+    pub(crate) fn forced_win_in_replay(replay: &robin_engine::replay::ReplayData) -> bool {
+        use robin_engine::{game_operation::MissionResult, player_command::PlayerCommand};
+        (0..replay.frame_count()).any(|ordinal| {
+            let frame = replay.frame(ordinal).expect("validated replay frame");
+            frame
+                .input
+                .commands
+                .iter()
+                .chain(&frame.input.post_commands)
+                .any(|input| {
+                    matches!(
+                        &input.player_input().command,
+                        PlayerCommand::ForceMissionEnd {
+                            result: MissionResult::Won
+                        }
+                    )
+                })
+        })
+    }
+
     pub const fn can_submit(self) -> bool {
         matches!(self, Self::Won)
     }
