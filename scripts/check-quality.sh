@@ -234,6 +234,7 @@ case "$1" in
         # not to a hard-coded upstream hostname.
         node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts
         python3 -m unittest discover -s scripts/validation -p supervised_test.py
+python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
 
         test -f scripts/test_portable_linker.py
         python3 -m unittest discover -s scripts -p test_portable_linker.py
