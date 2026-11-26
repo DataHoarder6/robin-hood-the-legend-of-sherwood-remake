@@ -22,6 +22,7 @@ commit=$(git -C "$repo" rev-parse "$tag^{commit}")
 # points at. Resolving the tag itself bakes the tag object's id instead.
 short=$(git -C "$repo" rev-parse --short=12 "$tag^{commit}")
 verifier_remote=/home/admin/build/robin-deploy/verify-cloudflare-deployment-$short.mjs
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$build_host" mkdir -p /home/admin/build/robin-deploy
 scp -q "$PWD/wasm-www/scripts/verify-cloudflare-deployment.mjs" "$build_host:$verifier_remote"
 echo "deploy_web_jautis: $tag -> $short ($commit)"
 
