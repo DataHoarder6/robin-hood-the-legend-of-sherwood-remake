@@ -11,7 +11,7 @@
 set -euo pipefail
 
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-host=${ROBIN_BUILD_HOST:-build-host}
+host=${ROBIN_BUILD_HOST:-minipc}
 target=${SHIP_DEV_TARGET:-laptop}
 
 remote_dir=$(bash "$repository/scripts/remote-check.sh" --sync)

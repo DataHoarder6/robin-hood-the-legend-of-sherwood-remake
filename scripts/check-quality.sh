@@ -315,6 +315,7 @@ case "$1" in
             'bash scripts/test_release_gate.sh' \
             'bash scripts/test_build_host.sh' \
             'bash scripts/test_remote_check.sh' \
+            'bash scripts/test_ship_dev.sh' \
             'bash scripts/tests/gate-shared-fifo.sh' \
             'bash scripts/tests/run-suites.sh' \
             'bash scripts/tests/gate-lanes.sh' \
