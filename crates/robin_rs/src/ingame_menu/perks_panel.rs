@@ -10,19 +10,18 @@
 //! under the cursor, and Escape or the Cancel button closes the panel.
 
 use crate::gfx_types::{GameEvent, Keycode};
-use robin_engine::campaign::{Campaign, CampaignValue, PerkPurchaseRow, PerkPurchaseState};
-use robin_engine::pc_status::Perk;
+use robin_engine::campaign::{
+    Campaign, CampaignValue, SkillNode, SkillPurchaseState, SkillTreeRow,
+};
 use robin_engine::player_command::PlayerCommand;
 use robin_engine::profiles::ProfileManager;
 use robin_engine::sherwood_stat::MenuTextLookup;
 
 use super::layout::{MENU_W, MenuTransform, draw_screen_background, render_text_virt_font};
 use super::resources::{
-    IngameMenuResources, MT_BTN_CANCEL, MT_STR_AMULETS, MT_STR_PERK_AFFORDABLE,
-    MT_STR_PERK_AUTO_LOOT, MT_STR_PERK_HINT, MT_STR_PERK_KEEP_MOVING_IN_COMBAT,
-    MT_STR_PERK_LAST_CLOVER, MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
-    MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK, MT_STR_PERK_OWNED, MT_STR_PERK_ROW,
-    MT_STR_PERK_UNAFFORDABLE, MT_TTL_SHERWOOD_PERKS, substitute_integer,
+    IngameMenuResources, MT_BTN_CANCEL, MT_STR_AMULETS, MT_STR_PERK_AFFORDABLE, MT_STR_PERK_HINT,
+    MT_STR_PERK_LAST_CLOVER, MT_STR_PERK_OWNED, MT_STR_PERK_ROW, MT_STR_PERK_UNAFFORDABLE,
+    MT_TTL_SHERWOOD_PERKS, substitute_integer,
 };
 use super::trading::substitute;
 use super::widget_bridge::{self, ModalInputState, ModalScreenIo, ScreenFrame, ScreenKey};
@@ -42,9 +41,9 @@ const BUTTON_Y: i32 = 414;
 pub enum PerksPanelOutcome {
     /// Escape, Quit, or the Cancel button.
     Close,
-    /// A row was activated and may be bought.  The authoritative handler still
-    /// owns price, affordability and already-owned checks.
-    Purchase { character_idx: u16, perk: Perk },
+    /// A row was activated and may be bought.  The authoritative campaign
+    /// still owns price, prerequisites, affordability and ownership checks.
+    Purchase { character_idx: u16, node: SkillNode },
 }
 
 impl PerksPanelOutcome {
@@ -56,10 +55,10 @@ impl PerksPanelOutcome {
             Self::Close => None,
             Self::Purchase {
                 character_idx,
-                perk,
-            } => Some(PlayerCommand::CampaignPurchasePerk {
+                node,
+            } => Some(PlayerCommand::CampaignPurchaseSkill {
                 character_idx,
-                perk,
+                node,
             }),
         }
     }
@@ -128,16 +127,16 @@ pub fn campaign_rows(
     profiles: &ProfileManager,
     portraits: &crate::ui_panel::PortraitCache,
     menu_text: &dyn MenuTextLookup,
-) -> (Vec<PerkPurchaseRow>, i32) {
+) -> (Vec<SkillTreeRow>, i32) {
     let names = character_names(campaign, profiles, portraits, menu_text);
     (
-        campaign.perk_purchase_rows(&names),
+        campaign.skill_tree_rows(&names),
         campaign.get_value(CampaignValue::Amulets),
     )
 }
 
 pub struct PerksPanelModalState {
-    rows: Vec<PerkPurchaseRow>,
+    rows: Vec<SkillTreeRow>,
     clovers: i32,
     selected: usize,
     scroll_top: usize,
@@ -154,7 +153,7 @@ impl PerksPanelModalState {
         window: &crate::window::GameWindow,
         renderer: &crate::renderer::Renderer,
         resources: &IngameMenuResources,
-        rows: Vec<PerkPurchaseRow>,
+        rows: Vec<SkillTreeRow>,
         clovers: i32,
     ) -> Self {
         Self::build(
@@ -167,7 +166,7 @@ impl PerksPanelModalState {
 
     fn build(
         resources: &IngameMenuResources,
-        rows: Vec<PerkPurchaseRow>,
+        rows: Vec<SkillTreeRow>,
         clovers: i32,
         input: ModalInputState,
     ) -> Self {
@@ -202,7 +201,7 @@ impl PerksPanelModalState {
     ///
     /// Called each tick by the driver so a purchase lands on the next frame
     /// without the panel caching a stale row state.
-    pub fn set_rows(&mut self, rows: Vec<PerkPurchaseRow>, clovers: i32) {
+    pub fn set_rows(&mut self, rows: Vec<SkillTreeRow>, clovers: i32) {
         self.rows = rows;
         self.clovers = clovers;
         self.clamp_selection();
@@ -282,7 +281,7 @@ impl PerksPanelModalState {
         }
         Some(PerksPanelOutcome::Purchase {
             character_idx: row.character_idx,
-            perk: row.perk,
+            node: row.node,
         })
     }
 
@@ -373,14 +372,16 @@ impl PerksPanelModalState {
                 }
                 // The row's cost is priced in the same vocabulary the HUD's
                 // clover counter uses, so the panel and the HUD agree on the
-                // unit without a second word for it.
-                let line = perk_row_text(
+                // unit without a second word for it.  Tier and prerequisite
+                // arrows are drawn from the tree data, not invented here.
+                let line = skill_row_text(
                     &resources.menu_text.get(MT_STR_PERK_ROW),
                     &resources.menu_text.get(MT_STR_AMULETS),
                     row,
-                    &resources.menu_text.get(perk_label_key(row.perk)),
-                    &resources.menu_text.get(perk_state_key(row.state)),
+                    SkillNode::label(row.node),
+                    &skill_state_text(&resources.menu_text, row.state),
                 );
+                let line = format!("{} {}", tier_label(row.tier), line);
                 render_text_virt_font(renderer, font, transform, &line, ROW_X, y);
             }
             render_text_virt_font(
@@ -399,21 +400,25 @@ impl PerksPanelModalState {
     }
 }
 
-fn perk_label_key(perk: Perk) -> usize {
-    match perk {
-        Perk::KeepMovingInCombat => MT_STR_PERK_KEEP_MOVING_IN_COMBAT,
-        Perk::AutoLoot => MT_STR_PERK_AUTO_LOOT,
-        Perk::NoFriendlyFireDamage => MT_STR_PERK_NO_FRIENDLY_FIRE_DAMAGE,
-        Perk::NoFriendlyFireKnockback => MT_STR_PERK_NO_FRIENDLY_FIRE_KNOCKBACK,
+/// Tier heading printed at the start of each node row.
+fn tier_label(tier: u8) -> &'static str {
+    match tier {
+        1 => "Tier I",
+        2 => "Tier II",
+        3 => "Tier III",
+        _ => "Tier",
     }
 }
 
-fn perk_state_key(state: PerkPurchaseState) -> usize {
+/// The localized state word.  Prerequisites have no legacy menu-text id, so
+/// the tree's own short wording is used (no "why locked" tooltip is added).
+fn skill_state_text(menu_text: &dyn MenuTextLookup, state: SkillPurchaseState) -> String {
     match state {
-        PerkPurchaseState::Owned => MT_STR_PERK_OWNED,
-        PerkPurchaseState::Affordable => MT_STR_PERK_AFFORDABLE,
-        PerkPurchaseState::Unaffordable => MT_STR_PERK_UNAFFORDABLE,
-        PerkPurchaseState::WouldSpendLastClover => MT_STR_PERK_LAST_CLOVER,
+        SkillPurchaseState::PrerequisitesMissing => "needs earlier skills".to_owned(),
+        SkillPurchaseState::Owned => menu_text.get(MT_STR_PERK_OWNED),
+        SkillPurchaseState::Affordable => menu_text.get(MT_STR_PERK_AFFORDABLE),
+        SkillPurchaseState::Unaffordable => menu_text.get(MT_STR_PERK_UNAFFORDABLE),
+        SkillPurchaseState::WouldSpendLastClover => menu_text.get(MT_STR_PERK_LAST_CLOVER),
     }
 }
 
@@ -427,29 +432,36 @@ fn balance_text(amulets_template: &str, clovers: i32) -> String {
     substitute_integer(amulets_template, i64::from(clovers))
 }
 
-/// Render one perk row from the localized row and amulets templates.
+/// Render one skill-tree row from the localized row and amulets templates.
 ///
 /// `row_template` (`MT_STR_PERK_ROW`) carries only `%s` placeholders, so it
 /// still expands with the trading `substitute`; the amulets template carries
-/// one numeric price token and expands with `substitute_integer`.  Pure so
-/// the rendered cost can be asserted without a renderer.
-fn perk_row_text(
+/// one numeric price token and expands with `substitute_integer`.  A row with
+/// prerequisites gets an arrow prefix, so the tree structure is visible on
+/// screen without a separate "why locked" tooltip.  Pure so the rendered
+/// cost, tier and arrows can be asserted without a renderer.
+fn skill_row_text(
     row_template: &str,
     amulets_template: &str,
-    row: &PerkPurchaseRow,
-    perk_label: &str,
-    perk_state: &str,
+    row: &SkillTreeRow,
+    skill_label: &str,
+    skill_state: &str,
 ) -> String {
     let cost = substitute_integer(amulets_template, i64::from(row.cost));
+    let label = if row.prerequisites.is_empty() {
+        skill_label.to_owned()
+    } else {
+        format!("↳ needs earlier skills {skill_label}")
+    };
     substitute(
         row_template,
-        &[&row.character_name, perk_label, &cost, perk_state],
+        &[&row.character_name, &label, &cost, skill_state],
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PerksPanelModalState, PerksPanelOutcome, ROW_H, ROW_X, ROW_Y, perk_state_key};
+    use super::{PerksPanelModalState, PerksPanelOutcome, ROW_H, ROW_X, ROW_Y};
     use crate::gfx_types::GameEvent;
     use crate::ingame_menu::IngameMenuResources;
     use crate::ingame_menu::layout::MenuTransform;
@@ -459,12 +471,13 @@ mod tests {
     };
     use crate::ingame_menu::widget_bridge::ModalInputState;
     use robin_engine::campaign::{
-        MINIMUM_CLOVERS_AFTER_PURCHASE, PcDescription, PerkPurchaseState, perk_purchase_rows,
+        MINIMUM_CLOVERS_AFTER_PURCHASE, PcDescription, SkillNode, SkillPurchaseState,
+        skill_tree_rows,
     };
-    use robin_engine::pc_status::{PERK_CLOVER_COST, PcStatus, Perk};
+    use robin_engine::pc_status::{PcStatus, Perk};
 
-    /// The smallest purse that can buy a perk and still keep a clover back.
-    const PURSE: i32 = PERK_CLOVER_COST + MINIMUM_CLOVERS_AFTER_PURCHASE;
+    /// The smallest purse that can buy a Tier-I node and still keep a clover.
+    const PURSE: i32 = SkillNode::FleetFooted.cost() + MINIMUM_CLOVERS_AFTER_PURCHASE;
 
     fn character(name: &str, owned: &[Perk]) -> PcDescription {
         let mut description = PcDescription {
@@ -482,7 +495,7 @@ mod tests {
 
     fn panel(clovers: i32) -> PerksPanelModalState {
         let resources = IngameMenuResources::stub();
-        let rows = perk_purchase_rows(
+        let rows = skill_tree_rows(
             &[
                 character("Robin", &[Perk::KeepMovingInCombat]),
                 character("Little John", &[]),
@@ -498,6 +511,13 @@ mod tests {
             keycode,
             physical_key: None,
         }]
+    }
+
+    fn confirm(state: &mut PerksPanelModalState) -> Option<PerksPanelOutcome> {
+        state.handle_events(
+            &key(crate::gfx_types::Keycode::Return),
+            MenuTransform::centered(640, 480),
+        )
     }
 
     fn tap(x: i32, y: i32) -> Vec<GameEvent> {
@@ -516,8 +536,8 @@ mod tests {
     #[test]
     fn return_buys_the_selected_characters_row_exactly_once() {
         let mut state = panel(PURSE);
-        // Row 5 is Little John's AutoLoot row (4 perks per character).
-        state.move_selection(5);
+        // Row 9 is Little John's Fleet-footed row (9 nodes per character).
+        state.move_selection(9);
         let outcome = state.handle_events(
             &key(crate::gfx_types::Keycode::Return),
             MenuTransform::centered(640, 480),
@@ -526,7 +546,7 @@ mod tests {
             outcome,
             Some(PerksPanelOutcome::Purchase {
                 character_idx: 1,
-                perk: Perk::AutoLoot,
+                node: SkillNode::FleetFooted,
             })
         );
         let commands: Vec<_> = outcome
@@ -538,20 +558,20 @@ mod tests {
             1,
             "activating one row must emit exactly one command"
         );
-        let robin_engine::player_command::PlayerCommand::CampaignPurchasePerk {
+        let robin_engine::player_command::PlayerCommand::CampaignPurchaseSkill {
             character_idx,
-            perk,
+            node,
         } = &commands[0]
         else {
-            panic!("expected a perk purchase, got {:?}", commands[0]);
+            panic!("expected a skill purchase, got {:?}", commands[0]);
         };
-        assert_eq!((*character_idx, *perk), (1, Perk::AutoLoot));
+        assert_eq!((*character_idx, *node), (1, SkillNode::FleetFooted));
     }
 
     #[test]
     fn a_pointer_click_buys_the_row_under_the_cursor() {
         let mut state = panel(PURSE);
-        let row = 5;
+        let row = 9;
         let y = ROW_Y + row * ROW_H + ROW_H / 2;
         let x = ROW_X + 20;
         let outcome = state.handle_events(&tap(x, y), MenuTransform::centered(640, 480));
@@ -559,7 +579,7 @@ mod tests {
             outcome,
             Some(PerksPanelOutcome::Purchase {
                 character_idx: 1,
-                perk: Perk::AutoLoot,
+                node: SkillNode::FleetFooted,
             })
         );
     }
@@ -567,23 +587,25 @@ mod tests {
     #[test]
     fn owned_unaffordable_and_last_clover_rows_do_not_emit_a_purchase() {
         let resources = IngameMenuResources::stub();
-        let ownable = perk_purchase_rows(
+        let ownable = skill_tree_rows(
             &[character("Robin", &[Perk::KeepMovingInCombat])],
             &["Robin".to_owned()],
             PURSE,
         );
         let mut owned =
             PerksPanelModalState::build(&resources, ownable, PURSE, ModalInputState::new());
+        // Legacy KeepMovingInCombat is now the Fight Through node, row 4.
+        owned.move_selection(4);
         assert_eq!(
             owned.handle_events(
                 &key(crate::gfx_types::Keycode::Return),
                 MenuTransform::centered(640, 480),
             ),
             None,
-            "an owned perk is not purchasable"
+            "an owned node is not purchasable"
         );
 
-        let unaffordable = perk_purchase_rows(&[character("Robin", &[])], &["Robin".to_owned()], 0);
+        let unaffordable = skill_tree_rows(&[character("Robin", &[])], &["Robin".to_owned()], 0);
         let mut poor =
             PerksPanelModalState::build(&resources, unaffordable, 0, ModalInputState::new());
         assert_eq!(
@@ -592,18 +614,18 @@ mod tests {
                 MenuTransform::centered(640, 480),
             ),
             None,
-            "an unaffordable perk is not purchasable"
+            "an unaffordable node is not purchasable"
         );
 
-        let last_clover = perk_purchase_rows(
+        let last_clover = skill_tree_rows(
             &[character("Robin", &[])],
             &["Robin".to_owned()],
-            PERK_CLOVER_COST,
+            SkillNode::FleetFooted.cost(),
         );
         let mut saving = PerksPanelModalState::build(
             &resources,
             last_clover,
-            PERK_CLOVER_COST,
+            SkillNode::FleetFooted.cost(),
             ModalInputState::new(),
         );
         assert_eq!(
@@ -618,34 +640,50 @@ mod tests {
 
     #[test]
     fn every_refusal_state_has_its_own_row_text() {
-        assert_eq!(perk_state_key(PerkPurchaseState::Owned), MT_STR_PERK_OWNED);
+        let resources = IngameMenuResources::stub();
+        let menu_text = &resources.menu_text;
         assert_eq!(
-            perk_state_key(PerkPurchaseState::Affordable),
-            MT_STR_PERK_AFFORDABLE
+            super::skill_state_text(menu_text, SkillPurchaseState::Owned),
+            menu_text.get(MT_STR_PERK_OWNED)
         );
         assert_eq!(
-            perk_state_key(PerkPurchaseState::Unaffordable),
-            MT_STR_PERK_UNAFFORDABLE
+            super::skill_state_text(menu_text, SkillPurchaseState::Affordable),
+            menu_text.get(MT_STR_PERK_AFFORDABLE)
         );
         assert_eq!(
-            perk_state_key(PerkPurchaseState::WouldSpendLastClover),
-            MT_STR_PERK_LAST_CLOVER,
+            super::skill_state_text(menu_text, SkillPurchaseState::Unaffordable),
+            menu_text.get(MT_STR_PERK_UNAFFORDABLE)
+        );
+        assert_eq!(
+            super::skill_state_text(menu_text, SkillPurchaseState::WouldSpendLastClover),
+            menu_text.get(MT_STR_PERK_LAST_CLOVER),
             "an empty and a last-clover refusal must not share the same words"
         );
 
-        // The two refusals a full-enough purse can produce are distinct rows in
+        // The three refusals a full-enough purse can produce are distinct in
         // the model the panel renders, so the panel explains rather than greys.
-        let empty = perk_purchase_rows(&[character("Robin", &[])], &["Robin".to_owned()], 0);
-        let last = perk_purchase_rows(
+        let empty = skill_tree_rows(&[character("Robin", &[])], &["Robin".to_owned()], 0);
+        let last = skill_tree_rows(
             &[character("Robin", &[])],
             &["Robin".to_owned()],
-            PERK_CLOVER_COST,
+            SkillNode::FleetFooted.cost(),
         );
-        assert_eq!(empty[0].state, PerkPurchaseState::Unaffordable);
-        assert_eq!(last[0].state, PerkPurchaseState::WouldSpendLastClover);
+        assert_eq!(
+            empty[0].state,
+            robin_engine::campaign::SkillPurchaseState::Unaffordable
+        );
+        assert_eq!(
+            last[0].state,
+            robin_engine::campaign::SkillPurchaseState::WouldSpendLastClover
+        );
+        assert_eq!(
+            super::skill_state_text(menu_text, last[8].state),
+            "needs earlier skills",
+            "a locked tree node has its own short state text"
+        );
         assert_ne!(
-            perk_state_key(empty[0].state),
-            perk_state_key(last[0].state)
+            super::skill_state_text(menu_text, empty[0].state),
+            super::skill_state_text(menu_text, last[0].state)
         );
     }
 
@@ -669,13 +707,13 @@ mod tests {
         // Level.res ships "Amulets: %i"; the Rust fallback ships
         // "Amulets: %d".  Both must render the numeric cost, never the
         // literal printf token.
-        let rows = perk_purchase_rows(&[character("Robin", &[])], &["Robin".to_owned()], PURSE);
+        let rows = skill_tree_rows(&[character("Robin", &[])], &["Robin".to_owned()], PURSE);
         let row = &rows[0];
-        let line = super::perk_row_text(
+        let line = super::skill_row_text(
             "%s — %s — %s — %s",
             "Amulets: %i",
             row,
-            "Keep moving in combat",
+            SkillNode::label(row.node),
             "Affordable",
         );
         assert!(
@@ -715,7 +753,8 @@ mod tests {
             ..ProfileManager::default()
         };
         let portraits = crate::ui_panel::PortraitCache::new();
-        let menu_text = crate::ingame_menu::resources::MenuText::default();
+        let resources = IngameMenuResources::stub();
+        let menu_text = &resources.menu_text;
 
         let mut campaign = Campaign::default();
         // A modded save can carry a roster entry with no profile link, or a
@@ -734,7 +773,7 @@ mod tests {
             ..PcDescription::default()
         });
 
-        let names = super::character_names(&campaign, &profiles, &portraits, &menu_text);
+        let names = super::character_names(&campaign, &profiles, &portraits, menu_text);
         assert_eq!(names.len(), 3);
         assert_eq!(
             names[2], "Robin des bois",
@@ -747,6 +786,105 @@ mod tests {
         assert_eq!(
             names[1], "Character 2",
             "a dangling profile link needs a stable index fallback"
+        );
+    }
+
+    #[test]
+    fn tree_rows_name_the_tactical_use_tier_and_prerequisite_arrows() {
+        use robin_engine::campaign::skill_tree::{SkillNode, skill_tree_rows};
+
+        let characters = [character("Robin", &[])];
+        let rows = skill_tree_rows(&characters, &["Robin".to_owned()], 3);
+        assert_eq!(rows.len(), 9);
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                super::skill_row_text(
+                    "%s — %s — %s — %s",
+                    "Amulets: %i",
+                    row,
+                    SkillNode::label(row.node),
+                    "available",
+                )
+            })
+            .collect();
+        let joined = lines.join("\n");
+        for label in [
+            "Move faster on foot",
+            "Survive more blows",
+            "Walk without being heard",
+            "Hear guards from further away",
+            "Fight through a swordfight",
+            "Strike allies without hurting them",
+            "Open locks and climb walls",
+            "Loot a knocked-out guard",
+            "Never knock allies back",
+        ] {
+            assert!(joined.contains(label), "missing tactical label {label:?}");
+        }
+        assert!(
+            super::skill_row_text(
+                "%s — %s — %s — %s",
+                "Amulets: %i",
+                &rows[8],
+                SkillNode::label(rows[8].node),
+                "available",
+            )
+            .contains("needs earlier skills"),
+            "the Tier-III row must show its prerequisite arrows"
+        );
+        assert!(
+            super::tier_label(rows[0].tier).contains("I")
+                && super::tier_label(rows[8].tier).contains("III"),
+            "the tree must be grouped by tier"
+        );
+    }
+
+    #[test]
+    fn locked_and_owned_rows_emit_no_purchase_but_an_affordable_one_does() {
+        use robin_engine::campaign::skill_tree::{SkillNode, skill_tree_rows};
+
+        let resources = IngameMenuResources::stub();
+        let rows = skill_tree_rows(
+            &[character("Robin", &[Perk::KeepMovingInCombat])],
+            &["Robin".to_owned()],
+            3,
+        );
+        let mut state = PerksPanelModalState::build(&resources, rows, 3, ModalInputState::new());
+        // Tier III needs all four Tier-II nodes; the panel must not offer it.
+        state.move_selection(8);
+        assert_eq!(
+            confirm(&mut state),
+            None,
+            "a locked row must never ask the host to spend clovers"
+        );
+        // The bought Tier-II row reports ownership instead.
+        let fight_through = SkillNode::ALL
+            .iter()
+            .position(|node| *node == SkillNode::FightThrough)
+            .unwrap();
+        state.move_selection(fight_through as isize - 8);
+        assert_eq!(
+            confirm(&mut state),
+            None,
+            "an owned row is not bought twice"
+        );
+        // A prerequisite-free Tier-I row is offered exactly once.
+        state.move_selection(-3);
+        let outcome = confirm(&mut state);
+        assert_eq!(
+            outcome,
+            Some(PerksPanelOutcome::Purchase {
+                character_idx: 0,
+                node: SkillNode::Hardy,
+            })
+        );
+        assert_eq!(
+            outcome
+                .into_iter()
+                .filter_map(PerksPanelOutcome::player_command)
+                .count(),
+            1
         );
     }
 
@@ -764,7 +902,8 @@ mod tests {
             ..ProfileManager::default()
         };
         let portraits = crate::ui_panel::PortraitCache::new();
-        let menu_text = crate::ingame_menu::resources::MenuText::default();
+        let resources = IngameMenuResources::stub();
+        let menu_text = &resources.menu_text;
         let mut campaign = Campaign::default();
         campaign.characters.push(PcDescription {
             character_profile_idx: Some(CharacterProfileIdx(0)),
@@ -774,14 +913,14 @@ mod tests {
         // A character that never spawned has no `PcStatus::name`; the row label
         // comes from the profile the campaign created it from.
         assert_eq!(
-            super::character_names(&campaign, &profiles, &portraits, &menu_text),
+            super::character_names(&campaign, &profiles, &portraits, menu_text),
             vec!["Robin des bois".to_owned()]
         );
 
         // A spawned/renamed character keeps its live status name.
         campaign.characters[0].status.name = "Robin".to_owned();
         assert_eq!(
-            super::character_names(&campaign, &profiles, &portraits, &menu_text),
+            super::character_names(&campaign, &profiles, &portraits, menu_text),
             vec!["Robin".to_owned()]
         );
     }

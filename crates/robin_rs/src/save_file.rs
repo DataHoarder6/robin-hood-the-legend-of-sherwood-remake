@@ -1427,6 +1427,7 @@ mod tests {
             character_profile_idx: Some(CharacterProfileIdx(0)),
             instanced: true,
             status: status.clone(),
+            skills: Default::default(),
         });
         let mut assets = LevelAssets::new();
         let mut engine = Engine::new_for_test(800.0, 600.0, campaign, &mut assets)
