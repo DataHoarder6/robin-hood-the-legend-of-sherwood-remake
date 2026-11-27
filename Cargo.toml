@@ -195,10 +195,6 @@ opt-level = 3
 [profile.dev.package.robin_asset_codecs]
 opt-level = 1
 codegen-backend = "llvm"
-[profile.test.package.robin_asset_codecs]
-opt-level = 1
-codegen-backend = "llvm"
-
 # Proc macros execute again on incremental rebuilds. Optimize their host code
 # and parsing dependencies with LLVM while keeping game code on Cranelift.
 # This also covers build scripts and is inherited by the test/dev-opt1 profiles.
@@ -212,9 +208,6 @@ codegen-backend = "llvm"
 # Build just this crate with LLVM in the cranelift-backed profiles.
 [profile.dev.package.crc32fast]
 codegen-backend = "llvm"
-[profile.test.package.crc32fast]
-codegen-backend = "llvm"
-
 # zmij (serde_json's f64 formatter) uses `_mm_mulhi_epu16`. Since
 # nightly-2026-10-21, stdarch lowers it (and pavg/pmulh/variable shifts) to
 # LLVM intrinsics instead of portable simd ops, and cranelift aborts with
@@ -223,9 +216,6 @@ codegen-backend = "llvm"
 # TODO(toolchain): drop once cg_clif implements llvm.x86.sse2.pmulhu.w.
 [profile.dev.package.zmij]
 codegen-backend = "llvm"
-[profile.test.package.zmij]
-codegen-backend = "llvm"
-
 # Same story for jxl-rs: its SIMD feature (on by default, and wanted — map
 # decode is a mission-load hot path) carries AVX512 intrinsics cranelift
 # can't compile, so the jxl crates build with LLVM in the cranelift-backed
@@ -236,13 +226,6 @@ codegen-backend = "llvm"
 codegen-backend = "llvm"
 [profile.dev.package.jxl_transforms]
 codegen-backend = "llvm"
-[profile.test.package.jxl]
-codegen-backend = "llvm"
-[profile.test.package.jxl_simd]
-codegen-backend = "llvm"
-[profile.test.package.jxl_transforms]
-codegen-backend = "llvm"
-
 # rav1d (native AVIF decode: mod terrain, converter quality gates, tests) is
 # built without asm; unoptimized it decodes a 6 MP terrain map in minutes.
 # Optimize it with LLVM in the dev/test profiles so native mod loading and
@@ -253,20 +236,12 @@ codegen-backend = "llvm"
 codegen-backend = "llvm"
 opt-level = 3
 debug-assertions = false
-[profile.test.package.rav1d]
-codegen-backend = "llvm"
-opt-level = 3
-debug-assertions = false
-
 # curve25519-dalek (ed25519 signing for leaderboards and replays) compiles its
 # AVX-512 IFMA backend on nightly and runtime-dispatches to it on capable
 # CPUs. Cranelift aborts with "llvm.x86.avx512.vpmadd52l.uq.256 is not yet
 # supported" the moment that path runs, so build it with LLVM too.
 [profile.dev.package.curve25519-dalek]
 codegen-backend = "llvm"
-[profile.test.package.curve25519-dalek]
-codegen-backend = "llvm"
-
 # The `"*"` package override excludes workspace members: runtime members keep
 # the profile's opt-level (dev 0, dev-opt1 1). Host tools, including the
 # robin_state_hash_derive proc macro, use the optimized build override above.
@@ -280,17 +255,13 @@ codegen-backend = "llvm"
 [profile.dev.package.rilua]
 codegen-backend = "llvm"
 
-# Tests favor fast compile/link cycles over debugger-quality artifacts.  Keep
-# the production dependency graph unchanged, but use the same fast native
-# codegen backend as development builds and omit bulky test-only debuginfo.
-# Panic locations and test assertion locations remain available.
-[profile.test]
-debug = 0
-codegen-backend = "cranelift"
-
-[profile.test.package.rilua]
-codegen-backend = "llvm"
-
+# Tests build with the dev profile's settings: `test` inherits `dev`, its
+# package overrides and its build-override included. A test-only difference
+# such as `debug = 0` gives every dependency and every workspace library a
+# second artifact, so `cargo test` and `cargo build` in one gate compiled
+# robin_engine and the whole graph twice
+# (docs/slop/build-time-root-causes.md). The one override below applies to a
+# test-only crate, so it cannot split a shared unit.
 # Probe tests exercise panic unwinding, which Cranelift cannot catch reliably.
 [profile.test.package.robin_test_support]
 codegen-backend = "llvm"
