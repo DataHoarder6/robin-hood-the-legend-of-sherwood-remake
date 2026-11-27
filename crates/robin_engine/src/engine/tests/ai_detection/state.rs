@@ -51,6 +51,53 @@ fn quiet_pc_noise_refresh_preserves_the_previous_hearing_box() {
 }
 
 #[test]
+fn silent_step_halves_walk_noise_but_leaves_run_noise_alone() {
+    use crate::campaign::SkillNode;
+    use crate::order::OrderType;
+
+    let mut engine = EngineInner::new();
+    let pc = engine.add_test_entity(make_test_pc(crate::element::Posture::Upright));
+    let Entity::Pc(pc_entity) = engine.ent_mut(pc) else {
+        panic!("noise PC changed kind")
+    };
+    pc_entity.element.active = true;
+    pc_entity
+        .element
+        .set_position_map(MapPoint::new(100.0, 200.0));
+    pc_entity
+        .element
+        .set_material(crate::element::GameMaterial::Ground);
+
+    engine.mission_domain.campaign.characters[0].grant_skill(SkillNode::SilentStep);
+
+    engine.refresh_pc_produced_noise_for_with_order(pc, OrderType::WalkingUpright);
+    assert_eq!(
+        engine.actor(pc).last_noise_volume,
+        10,
+        "ground walking noise is 20, Silent Step halves it"
+    );
+    let half_x = 10.0_f32 + 100.0;
+    let half_y = 10.0_f32 * crate::position_interface::ASPECT_RATIO + 100.0;
+    assert_eq!(
+        engine.actor(pc).hear_noise_box,
+        crate::coordinates::MapBBox::from_coords(
+            100.0 - half_x,
+            200.0 - half_y,
+            100.0 + half_x,
+            200.0 + half_y
+        ),
+        "the published hearing box follows the reduced volume"
+    );
+
+    engine.refresh_pc_produced_noise_for_with_order(pc, OrderType::RunningUpright);
+    assert_eq!(
+        engine.actor(pc).last_noise_volume,
+        70,
+        "running is deliberately unaffected by Silent Step"
+    );
+}
+
+#[test]
 fn patrol_member_thinks_before_the_chief_applies_its_direction() {
     use crate::ai::{AiState, PathHistoryEntry, PathId, PatrolPath, Position, Substate};
 

@@ -225,6 +225,7 @@ mod suite {
 
     fn run_fast_wall_anti_collision_fixture(
         first_distance: u16,
+        fleet_footed: bool,
     ) -> (
         MapPoint,
         Vec<crate::movement_diagnostics::ParityMovementStep>,
@@ -285,6 +286,10 @@ mod suite {
             ));
         pc.position_iface_mut().set_anti_collision_on(true);
         let owner = engine.add_test_entity(pc);
+        if fleet_footed {
+            engine.mission_domain.campaign.characters[0]
+                .grant_skill(crate::campaign::SkillNode::FleetFooted);
+        }
         {
             let level = std::sync::Arc::make_mut(&mut engine.world.fast_grid_mut().level);
             level.sector_number_map.insert(SectorNumber::new(1), 0);
@@ -346,8 +351,33 @@ mod suite {
     }
 
     #[test]
+    fn fleet_footed_scales_the_applied_movement_speed_factor() {
+        let (_, baseline) = run_fast_wall_anti_collision_fixture(4, false);
+        assert_eq!(
+            baseline
+                .first()
+                .expect("baseline movement step")
+                .speed_factor
+                .bits,
+            1.0_f32.to_bits(),
+            "authored speed factor is unchanged without the skill"
+        );
+
+        let (_, boosted) = run_fast_wall_anti_collision_fixture(4, true);
+        assert_eq!(
+            boosted
+                .first()
+                .expect("Fleet-Footed movement step")
+                .speed_factor
+                .bits,
+            1.25_f32.to_bits(),
+            "Fleet Footed multiplies the applied walk/run speed factor"
+        );
+    }
+
+    #[test]
     fn fast_wall_anti_collision_commits_each_perform_motion_before_the_next() {
-        let (position, capture) = run_fast_wall_anti_collision_fixture(4);
+        let (position, capture) = run_fast_wall_anti_collision_fixture(4, false);
         assert_eq!(capture.len(), 2);
         assert_eq!(capture[0].pre_position.x.bits, 1155272038);
         assert_eq!(capture[0].post_position.x.bits, 1155275468);
@@ -364,7 +394,7 @@ mod suite {
 
     #[test]
     fn zero_distance_first_fast_wall_call_still_executes_the_second() {
-        let (position, capture) = run_fast_wall_anti_collision_fixture(0);
+        let (position, capture) = run_fast_wall_anti_collision_fixture(0, false);
         assert_ne!(
             position.x.to_bits(),
             1155272038,

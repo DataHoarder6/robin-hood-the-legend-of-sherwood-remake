@@ -500,6 +500,53 @@ fn setup_pc_engine(actions: &[(Action, u16)]) -> (EngineInner, LevelAssets, Enti
 }
 
 #[test]
+fn skill_purchase_stamps_new_node_effects_onto_live_pcs() {
+    use crate::campaign::{CampaignValue, SkillNode};
+
+    let (mut engine, assets, pc) = setup_pc_engine(&[]);
+    engine.add_campaign_value(&assets, CampaignValue::Amulets, 10);
+
+    assert_eq!(
+        engine
+            .ent(pc)
+            .pc_data()
+            .expect("setup built a PC")
+            .life_points,
+        50,
+        "fixture starts with a wounded PC"
+    );
+    assert!(
+        !engine
+            .ent(pc)
+            .pc_data()
+            .expect("setup built a PC")
+            .has_lockpick,
+        "the default profile has no lockpick"
+    );
+
+    for node in [SkillNode::Hardy, SkillNode::BurglarsKit] {
+        engine.apply_commands(
+            &crate::sim_rng::test_context(),
+            &mut HostDisplayState::default(),
+            &mut InputState::default(),
+            &assets,
+            &[PlayerInput::host(PlayerCommand::CampaignPurchaseSkill {
+                character_idx: 0,
+                node,
+            })],
+        );
+    }
+
+    let live = engine.ent(pc).pc_data().expect("setup built a PC");
+    assert_eq!(
+        live.life_points, 75,
+        "Hardy adds its 25 bonus life points to the live PC"
+    );
+    assert!(live.has_lockpick, "BurglarsKit authorizes live lockpicks");
+    assert!(live.has_climb, "BurglarsKit authorizes live climbs");
+}
+
+#[test]
 fn keep_moving_in_combat_command_sets_and_clears_the_per_pc_flag() {
     let (mut engine, assets, actor) = setup_pc_engine(&[]);
     let other = spawn_pc_at(&mut engine, 90.0, 10.0);

@@ -273,6 +273,58 @@ fn listen_fires_on_25th_owner_invocation_with_strict_3d_cross_layer_scan() {
 }
 
 #[test]
+fn keen_ear_extends_listen_beyond_the_authored_750_unit_boundary() {
+    use crate::campaign::SkillNode;
+    use crate::element::{Command, Posture};
+    use crate::order::{Order, OrderType};
+    use crate::sequence::SequenceElement;
+
+    let sim = crate::sim_rng::SimulationContext::with_seed_and_config(
+        1,
+        crate::engine::SimConfig {
+            script_enabled: false,
+            ..Default::default()
+        },
+    );
+    let assets = LevelAssets::new();
+    let mut engine = EngineInner::new();
+    let listener = engine.add_test_entity(make_test_pc(Posture::Upright));
+    engine.mission_domain.campaign.characters[0].grant_skill(SkillNode::KeenEar);
+    // 800 units: outside the authored 750 radius, inside Keen Ear's 1050.
+    let far = engine.add_test_entity(make_discovery_bonus(800.0));
+    engine.place(
+        listener,
+        crate::coordinates::WorldPoint3D {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    );
+
+    let mut element = SequenceElement::new(1, Command::EnterListen, Some(listener));
+    element
+        .orders
+        .push_back(Order::test_new(OrderType::Listening, 0.0, 0.0));
+    element.orders.push_back(Order::test_new(
+        OrderType::TransitionListeningWaitingUpright,
+        0.0,
+        0.0,
+    ));
+    let seq = engine.orders.sequence_manager.insert_element(element);
+    engine.orders.sequence_manager.start_sequence_level(seq);
+    engine.select_sequence_element(listener, Some((seq, 0)));
+    engine.t_element_in_progress(&assets, seq, 0);
+    engine.actor_mut(listener).execute_order_initialising = false;
+    engine.actor_mut(listener).wait_time = 1;
+
+    engine.tick_enemy_ai_blip_detection_for_owner(TickCtx::new(&sim, &assets), listener);
+    assert!(
+        !engine.elem(far).blipped,
+        "Keen Ear must reveal a blip at 800 units, past the base 750 boundary"
+    );
+}
+
+#[test]
 fn production_listen_creation_order_runs_heard_before_later_reveal() {
     let mut assets = LevelAssets::new();
     use crate::element::{Command, TargetFilter};
