@@ -1651,7 +1651,7 @@ mod hidden_ground_tests {
         const {
             assert!(
                 HIDDEN_ZONE_DOT_SPACING >= 20.0,
-                "dots must not carpet the whole map: spacing is {HIDDEN_ZONE_DOT_SPACING}"
+                "dots must not carpet the whole map"
             );
         };
     }
