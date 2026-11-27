@@ -82,7 +82,9 @@ pub(super) struct GpuResources {
     pub(super) mask_alpha_cache: HashMap<u32, MaskAlpha>,
     pub(super) background_texture: Option<BackgroundTexture>,
     /// Second pre-baked terrain, selected when `direction_step() != 0`.
-    pub(super) directional_background_texture: Option<BackgroundTexture>,
+    /// Boxed for the same stack budget as `background_texture`: the renderer
+    /// is embedded in the production frontend assembly future.
+    pub(super) directional_background_texture: Option<Box<BackgroundTexture>>,
     direction_step: u8,
     pub(super) sampler: wgpu::Sampler,
     pub(super) linear_sampler: wgpu::Sampler,
@@ -617,7 +619,7 @@ impl GpuResources {
         match variant {
             BackgroundVariant::Base => self.background_texture = Some(background),
             BackgroundVariant::Directional => {
-                self.directional_background_texture = Some(background)
+                self.directional_background_texture = Some(Box::new(background))
             }
         }
         true
@@ -657,7 +659,7 @@ impl GpuResources {
     pub(super) fn selected_background_texture(&self) -> Option<&BackgroundTexture> {
         select_background(
             self.background_texture.as_ref(),
-            self.directional_background_texture.as_ref(),
+            self.directional_background_texture.as_deref(),
             self.direction_step,
         )
     }

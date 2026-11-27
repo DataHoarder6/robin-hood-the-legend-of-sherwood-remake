@@ -63,7 +63,9 @@ pub struct ViewportState {
     /// shipped orientation, every other step a host-only presentation choice.
     direction_step: u8,
     /// Exact camera state captured when leaving step 0, restored on return.
-    saved_direction_camera: Option<(MapPoint, MapPoint, f32, f32, f32, f32, f32, f32)>,
+    // Boxed: this tuple is duplicated in the production frontend assembly
+    // future, whose construction has a hard 32 KiB stack budget.
+    saved_direction_camera: Option<Box<(MapPoint, MapPoint, f32, f32, f32, f32, f32, f32)>>,
     last_rotation_ms: Option<u32>,
     /// Uptime at which the angle readout stops showing. Host-only.
     readout_until_ms: Option<u32>,
@@ -256,7 +258,7 @@ impl ViewportState {
             return;
         }
         if from == 0 {
-            self.saved_direction_camera = Some((
+            self.saved_direction_camera = Some(Box::new((
                 self.view_position,
                 self.old_view_position,
                 self.zoom_factor,
@@ -265,7 +267,7 @@ impl ViewportState {
                 self.camera_angle,
                 self.compass_heading,
                 self.display_angle,
-            ));
+            )));
         } else if to == 0 {
             let saved = self
                 .saved_direction_camera
