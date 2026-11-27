@@ -125,8 +125,10 @@ class RuntimeEvidenceTests(unittest.TestCase):
                 target.write_text(f"import os,pathlib,time\npathlib.Path({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n")
                 return evidence.digest(target)
             with patch.object(input_worker, "snapshot_executable", snapshot), contextlib.redirect_stdout(io.StringIO()):
+                # The worker must start and write its pid before the timeout:
+                # 0.3 s was shorter than a Python start under a loaded host.
                 with self.assertRaises(subprocess.TimeoutExpired):
-                    input_worker.dismiss_briefings(":1", root, timeout=0.3)
+                    input_worker.dismiss_briefings(":1", root, timeout=2.0)
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pidfile.read_text()), 0)
             self.assertTrue(list(root.glob("briefing-input-*.log")))

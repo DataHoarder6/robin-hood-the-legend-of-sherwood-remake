@@ -23,7 +23,7 @@ assert_build_host() {
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint lint-tests core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -39,20 +39,16 @@ case "$1" in
         cargo fmt --all -- --check
         ;;
     lint)
-        # The code that ships: every library and binary of the workspace with
-        # the shipping client's `release` feature set, without cfg(test), so
-        # `-D warnings` reports the dead code and unused imports only the
-        # shipped build sees. `robin_app/release` forwards to `robin_rs/release`;
+        # Every target of the workspace with the shipping client's `release`
+        # feature set. `--all-targets` checks each library with and without
+        # cfg(test), so `-D warnings` also reports dead code only the shipped
+        # build sees. `robin_app/release` forwards to `robin_rs/release`;
         # naming `robin_rs/release` directly would also read as robin_parity's
         # `dep/feature` syntax. No `-A`: a lint that is wrong for this code is
         # allowed by name where it fires, with a reason. Never add per-invocation
         # rustflags to a suite: Cargo keeps them out of artifact file names, so
         # a suite with different flags overwrites the shared proc-macro and
         # build-script artifacts (docs/slop/build-time-root-causes.md).
-        cargo clippy --locked --workspace --features robin_app/release -- -D warnings
-        ;;
-    lint-tests)
-        # The same lint over every target, test code included.
         cargo clippy --locked --workspace --all-targets --features robin_app/release -- -D warnings
         ;;
     core)
@@ -79,7 +75,12 @@ case "$1" in
         cargo test --locked -p robin_lua --test natives_smoke panic_unwind_detaches_native_session \
             --config 'profile.test.package.robin_lua.codegen-backend="llvm"'
         ;;
-    engine) cargo test --locked -p robin_engine_types -p robin_legacy_save -p robin_level_data -p robin_engine_geometry -p robin_engine_script -p robin_engine ;;
+    engine)
+        # nextest runs every test binary at once; cargo test runs them in turn.
+        engine_packages=(-p robin_engine_types -p robin_legacy_save -p robin_level_data -p robin_engine_geometry -p robin_engine_script -p robin_engine)
+        cargo nextest run --locked "${engine_packages[@]}"
+        cargo test --locked --doc "${engine_packages[@]}"
+        ;;
     assets)
         cargo test --locked -p robin_asset_codecs -p robin_assets -p robin_data_io
         cargo test --locked -p robin_assets --no-default-features
@@ -127,10 +128,10 @@ case "$1" in
         # configuration published: `wasm-www/scripts/build-runtime.mjs --threads`
         # ships `audio,multiplayer,wasm-threads` (a runtime without multiplayer
         # exports ticket schema 0, so the stable shell refuses every invitation),
-        # whose std is rebuilt with atomics. Build, not check: only a link
-        # exercises the threaded link arguments. Unpublished feature sets are not
-        # compiled here.
-        cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_app --bin robin --no-default-features --features audio,multiplayer,wasm-threads
+        # whose std is rebuilt with atomics. Checked, not linked: the link and the
+        # threaded link arguments are proved by `wasm-release`. Unpublished
+        # feature sets are not compiled here.
+        cargo check --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_app --bin robin --no-default-features --features audio,multiplayer,wasm-threads
         ;;
     wasm-release)
         # The shipped wasm-release artifact, built with the repo's plan; the
@@ -214,70 +215,63 @@ case "$1" in
         ;;
     tooling)
         # Curated fixture-free tests: never discover arbitrary scripts that may
-        # capture real game sessions or operate a deployed service.
-        python3 scripts/test_quality_suites.py
-        python3 scripts/test_workspace_hygiene.py
-        pnpm --dir scripts/release verify
-        # The browser runtime plan the stable site publishes. A plan without
-        # multiplayer exports ticket schema 0 and refuses every invitation.
-        node --test wasm-www/scripts/build-runtime.test.mjs
-        # Child processes must be OS-supervised, and a browser join must fail
-        # at the host when its artifact was never staged.
-        node --test scripts/validation/supervised.test.mjs
-        node --experimental-strip-types --test wasm-www/src/content_cache.test.ts
-        node --test scripts/validation/browser-boot.test.mjs
-        # Issue #76: the reload check's pure contract (including the hard
-        # "no live mission after reload" assertion) runs without a browser.
-        node --test scripts/validation/campaign-persistence.test.mjs
-        node --experimental-strip-types --test wasm-www/src/join_ticket.test.ts
-        # A published manifest must be same-origin to the page that serves it,
-        # not to a hard-coded upstream hostname.
-        node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts
-        python3 -m unittest discover -s scripts/validation -p supervised_test.py
-python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
-
-        test -f scripts/test_portable_linker.py
-        python3 -m unittest discover -s scripts -p test_portable_linker.py
-        python3 -m unittest discover -s scripts -p test_triage_bug_bundle.py
-        python3 -m unittest discover -s scripts -p test_defect_ledger.py
-        test -f scripts/validation/save_load_live_test.py
-        python3 -m unittest discover -s scripts/validation -p save_load_live_test.py
-        python3 -m unittest discover -s scripts/validation -p capture_live_test.py
-        python3 -m unittest discover -s scripts/validation -p lifecycle_gate_test.py
-        python3 -m unittest discover -s scripts/validation -p namespace_x11_test.py
-        python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py
-        python3 -m unittest discover -s scripts/validation -p parity_check_test.py
-        python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py
-        python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py
-        python3 -m unittest discover -s scripts/validation -p display_allocation_test.py
-        test -f tools/crash-receiver/test_receiver.py
-        python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py
-        bash scripts/test_parity_orchestration.sh
-        bash scripts/test_publisher_short.sh
-        bash scripts/test_release.sh
-        bash scripts/test_release_notes.sh
-        bash scripts/test_verify_release_tag.sh
-        bash scripts/test_doctor.sh
-        bash scripts/test_reconcile_main.sh
-        bash scripts/test_prune_worktrees.sh
-        bash scripts/test_land.sh
-        bash scripts/test_session_gate_check.sh
-        bash scripts/test_push_gate.sh
-        bash scripts/test_release_gate.sh
-        bash scripts/test_build_host.sh
-        bash scripts/test_remote_check.sh
-        bash scripts/tests/gate-shared-fifo.sh
-        bash scripts/tests/run-suites.sh
-        # The unattended loop's state machine and one-run driver: fixture-only,
-        # no network, no gate. They catch wrong-target write-backs and repeated
-        # assertions before those behaviours strand a run.
-        bash scripts/test_director_state.sh
-        bash scripts/test_director_select_issue.sh
-        bash scripts/test_director_writeback.sh
-        bash scripts/tests/director-loop.sh
-        bash scripts/tests/quality-preflight.sh
-        bash scripts/test_prepare_next_minor.sh
-        bash scripts/test_release_orchestrator.sh
+        # capture real game sessions or operate a deployed service. They run
+        # concurrently, and a landing runs only the ones its diff can affect
+        # (scripts/run-fixtures.sh).
+        bash scripts/run-fixtures.sh \
+            'python3 scripts/test_quality_suites.py' \
+            'python3 scripts/test_workspace_hygiene.py' \
+            'pnpm --dir scripts/release verify' \
+            'node --test wasm-www/scripts/build-runtime.test.mjs' \
+            'node --test scripts/validation/supervised.test.mjs' \
+            'node --experimental-strip-types --test wasm-www/src/content_cache.test.ts' \
+            'node --test scripts/validation/browser-boot.test.mjs' \
+            'node --test scripts/validation/campaign-persistence.test.mjs' \
+            'node --experimental-strip-types --test wasm-www/src/join_ticket.test.ts' \
+            'node --experimental-strip-types --test wasm-www/src/demo_datadir.test.ts' \
+            'python3 -m unittest discover -s scripts/validation -p supervised_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py' \
+            'test -f scripts/test_portable_linker.py' \
+            'python3 -m unittest discover -s scripts -p test_portable_linker.py' \
+            'python3 -m unittest discover -s scripts -p test_triage_bug_bundle.py' \
+            'python3 -m unittest discover -s scripts -p test_defect_ledger.py' \
+            'test -f scripts/validation/save_load_live_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p save_load_live_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p capture_live_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p lifecycle_gate_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p namespace_x11_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p runtime_evidence_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p parity_check_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p scenario_corpus_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p multiplayer_e2e_test.py' \
+            'python3 -m unittest discover -s scripts/validation -p display_allocation_test.py' \
+            'test -f tools/crash-receiver/test_receiver.py' \
+            'python3 -m unittest discover -s tools/crash-receiver -p test_receiver.py' \
+            'bash scripts/test_parity_orchestration.sh' \
+            'bash scripts/test_publisher_short.sh' \
+            'bash scripts/test_release.sh' \
+            'bash scripts/test_release_notes.sh' \
+            'bash scripts/test_verify_release_tag.sh' \
+            'bash scripts/test_doctor.sh' \
+            'bash scripts/test_reconcile_main.sh' \
+            'bash scripts/test_prune_worktrees.sh' \
+            'bash scripts/test_land.sh' \
+            'bash scripts/test_session_gate_check.sh' \
+            'bash scripts/test_push_gate.sh' \
+            'bash scripts/test_release_gate.sh' \
+            'bash scripts/test_build_host.sh' \
+            'bash scripts/test_remote_check.sh' \
+            'bash scripts/tests/gate-shared-fifo.sh' \
+            'bash scripts/tests/run-suites.sh' \
+            'bash scripts/tests/gate-lanes.sh' \
+            'bash scripts/tests/run-fixtures.sh' \
+            'bash scripts/test_director_state.sh' \
+            'bash scripts/test_director_select_issue.sh' \
+            'bash scripts/test_director_writeback.sh' \
+            'bash scripts/tests/director-loop.sh' \
+            'bash scripts/tests/quality-preflight.sh' \
+            'bash scripts/test_prepare_next_minor.sh' \
+            'bash scripts/test_release_orchestrator.sh'
         ;;
     unreferenced-items)
         # Advisory review queue, never a gate: rust-analyzer cannot see every

@@ -77,7 +77,6 @@ crates_changed=0
 engine_changed=0
 tools_changed=0
 wasm_changed=0
-wasm_release_changed=0
 printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
 printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
 printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_changed=1
@@ -85,26 +84,21 @@ printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_change
 # follows every input of that compile: the crates, the build plan Cargo reads and
 # the devShell that supplies the toolchain.
 printf '%s\n' "$paths" | grep -qE '^(crates/|Cargo\.(toml|lock)$|\.cargo/config\.toml$|flake\.(nix|lock)$|rust-toolchain\.toml$|scripts/wasm-threads\.cargo-config\.toml$)' && wasm_changed=1
-# `wasm-release` builds the published fat-LTO artifact, the single most
-# expensive compile in the repo (about 7 minutes warm). A landing pays for it
-# only when the release plan itself changes; CI builds it on every push to
-# `main` (.github/workflows/rust-quality.yml), so a crate change that breaks
-# only the release profile turns that run red instead of holding every gate.
-printf '%s\n' "$paths" | grep -qE '^(wasm-www/scripts/|wasm-www/runtime-contract\.json$|Cargo\.toml$|\.cargo/config\.toml$|flake\.(nix|lock)$|rust-toolchain\.toml$|scripts/(check-wasm-release-artifact\.sh|wasm-threads\.cargo-config\.toml|install_pinned_wasm_bindgen\.sh)$)' && wasm_release_changed=1
+# `wasm-release` builds the published fat-LTO artifact (7-9 minutes warm). It is
+# never part of the gate, whose end-to-end budget is 60 seconds: CI builds it on
+# every push to `main` (.github/workflows/rust-quality.yml) and the release
+# workflow before publishing.
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    # `lint` runs clippy with `-D warnings` over libraries and binaries, the
-    # code that ships; `lint-tests` adds the test targets. `wasm` is selected
+    # `lint` runs clippy with `-D warnings` over every target with the shipping
+    # feature set. `wasm` is selected
     # separately below: it also depends on the build plan and devShell, not
     # only on crates/.
-    suites+=(format lint lint-tests client-release)
+    suites+=(format lint client-release)
 fi
 if [ "$wasm_changed" = 1 ]; then
     suites+=(wasm)
-fi
-if [ "$wasm_release_changed" = 1 ]; then
-    suites+=(wasm-release)
 fi
 if [ "$engine_changed" = 1 ]; then
     suites+=(engine)
@@ -159,45 +153,6 @@ if [ ${#suites[@]} -eq 0 ]; then
     exit 0
 fi
 
-# Two tiers (docs/adr/0014-two-tier-landing-gate.md). Before the push, only the
-# suites that finish in seconds on a warm copy: format, lint, docs. Everything
-# else is verified right after the push on its own warm copy
-# (scripts/post-land-verify.sh, started by land.sh), and a red verification
-# stops the line: while scripts/main-red.sh reports red, every landing runs the
-# full set, plus the suites that failed, before it may push.
-#
-# The deferred tier needs a caller that runs it. land.sh names a file in
-# ROBIN_GATE_DEFERRED_FILE and starts the verification after its push; a plain
-# `git push` through the pre-push hook has no such caller, so it gates the full
-# set here.
-red_suites=$(bash scripts/main-red.sh suites)
-if [ -n "$red_suites" ]; then
-    printf 'push-gate: main is red (%s); this landing runs the full gate\n' "$red_suites" >&2
-    [ -z "${ROBIN_GATE_DEFERRED_FILE:-}" ] || printf '#full\n' >"$ROBIN_GATE_DEFERRED_FILE"
-    for suite in $red_suites; do
-        case " ${suites[*]} " in *" $suite "*) ;; *) suites+=("$suite") ;; esac
-    done
-fi
-if [ -n "${ROBIN_GATE_DEFERRED_FILE:-}" ] && [ -z "$red_suites" ]; then
-    fast=()
-    deferred=()
-    for suite in "${suites[@]}"; do
-        case $suite in
-            format | lint | docs) fast+=("$suite") ;;
-            *) deferred+=("$suite") ;;
-        esac
-    done
-    printf '%s\n' "${deferred[@]}" >"$ROBIN_GATE_DEFERRED_FILE"
-    if [ ${#deferred[@]} -gt 0 ]; then
-        printf 'push-gate: verified after the push: %s\n' "${deferred[*]}" >&2
-    fi
-    suites=("${fast[@]}")
-    if [ ${#suites[@]} -eq 0 ]; then
-        printf 'push-gate: nothing to run before the push.\n' >&2
-        exit 0
-    fi
-fi
-
 # One remote-check call for the whole push: it syncs this checkout once and runs
 # every suite under the copy's lock, so a later suite reuses what the earlier one
 # built. remote-check pushes this checkout to the build host, and that push would
@@ -206,6 +161,8 @@ printf 'push-gate: %s\n' "${suites[*]}" >&2
 # Gate copies are keyed by the tree being proved, so two pushes of one tree
 # share a build instead of paying for it twice.
 export ROBIN_GATE_TREE=$(git rev-parse "${head}^{tree}")
+ROBIN_CHANGED_PATHS=$(printf '%s\n' "$paths" | paste -sd' ' -)
+export ROBIN_CHANGED_PATHS
 SKIP_PUSH_GATE=1 bash scripts/remote-check.sh --suites "${suites[@]}" || {
     printf 'push-gate: %s failed; the integration branch stays where it is.\n' "${suites[*]}" >&2
     printf 'push-gate: fix it, or push with SKIP_PUSH_GATE=1 and say why.\n' >&2

@@ -71,8 +71,8 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `client` | `robin_rs`, `robin_app`, default features | Client tests and the binary/example tests, then a separate `robin` binary build |
 | `client-release` | `robin_rs`, `release` features | Client library tests with desktop/audio/multiplayer/updates; the binary links in CI's `client` |
 | `tools` | `robin_modding_tools`; `robin_app` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
-| `wasm` | `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the published client (threaded `audio,multiplayer`), linked; unpublished feature sets are not compiled |
-| `wasm-release` | `robin_replay_admission_wasm`; `robin_app` `wasm-release` artifact | Replay-admission module check; the published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; gated only when the release plan changes, and run by CI on every push to `main` |
+| `wasm` | `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the published client (threaded `audio,multiplayer`), checked; its link is `wasm-release`'s |
+| `wasm-release` | `robin_replay_admission_wasm`; `robin_app` `wasm-release` artifact | Replay-admission module check; the published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; never gated (fat LTO cannot fit the gate's 60-second budget): CI on every push to `main` and the release workflow |
 | `wasm-tests` | `robin_rs` and `robin_app` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
@@ -150,10 +150,7 @@ To decide whether a heavy suite is still owed by a path, `cargo tree -i
 --workspace <crate>` lists reverse dependencies. Treat it as a hint only: the
 tree is not exactly what a build compiles.
 
-The push that updates the integration branch is gated in two tiers
-([ADR 0014](adr/0014-two-tier-landing-gate.md)): `format`, `lint` and `docs` before the
-push; every other selected suite right after it, on the `post-land` copy, with a
-red result stopping the line (`scripts/main-red.sh show`). The suites a landing owes
+The push that updates the integration branch is gated. The suites a landing owes
 are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
 `client-release` when anything under `crates/` or a gate script changed,
 `engine` when engine crates did, `tooling` when anything under `scripts/`,
@@ -167,8 +164,13 @@ its release plan changes (the build plan, profiles, toolchain or devShell); CI
 builds it on every push to `main`, so a release-only break turns that run red
 without holding every landing for seven minutes.
 
-`scripts/run-suites.sh` runs the suites that never touch Cargo's build directory
-(`tooling`, `docs`, `web`, `editor`) alongside the Cargo suites instead of after them.
+The gate's budget is 60 seconds end to end on a warm copy. `scripts/remote-check.sh`
+syncs the gate copy by git (push, then check out only what changed), and
+`scripts/gate-lanes.sh` runs the selected suites in concurrent lanes (lint, engine,
+client, wasm), each a git worktree of the gate copy with its own warm target directory.
+Inside a lane, `scripts/run-suites.sh` runs the suites that never touch Cargo's build
+directory alongside the Cargo ones, and `tooling` runs only the fixtures the diff can
+affect, concurrently (`scripts/run-fixtures.sh`).
 
 No gate suite passes its own rustflags (`--config ...rustflags`, `RUSTFLAGS`).
 Cargo keeps rustflags out of artifact file names, so such a suite overwrites the

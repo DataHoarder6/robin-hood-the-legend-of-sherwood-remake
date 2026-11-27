@@ -15,7 +15,7 @@ set -euo pipefail
 (($# >= 1)) || exit 2
 
 if (($# >= 2)) && [[ -n $2 ]]; then
-    printf '%s\n' "${ROBIN_GATE_COPY:-gate-shared}"
+    printf 'gate-shared\n'
 else
     printf 'pool\n'
 fi

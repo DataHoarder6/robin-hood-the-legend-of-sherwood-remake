@@ -209,10 +209,7 @@ for _round in $(seq 1 "$rounds"); do
         printf 'land: gate skipped for %s; the batch tree is already proved\n' \
             "$head" >&2
     elif [ "$rebased" = 1 ] || [ "$_round" = 1 ]; then
-        # push-gate writes the suites it deferred to after the push, or `#full`
-        # when main is red and it ran everything (docs/adr/0014-two-tier-landing-gate.md).
-        deferred_file=$(mktemp "${TMPDIR:-/tmp}/robin-land-deferred.XXXXXX")
-        ROBIN_GATE_DEFERRED_FILE=$deferred_file bash scripts/push-gate.sh "$base" "$head"
+        bash scripts/push-gate.sh "$base" "$head"
     fi
 
     if ! SKIP_PUSH_GATE=1 git push --quiet "$remote" "HEAD:refs/heads/$integration"; then
@@ -224,17 +221,6 @@ for _round in $(seq 1 "$rounds"); do
     landed=$(git ls-remote "$remote" "refs/heads/$integration" | cut -f1)
     if [ "$landed" = "$head" ]; then
         printf 'land: %s/%s = %s\n' "$remote" "$integration" "$landed" >&2
-        if [ -n "${deferred_file:-}" ] && [ -s "$deferred_file" ]; then
-            if [ "$(head -1 "$deferred_file")" = '#full' ]; then
-                bash scripts/main-red.sh clear "$head"
-            else
-                mapfile -t deferred < "$deferred_file"
-                unit=post-land-${head:0:12}
-                runbg run "$unit" -- bash "$repository/scripts/post-land-verify.sh" "$head" "${deferred[@]}" >&2
-                printf 'land: verifying %s after the push: runbg log %s; red stops the line\n' \
-                    "${deferred[*]}" "$unit" >&2
-            fi
-        fi
         exit 0
     fi
     printf 'land: %s/%s is %s after the push, not %s; integrating again\n' \

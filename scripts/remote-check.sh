@@ -34,6 +34,9 @@ exec </dev/null
 # such variable. Default it here: `${var@Q}` on an unset name aborts under
 # set -u while the heredoc renders.
 docs_paths=${ROBIN_DOCS_CHECK_PATHS:-}
+# push-gate exports the landing's diff so `tooling` runs only the fixtures it
+# can affect (scripts/run-fixtures.sh); interactive checks run them all.
+changed_paths=${ROBIN_CHANGED_PATHS:-}
 # The process-layer e2e suite needs these on the build host. Forward them
 # explicitly instead of making the verifier hand-write an ssh gate: a bare
 # check-quality.sh multiplayer-e2e fails on a missing ROBIN_E2E_BINARY, which
@@ -61,9 +64,6 @@ remote_root=build/robin
 # delete a gate's cwd mid-build (observed 2026-11-20 with gate-shared).
 gate_root=build/robin-gate
 gate_copy_name=gate-shared
-# Post-land verification (scripts/post-land-verify.sh) proves landed trees on
-# its own stable copy, so it never queues behind the next landing's gate.
-post_land_copy_name=post-land
 copy_root=$remote_root
 slots=${ROBIN_BUILD_SLOTS:-2}
 slot_dir="~/$remote_root/.slots"
@@ -274,6 +274,33 @@ require_disk() {
     fi
 }
 
+# The gate proves a committed tree (push-gate refuses anything else), so the gate
+# copy is synced by git: push the commit and check it out. Only files whose
+# content changed are written, with a fresh mtime, so Cargo's freshness check is
+# exact and nothing reads the whole tree; rsync --checksum read all 463 MB on
+# both sides of every gate (about 15 s). Lane worktrees (scripts/gate-lanes.sh)
+# check the same commit out from this repository.
+sync_gate() {
+    remote_dir="~/$gate_root/$name"
+    printf 'remote-check: sync %s -> %s:%s (git)\n' "$repository" "$host" "$remote_dir" >&2
+    require_disk
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+mkdir -p $remote_dir
+cd $remote_dir
+git rev-parse --git-dir >/dev/null 2>&1 || git init -q -b main .
+EOF
+    git -C "$repository" push -q --force "$host:$remote_dir/.git" HEAD:refs/robin/check
+    ssh "$host" bash -s <<EOF
+set -euo pipefail
+cd $remote_dir
+git checkout --quiet --force --detach refs/robin/check
+# --prune retires copies by directory age; a copy synced now must look born now.
+touch .
+git rev-parse HEAD >&2
+EOF
+}
+
 sync_worktree() {
     remote_dir="~/$copy_root/$name"
     printf 'remote-check: sync %s -> %s:%s\n' "$repository" "$host" "$remote_dir" >&2
@@ -449,9 +476,9 @@ else
     requested=("$1")
 fi
 
-case $name in
-    "$gate_copy_name" | "$post_land_copy_name") copy_root=$gate_root ;;
-esac
+if [ "$name" = "$gate_copy_name" ]; then
+    copy_root=$gate_root
+fi
 
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
@@ -519,7 +546,13 @@ fi
 remote_dir="~/$copy_root/$name"
 # The toolchain is proved as the first command inside the gate's devShell
 # (gate_toolchain_guard), which names a GC'd devShell input before any compile.
-sync_worktree
+if [ "$copy_root" = "$gate_root" ]; then
+    sync_gate
+    runner=gate-lanes.sh
+else
+    sync_worktree
+    runner=run-suites.sh
+fi
 lock="$remote_dir.lock"
 printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2
 # One synced tree, one lock, one devShell: a second sync between two suites
@@ -540,6 +573,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     env $cache_env \
     TMPDIR=\$gate_tmp \
     ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
+    ROBIN_CHANGED_PATHS=${changed_paths@Q} \
     ROBIN_E2E_BINARY=${e2e_binary@Q} \
     ROBINHOOD_DATA_DIR=${e2e_data@Q} \
     ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
@@ -553,5 +587,5 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
-    nix develop --command bash -c '${gate_toolchain_guard}bash scripts/run-suites.sh ${requested[*]}'
+    nix develop --command bash -c '${gate_toolchain_guard}bash scripts/$runner ${requested[*]}'
 EOF
