@@ -129,7 +129,12 @@ fi
 # docs are not a gate on an unrelated change.
 if printf '%s\n' "$paths" | grep -qE '(^docs/|\.md$)'; then
     suites+=(docs)
-    ROBIN_DOCS_CHECK_PATHS=$(printf '%s\n' "$paths" | grep -E '\.md$' | paste -sd' ' -)
+    # A deleted Markdown file has no links left to check.
+    ROBIN_DOCS_CHECK_PATHS=$(printf '%s\n' "$paths" | grep -E '\.md$' |
+        while read -r doc; do
+            if git cat-file -e "$head:$doc" 2>/dev/null; then printf '%s\n' "$doc"; fi
+        done |
+        paste -sd' ' -)
     export ROBIN_DOCS_CHECK_PATHS
 fi
 # wasm-www JS/TS and its configs run the `web` suite. The release scripts'
