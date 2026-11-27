@@ -139,11 +139,16 @@ if grep -F 'SCCACHE_BASEDIRS=$(pwd)' "$source_root/scripts/remote-check.sh" >/de
 else
     pass "remote-check does not override SCCACHE_BASEDIRS per invocation"
 fi
-if [ "$(grep -c 'CARGO_INCREMENTAL=0' "$source_root/scripts/remote-check.sh")" -eq 2 ] &&
+# ADR 0013: the gate copy runs without sccache and with Cargo incremental; pool
+# copies keep sccache and therefore incremental off. Never both on one command.
+gate_cache=$(grep -F 'cache_env="RUSTC_WRAPPER="' "$source_root/scripts/remote-check.sh" || true)
+pool_cache=$(grep -F 'cache_env="SCCACHE_BASEDIRS=' "$source_root/scripts/remote-check.sh" || true)
+if [ -n "$gate_cache" ] && [[ $gate_cache != *CARGO_INCREMENTAL* ]] &&
+   [[ $pool_cache == *CARGO_INCREMENTAL=0* ]] &&
    [ "$(grep -c 'SCCACHE_ALLOW_INCREMENTAL' "$source_root/scripts/remote-check.sh")" -eq 0 ]; then
-    pass "both remote commands disable Cargo incremental for sccache"
+    pass "the gate copy drops sccache for incremental; pool copies keep sccache without it"
 else
-    fail "remote-check must disable incremental and not set SCCACHE_ALLOW_INCREMENTAL (ADR 0007)"
+    fail "remote-check cache selection drifted from ADR 0013"
 fi
 for flag in CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS; do
     if grep -F "$flag" "$source_root/scripts/remote-check.sh" >/dev/null && \
@@ -159,14 +164,14 @@ else
     pass "the remote heredoc quotes the basedirs command substitution correctly"
 fi
 
-# --- every remote gate runs in a bounded transient scope ----------------------
-rc=0
+# --- the remote gate runs in a bounded transient scope -------------------------
+# One remote command serves one suite and many: a second copy of it drifted.
 for needle in 'systemd-run --user --scope' 'XDG_RUNTIME_DIR=/run/user/' '--unit=build-${name}-$$' 'RuntimeMaxSec=7200' 'TimeoutStopSec=30'; do
     count=$(grep -F -c -- "$needle" "$source_root/scripts/remote-check.sh" || true)
-    if [ "$count" -ge 2 ]; then
-        pass "remote-check has two scoped commands with $needle"
+    if [ "$count" -eq 1 ]; then
+        pass "the one remote command is scoped with $needle"
     else
-        fail "remote-check has $count occurrences of $needle, expected at least two"
+        fail "remote-check has $count occurrences of $needle, expected exactly one"
     fi
 done
 
@@ -175,10 +180,10 @@ done
 # explicit suspend/hibernate requests. A gate lock that drops `sleep` can have
 # the host suspended mid-build by a scheduled or user request (systemd-inhibit(1)).
 inhibit_count=$(grep -F -c 'systemd-inhibit --what=idle:sleep' "$source_root/scripts/remote-check.sh" || true)
-if [ "$inhibit_count" -ge 2 ]; then
-    pass "both remote gates inhibit idle and sleep"
+if [ "$inhibit_count" -eq 1 ]; then
+    pass "the remote command inhibits idle and sleep"
 else
-    fail "remote-check has $inhibit_count idle:sleep inhibits, expected at least two"
+    fail "remote-check has $inhibit_count idle:sleep inhibits, expected exactly one"
 fi
 if grep -Fq 'systemd-inhibit --what=idle ' "$source_root/scripts/remote-check.sh"; then
     fail "a remote gate inhibits only idle, so an explicit suspend can kill the build"
@@ -190,10 +195,16 @@ fi
 tree_sha=0123456789abcdef0123456789abcdef01234567
 other_sha=fedcba9876543210fedcba9876543210fedcba98
 name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo")
-if [ "$name" = "$(basename "$repo")" ]; then
-    pass "an interactive copy keeps the worktree name"
+if [ "$name" = pool ]; then
+    pass "an interactive check takes the warm pool"
 else
-    fail "interactive copy was '$name'"
+    fail "interactive copy was '$name', expected pool"
+fi
+if grep -Fq 'name=pool-$index' "$source_root/scripts/remote-check.sh" &&
+   grep -Fq "seq -f 'pool-%g'" "$source_root/scripts/remote-check.sh"; then
+    pass "the pool resolves to a real copy and --prune keeps every pool copy"
+else
+    fail "remote-check does not resolve or keep the pool copies"
 fi
 name=$(bash "$source_root/scripts/gate-copy-name.sh" "$repo" "$tree_sha")
 if [ "$name" = "gate-shared" ]; then

@@ -3,19 +3,19 @@
 #
 #   gate-copy-name.sh REPOSITORY [TREE_SHA]
 #
-# Interactive checks keep the worktree name so `live-worktrees.sh` and --prune
-# can still find their owner. Gates all use ONE stable copy: a tree-keyed copy
-# gets a fresh target/ for every landing, so Cargo recompiles every dependency
-# (measured sccache Rust hit rate 0.36%). The copy lock is held from rsync
-# through the suites, so a single copy cannot swap trees under a running build.
-# Cargo's own freshness check then reuses unchanged artifacts across landings.
+# Gates all use ONE stable copy: a tree-keyed copy gets a fresh target/ for
+# every landing, so Cargo recompiles every dependency (measured sccache Rust hit
+# rate 0.36%). Interactive checks use the warm pool (`pool`, resolved by
+# remote-check.sh to the first free `pool-N`): a copy per worktree name started
+# cold for every new worktree (60 and 16 minute builds, 2026-11-21). The copy
+# lock is held from rsync through the suites, so no copy swaps trees under a
+# running build, and Cargo's own freshness check reuses unchanged artifacts.
 set -euo pipefail
 
 (($# >= 1)) || exit 2
-repository=$1
 
 if (($# >= 2)) && [[ -n $2 ]]; then
     printf 'gate-shared\n'
 else
-    basename "$repository"
+    printf 'pool\n'
 fi

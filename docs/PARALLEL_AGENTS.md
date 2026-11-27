@@ -108,8 +108,12 @@ scripts/remote-check.sh engine              # the only way to build from oci-vm
 Symptom: 3–5 agents each compile the same wasm/LLVM graph; the build host runs
 16 compilers on 12 cores and every gate gets slower.
 
-Rule: gates use ONE stable copy (`gate-shared`); interactive checks keep their
-worktree name. Tree-keyed gate copies were tried and removed: each new tree got
+Rule: gates use ONE stable copy (`gate-shared`); interactive checks take a warm
+copy from the pool (`pool-1` .. `pool-$ROBIN_BUILD_SLOTS`, the first free one), so
+a new worktree no longer starts from an empty `target/` (60- and 16-minute cold
+builds on 2026-11-21). `--sync` alone keeps the worktree's own copy, because its
+caller works in it by hand after the lock is released. Tree-keyed gate copies
+were tried and removed: each new tree got
 a fresh `target/`, so Cargo recompiled every dependency and sccache's Rust hit
 rate was 0.36% (measured 2026-11-20). One locked copy lets Cargo reuse its own
 unchanged artifacts across landings; `rsync --checksum --no-times` preserves
@@ -286,10 +290,10 @@ skipped rather than failing.
 Recipes: `just doctor`, `just reconcile-main`, `just check SUITE`
 (`scripts/check-quality.sh` suites; `tooling` is the fixture-free one).
 
-Gate builds set `CARGO_INCREMENTAL=0`. A trial with incremental and
-`SCCACHE_ALLOW_INCREMENTAL=1` broke a landing gate; the stable warm copy, not
-incremental, is the speed fix. See
-[ADR 0007](adr/0007-no-cargo-incremental-in-gates.md).
+The gate copy builds with Cargo incremental and without sccache (an empty
+`RUSTC_WRAPPER`); pool copies keep sccache with `CARGO_INCREMENTAL=0`. Never
+set `SCCACHE_ALLOW_INCREMENTAL`: it broke a landing gate. See
+[ADR 0013](adr/0013-gate-incremental-without-sccache.md).
 
 The shared gate copy lives in `~/build/robin-gate/`, outside the `~/build/robin/`
 root that every `--prune` scans. No agent's prune can delete a gate's cwd

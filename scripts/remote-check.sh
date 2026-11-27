@@ -3,15 +3,16 @@
 #
 # The runtime is the wrong place to compile this workspace, and the laptop is
 # the owner's machine: builds happen on the build host (ROBIN_BUILD_HOST,
-# default `minipc`). Every worktree gets its own copy there, because a second
-# agent's rsync into a shared copy would swap the source out from under a
-# running compile.
+# default `minipc`). A check takes a warm copy from the pool (`pool-1` ..
+# `pool-$ROBIN_BUILD_SLOTS`) and holds its lock from rsync to the last suite, so
+# no second agent can swap the source out from under a running compile; gates
+# use the one `gate-shared` copy.
 #
 #   scripts/remote-check.sh engine          # this worktree, engine suite
 #   scripts/remote-check.sh engine feat/x   # explicit copy name
 #   scripts/remote-check.sh --suites tooling format
 #                                           # several suites, one synced tree
-#   scripts/remote-check.sh --sync          # copy this worktree, print the remote path
+#   scripts/remote-check.sh --sync          # copy this worktree to its own copy, print the path
 #   scripts/remote-check.sh --list          # copies on the host, with sizes
 #   scripts/remote-check.sh --prune         # delete copies whose worktree is gone
 #   scripts/remote-check.sh --prune-stale [DAYS]
@@ -105,8 +106,8 @@ usage() {
     exit 2
 }
 
-# The copy's name defaults to this worktree's directory, which is what differs
-# between concurrent agents.
+# A check without an explicit name takes the warm pool; a gate (ROBIN_GATE_TREE)
+# takes gate-shared.
 copy_name() {
     if [ $# -ge 1 ] && [ -n "$1" ]; then
         printf '%s' "$1"
@@ -142,10 +143,10 @@ lock_copy() {
     mkdir -p -- "$lock_dir" "$queue_dir"
     local deadline=$(( $(date +%s) + wait ))
     # The ticket is global so the EXIT cleanup (set up at the top of this script)
-    # retires it after a finish or a kill; a dead caller must not hold the queue.
-    ticket="$queue_dir/$(printf '%020d' "$deadline")-$(date +%s%N)-$$-$RANDOM"
+    # retires it after a kill; a dead caller must not hold the queue. BASHPID,
+    # not $$: a caller in a subshell must be reaped by its own death.
+    ticket="$queue_dir/$(printf '%020d' "$deadline")-$(date +%s%N)-$BASHPID-$RANDOM"
     : >"$ticket"
-    exec 9>"$lock_dir/$safe.lock"
 
     while :; do
         now=$(date +%s)
@@ -169,14 +170,17 @@ lock_copy() {
         done
 
         first=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | sort | head -1)
-        if [ "$first" = "${ticket##*/}" ]; then
-            if flock -n 9; then
-                printf 'remote-check: gate copy slot acquired for %s\n' "$name" >&2
-                # Cover the pre-gate ssh/rsync work (prepare_cache, toolchain
-                # check, sync_worktree) with the host's idle-poweroff scope.
-                begin_build_scope
-                return 0
-            fi
+        if [ "$first" = "${ticket##*/}" ] && acquire_copy_lock "$lock_dir" "$safe"; then
+            # The held lock now excludes others; the ticket's work is done. Left
+            # in the queue it would stay first until this caller exits, and the
+            # next caller could not take a free pool copy beside it.
+            rm -f -- "$ticket"
+            ticket=
+            printf 'remote-check: gate copy slot acquired for %s\n' "$name" >&2
+            # Cover the pre-gate ssh/rsync work (prepare_cache, toolchain
+            # check, sync_worktree) with the host's idle-poweroff scope.
+            begin_build_scope
+            return 0
         fi
 
         count=$(find "$queue_dir" -maxdepth 1 -type f -printf '%f\n' | wc -l)
@@ -194,6 +198,29 @@ lock_copy() {
         fi
         sleep 0.2
     done
+}
+
+# Take the copy's lock on fd 9. The pool is one queue over ROBIN_BUILD_SLOTS
+# copies: the first caller in line takes the first free `pool-N` and `name`
+# becomes that copy, so every later step (cache, sync, remote lock) names a real
+# directory. Any other name is its own single copy.
+acquire_copy_lock() {
+    local lock_dir=$1 safe=$2 index
+    if [ "$name" != pool ]; then
+        exec 9>"$lock_dir/$safe.lock"
+        flock -n 9 && return 0
+        exec 9>&-
+        return 1
+    fi
+    for index in $(seq "$slots"); do
+        exec 9>"$lock_dir/$safe-$index.lock"
+        if flock -n 9; then
+            name=pool-$index
+            return 0
+        fi
+        exec 9>&-
+    done
+    return 1
 }
 
 # Gate copies have no worktree owner, so --prune keeps them only until this old.
@@ -391,7 +418,7 @@ EOF
         # copy — and delete the rest. Age is the wrong test: a copy can be a
         # week old and still be the only build cache its worktree has.
         keep=$(bash "$repository/scripts/live-worktrees.sh" |
-            { cat; copy_name "${2:-}"; printf 'gate-shared\n'; } | sort -u |
+            { cat; [ -z "${2:-}" ] || printf '%s\n' "$2"; seq -f 'pool-%g' "$slots"; printf 'gate-shared\n'; } | sort -u |
             sed 's/.*/"&"/' | paste -sd' ' -)
         # Only real copies: the root is shared, and a cache or scratch directory
         # someone keeps beside the copies is not this script's to delete.
@@ -413,7 +440,9 @@ EOF
         exit 0
         ;;
     --sync)
-        name=$(copy_name "${2:-}")
+        # The caller works in this copy by hand after the lock is released, so
+        # it is the worktree's own copy, never one the pool hands to an agent.
+        name=${2:-$(basename "$repository")}
         require_host
         lock_copy
         sync_worktree
@@ -422,9 +451,7 @@ EOF
         ;;
 esac
 
-multi=0
 if [ "${1:-}" = --suites ]; then
-    multi=1
     shift
     (( $# > 0 )) || usage
     # One copy, one name: the suites share a tree, so there is nothing for a
@@ -490,8 +517,21 @@ prepare_cache() {
 }
 
 lock_copy
-prepare_cache
-remote_dir="~/$remote_root/$name"
+# The gate copy is one stable tree: Cargo's own fingerprints and incremental
+# state make a warm rebuild cheap, and sccache has nothing to add there (its
+# Rust hits on gate-shared were Cargo artifacts it had just overwritten). It also
+# refuses CARGO_INCREMENTAL=1, so the gate runs without the wrapper the build
+# host configures (an empty RUSTC_WRAPPER resets `build.rustc-wrapper`) and with
+# the profiles' incremental default (docs/adr/0013-gate-incremental-without-sccache.md).
+# Pool copies are swapped between worktrees, so they keep sccache with one
+# basedir per copy and Cargo incremental off, which sccache cannot cache.
+if [ "$name" = "$gate_copy_name" ]; then
+    cache_env="RUSTC_WRAPPER="
+else
+    prepare_cache
+    cache_env="SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} CARGO_INCREMENTAL=0 SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH SCCACHE_IDLE_TIMEOUT=0 SCCACHE_CLIENT_SIDE=1"
+fi
+remote_dir="~/$copy_root/$name"
 # A warm copy already carries the gate's flake, so prove the toolchain can exec
 # before rsyncing a tree into it. A first-time copy has no flake yet; its check
 # runs as the first command inside the gate devShell below.
@@ -502,12 +542,11 @@ else
 fi
 sync_worktree
 lock="$remote_dir.lock"
-if ((multi)); then
-    printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2
-    # One synced tree, one lock, one devShell: a second sync between two suites
-    # would swap the copy out from under the first, and the suites share its
-    # build cache. `\$suite` reaches the remote shell untouched.
-    ssh "$host" bash -s <<EOF
+printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2
+# One synced tree, one lock, one devShell: a second sync between two suites
+# would swap the copy out from under the first, and the suites share its build
+# cache. `\$suite` reaches the remote shell untouched.
+ssh "$host" bash -s <<EOF
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 # A private TMPDIR per gate keeps `nix develop --command` scratch files from
@@ -519,12 +558,8 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
     systemd-inhibit --what=idle:sleep --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
+    env $cache_env \
     TMPDIR=\$gate_tmp \
-    CARGO_INCREMENTAL=0 \
-    SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
-    SCCACHE_IDLE_TIMEOUT=0 \
-    SCCACHE_CLIENT_SIDE=1 \
     ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
     ROBIN_E2E_BINARY=${e2e_binary@Q} \
     ROBINHOOD_DATA_DIR=${e2e_data@Q} \
@@ -541,40 +576,3 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     bash scripts/build-slot.sh $slot_dir $slots \\
     nix develop --command bash -c '${gate_toolchain_guard}for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
 EOF
-else
-    printf 'remote-check: %s -> %s:%s\n' "${requested[0]}" "$host" "$remote_dir" >&2
-    ssh "$host" bash -s <<EOF
-set -euo pipefail
-export XDG_RUNTIME_DIR=/run/user/\$(id -u)
-# A private TMPDIR per gate keeps `nix develop --command` scratch files from
-# accumulating in the shared /tmp; the trap removes them when the gate ends.
-gate_tmp=\$(mktemp -d /tmp/robin-gate.XXXXXX)
-trap 'rm -rf -- "\$gate_tmp"' EXIT
-cd $remote_dir
-systemd-run --user --scope --unit=build-${name}-$$ \
-    -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
-    systemd-inhibit --what=idle:sleep --why='check-quality ${requested[0]}' \\
-    flock -w 7200 $lock \\
-    env SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} \
-    TMPDIR=\$gate_tmp \
-    CARGO_INCREMENTAL=0 \
-    SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH \
-    SCCACHE_IDLE_TIMEOUT=0 \
-    SCCACHE_CLIENT_SIDE=1 \
-    ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
-    ROBIN_E2E_BINARY=${e2e_binary@Q} \
-    ROBINHOOD_DATA_DIR=${e2e_data@Q} \
-    ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \
-    ROBIN_E2E_JOBS=${e2e_jobs@Q} \
-    PARITY_LINUX_BIN=${parity_linux_bin@Q} \
-    PARITY_WINDOWS_EXE=${parity_windows_exe@Q} \
-    PARITY_DATA_DIR=${parity_data_dir@Q} \
-    PARITY_LINUX_DIR=${parity_linux_dir@Q} \
-    PARITY_WINDOWS_DIR=${parity_windows_dir@Q} \
-    PARITY_REPLAY=${parity_replay@Q} \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
-    bash scripts/build-slot.sh $slot_dir $slots \\
-    nix develop --command bash -c '${gate_toolchain_guard}bash scripts/check-quality.sh ${requested[0]}'
-EOF
-fi

@@ -265,6 +265,7 @@ python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
         bash scripts/test_release_gate.sh
         bash scripts/test_build_host.sh
         bash scripts/test_remote_check.sh
+        bash scripts/tests/gate-shared-fifo.sh
         # The unattended loop's state machine and one-run driver: fixture-only,
         # no network, no gate. They catch wrong-target write-backs and repeated
         # assertions before those behaviours strand a run.

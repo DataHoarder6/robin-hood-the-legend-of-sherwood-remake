@@ -13,18 +13,26 @@ export HOME=$work/home
 export XDG_STATE_HOME=$work/state
 mkdir -p -- "$HOME" "$XDG_STATE_HOME"
 
-# Exercise the function the gate actually ships, not a paraphrase of it.
-sed -n '/^lock_copy() {/,/^}/p' "$source_root/scripts/remote-check.sh" >"$work/lock_copy.sh"
-if ! grep -q '^lock_copy() {' "$work/lock_copy.sh"; then
-    printf 'FAIL lock_copy() not found in scripts/remote-check.sh\n' >&2
-    exit 1
-fi
+# Exercise the functions the gate actually ships, not a paraphrase of them.
+sed -n -e '/^lock_copy() {/,/^}/p' -e '/^acquire_copy_lock() {/,/^}/p' \
+    "$source_root/scripts/remote-check.sh" >"$work/lock_copy.sh"
+for function in lock_copy acquire_copy_lock; do
+    if ! grep -q "^$function() {" "$work/lock_copy.sh"; then
+        printf 'FAIL %s() not found in scripts/remote-check.sh\n' "$function" >&2
+        exit 1
+    fi
+done
 # shellcheck source=/dev/null
 source "$work/lock_copy.sh"
 
 host=fake-host
 name=gate-shared
+slots=2
 failures=0
+
+# lock_copy() opens the host's idle-poweroff scope once admitted; that is an ssh
+# to the build host, which this fixture does not have.
+begin_build_scope() { :; }
 
 pass() { printf 'ok   %s\n' "$1"; }
 fail() { printf 'FAIL %s\n' "$1"; failures=$((failures + 1)); }
@@ -52,15 +60,18 @@ waiter() { # ID HOLD-SECS
         return 1
     fi
 }
-export -f waiter lock_copy
-export work host name
+export -f waiter lock_copy acquire_copy_lock begin_build_scope
+export work host name slots
 
 queue_dir=$XDG_STATE_HOME/robin-remote-check/queue/fake-host-gate-shared
+# An admitted caller leaves the queue, so N callers have arrived once the queued
+# tickets plus the admitted ones add up to N.
 wait_for_tickets() { # N
-    local i
+    local i queued admitted
     for i in $(seq 200); do
-        [ "$(find "$queue_dir" -maxdepth 1 -type f 2>/dev/null | wc -l)" -eq "$1" ] &&
-            return 0
+        queued=$(find "$queue_dir" -maxdepth 1 -type f 2>/dev/null | wc -l)
+        admitted=$(cat "$work/admitted" 2>/dev/null | wc -l)
+        [ $((queued + admitted)) -eq "$1" ] && return 0
         sleep 0.05
     done
     return 1
@@ -86,8 +97,10 @@ if [ "$admitted" = '1,2,3' ]; then
 else
     fail "admission order was '$admitted', want '1,2,3'"
 fi
+# An admitted caller leaves the queue, so a position counts the callers still
+# waiting: waiter 2 is first in line behind the holder, waiter 3 second.
 for id in 2 3; do
-    expect_contains "$work/waiter-$id.queue" "waiting in gate copy queue ($id/" \
+    expect_contains "$work/waiter-$id.queue" "waiting in gate copy queue ($((id - 1))/" \
         "waiter $id logs its queue position"
 done
 expect_contains "$work/waiter-3.queue" 'for gate-shared' \
@@ -130,6 +143,36 @@ if [ -e "$work/waiter-4.result" ] &&
     fail 'the timed-out waiter acquired the copy'
 else
     pass 'the timed-out waiter did not acquire the copy'
+fi
+
+# ---- Pool admission -------------------------------------------------------
+# Interactive checks share ROBIN_BUILD_SLOTS warm copies. Two concurrent callers
+# must each hold a different real copy at the same time, and `name` must become
+# that copy so every later step addresses a directory that exists.
+pool_waiter() { # ID HOLD-SECS
+    local id=$1 hold=$2 name=pool
+    if lock_copy 2>"$work/pool-$id.queue"; then
+        printf '%s\n' "$name" >>"$work/pool-admitted"
+        sleep "$hold"
+        exec 9>&-
+    fi
+}
+export -f pool_waiter
+pool_pids=()
+for id in 1 2; do
+    pool_waiter "$id" 2 >/dev/null 2>&1 &
+    pool_pids+=("$!")
+done
+for _ in $(seq 40); do
+    [ "$(cat "$work/pool-admitted" 2>/dev/null | wc -l)" -eq 2 ] && break
+    sleep 0.05
+done
+held=$(sort "$work/pool-admitted" 2>/dev/null | paste -sd, -)
+for pid in "${pool_pids[@]}"; do wait "$pid" || true; done
+if [ "$held" = 'pool-1,pool-2' ]; then
+    pass 'two concurrent checks hold the two pool copies at once'
+else
+    fail "pool admission held '$held', want 'pool-1,pool-2'"
 fi
 
 printf '\n%s checks failed\n' "$failures"

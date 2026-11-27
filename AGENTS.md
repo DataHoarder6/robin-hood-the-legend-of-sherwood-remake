@@ -30,8 +30,9 @@
   `--prune`.
 - Gate on the build host one at a time; `docs/PARALLEL_AGENTS.md` ("Every
   agent's gate takes an hour") owns the single `gate-shared` copy and scope
-  rules. Gate builds set `CARGO_INCREMENTAL=0` and never set
-  `SCCACHE_ALLOW_INCREMENTAL` — `docs/adr/0007-no-cargo-incremental-in-gates.md`.
+  rules. The gate copy builds without sccache and with Cargo incremental; pool
+  copies keep sccache with incremental off; nothing sets
+  `SCCACHE_ALLOW_INCREMENTAL` — `docs/adr/0013-gate-incremental-without-sccache.md`.
 - `nix develop` gives the same shell locally, with the clang + wild that
   `.cargo/config.toml` expects; without them links are slow and warn. Its PATH
   starts with `scripts/cargo-runtime-guard.sh`, which refuses `cargo build`,

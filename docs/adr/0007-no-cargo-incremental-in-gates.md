@@ -1,6 +1,6 @@
 # 0007 — No Cargo incremental in gate builds
 
-- **Status:** Accepted
+- **Status:** DEPRECATED 2026-11-27 — superseded by [0013](0013-gate-incremental-without-sccache.md)
 - **Date:** 2026-11-21
 - **Related:** [`0002`](0002-finished-work-lands-in-session.md), [`0004`](0004-nonexpiring-invitations.md)
 

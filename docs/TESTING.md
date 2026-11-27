@@ -109,13 +109,15 @@ remove it only after that suite exits. If a suite has hung in `futex_wait` with
 a static log for several minutes, kill it and rerun with a fresh TMPDIR rather
 than waiting.
 
-There is **one** build copy: `~/build/robin-gate/gate-shared` on `minipc`, held
+There is **one** gate copy: `~/build/robin-gate/gate-shared` on `minipc`, held
 under a lock from the first sync until the last suite finishes, outside the
-pruned root. Cargo incremental is off in gates (`CARGO_INCREMENTAL=0`); the
-stable copy gives Cargo's own freshness check the same cwd and target dir on
-every run, and `sccache` only sees genuinely new inputs. A per-tree copy
-was tried and removed: a fresh cwd gives `sccache` new working-dir and out-dir
-keys, and measured 0.36 % Rust hits. The evidence and the rejected alternatives
+pruned root. It builds with Cargo incremental and without `sccache`
+([ADR 0013](adr/0013-gate-incremental-without-sccache.md)): the stable copy
+gives Cargo's own freshness check and incremental state the same cwd and target
+dir on every run. Interactive checks take a warm pool copy (`pool-N`), which
+keeps `sccache` and `CARGO_INCREMENTAL=0`. A per-tree copy was tried and
+removed: a fresh cwd gives `sccache` new working-dir and out-dir keys, and
+measured 0.36 % Rust hits. The evidence and the rejected alternatives
 are [`2026-11-20-build-reduction-research.md`](slop/2026-11-20-build-reduction-research.md)
 and [`2026-11-20-build-freshness-and-profiling-research.md`](slop/2026-11-20-build-freshness-and-profiling-research.md).
 
