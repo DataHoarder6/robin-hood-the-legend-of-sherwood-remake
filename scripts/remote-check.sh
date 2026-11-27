@@ -547,12 +547,21 @@ fi
 remote_dir="~/$copy_root/$name"
 # The toolchain is proved as the first command inside the gate's devShell
 # (gate_toolchain_guard), which names a GC'd devShell input before any compile.
+# The gate is every agent's critical path; interactive checks are not. The gate
+# takes no build slot and runs with a high CPU weight, interactive checks queue
+# for a slot and run with a low one, so the kernel hands the gate the cores
+# whenever both compile (both scopes sit in the same user slice, so the weights
+# compare directly).
 if [ "$copy_root" = "$gate_root" ]; then
     sync_gate
     runner=gate-lanes.sh
+    cpu_weight=10000
+    slot_runner=
 else
     sync_worktree
     runner=run-suites.sh
+    cpu_weight=20
+    slot_runner="bash scripts/build-slot.sh $slot_dir $slots"
 fi
 lock="$remote_dir.lock"
 printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2
@@ -571,7 +580,7 @@ gate_tmp=\$(mktemp -d /dev/shm/robin-gate.XXXXXX)
 trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
-    -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 \
+    -p RuntimeMaxSec=7200 -p TimeoutStopSec=30 -p CPUWeight=$cpu_weight \
     systemd-inhibit --what=idle:sleep --why='check-quality ${requested[*]}' \\
     flock -w 7200 $lock \\
     env $cache_env \
@@ -591,6 +600,6 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     PARITY_REPLAY=${parity_replay@Q} \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
-    bash scripts/build-slot.sh $slot_dir $slots \\
+    $slot_runner \\
     nix develop --command bash -c '${gate_toolchain_guard}bash scripts/$runner ${requested[*]}'
 EOF
