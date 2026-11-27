@@ -312,6 +312,19 @@ impl EngineInner {
             },
         });
         let new_id = self.add_entity(entity);
+        // A replacement borrows the gang character, so its purchased health
+        // and movement authorization travel with it into the mission.
+        {
+            let description = &self.mission_domain.campaign.characters[char_idx];
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(new_id)
+                .and_then(|e| e.pc_data_mut())
+            {
+                crate::engine::skill_effects::apply_spawn_effects(pc, description);
+            }
+        }
         if let Some(dead_id) = dead_pc {
             self.retire_replaced_pc(dead_id);
         }

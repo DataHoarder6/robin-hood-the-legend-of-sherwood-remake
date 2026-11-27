@@ -70,6 +70,7 @@ mod send_message_tests;
 mod sequence_runtime;
 mod sequence_validity;
 mod simulation_gate;
+mod skill_effects;
 mod snapshot;
 pub use snapshot::PersistedEngineState;
 mod soldier_helpers;

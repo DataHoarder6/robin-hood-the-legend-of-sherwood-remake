@@ -1739,10 +1739,11 @@ impl EngineInner {
     /// price, ownership, prerequisites, the death-save floor and the purse
     /// cap.  The legacy flat-perk command and this one share the same campaign
     /// records and therefore the same purchased flags.  Legacy nodes are
-    /// stamped onto live PCs through the existing `set_pc_perk` path; the five
-    /// new nodes are campaign progression read at spawn (TODO: hook the
-    /// movement, health, noise, listen-radius and lockpick/climb effects into
-    /// `PcData` at spawn, then apply them to live PCs here).
+    /// stamped onto live PCs through the existing `set_pc_perk` path.  The five
+    /// new nodes are campaign progression: health and movement authorization
+    /// are stamped at spawn and on purchase, while speed, walking noise and
+    /// Listen radius are derived at their consuming seams in
+    /// [`crate::engine::skill_effects`].
     pub(crate) fn campaign_purchase_skill(&mut self, character_idx: u16, node: SkillNode) {
         let result = self
             .mission_domain
@@ -1759,6 +1760,14 @@ impl EngineInner {
         }
         if let Some(perk) = node.legacy_perk() {
             self.set_pc_perk(character_idx, perk);
+        }
+        // Spawn stamped the nodes the character already owned.  A node bought
+        // mid-mission reaches the live copies here; the speed, noise and Listen
+        // effects need no stamp because their seams read the campaign directly.
+        for (_, pc) in self.world.entities.pcs_mut() {
+            if pc.pc.campaign_description_index == Some(u32::from(character_idx)) {
+                super::skill_effects::apply_purchased_node(&mut pc.pc, node);
+            }
         }
     }
 

@@ -792,8 +792,14 @@ impl EngineInner {
         tcx: TickCtx<'_>,
         pc_id: EntityId,
     ) -> Option<crate::sprite::MotionState> {
-        const DISTANCE_LISTEN: f32 = 750.0;
         const TIME_LISTEN_WAIT: u32 = 25;
+        // Keen Ear changes the radius of this one-shot reveal. Deriving it
+        // from the campaign record means a mid-mission purchase applies on the
+        // next reveal without a new serialized field or a live restamp.
+        let listen_radius_squared = {
+            let radius = self.pc_skill_effects(pc_id).listen_radius.max(0) as f32;
+            radius * radius
+        };
         // FrozenAll is volatile script state and Original samples it inside
         // sprite action. The Listen countdown still runs through
         // its Execute arm while frozen, but its visual operand must not move.
@@ -871,7 +877,7 @@ impl EngineInner {
                 };
                 let elem = entity.element_data();
                 if listen_distance_squared(listener_position, elem.position())
-                    >= DISTANCE_LISTEN * DISTANCE_LISTEN
+                    >= listen_radius_squared
                 {
                     continue;
                 }

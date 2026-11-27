@@ -161,6 +161,17 @@ impl EngineInner {
         actor_id: crate::entity_id::ActorId,
         mut ft: FinalTol,
     ) -> Option<MotionState> {
+        // Fleet Footed scales the PC's walk/run factor at the point the
+        // authored sequence factor is consumed. Deriving it from the campaign
+        // record (rather than storing a new field) keeps state hashes and
+        // replays deterministic for a given skill set.
+        let skill_speed_factor = self
+            .world
+            .entities
+            .get(entity_id)
+            .is_some_and(|entity| entity.is_pc())
+            .then(|| self.pc_skill_effects(entity_id).speed_factor)
+            .unwrap_or(1.0);
         let mut seek_operands = self.movement_seek_operands(entity_id, selected, ft);
         let entity = self
             .world
@@ -685,7 +696,10 @@ impl EngineInner {
                 };
             }
         }
-        let speed_factor = speed_factor;
+        // Apply the skill multiplier after the shield-follow override so every
+        // walk/run step sees it, while an empty skill set leaves the exact
+        // authored bit pattern (x * 1.0 == x) untouched.
+        let speed_factor = speed_factor * skill_speed_factor;
         // Dispatch by order action: transition-animation orders
         // route to `MotionMethod::TillLastFrame`, while walking /
         // running orders route to `MotionMethod::Walk` (or

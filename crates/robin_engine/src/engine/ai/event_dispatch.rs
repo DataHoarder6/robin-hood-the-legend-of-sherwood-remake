@@ -185,6 +185,7 @@ impl EngineInner {
         in_building: bool,
         active: bool,
         prev_volume: u16,
+        walk_noise_multiplier: f32,
     ) -> (u16, bool) {
         use crate::element::GameMaterial as Material;
         use crate::order::OrderType as OT;
@@ -215,6 +216,14 @@ impl EngineInner {
             // pre-existing 50 fallback.
             Material::LightShadow => (prev_volume, prev_volume, 50),
             _ => (20, 70, 50), // default = ground
+        };
+        // Silent Step halves the walk volume only. Light Shadow deliberately
+        // keeps its previous-volume semantics, so it is excluded here rather
+        // than shrinking compounding values frame after frame.
+        let walk = if material == Material::LightShadow {
+            walk
+        } else {
+            ((walk as f32) * walk_noise_multiplier).round() as u16
         };
 
         // NOISE_VOLUME_* constants.
@@ -391,8 +400,15 @@ impl EngineInner {
                 noise,
             )
         };
-        let (volume, refresh_hear_box) =
-            Self::pc_noise_volume(order_type, material, in_building, active, previous);
+        let walk_noise_multiplier = self.pc_skill_effects(pc_id).walk_noise_multiplier;
+        let (volume, refresh_hear_box) = Self::pc_noise_volume(
+            order_type,
+            material,
+            in_building,
+            active,
+            previous,
+            walk_noise_multiplier,
+        );
         let Entity::Pc(pc) =
             self.expect_entity_mut(pc_id, "PC produced-noise owner before write-back")
         else {

@@ -1180,6 +1180,19 @@ impl EngineInner {
             },
         });
         let spawned_eid = self.add_entity(entity);
+        // The character owns campaign progression; the beam-me point owns only
+        // spawn data. Stamp the serialized skill effects after entity creation.
+        {
+            let description = &self.mission_domain.campaign.characters[char_idx];
+            if let Some(pc) = self
+                .world
+                .entities
+                .get_mut(spawned_eid)
+                .and_then(|e| e.pc_data_mut())
+            {
+                crate::engine::skill_effects::apply_spawn_effects(pc, description);
+            }
+        }
         Ok(spawned_eid)
     }
 

@@ -26,6 +26,9 @@ pub const FLEET_FOOTED_SPEED_FACTOR: f32 = 1.25;
 pub const HARDY_BONUS_LIFE_POINTS: i16 = 25;
 /// Silent Step scales walking noise by this value; running noise is unchanged.
 pub const SILENT_STEP_NOISE_MULTIPLIER: f32 = 0.5;
+/// The original Listen sphere's authored radius.  Keen Ear raises it to
+/// [`KEEN_EAR_LISTEN_RADIUS`]; every other listener stays at this value.
+pub const BASE_LISTEN_RADIUS: i32 = 750;
 /// Keen Ear raises the Listen radius from the authored 750 to this value.
 pub const KEEN_EAR_LISTEN_RADIUS: i32 = 1050;
 /// Cost of buying every node: four Tier-I at one, four Tier-II and the single
@@ -191,6 +194,77 @@ impl SkillNode {
     }
 }
 
+// ─── Derived gameplay effects ────────────────────────────────────
+
+/// The gameplay values a skill set grants, derived on demand from the
+/// ownership bitmask (and the legacy perk mirror).
+///
+/// This struct is deliberately **not** serialized.  The campaign's
+/// [`SkillSet`] is the only stored fact, so every peer and every replay derives
+/// identical values from it and state hashes stay deterministic.  Effects
+/// that can live in an existing serialized field (`life_points`,
+/// `has_lockpick`, `has_climb`) are stamped at spawn; the rest are read at the
+/// seam that consumes them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkillEffects {
+    /// Multiplier for a PC's walk and run movement factor.
+    pub speed_factor: f32,
+    /// Life points added to the base total at spawn.
+    pub bonus_life_points: i16,
+    /// Multiplier for walking noise; running noise is untouched.
+    pub walk_noise_multiplier: f32,
+    /// Radius of the Listen one-shot reveal.
+    pub listen_radius: i32,
+    /// Whether lock and wall-climb actions are authorized.
+    pub lockpick_and_climb: bool,
+}
+
+impl SkillEffects {
+    /// Values for a character who owns no nodes.
+    pub const fn neutral() -> Self {
+        Self {
+            speed_factor: 1.0,
+            bonus_life_points: 0,
+            walk_noise_multiplier: 1.0,
+            listen_radius: BASE_LISTEN_RADIUS,
+            lockpick_and_climb: false,
+        }
+    }
+
+    /// Derive every effect from one ownership oracle.  Callers pass either
+    /// [`SkillSet::has`] or [`crate::campaign::PcDescription::has_skill`] so
+    /// pre-tree saves report their legacy perks through the same path.
+    pub fn from_owner(owns: impl Fn(SkillNode) -> bool) -> Self {
+        let mut effects = Self::neutral();
+        for node in SkillNode::ALL {
+            if owns(node) {
+                effects.apply(node.effect());
+            }
+        }
+        effects
+    }
+
+    /// Fold one node's data-only effect.  The combat nodes keep their existing
+    /// serialized perk flags as their authority and are intentionally absent.
+    fn apply(&mut self, effect: SkillEffect) {
+        match effect {
+            SkillEffect::SpeedFactor(factor) => self.speed_factor *= factor,
+            SkillEffect::BonusLifePoints(bonus) => self.bonus_life_points += bonus,
+            SkillEffect::WalkNoiseMultiplier(multiplier) => {
+                self.walk_noise_multiplier *= multiplier
+            }
+            SkillEffect::ListenRadius(radius) => {
+                self.listen_radius = self.listen_radius.max(radius)
+            }
+            SkillEffect::LockpickAndClimb => self.lockpick_and_climb = true,
+            SkillEffect::FightThrough
+            | SkillEffect::CarefulBlade
+            | SkillEffect::AutoLoot
+            | SkillEffect::SteadyBlade => {}
+        }
+    }
+}
+
 // ─── Ownership set ───────────────────────────────────────────────
 
 /// The nine owned flags in one `#[serde(default)]` field.  Nine bits fit in a
@@ -346,4 +420,56 @@ pub fn skill_tree_rows(
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+
+    #[test]
+    fn effects_are_derived_only_from_owned_nodes() {
+        assert_eq!(SkillEffects::from_owner(|_| false), SkillEffects::neutral());
+
+        assert_eq!(
+            SkillEffects::from_owner(|node| node == SkillNode::FleetFooted).speed_factor,
+            FLEET_FOOTED_SPEED_FACTOR
+        );
+        assert_eq!(
+            SkillEffects::from_owner(|node| node == SkillNode::Hardy).bonus_life_points,
+            HARDY_BONUS_LIFE_POINTS
+        );
+        assert_eq!(
+            SkillEffects::from_owner(|node| node == SkillNode::SilentStep).walk_noise_multiplier,
+            SILENT_STEP_NOISE_MULTIPLIER
+        );
+        assert_eq!(
+            SkillEffects::from_owner(|node| node == SkillNode::KeenEar).listen_radius,
+            KEEN_EAR_LISTEN_RADIUS
+        );
+        assert!(SkillEffects::from_owner(|node| node == SkillNode::BurglarsKit).lockpick_and_climb);
+        assert_eq!(
+            SkillEffects::from_owner(|_| true),
+            SkillEffects {
+                speed_factor: FLEET_FOOTED_SPEED_FACTOR,
+                bonus_life_points: HARDY_BONUS_LIFE_POINTS,
+                walk_noise_multiplier: SILENT_STEP_NOISE_MULTIPLIER,
+                listen_radius: KEEN_EAR_LISTEN_RADIUS,
+                lockpick_and_climb: true,
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_perk_ownership_feeds_the_same_derived_effects() {
+        let mut status = crate::pc_status::PcStatus::default();
+        status.grant_perk(Perk::KeepMovingInCombat);
+        status.grant_perk(Perk::AutoLoot);
+        let set = SkillSet::from_status(&status);
+        assert!(set.has(SkillNode::FightThrough));
+        assert!(set.has(SkillNode::LootTheKnockout));
+        assert_eq!(
+            SkillEffects::from_owner(|n| set.has(n)),
+            SkillEffects::neutral()
+        );
+    }
 }

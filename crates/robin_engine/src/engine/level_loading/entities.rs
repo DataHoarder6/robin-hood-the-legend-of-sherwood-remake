@@ -688,6 +688,21 @@ impl EngineInner {
                 },
             });
             let eid = self.add_entity(entity);
+            // Skill-tree health and lock/climb authorization are campaign
+            // progression, not level-authored spawn data. Stamp them after the
+            // profile-derived fields so Burglars Kit can add an authorization
+            // the profile alone did not grant.
+            {
+                let description = &self.mission_domain.campaign.characters[char_idx];
+                if let Some(pc) = self
+                    .world
+                    .entities
+                    .get_mut(eid)
+                    .and_then(|e| e.pc_data_mut())
+                {
+                    crate::engine::skill_effects::apply_spawn_effects(pc, description);
+                }
+            }
             bind_named_entity(assets, loaded, "heroes", index, eid);
             if let Some(ai) = self
                 .world
