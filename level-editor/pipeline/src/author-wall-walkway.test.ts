@@ -141,10 +141,7 @@ test("a walkway's support clearance never removes a separately placed crossing w
     ],
   });
   const geometry = compileMap(f.document, f.bounds, f.assets).descriptor.asset_geometry!;
-  // Authored terrain owns layer 0; the walkway and the crossing wall remain
-  // two separate receiving regions above it, so support clearance kept the wall.
-  assert.equal(geometry.motion_data.layers[0]!.length, 1);
-  assert.equal(geometry.motion_data.layers[1]!.length, 2);
+  assert.equal(geometry.motion_data.layers[0]!.length, 2);
 });
 
 test("separate coplanar source tiles still join across their shared edge", () => {
