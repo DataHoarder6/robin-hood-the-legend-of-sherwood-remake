@@ -126,7 +126,7 @@ pub const FRAME_TIME_MS: u32 = 40;
 /// earlier recordings are rejected rather than decoded with a shifted layout.
 /// Version 80 records the host-authoritative cooperative-pause decision in the
 /// canonical command stream, so a pause boundary is reproduced on replay.
-pub const REPLAY_SCHEMA_VERSION: u32 = 80;
+pub const REPLAY_SCHEMA_VERSION: u32 = 81;
 
 /// Wire-format protocol version shared by the engine and the leaderboard wire
 /// protocol. Bump on any breaking change to `NetMsg` or
@@ -187,7 +187,7 @@ pub const REPLAY_SCHEMA_VERSION: u32 = 80;
 /// in peer snapshots and the deterministic command stream.
 /// Protocol 75 carries the host-authoritative cooperative-pause decision and
 /// the seat acknowledgements that bound its barrier.
-pub const NET_PROTOCOL_VERSION: u32 = 75;
+pub const NET_PROTOCOL_VERSION: u32 = 76;
 
 pub use artifact::ArtifactRefV1;
 pub use canonical::{

@@ -20,7 +20,7 @@ const NATIVE_SNAPSHOT_MAGIC: &[u8; 4] = b"RHNS";
 /// Version 16 adds the per-PC "no friendly-fire knockback" flag.
 /// Version 17 adds the authoritative extra-guards option to `SimConfig`.
 /// Version 18 adds the host-authoritative cooperative-pause gate state.
-const NATIVE_SNAPSHOT_VERSION: u32 = 18;
+const NATIVE_SNAPSHOT_VERSION: u32 = 19;
 const NATIVE_SNAPSHOT_HEADER_BYTES: usize = 8;
 
 /// Native codec form of the current nested [`EngineInner`] snapshot.
