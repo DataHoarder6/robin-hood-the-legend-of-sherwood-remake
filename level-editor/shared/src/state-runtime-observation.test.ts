@@ -67,8 +67,8 @@ test("synthetic structural probe preserves sparse FX and reset sentinel (not liv
     p = packet(f.engine, f.assets);
   const observed = await decodeRuntimeCapture(p.e, p.a, p.manifest, source, [binding]);
   assert.equal(observed.engine_frame, 17);
-  assert.equal(observed.patches[0]!.sprite?.count, 65535);
-  assert.equal(observed.patches[0]!.sprite?.row, 1);
+  assert.equal(observed.patches[0].sprite?.count, 65535);
+  assert.equal(observed.patches[0].sprite?.row, 1);
 });
 test("source and payload guards reject before decoding", async () => {
   const f = synthetic(),
@@ -78,7 +78,7 @@ test("source and payload guards reject before decoding", async () => {
     /identity/,
   );
   const changed = new Uint8Array(p.e);
-  changed[0]! ^= 1;
+  changed[0] ^= 1;
   await assert.rejects(decodeRuntimeCapture(changed, p.a, p.manifest, source, [binding]), /hash/);
 });
 test("missing FX, wrong variant, invalid counter and old flat shape cannot become empty observations", async () => {

@@ -29,8 +29,8 @@ test("native collinearity preserves results across large coordinate translations
           [a, a, c],
         ] as const) {
           assert.equal(
-            predicates.SlopesEqual4(points[0], points[1], points[2], true),
-            predicates.SlopesEqual(points[0], points[1], points[2], true),
+            predicates.SlopesEqual4(...points, true),
+            predicates.SlopesEqual(...points, true),
             JSON.stringify(points),
           );
         }

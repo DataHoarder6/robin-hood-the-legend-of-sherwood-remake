@@ -228,25 +228,13 @@ test("gameplay receiver holds initial obstacles while independent target starts,
   const target = (tick: number) =>
     clocks.apply(
       f.batch(seq++, seq, [
-        {
-          kind: "element",
-          id: f.body.id,
-          source: f.body.source as StateClockSample["source"],
-          active: true,
-          tick,
-        },
+        { kind: "element", id: f.body.id, source: f.body.source as StateClockSample["source"], active: true, tick },
       ]),
     );
   const receiver = (phase: "initial" | "forward" | "applied" | "reverse") =>
     clocks.apply(
       f.batch(seq++, seq, [
-        {
-          kind: "background",
-          id: f.ground.id,
-          source: f.ground.source as StateClockSample["source"],
-          phase,
-          tick: 0,
-        },
+        { kind: "background", id: f.ground.id, source: f.ground.source as StateClockSample["source"], phase, tick: 0 },
       ]),
     );
   target(0);

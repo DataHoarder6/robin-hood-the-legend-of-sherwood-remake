@@ -53,9 +53,7 @@ function fixture() {
 }
 
 test("a rounded oblique ramp handoff retains supported endpoints and collision checks", () => {
-  // The JSON import widens each captured edge to number[][]; every edge in the
-  // fixture has exactly two anchors, as NavigationJoin requires.
-  const { connection, from, to } = rampPartition as unknown as {
+  const { connection, from, to } = rampPartition as {
     connection: NavigationConnection;
     from: NavigationAnchorArea;
     to: NavigationAnchorArea;

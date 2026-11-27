@@ -13,11 +13,7 @@ import {
   type StateDeliveryContract,
 } from "./state-delivery.ts";
 
-/** Samples may observe an element, a background state or a patch state; their
- * source kinds differ, so the event port accepts the union the contract uses. */
-type Source =
-  | StateDeliveryContract["native"]["elements"][number]["source"]
-  | NonNullable<StateDeliveryContract["native"]["patch_states"]>[number]["source"];
+type Source = StateDeliveryContract["native"]["elements"][number]["source"];
 export type StateClockSample =
   | {
       kind: "element";
