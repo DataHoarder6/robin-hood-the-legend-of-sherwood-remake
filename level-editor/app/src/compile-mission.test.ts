@@ -192,19 +192,21 @@ test("resizing omits out-of-frame mission markers even in strict export and reta
   assert.deepEqual(doc, before);
 });
 
-test("native source staging keeps complete patch slots and script topology without claiming execution", async () => {
-  const { prepareNativeMissionSource } = await import("./compile-mission.ts");
-  const { readFile } = await import("node:fs/promises");
+test("native source staging keeps complete patch slots and script topology without claiming execution", async (t) => {
+  const { access, readFile } = await import("node:fs/promises");
   const source = new URL("../../library/mission-states/croisement02/source/", import.meta.url);
+  const rhm = new URL("Emb05_FoB_MP.rhm.json", source);
+  const rhp = new URL("Croisement02.rhp.json", source);
+  try {
+    await Promise.all([access(rhm), access(rhp)]);
+  } catch {
+    t.skip("optional native source JSON fixtures are not present");
+    return;
+  }
+  const { prepareNativeMissionSource } = await import("./compile-mission.ts");
   const bytes = new Map([
-    [
-      "Data/Levels/Emb05_FoB_MP.rhm.json",
-      new Uint8Array(await readFile(new URL("Emb05_FoB_MP.rhm.json", source))),
-    ],
-    [
-      "Data/Levels/Croisement02.rhp.json",
-      new Uint8Array(await readFile(new URL("Croisement02.rhp.json", source))),
-    ],
+    ["Data/Levels/Emb05_FoB_MP.rhm.json", new Uint8Array(await readFile(rhm))],
+    ["Data/Levels/Croisement02.rhp.json", new Uint8Array(await readFile(rhp))],
     // Pinning alone deliberately does not attest that a program decodes or can execute.
     ["Data/Levels/Emb05_FoB_MP.scb", new Uint8Array([1, 2, 3])],
   ]);

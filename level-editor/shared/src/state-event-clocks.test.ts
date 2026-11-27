@@ -65,39 +65,75 @@ test("observed Tac06 rock onset separation cannot advance an unrelated patch clo
   // not expose frame counters; these sample ticks exercise the event port only.
   clocks.apply(
     f.batch(0, 269, [
-      { kind: "background", id: f.ground.id, source: f.ground.source, phase: "forward", tick: 0 },
+      {
+        kind: "background",
+        id: f.ground.id,
+        source: f.ground.source as StateClockSample["source"],
+        phase: "forward",
+        tick: 0,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), undefined);
   clocks.apply(
     f.batch(1, 300, [
-      { kind: "element", id: f.body.id, source: f.body.source, active: true, tick: 2 },
+      {
+        kind: "element",
+        id: f.body.id,
+        source: f.body.source as StateClockSample["source"],
+        active: true,
+        tick: 2,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), undefined);
   clocks.apply(
     f.batch(2, 328, [
-      { kind: "patch", id: f.patch.id, source: f.patch.source, phase: "forward", tick: 0 },
+      {
+        kind: "patch",
+        id: f.patch.id,
+        source: f.patch.source as StateClockSample["source"],
+        phase: "forward",
+        tick: 0,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), 0);
   assert.equal(clocks.sample("background", f.ground.id)!.tick, 0);
   clocks.apply(
     f.batch(3, 330, [
-      { kind: "patch", id: f.patch.id, source: f.patch.source, phase: "applied", tick: 0 },
+      {
+        kind: "patch",
+        id: f.patch.id,
+        source: f.patch.source as StateClockSample["source"],
+        phase: "applied",
+        tick: 0,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), 3);
   clocks.apply(
     f.batch(4, 350, [
-      { kind: "patch", id: f.patch.id, source: f.patch.source, phase: "applied", tick: 12 },
+      {
+        kind: "patch",
+        id: f.patch.id,
+        source: f.patch.source as StateClockSample["source"],
+        phase: "applied",
+        tick: 12,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), 3);
   assert.equal(clocks.sample("patch", f.patch.id)!.tick, 12);
   clocks.apply(
     f.batch(5, 351, [
-      { kind: "patch", id: f.patch.id, source: f.patch.source, phase: "initial", tick: 0 },
+      {
+        kind: "patch",
+        id: f.patch.id,
+        source: f.patch.source as StateClockSample["source"],
+        phase: "initial",
+        tick: 0,
+      },
     ]),
   );
   assert.equal(clocks.physicalTick("rock"), undefined);
@@ -109,7 +145,7 @@ test("event batches validate atomically and reject duplicate, stale, or foreign 
   const sample: StateClockSample = {
     kind: "element",
     id: f.body.id,
-    source: f.body.source,
+    source: f.body.source as StateClockSample["source"],
     active: true,
     tick: 2,
   };
@@ -137,7 +173,7 @@ test("an omitted visibility field retains the owner's last visibility independen
       {
         kind: "element",
         id: f.body.id,
-        source: f.body.source,
+        source: f.body.source as StateClockSample["source"],
         active: true,
         visible: false,
         tick: 0,
@@ -146,7 +182,13 @@ test("an omitted visibility field retains the owner's last visibility independen
   );
   const applied = clocks.apply(
     f.batch(1, 1, [
-      { kind: "element", id: f.body.id, source: f.body.source, active: true, tick: 1 },
+      {
+        kind: "element",
+        id: f.body.id,
+        source: f.body.source as StateClockSample["source"],
+        active: true,
+        tick: 1,
+      },
     ]),
   );
   assert.equal(applied[0]!.kind, "element");

@@ -105,9 +105,10 @@ test("projected stair collision admits only physically supported movement footpr
         }
       assert.ok(checked > 0, `${degrees}/${elevation}: usable floor was lost`);
       const compare = (p: Point, q: Point) => p[0] - q[0] || p[1] - q[1];
+      const reversed = projectStairClearance([...boundary].reverse(), plane);
       assert.deepEqual(
-        projectStairClearance([...boundary].reverse(), plane)?.toSorted(compare),
-        compiled.toSorted(compare),
+        reversed === undefined ? undefined : [...reversed].sort(compare),
+        [...compiled].sort(compare),
       );
     }
   assert.ok(corrected > 0, "at least one projected floor must require recovery");

@@ -14,7 +14,7 @@ export interface NativeExtractionScenes {
   depth: THREE.Object3D;
   dispose(): void;
 }
-const trusted = new WeakSet<object>();
+const trusted = new WeakSet();
 const retirement = new WeakMap<NativeExtractionContext, () => void>();
 const retired = new WeakSet<NativeExtractionContext>();
 export interface NativeExtractionContext {
@@ -171,8 +171,9 @@ export async function bindNativeExtractionContext(input: {
             )
               throw new Error("Native extraction context unsupported receiver depth");
             const material = original.clone();
-            material.onBeforeCompile = original.onBeforeCompile;
-            material.customProgramCacheKey = original.customProgramCacheKey;
+            material.onBeforeCompile = (shader, renderer) =>
+              original.onBeforeCompile(shader, renderer);
+            material.customProgramCacheKey = () => original.customProgramCacheKey();
             material.colorWrite = false;
             materials.push(material);
             return material;

@@ -24,7 +24,9 @@ test("rounded clearance crossings become valid integer regions instead of cancel
   assert.ok(polygonArea(result) > 0);
   for (const polygon of result)
     for (const ring of polygon) for (const point of ring) assert.ok(point.every(Number.isInteger));
-  assert.ok(warnings.some((w) => w.includes("normalized generated boundaries")));
+  // The crossed corner is repaired during quantization, which reports the
+  // specific repair; the generic boundary warning covers union-level repairs.
+  assert.ok(warnings.some((w) => w.includes("repaired a crossed subpixel corner")));
   assert.deepEqual(quantizeRecoveredMotion(result, "stable", []), result);
 });
 

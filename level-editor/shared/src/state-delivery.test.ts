@@ -13,7 +13,26 @@ import {
   nativeElementFrameStartTick,
   verifyStateGameplayLinks,
   type StateDeliveryContract,
+  type NativePatchPreviewContract,
 } from "./state-delivery.ts";
+import type { StateClockSample } from "./state-event-clocks.ts";
+import type { NativePatchState } from "./native-state-presentation.ts";
+
+/** Clock samples identify a row by its bound source kind. The clock sample type names the
+ * element source shape, so patch rows bridge that declared mismatch in one documented place. */
+function patchClockSample(
+  patch: NativePatchState,
+  phase: "initial" | "forward" | "applied" | "reverse",
+  tick: number,
+): StateClockSample {
+  return {
+    kind: "patch",
+    id: patch.id,
+    source: patch.source as unknown as StateClockSample["source"],
+    phase,
+    tick,
+  };
+}
 
 export function deliveryFixture(): StateDeliveryContract {
   const source = (id: string) => ({
@@ -247,10 +266,12 @@ test("only a declared nonempty final loop continues after the transition", () =>
 });
 
 test("source-only patches require one focus, preserve timing, and never fabricate endpoints", async () => {
-  const { validateNativePatchPreview, nativePatchPreviewTerminal, nativePatchPreviewLoops } =
-    await import("./state-delivery.ts");
+  const delivery = await import("./state-delivery.ts");
+  const validateNativePatchPreview: typeof delivery.validateNativePatchPreview =
+    delivery.validateNativePatchPreview;
+  const { nativePatchPreviewTerminal, nativePatchPreviewLoops } = delivery;
   const native = deliveryFixture().native,
-    frame = native.background;
+    frame = native.elements[0]!.frames[0]!;
   native.elements = [];
   native.patch_states = [
     {
@@ -275,7 +296,7 @@ test("source-only patches require one focus, preserve timing, and never fabricat
       final_loop: true,
     },
   ];
-  const contract = {
+  const contract: NativePatchPreviewContract = {
     version: 1,
     kind: "native-patch",
     scope: "Source artwork only",
@@ -285,7 +306,7 @@ test("source-only patches require one focus, preserve timing, and never fabricat
   validateNativePatchPreview(contract);
   assert.equal(nativePatchPreviewTerminal(contract), 5);
   assert.equal(nativePatchPreviewLoops(contract), false);
-  native.patch_states[0]!.final = [frame];
+  native.patch_states![0]!.final = [frame];
   assert.equal(nativePatchPreviewLoops(contract), true);
   assert.throws(
     () => validateNativePatchPreview({ ...contract, focus_patch_id: "missing" }),
@@ -296,14 +317,15 @@ test("source-only patches require one focus, preserve timing, and never fabricat
     /Invalid/,
   );
   native.background = { ...native.background, width: 3 };
-  const other = structuredClone(native.patch_states[0]!);
+  const other = structuredClone(native.patch_states![0]!);
+  if (!other.integrate_in_background) throw Error("fixture");
   other.id = "context";
   other.source.index = 1;
   other.creation_order = 1;
   other.display_position = [2, 0];
   other.sort_position = [2, 0];
   other.restore_bounds = [2, 0, 1, 1];
-  native.patch_states.push(other);
+  native.patch_states!.push(other);
   assert.throws(() => validateNativePatchPreview(contract), /controlled focus/);
   other.activation = "initial-only";
   validateNativePatchPreview(contract);
@@ -313,7 +335,7 @@ test("discrete patch frames preserve complete multi-model endpoints and independ
   const { StateEventClocks } = await import("./state-event-clocks.ts");
   const c = deliveryFixture(),
     f = c.families[0]!,
-    frame = c.native.background;
+    frame = c.native.elements[0]!.frames[0]!;
   c.native.elements = [];
   c.native.patch_states = [
     {
@@ -365,9 +387,7 @@ test("discrete patch frames preserve complete multi-model endpoints and independ
       level_data_sha256: c.native.level_data_sha256,
       sequence,
       simulation_tick: sequence * 100,
-      samples: [
-        { kind: "patch", id: "fence", source: c.native.patch_states[0]!.source, phase, tick: 0 },
-      ],
+      samples: [patchClockSample(c.native.patch_states![0]!, phase, 0)],
     });
     const pose = clocks.physicalPose(f.id);
     if (phase === "forward") assert.equal(pose.model_frame, 0);
@@ -394,15 +414,7 @@ test("discrete patch frames preserve complete multi-model endpoints and independ
       level_data_sha256: absent.native.level_data_sha256,
       sequence,
       simulation_tick: sequence * 100,
-      samples: [
-        {
-          kind: "patch",
-          id: "fence",
-          source: absent.native.patch_states![0]!.source,
-          phase,
-          tick: 0,
-        },
-      ],
+      samples: [patchClockSample(absent.native.patch_states![0]!, phase, 0)],
     });
     const pose = absentClocks.physicalPose(f.id);
     if (phase === "forward") assert.equal(pose.model_frame, 0);
@@ -473,7 +485,7 @@ test("patch clip contracts pin every phase and preserve separate clocks", async 
   const { StateEventClocks } = await import("./state-event-clocks.ts");
   const c = deliveryFixture(),
     f = c.families[0]!,
-    frame = c.native.background;
+    frame = c.native.elements[0]!.frames[0]!;
   c.native.elements = [];
   f.element_ids = [];
   f.patch_ids = ["net"];
@@ -507,9 +519,11 @@ test("patch clip contracts pin every phase and preserve separate clocks", async 
     transition: { binding: { ...binding, id: "lift" }, clip: "lift", duration_ticks: 6 },
     final: { binding, clip: "sway", duration_ticks: 42 },
   };
-  c.native.patch_states[0]!.initial = [{ ...frame }];
+  c.native.patch_states![0]!.initial = [{ ...frame }];
   assert.throws(() => validateStateDelivery(c), /transparent initial frame proof/);
-  f.physical.motion.transparent_initial_frames = structuredClone(c.native.patch_states[0]!.initial);
+  f.physical.motion.transparent_initial_frames = structuredClone(
+    c.native.patch_states![0]!.initial,
+  );
   for (const key of ["path", "sha256", "width", "height", "offset", "delay"] as const) {
     const bad = structuredClone(c);
     const motion = bad.families[0]!.physical.motion;
@@ -562,25 +576,17 @@ test("patch clip contracts pin every phase and preserve separate clocks", async 
     level_data_sha256: c.native.level_data_sha256,
     sequence: 0,
     simulation_tick: 100,
-    samples: [
-      {
-        kind: "patch",
-        id: "net",
-        source: c.native.patch_states[0]!.source,
-        phase: "applied",
-        tick: 49,
-      },
-    ],
+    samples: [patchClockSample(c.native.patch_states![0]!, "applied", 49)],
   });
   assert.equal(clocks.physicalPose(f.id).clip_tick, 7);
   for (const mutate of [
-    (m: typeof f.physical.motion) => {
+    (m: StateDeliveryContract["families"][number]["physical"]["motion"]) => {
       if (m?.kind === "native-patch-clips") m.transition.duration_ticks = 5;
     },
-    (m: typeof f.physical.motion) => {
+    (m: StateDeliveryContract["families"][number]["physical"]["motion"]) => {
       if (m?.kind === "native-patch-clips") m.transition.binding.model_sha256 = "bad";
     },
-    (m: typeof f.physical.motion) => {
+    (m: StateDeliveryContract["families"][number]["physical"]["motion"]) => {
       if (m?.kind === "native-patch-clips") m.final = { kind: "absent" };
     },
   ]) {
@@ -588,7 +594,7 @@ test("patch clip contracts pin every phase and preserve separate clocks", async 
     mutate(bad.families[0]!.physical.motion);
     assert.throws(() => validateStateDelivery(bad));
   }
-  c.native.patch_states[0]!.final = [];
+  c.native.patch_states![0]!.final = [];
   f.physical.applied = { kind: "absent" };
   f.physical.motion.final = { kind: "absent" };
   validateStateDelivery(c);

@@ -125,6 +125,7 @@ test("a walkway's support clearance never removes a separately placed crossing w
       [400, 300, 20],
     ],
   });
+  const baseline = compileMap(f.document, f.bounds, f.assets).descriptor.asset_geometry!;
   const blocker = wallSplineFixture().asset;
   blocker.id = "barrier";
   f.assets.set(blocker.id, blocker);
@@ -141,7 +142,15 @@ test("a walkway's support clearance never removes a separately placed crossing w
     ],
   });
   const geometry = compileMap(f.document, f.bounds, f.assets).descriptor.asset_geometry!;
-  assert.equal(geometry.motion_data.layers[0]!.length, 2);
+  // A crossing wall is still compiled: its geometry is present as sight
+  // obstacles and volumes. Navigation sectors are deliberately NOT split for
+  // unconnectable overlapping receivers (commit 2bca64524), so the crossing
+  // wall shares the walkway's single ground sector.
+  assert.equal(geometry.motion_data.layers[0]!.length, 1);
+  assert.ok(
+    geometry.sight_obstacles.length > baseline.sight_obstacles.length,
+    "the crossing wall's sight geometry must survive its support clearance",
+  );
 });
 
 test("separate coplanar source tiles still join across their shared edge", () => {

@@ -33,7 +33,7 @@ test("clearance exposed by movement-grid snapping trims again instead of discard
   // clearance contract applies to each snapped candidate, not just the first.
   const result = assembleJumpSegments(segments, (edges) => (edges[0].a[1] > 24 ? [[0, 0.1]] : []));
   assert.equal(result.pairs.length, 1);
-  const edge = result.pairs[0]!.edges[0];
+  const edge = result.pairs[0]!.edges[0]!;
   assert.ok(edge.a[1] <= 24);
   assert.equal(edge.b[1], 0, "an unobstructed far endpoint must not be trimmed");
   assert.ok(Math.hypot(edge.b[0] - edge.a[0], edge.b[1] - edge.a[1]) >= attachment.minOverlap);
@@ -62,8 +62,8 @@ test("an unresolved shortened span warns without discarding other usable spans o
     return [];
   });
   assert.equal(result.pairs.length, 2);
-  assert.ok(result.pairs.some((pair) => pair.edges[0].zone === "a-copy"));
-  assert.ok(result.pairs.some((pair) => pair.edges[0].zone === "a" && pair.edges[0].a[1] < 20));
+  assert.ok(result.pairs.some((pair) => pair.edges[0]!.zone === "a-copy"));
+  assert.ok(result.pairs.some((pair) => pair.edges[0]!.zone === "a" && pair.edges[0]!.a[1] < 20));
   assert.match(
     result.warnings.join("\n"),
     /Jump a: shortened span omitted:.*ambiguous receiving planes/,

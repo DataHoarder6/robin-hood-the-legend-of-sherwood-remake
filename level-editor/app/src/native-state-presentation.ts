@@ -381,7 +381,7 @@ export async function verifyNativePresentationSource(
       row.start_animation_valid !== state.initial.length > 0 ||
       row.transition_animation_valid !== true ||
       row.end_animation_valid !== state.final.length > 0 ||
-      fx?.active !== true ||
+      !fx?.active ||
       sprite?.profile_name !== state.profile.name ||
       sprite.position_x !== state.display_position[0] ||
       sprite.position_y !== state.display_position[1] ||

@@ -61,7 +61,7 @@ export function createNativeExtractionGeometrySnapshot() {
     for (const [name, value] of Object.entries(source.attributes))
       copy.setAttribute(name, attribute(value));
     for (const [name, values] of Object.entries(source.morphAttributes))
-      copy.morphAttributes[name as keyof typeof copy.morphAttributes] = values!.map(attribute);
+      copy.morphAttributes[name as keyof typeof copy.morphAttributes] = values.map(attribute);
     copy.morphTargetsRelative = source.morphTargetsRelative;
     for (const group of source.groups) copy.addGroup(group.start, group.count, group.materialIndex);
     copy.boundingBox = source.boundingBox?.clone() ?? null;

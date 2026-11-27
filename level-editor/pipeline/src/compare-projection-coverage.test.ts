@@ -13,10 +13,11 @@ test("projection coverage ignores subdivision while preserving height and receiv
   const before = fixture(),
     after = structuredClone(before),
     quad = after.sight_obstacles.shift()!;
-  assert.equal(quad.points.length, 4);
+  assert.ok(quad.points.length >= 4);
+  const diagonal = Math.floor(quad.points.length / 2);
   after.sight_obstacles.push(
-    { ...quad, points: [quad.points[0]!, quad.points[1]!, quad.points[2]!] },
-    { ...quad, points: [quad.points[0]!, quad.points[2]!, quad.points[3]!] },
+    { ...quad, points: quad.points.slice(0, diagonal + 1) },
+    { ...quad, points: [quad.points[0]!, ...quad.points.slice(diagonal)] },
   );
   assert.equal(compareProjectionCoverage(before, after).equal, true);
   after.sight_obstacles.pop();

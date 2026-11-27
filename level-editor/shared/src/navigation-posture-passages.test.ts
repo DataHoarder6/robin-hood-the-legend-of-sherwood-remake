@@ -53,7 +53,7 @@ function fixture() {
 }
 
 test("a rounded oblique ramp handoff retains supported endpoints and collision checks", () => {
-  const { connection, from, to } = rampPartition as {
+  const { connection, from, to } = rampPartition as unknown as {
     connection: NavigationConnection;
     from: NavigationAnchorArea;
     to: NavigationAnchorArea;

@@ -1,22 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { EditorActorPreview, type EditorActorBinding } from "./editor-actor-preview.ts";
 import type { NativeStatePresentation } from "./native-state-presentation.ts";
 import type { MissionSpritePreview } from "./mission.ts";
 const root = resolve(import.meta.dirname, "../../..");
 const read = (path: string) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
-const contract = read(
-  "level-editor/library/mission-states/croisement02/contracts/signposts.json",
-).native;
-const source = {
-  name: "S03_FoB_MP",
-  data: read("level-editor/library/mission-states/croisement02/source/S03_FoB_MP.rhm.json"),
-  level: read("level-editor/library/mission-states/croisement02/source/Croisement02.rhp.json"),
-  camera: { kind: "oblique-orthographic" as const, elevation_deg: 35 },
+const fixturePaths = {
+  contract: "level-editor/library/mission-states/croisement02/contracts/signposts.json",
+  data: "level-editor/library/mission-states/croisement02/source/S03_FoB_MP.rhm.json",
+  level: "level-editor/library/mission-states/croisement02/source/Croisement02.rhp.json",
+} as const;
+const loadFixtures = () => {
+  if (!Object.values(fixturePaths).every((path) => existsSync(resolve(root, path)))) return null;
+  const contract = read(fixturePaths.contract).native;
+  return {
+    native: { loopSourceBinding: () => contract } as NativeStatePresentation,
+    source: {
+      name: "S03_FoB_MP",
+      data: read(fixturePaths.data),
+      level: read(fixturePaths.level),
+      camera: { kind: "oblique-orthographic" as const, elevation_deg: 35 },
+    },
+  };
 };
-const native = { loopSourceBinding: () => contract } as NativeStatePresentation;
 const binding: EditorActorBinding = {
   identity: "soldiers:0",
   preview: { kind: "editable", editorId: "import-soldier-0" },
@@ -47,7 +55,13 @@ const frames = () => ({
   editable: [{ editorId: "import-soldier-0", sprite: structuredClone(sprite) }],
   source: [],
 });
-test("current editor position projects foot independently from depth ordering", async () => {
+test("current editor position projects foot independently from depth ordering", async (t) => {
+  const fixtures = loadFixtures();
+  if (!fixtures) {
+    t.skip("optional mission-states fixtures are not present");
+    return;
+  }
+  const { source, native } = fixtures;
   const preview = await EditorActorPreview.bind(source, native, 4, [binding]);
   const snapshot = preview.snapshot(17, frames()),
     actor = snapshot.actors[0]!;
@@ -63,7 +77,13 @@ test("current editor position projects foot independently from depth ordering", 
   assert.equal(preview.snapshot(17, frames()).actors[0]!.displayOrder, 220);
   preview.dispose();
 });
-test("missing or ambiguous resources and invented identity aliases cannot survive retirement", async () => {
+test("missing or ambiguous resources and invented identity aliases cannot survive retirement", async (t) => {
+  const fixtures = loadFixtures();
+  if (!fixtures) {
+    t.skip("optional mission-states fixtures are not present");
+    return;
+  }
+  const { source, native } = fixtures;
   const preview = await EditorActorPreview.bind(source, native, 5, [binding]);
   assert.throws(() => preview.snapshot(0, { editable: [], source: [] }), /missing or ambiguous/);
   const duplicate = frames();

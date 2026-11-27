@@ -6,7 +6,11 @@ import type { StateDeliveryContract } from "./state-delivery.ts";
 import type { StateRuntimeBinding } from "./state-runtime-adapter.ts";
 import type { StateClockBatch } from "./state-event-clocks.ts";
 function fixture() {
-  const source = { kind: "mission-patch" as const, index: 0, sha256: "c".repeat(64) };
+  const source = {
+    kind: "mission-patch",
+    index: 0,
+    sha256: "c".repeat(64),
+  } as unknown as StateRuntimeBinding["source"];
   const native = {
     mission: "Synthetic",
     mission_data_sha256: "a".repeat(64),
@@ -87,7 +91,7 @@ test("synthetic session delegates observed clocks and empty final phase without 
     await s.deliver(p.e, p.a, p.manifest);
   }
   assert.deepEqual(
-    batches.map((b) => b.samples[0].tick),
+    batches.map((b) => b.samples[0]!.tick),
     [5, 0],
   );
   assert.deepEqual(

@@ -246,7 +246,7 @@ test("a raised ramp reconnects along an internal ground hole", () => {
       [200, 200],
       [100, 200],
     ];
-    ground.blockers = [reversed ? hole.toReversed() : hole];
+    ground.blockers = [reversed ? [...hole].reverse() : hole];
     const ramp = rectangle([0, 0.4, -40], 100, 100, 200, 250);
     const [region] = assembleNavigationRegions([ground, ramp], []);
     assert.ok(region);

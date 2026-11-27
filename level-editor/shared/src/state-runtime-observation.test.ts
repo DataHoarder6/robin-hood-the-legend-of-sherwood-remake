@@ -8,13 +8,18 @@ const source = {
   mission_data_sha256: "a".repeat(64),
   level_data_sha256: "b".repeat(64),
 };
-const binding: StateRuntimeBinding = {
+const patchSource = {
+  kind: "mission-patch",
+  index: 0,
+  sha256: "c".repeat(64),
+} as unknown as StateRuntimeBinding["source"];
+const binding = {
   kind: "patch",
   id: "p",
-  source: { kind: "mission-patch", index: 0, sha256: "c".repeat(64) },
+  source: patchSource,
   runtime_index: 0,
   phase_rows: { initial: 0, forward: 1 },
-};
+} satisfies StateRuntimeBinding;
 function packet(engine: unknown, assets: unknown) {
   const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v));
   const e = encode(engine),
@@ -67,8 +72,8 @@ test("synthetic structural probe preserves sparse FX and reset sentinel (not liv
     p = packet(f.engine, f.assets);
   const observed = await decodeRuntimeCapture(p.e, p.a, p.manifest, source, [binding]);
   assert.equal(observed.engine_frame, 17);
-  assert.equal(observed.patches[0].sprite?.count, 65535);
-  assert.equal(observed.patches[0].sprite?.row, 1);
+  assert.equal(observed.patches[0]!.sprite?.count, 65535);
+  assert.equal(observed.patches[0]!.sprite?.row, 1);
 });
 test("source and payload guards reject before decoding", async () => {
   const f = synthetic(),
@@ -78,7 +83,7 @@ test("source and payload guards reject before decoding", async () => {
     /identity/,
   );
   const changed = new Uint8Array(p.e);
-  changed[0] ^= 1;
+  changed[0] = changed[0]! ^ 1;
   await assert.rejects(decodeRuntimeCapture(changed, p.a, p.manifest, source, [binding]), /hash/);
 });
 test("missing FX, wrong variant, invalid counter and old flat shape cannot become empty observations", async () => {

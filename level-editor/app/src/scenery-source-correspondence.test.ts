@@ -211,19 +211,31 @@ test("an unrelated missing scenery preview does not prevent a verified source ow
   internal.resources.set("unrelated", unrelated);
   assert.equal(await layer.bindNativeSourceClocks(f.native, f.level), true);
 });
+/** A real promise resource plus a signal for when the layer has admitted it. */
+function deferredFixtureResource(internal: any) {
+  let release!: () => void;
+  let admitted!: () => void;
+  const resource = new Promise<unknown>((resolve) => {
+    release = () => resolve({});
+  });
+  const admission = new Promise<void>((resolve) => {
+    admitted = resolve;
+  });
+  const originalGet = internal.resources.get.bind(internal.resources);
+  internal.resources.get = (key: string) => {
+    const value = originalGet(key);
+    if (key === "fixture") admitted();
+    return value;
+  };
+  internal.resources.set("fixture", resource);
+  return { admission, release };
+}
 test("retired missions cannot bind after a matching resource finishes loading", async () => {
   const f = await fixture(),
     { layer, internal } = attachLayer(f);
-  let waiting = false,
-    release!: () => void;
-  internal.resources.set("fixture", {
-    then(resolve: (value: unknown) => void) {
-      waiting = true;
-      release = () => resolve({});
-    },
-  });
+  const { admission, release } = deferredFixtureResource(internal);
   const pending = layer.bindNativeSourceClocks(f.native, f.level);
-  while (!waiting) await new Promise((resolve) => setImmediate(resolve));
+  await admission;
   layer.clearSourceClocks();
   release();
   assert.equal(await pending, false);
@@ -232,16 +244,9 @@ test("retired missions cannot bind after a matching resource finishes loading", 
 test("placement mismatch during resource admission rejects without leaving a partial binding", async () => {
   const f = await fixture(),
     { layer, internal } = attachLayer(f);
-  let waiting = false,
-    release!: () => void;
-  internal.resources.set("fixture", {
-    then(resolve: (value: unknown) => void) {
-      waiting = true;
-      release = () => resolve({});
-    },
-  });
+  const { admission, release } = deferredFixtureResource(internal);
   const pending = layer.bindNativeSourceClocks(f.native, f.level);
-  while (!waiting) await new Promise((resolve) => setImmediate(resolve));
+  await admission;
   f.document.objects[0]!.transform.dx = 12;
   release();
   await assert.rejects(pending, /placement changed during/);

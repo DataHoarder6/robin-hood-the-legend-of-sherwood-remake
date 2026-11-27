@@ -6,6 +6,7 @@ import { compileAssetGameplay } from "./compile-asset-gameplay.ts";
 import { validateAssetGameplay, type AssetWalkableSurface } from "./asset-gameplay.ts";
 import { createTerrainGrid } from "./authored-terrain.ts";
 import { IDENTITY_TRANSFORM } from "./level3d.ts";
+import type { Point } from "./level.ts";
 import {
   assetCompilerFixture,
   forcedCrouchCompilerFixture,
@@ -115,6 +116,7 @@ test("virtual entrances ignore overlapping geometry only inside their declared p
       z_top: 40,
     }));
     assets.set(barrier.id, barrier);
+    assert.ok(document.assetSources);
     document.assetSources.push({ ...document.assetSources[0]!, id: barrier.id });
     document.objects.push({
       ...structuredClone(document.objects[0]!),
@@ -246,6 +248,7 @@ test("copied roof takeoffs follow precise floor contours without fictitious grou
       [0, 0, 2000, 2000],
       { bestEffort: true },
     );
+    assert.ok(compiled.jump_line_pairs, `rotation ${rotation}`);
     assert.equal(compiled.jump_line_pairs.length, 2, `rotation ${rotation}`);
     assert.ok(compiled.motion_data.layers.flat().some((area) => area.precise_polygon?.length));
   }
@@ -614,7 +617,9 @@ for (const type of [1, 2, 3] as const)
       const floor = lift.physical_navigation;
       const heights = floor.boundary.map((point) => planeHeight(floor.plane, point));
       const receivers = compiled.sight_obstacles.filter(
-        (obstacle) => obstacle.projection_area?.[0] === lift.motion_area_index,
+        (obstacle) =>
+          Array.isArray(obstacle.projection_area) &&
+          obstacle.projection_area[0] === lift.motion_area_index,
       );
       assert.ok(receivers.length);
       for (const receiver of receivers)
@@ -2090,6 +2095,7 @@ test("elevated passages require floors at their actual endpoints despite alterna
     );
     const best = compileAssetGameplay(document, assets, bounds, { bestEffort: true });
     assert.equal(best.doors.length, 0);
+    assert.ok(best.warnings);
     assert.ok(
       best.warnings.some((warning) =>
         warning.includes("elevated passage endpoint has no receiving floor"),
@@ -3152,7 +3158,15 @@ test("unconnectable overlapping receivers stay in one native sector like the ori
   assert.equal(compiled.motion_data.layers.flat().length, 1);
   const receivers = compiled.sight_obstacles.filter((obstacle) => obstacle.projection_area);
   assert.equal(receivers.length, 2);
-  assert.equal(new Set(receivers.map((receiver) => receiver.projection_area![0])).size, 1);
+  assert.equal(
+    new Set(
+      receivers.map((receiver) => {
+        assert.ok(Array.isArray(receiver.projection_area));
+        return receiver.projection_area[0];
+      }),
+    ).size,
+    1,
+  );
   assert.equal(compiled.doors.length, 0, "No passage may bridge unmatched heights");
   assert.ok(compiled.warnings?.some((warning) => warning.includes("one sector is retained")));
   assert.deepEqual(hut.gameplay, before);
@@ -3242,7 +3256,7 @@ test("joined floors export distinct layers when a raised end overlaps a separate
   const compiled = compileAssetGameplay(document, assets, bounds);
   const bindings = new Map<string, { layer: number; count: number }>();
   for (const obstacle of compiled.sight_obstacles) {
-    if (!obstacle.projection_area) continue;
+    if (!Array.isArray(obstacle.projection_area)) continue;
     const key = JSON.stringify(obstacle.projection_area);
     const binding = bindings.get(key) ?? { layer: obstacle.projection_area[1], count: 0 };
     binding.count++;

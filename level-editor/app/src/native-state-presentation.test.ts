@@ -756,8 +756,8 @@ test("immutable initial background art follows ambient FX insertion order and ne
   for (const tick of [0, 2, 50, 0]) {
     p.seek(tick);
     assert.deepEqual(
-      [...p.pixels().data.slice(0, 3)],
-      [0, 200, 0],
+      p.pixels().data.slice(0, 3),
+      new Uint8Array([0, 200, 0]),
       "initial receiver paints after red ambient FX, without advancing its initial loop",
     );
     assert.deepEqual(p.composeLoopSnapshot(p.loopDrawSnapshot()).data, p.pixels().data);
@@ -772,8 +772,8 @@ test("immutable initial background art follows ambient FX insertion order and ne
   f.contract.mission_data_sha256 = await missionStateDataHash(f.source.data);
   await p.set(f.contract, f.source, f.read, "immutable-source-initial");
   assert.deepEqual(
-    [...p.pixels().data.slice(0, 3)],
-    [200, 0, 0],
+    p.pixels().data.slice(0, 3),
+    new Uint8Array([200, 0, 0]),
     "a valid initial animation does not activate inactive source FX",
   );
   assert.equal(
@@ -794,7 +794,7 @@ test("immutable context retains stationary inactive artwork outside transition f
   const p = new NativeStatePresentation();
   await p.set(f.contract, f.source, f.read, "immutable-source-initial");
   p.seek(100);
-  assert.deepEqual([...p.pixels().data.slice(0, 3)], [0, 200, 0]);
+  assert.deepEqual(p.pixels().data.slice(0, 3), new Uint8Array([0, 200, 0]));
   const draw = p.loopDrawSnapshot().draws[0]!;
   assert.equal(draw.sourceActive, false);
   assert.equal(draw.sourceTick, 0);
@@ -831,7 +831,7 @@ test("immutable ordered patch context retains source identity, first frame and f
   await p.set(f.contract, f.source, f.read, "immutable-source-initial");
   for (const tick of [0, 20]) {
     p.seek(tick);
-    assert.deepEqual([...p.pixels().data.slice(0, 3)], [0, 0, 200]);
+    assert.deepEqual(p.pixels().data.slice(0, 3), new Uint8Array([0, 0, 200]));
     const draw = p.loopDrawSnapshot().draws.find((d) => d.element.id === state.id)!;
     assert.deepEqual(draw.element.source, state.source);
     assert.equal(draw.sourceTick, 0);
@@ -1042,7 +1042,7 @@ test("ordered remainder composition protects earlier kept art only outside later
   const orange = {
     width: 2,
     height: 2,
-    data: new Uint8Array(Array(4).fill([233, 149, 72, 255]).flat()),
+    data: new Uint8Array(Array.from({ length: 4 }, () => [233, 149, 72, 255]).flat()),
   };
   const output = native.remainderPixels(
     new Map([

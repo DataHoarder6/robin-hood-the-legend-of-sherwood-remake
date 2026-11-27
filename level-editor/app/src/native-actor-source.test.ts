@@ -1,21 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { bindInitialActorSource, queryActorMasks } from "./native-actor-source.ts";
 import type { Mask } from "../../shared/src/level.ts";
 const root = resolve(import.meta.dirname, "../../..");
 const read = (path: string) => JSON.parse(readFileSync(resolve(root, path), "utf8"));
-const contract = read(
-  "level-editor/library/mission-states/croisement02/contracts/signposts.json",
-).native;
-const source = {
-  name: "S03_FoB_MP",
-  data: read("level-editor/library/mission-states/croisement02/source/S03_FoB_MP.rhm.json"),
-  level: read("level-editor/library/mission-states/croisement02/source/Croisement02.rhp.json"),
-  camera: { kind: "oblique-orthographic" as const, elevation_deg: 35 },
+const fixturePaths = {
+  contract: "level-editor/library/mission-states/croisement02/contracts/signposts.json",
+  data: "level-editor/library/mission-states/croisement02/source/S03_FoB_MP.rhm.json",
+  level: "level-editor/library/mission-states/croisement02/source/Croisement02.rhp.json",
+} as const;
+const loadFixtures = () => {
+  if (!Object.values(fixturePaths).every((path) => existsSync(resolve(root, path)))) return null;
+  return {
+    contract: read(fixturePaths.contract).native,
+    source: {
+      name: "S03_FoB_MP",
+      data: read(fixturePaths.data),
+      level: read(fixturePaths.level),
+      camera: { kind: "oblique-orthographic" as const, elevation_deg: 35 },
+    },
+  };
 };
-test("actual S03 stream includes invisible patches and binds layer-local mask refs", async () => {
+test("actual S03 stream includes invisible patches and binds layer-local mask refs", async (t) => {
+  const fixtures = loadFixtures();
+  if (!fixtures) {
+    t.skip("optional mission-states fixtures are not present");
+    return;
+  }
+  const { source, contract } = fixtures;
   const got = await bindInitialActorSource(source, contract, 1);
   assert.equal(got.authority.creationRanks.get("civilians:0"), 25);
   assert.equal(got.authority.creationRanks.get("pcs_to_rescue:0"), 39);

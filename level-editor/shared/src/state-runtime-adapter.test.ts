@@ -7,6 +7,12 @@ import {
 } from "./state-runtime-adapter.ts";
 import type { StateDeliveryContract } from "./state-delivery.ts";
 
+/** Indexed fixture rows are optional under noUncheckedIndexedAccess; a missing row is a bug. */
+function present<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Missing fixture observation row");
+  return value;
+}
+
 function fixture() {
   const source = (kind: string, index: number) => ({ kind, index, sha256: "a".repeat(64) });
   const frames = [{ delay: 2 }, { delay: 3 }];
@@ -94,26 +100,27 @@ test("prepared identities keep target, collision and visual patch clocks indepen
     [0, 0, 0],
   );
   observed.engine_frame = 20;
-  Object.assign(observed.owners[0].sprite, {
+  Object.assign(present(observed.owners[0]).sprite, {
     last_action: "TransitionSittingWaitingUpright",
     row: 1,
     frame: 1,
     count: 2,
   });
-  observed.patches[1].sprite!.count = 2;
+  present(observed.patches[1]).sprite!.count = 2;
   const second = adapter.sample(observed);
   assert.deepEqual(
     second.samples.map((s) => s.tick),
     [5, 0, 2],
   );
   observed.engine_frame = 21;
-  observed.owners[0].sprite.active = false;
+  present(observed.owners[0]).sprite.active = false;
   const third = adapter.sample(observed);
-  assert.equal(third.samples[0].kind, "element");
-  assert.deepEqual(third.samples[0], {
+  const thirdOwner = present(third.samples[0]);
+  assert.equal(thirdOwner.kind, "element");
+  assert.deepEqual(thirdOwner, {
     kind: "element",
     id: "owner",
-    source: bindings[0].source,
+    source: present(bindings[0]).source,
     active: true,
     visible: false,
     tick: 5,
@@ -128,26 +135,26 @@ test("rejected identity, action, frame and phase observations do not consume a s
       o.mission = "wrong";
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].index = 999;
+      present(o.owners[0]).index = 999;
     },
     (o: RuntimeStateObservation) => {
-      o.owners.push(o.owners[0]);
+      o.owners.push(present(o.owners[0]));
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].sprite.last_action = "ShootBow";
+      present(o.owners[0]).sprite.last_action = "ShootBow";
     },
     (o: RuntimeStateObservation) => {
-      o.owners[0].sprite.row = 9;
+      present(o.owners[0]).sprite.row = 9;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].sprite!.row = 8;
+      present(o.patches[1]).sprite!.row = 8;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].sprite!.frame = 1;
-      o.patches[1].sprite!.count = 65535;
+      present(o.patches[1]).sprite!.frame = 1;
+      present(o.patches[1]).sprite!.count = 65535;
     },
     (o: RuntimeStateObservation) => {
-      o.patches[1].applied = true;
+      present(o.patches[1]).applied = true;
     },
   ]) {
     const bad = structuredClone(observed);
@@ -164,9 +171,12 @@ test("rejected identity, action, frame and phase observations do not consume a s
 test("construction requires exact source pins and complete family identities", () => {
   const { contract, bindings } = fixture();
   assert.throws(() => new StateRuntimeAdapter(contract, bindings.slice(1)), /Incomplete/);
-  assert.throws(() => new StateRuntimeAdapter(contract, [...bindings, bindings[0]]), /Invalid/);
+  assert.throws(
+    () => new StateRuntimeAdapter(contract, [...bindings, present(bindings[0])]),
+    /Invalid/,
+  );
   const bad = structuredClone(bindings);
-  bad[0].source.sha256 = "f".repeat(64);
+  present(bad[0]).source.sha256 = "f".repeat(64);
   assert.throws(() => new StateRuntimeAdapter(contract, bad), /Invalid/);
 });
 
@@ -175,13 +185,13 @@ test("final reset has a new phase clock even when engine elapsed time is large",
   const adapter = new StateRuntimeAdapter(contract, bindings);
   adapter.sample(observed);
   observed.engine_frame = 900;
-  Object.assign(observed.patches[1], {
+  Object.assign(present(observed.patches[1]), {
     applied: true,
     in_transition: false,
     sprite: { active: true, row: 2, frame: 0, count: 65535, last_action: "NonanimationEnd" },
   });
   const batch = adapter.sample(observed);
-  assert.equal(batch.samples[2].tick, 0);
+  assert.equal(present(batch.samples[2]).tick, 0);
   assert.equal((batch.samples[2] as { phase: string }).phase, "applied");
 });
 
