@@ -16,6 +16,17 @@
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
+# Parallel compiler front end for every target (nightly; the toolchain is pinned
+# in rust-toolchain.toml). Type checking and borrow checking of one crate are
+# otherwise single-threaded, and robin_engine (18 MB of source) and robin_rs
+# (11 MB) left a 12-core host on one core for minutes per gate step
+# (docs/slop/build-time-root-causes.md). 8 is the value the parallel-front-end
+# working group recommends. `cfg(all())` matches every target and Cargo joins it
+# with the entries above and the CARGO_TARGET_<triple>_RUSTFLAGS a gate sets.
+# The flag is the same for every invocation, so it never splits an artifact.
+[target.'cfg(all())']
+rustflags = ["-Z", "threads=8"]
+
 # The Wild reference lives in a linker-driver script rather than in rustflags
 # so that CI can drop it with the scalar CARGO_TARGET_*_LINKER=cc override
 # (rustflags env vars merge with — never replace — the entries above).
