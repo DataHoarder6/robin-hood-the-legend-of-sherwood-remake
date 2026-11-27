@@ -69,7 +69,12 @@ Ordered by measured cost.
    `.cargo/config.toml` turns on the nightly parallel front end for every
    target. It is unmeasured here: compare one gate before keeping it.
 7. **`robin_engine` (565 files, 18.4 MB, 3.5 MB of it in-crate tests) and
-   `robin_rs` (10.9 MB) are single compilation units.** Not changed: see below.
+   `robin_rs` (10.9 MB) are single compilation units.** The one layer that
+   never reaches back into the engine moved out: `robin_engine_geometry`
+   (positions, sectors, gates, sight obstacles, fast-find grid, patches,
+   material zones, element kinds, orders, the parity diagnostics gate; about
+   0.9 MB), re-exported at the old paths. Everything else sits on the cycle
+   described below.
 8. **`test` and `dev` differed only in `debug`.** That gave every dependency and
    workspace library two artifacts, so nextest and the `robin` build in one gate
    compiled `robin_engine` twice. `profile.test` now inherits `dev` unchanged
@@ -96,8 +101,11 @@ shows why item 7 needs a compile-driven refactor rather than a mechanical move:
   `game_session` (2.1 MB) references 81. The modules with no in-crate
   dependency (`sound`, `campaign_progress`, `mouse_way`) total about 200 KB.
 
-The order that would pay: break `element` and `position_interface` free of
-`engine` behind data-only types or traits, then lift the geometry/pathing
-cluster (`fast_find_grid`, `gate`, `sector`, `sight_obstacle`, `patch`, `mask`)
-into a crate below the simulation. Each step changes visibility across hundreds
-of call sites and has to be compiled before the next.
+Seams that look free are not: `legacy_save` (775 KB, two inbound uses) and the
+`test-helpers` mutation surface both write `EngineInner` state directly, which
+`engine_facade_contract` keeps out of other crates. The geometry layer was the
+one cluster whose outbound references reduced to movable value types
+(`sector_production::Type`, `sound_cache::Material`, `engine::diagnostics`), so
+it is the part that moved. The next step that would pay is breaking `element`
+free of `engine` behind data-only types, which changes visibility across
+hundreds of call sites and has to be compiled step by step.
