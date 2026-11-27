@@ -12,7 +12,8 @@
 //!
 //! - binaries, examples and cdylibs: `robin_build_identity::define!();` at the
 //!   crate root, stamping the commit `robin_build_identity`'s build script
-//!   discovered;
+//!   discovered (on Android `robin_rs` itself is the APK's cdylib, so it defines
+//!   the symbol there);
 //! - test harnesses of a library that must not depend on
 //!   `robin_build_identity` (unit tests and integration tests of
 //!   `robin_replay_format` and `robin_rs`): [`define_test_identity!`], a fixed

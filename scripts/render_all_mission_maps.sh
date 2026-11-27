@@ -7,7 +7,7 @@ frame="${2:-50}"
 data_dir="${3:-${ROBINHOOD_DATA_DIR:-datadirs/fullgame_gog}}"
 mkdir -p -- "$output_dir"
 
-cargo build --example render_mission_map --release
+cargo build -p robin_app --example render_mission_map --release
 renderer="${CARGO_TARGET_DIR:-target}/release/examples/render_mission_map"
 
 while IFS='|' read -r mission name; do
