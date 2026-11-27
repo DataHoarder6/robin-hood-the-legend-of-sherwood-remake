@@ -933,6 +933,7 @@ pub(super) fn restore_campaign(
                 "character profile name mismatch"
             );
             Ok(PcDescription {
+                skills: Default::default(),
                 character_profile_idx: Some(CharacterProfileIdx(source.profile_index)),
                 instanced: source.instanced,
                 status: PcStatus {

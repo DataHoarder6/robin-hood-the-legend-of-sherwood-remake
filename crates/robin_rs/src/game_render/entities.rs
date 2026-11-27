@@ -1648,10 +1648,12 @@ mod hidden_ground_tests {
 
     #[test]
     fn dot_spacing_is_restrained() {
-        assert!(
-            HIDDEN_ZONE_DOT_SPACING >= 20.0,
-            "dots must not carpet the whole map: spacing is {HIDDEN_ZONE_DOT_SPACING}"
-        );
+        const {
+            assert!(
+                HIDDEN_ZONE_DOT_SPACING >= 20.0,
+                "dots must not carpet the whole map: spacing is {HIDDEN_ZONE_DOT_SPACING}"
+            );
+        };
     }
 
     #[test]
