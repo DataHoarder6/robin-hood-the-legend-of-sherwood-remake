@@ -76,6 +76,11 @@ test("coplanar alternative areas cannot bridge a blocked seam or substitute a di
 
 test("the whole inward approach needs clearance, even when the takeoff line is clear", () => {
   const blocked = structuredClone(areas);
-  blocked[0]!.blockers.push([[80, 0], [81, 0], [81, 100], [80, 100]]);
+  blocked[0]!.blockers.push([
+    [80, 0],
+    [81, 0],
+    [81, 100],
+    [80, 100],
+  ]);
   assert.deepEqual(createJumpWalkingClearance(blocked, bands)(edges), [[0, 1]]);
 });
