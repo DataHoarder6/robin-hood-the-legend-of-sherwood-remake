@@ -2,7 +2,7 @@
 //! save, replay, or simulation hash. Environment is sampled once on first use.
 //! Set gates before process startup; changing them during a session is unsupported.
 
-use crate::element::EntityId;
+use crate::entity_id::EntityId;
 use serde::{Deserialize, Serialize};
 use std::{ffi::OsString, sync::OnceLock};
 
@@ -10,23 +10,23 @@ use std::{ffi::OsString, sync::OnceLock};
 /// Callers retain their own `OnceLock`: each gate samples the environment once,
 /// without introducing simulation state or forcing unrelated gates to parse.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ParityGate<const N: usize> {
+pub struct ParityGate<const N: usize> {
     enabled: bool,
     filters: Vec<Option<u32>>,
 }
 
 impl<const N: usize> ParityGate<N> {
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.enabled
     }
-    pub(crate) fn from_env(gate: &str, names: [&str; N]) -> Self {
+    pub fn from_env(gate: &str, names: [&str; N]) -> Self {
         Self::parse(gate, names, |name| std::env::var_os(name))
             .unwrap_or_else(|error| panic!("invalid parity diagnostic configuration: {error}"))
     }
 
     /// Like [`Self::from_env`], but every filter must be supplied once the
     /// gate is enabled (an exact-owner selection without wildcards).
-    pub(crate) fn from_env_required(gate: &str, names: [&str; N]) -> Self {
+    pub fn from_env_required(gate: &str, names: [&str; N]) -> Self {
         Self::parse_required(gate, names, |name| std::env::var_os(name))
             .unwrap_or_else(|error| panic!("invalid parity diagnostic configuration: {error}"))
     }
@@ -51,14 +51,14 @@ impl<const N: usize> ParityGate<N> {
     }
 
     /// The configured value of filter `index`, `None` when absent or disabled.
-    pub(crate) fn filter(&self, index: usize) -> Option<u32> {
+    pub fn filter(&self, index: usize) -> Option<u32> {
         self.filters[index]
     }
 
     /// The configured value of a filter parsed by [`Self::from_env_required`].
     /// Only call on an enabled gate.
     #[track_caller]
-    pub(crate) fn required(&self, index: usize) -> u32 {
+    pub fn required(&self, index: usize) -> u32 {
         self.filters[index].unwrap_or_else(|| {
             panic!("parity diagnostic filter {index} read from a disabled or optional gate")
         })
@@ -92,7 +92,7 @@ impl<const N: usize> ParityGate<N> {
 
     /// A missing observed value is deliberately not filtered: publication
     /// probes can run before the projectile has received its identity.
-    pub(crate) fn matches(&self, values: [Option<u32>; N]) -> bool {
+    pub fn matches(&self, values: [Option<u32>; N]) -> bool {
         self.enabled
             && self.filters.iter().zip(values).all(|(filter, value)| {
                 filter.is_none_or(|expected| value.is_none_or(|actual| actual == expected))
@@ -101,7 +101,7 @@ impl<const N: usize> ParityGate<N> {
 
     /// Unlike publication probes, a selected owner must already have its
     /// identity. An enabled filter rejects an absent observed identity.
-    pub(crate) fn matches_required(&self, values: [Option<u32>; N]) -> bool {
+    pub fn matches_required(&self, values: [Option<u32>; N]) -> bool {
         self.enabled
             && self
                 .filters
@@ -112,13 +112,13 @@ impl<const N: usize> ParityGate<N> {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(super) struct ExactOwnerFrame {
+pub struct ExactOwnerFrame {
     pub frame: u32,
     pub creation_order: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(super) struct PathOwnerFilter {
+pub struct PathOwnerFilter {
     pub frame: Option<u32>,
     pub creation_order: Option<u32>,
 }
@@ -162,7 +162,7 @@ impl OwnerFrames {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub(super) struct DiagnosticConfig {
+pub struct DiagnosticConfig {
     drop_boundary: Option<OwnerFrames>,
     goal_owner: Option<OwnerFrames>,
     turn_provenance: Option<OwnerFrames>,
@@ -339,7 +339,7 @@ impl DiagnosticConfig {
     }
 }
 
-pub(super) fn config() -> &'static DiagnosticConfig {
+pub fn config() -> &'static DiagnosticConfig {
     static CONFIG: OnceLock<DiagnosticConfig> = OnceLock::new();
     CONFIG.get_or_init(|| {
         DiagnosticConfig::parse(|name| std::env::var_os(name))

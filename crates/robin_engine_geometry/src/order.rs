@@ -547,7 +547,7 @@ pub enum OrderCompletion {
 )]
 pub struct Order {
     /// Identity within the owning queue, independent of animation restart IDs.
-    pub(crate) storage_slot: u64,
+    pub storage_slot: u64,
     pub order_type: OrderType,
     /// Target position (2D map coordinates).
     pub target_x: f32,
@@ -603,7 +603,7 @@ pub struct Order {
     /// RaisingShield, etc.).  Used by soldier Execute handlers that
     /// touch the antagonist on DONE / TERMINATED (DRINKING_ALE hides
     /// the bottle, TAKING picks up the coin/purse, etc.).
-    pub antagonist: Option<crate::element::EntityId>,
+    pub antagonist: Option<crate::entity_id::EntityId>,
 
     /// Side-channel work to perform when this order's animation
     /// completes. Default `AdvanceElement` routes through
@@ -645,7 +645,7 @@ impl Order {
     /// Attach a target entity (the order's antagonist).  Required for
     /// interaction animations (DrinkAle → ale bottle, Take → purse,
     /// GettingFreeFromWasp → wasp, etc.).
-    pub fn with_antagonist(mut self, antagonist: crate::element::EntityId) -> Self {
+    pub fn with_antagonist(mut self, antagonist: crate::entity_id::EntityId) -> Self {
         self.antagonist = Some(antagonist);
         self
     }
@@ -669,7 +669,9 @@ impl Order {
     /// code must route through [`alloc_order_id`] so rollback
     /// snapshots reproduce the same id sequence; test code building
     /// fixture sequences in isolation does not.
-    #[cfg(test)]
+    // Fixture helper for the engine's tests, kept unconditional so test and
+    // production builds share one artifact of this crate (no feature split).
+    #[doc(hidden)]
     pub fn test_new(order_type: OrderType, x: f32, y: f32) -> Self {
         Self::new(order_type, x, y, NonZeroU32::new(1).unwrap())
     }

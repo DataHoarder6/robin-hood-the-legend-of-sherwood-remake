@@ -701,7 +701,7 @@ impl ShadowData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::ElementKind;
+    use crate::element_kinds::ElementKind;
 
     #[test]
     fn sector_type_bitflags() {
@@ -896,7 +896,7 @@ mod tests {
             has_climb,
             has_jump: false,
             is_rider: false,
-            posture: crate::element::Posture::Upright,
+            posture: crate::element_kinds::Posture::Upright,
         }
     }
 

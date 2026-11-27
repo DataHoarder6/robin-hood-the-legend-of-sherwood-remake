@@ -148,7 +148,7 @@ bitflags! {
     /// Original v48 saves retain this lazy-computation mask independently.
     /// Keeping it here is required for an exact mid-motion restore.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-    pub(crate) struct PositionComputed: u8 {
+    pub struct PositionComputed: u8 {
         const NONE   = 0;
         const THREE_D = 1;
         const MAP    = 2;
@@ -726,8 +726,8 @@ pub struct PositionInterface {
     // The original game keeps posture in the position interface. ElementData remains
     // Rust's gameplay-facing owner, but retaining both serialized values here
     // prevents old-posture state from being lost during save adoption.
-    saved_posture: crate::element::Posture,
-    saved_old_posture: crate::element::Posture,
+    saved_posture: crate::element_kinds::Posture,
+    saved_old_posture: crate::element_kinds::Posture,
 
     // -- Layer & sector --
     #[serde(deserialize_with = "Option::deserialize")]
@@ -792,14 +792,14 @@ pub struct PositionInterface {
 /// radius. [`PositionInterface::restore_v48_serialized_state`] preserves
 /// those mission-initialized values.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PositionInterfaceV48State {
+pub struct PositionInterfaceV48State {
     pub computed_position: PositionComputed,
     pub computed_increment: IncrementComputed,
     /// Raw unchecked material storage. Validated only by live material
     /// access, matching the original game's plain enum-byte copy.
     pub material: u32,
-    pub posture: crate::element::Posture,
-    pub old_posture: crate::element::Posture,
+    pub posture: crate::element_kinds::Posture,
+    pub old_posture: crate::element_kinds::Posture,
     pub direction: Direction,
     pub direction_goal: Direction,
     pub slow_turn_count: u8,
@@ -888,8 +888,8 @@ impl PositionInterface {
             direction_count: 0,
             // Construction initializes both slots; this is not a transition
             // from Undefined. Save adoption can subsequently restore either.
-            saved_posture: crate::element::Posture::Upright,
-            saved_old_posture: crate::element::Posture::Upright,
+            saved_posture: crate::element_kinds::Posture::Upright,
+            saved_old_posture: crate::element_kinds::Posture::Upright,
 
             layer: Some(Layer::ZERO),
             sector: None,
@@ -904,7 +904,7 @@ impl PositionInterface {
             door: None,
             door_direction: false,
 
-            material: crate::element::GameMaterial::default().as_u32(),
+            material: crate::element_kinds::GameMaterial::default().as_u32(),
 
             goal_next_valid: false,
             anti_collision_on: true,
@@ -926,7 +926,7 @@ impl PositionInterface {
     ///
     /// No setters are used: their eager recomputation would overwrite the
     /// independently serialized map/3D/sprite caches and computation masks.
-    pub(crate) fn restore_v48_serialized_state(&mut self, state: PositionInterfaceV48State) {
+    pub fn restore_v48_serialized_state(&mut self, state: PositionInterfaceV48State) {
         self.computed_position = state.computed_position;
         self.computed_increment = state.computed_increment;
         self.material = state.material;
@@ -973,7 +973,7 @@ impl PositionInterface {
         self.box_blocked = state.blocked_box;
     }
 
-    pub(crate) fn v48_serialized_state(&self) -> PositionInterfaceV48State {
+    pub fn v48_serialized_state(&self) -> PositionInterfaceV48State {
         PositionInterfaceV48State {
             computed_position: self.computed_position,
             computed_increment: self.computed_increment,
@@ -1031,7 +1031,7 @@ impl PositionInterface {
     /// advance both copies in the same call, just as Original updates
     /// `mpostureOld`, `mposture`, the emergency-lying latch, and the translated
     /// move box atomically.
-    pub(crate) fn set_posture(&mut self, posture: crate::element::Posture) {
+    pub fn set_posture(&mut self, posture: crate::element_kinds::Posture) {
         self.saved_old_posture = self.saved_posture;
         self.saved_posture = posture;
         self.use_emergency_lying_box = false;
@@ -1042,7 +1042,7 @@ impl PositionInterface {
     /// constructor. This is distinct from [`Self::set_posture`]: construction
     /// initializes both `mposture` and `mpostureOld` to the same value rather
     /// than recording a transition from an earlier posture.
-    pub(crate) fn initialize_constructor_posture(&mut self, posture: crate::element::Posture) {
+    pub fn initialize_constructor_posture(&mut self, posture: crate::element_kinds::Posture) {
         self.saved_posture = posture;
         self.saved_old_posture = posture;
     }
@@ -1105,14 +1105,14 @@ impl PositionInterface {
     /// Return the exact cached original-game sprite position when one has been
     /// established by mission placement or restored from a legacy save.
     #[inline]
-    pub(crate) fn cached_sprite_position(&self) -> Option<MapPoint> {
+    pub fn cached_sprite_position(&self) -> Option<MapPoint> {
         self.position_sprite_valid.then_some(self.position_sprite)
     }
 
     /// Install the exact integer sprite-space top-left used by original-game gameplay
     /// hotspot queries.
     #[inline]
-    pub(crate) fn set_cached_sprite_position(&mut self, position: MapPoint) {
+    pub fn set_cached_sprite_position(&mut self, position: MapPoint) {
         self.position_sprite = position;
         self.position_sprite_valid = true;
     }
@@ -1145,7 +1145,7 @@ impl PositionInterface {
     /// outdoor corpse drop to preserve the current-frame projections until
     /// the delayed map position is applied by the next actor update.
     #[inline]
-    pub(crate) fn restore_cached_position_all_computed(&mut self, pt: WorldPoint3D) {
+    pub fn restore_cached_position_all_computed(&mut self, pt: WorldPoint3D) {
         self.position = pt;
         self.computed_position = PositionComputed::ALL;
     }
@@ -1156,7 +1156,7 @@ impl PositionInterface {
     /// The caller supplies the sprite-space point because it depends on the
     /// owning sprite's centre, which is deliberately not stored in the
     /// position interface itself.
-    pub(crate) fn finish_flight_position_update(&mut self, sprite: MapPoint) {
+    pub fn finish_flight_position_update(&mut self, sprite: MapPoint) {
         self.position_sprite = sprite;
         self.position_sprite_valid = true;
         self.computed_position = PositionComputed::ALL;
@@ -1219,8 +1219,10 @@ impl PositionInterface {
     pub fn set_layer_goal(&mut self, layer: Layer) {
         self.layer_goal = Some(layer);
     }
-    #[cfg(test)]
-    pub(crate) fn clear_layer_goal(&mut self) {
+    // Fixture helper for the engine's tests, kept unconditional so test and
+    // production builds share one artifact of this crate (no feature split).
+    #[doc(hidden)]
+    pub fn clear_layer_goal(&mut self) {
         self.layer_goal = None;
     }
 
@@ -1235,7 +1237,7 @@ impl PositionInterface {
 
     // Goal
     #[inline]
-    pub(crate) fn world_goal(&self) -> WorldPoint3D {
+    pub fn world_goal(&self) -> WorldPoint3D {
         self.goal
     }
 
@@ -1273,7 +1275,7 @@ impl PositionInterface {
         self.layer = Some(l);
     }
     #[inline]
-    pub(crate) fn clear_layer(&mut self) {
+    pub fn clear_layer(&mut self) {
         self.layer = None;
     }
     #[inline]
@@ -1342,7 +1344,7 @@ impl PositionInterface {
 
     /// Mirror the position-interface fields installed by Original's
     /// sprite takeoff preparation and retained by flight.
-    pub(crate) fn set_flight_goal_and_increment(
+    pub fn set_flight_goal_and_increment(
         &mut self,
         goal: WorldPoint3D,
         increment: WorldVec3D,
@@ -1358,7 +1360,7 @@ impl PositionInterface {
     /// Publish the increment installed by the projectile update.
     /// Projectile flight has no position goal, so it must not use the actor
     /// flight helper above (which would fabricate one).
-    pub(crate) fn set_projectile_increment(&mut self, increment: WorldVec3D) {
+    pub fn set_projectile_increment(&mut self, increment: WorldVec3D) {
         self.increment = increment;
         self.computed_increment = IncrementComputed::INCREMENT;
     }
@@ -1445,7 +1447,7 @@ impl PositionInterface {
     /// Gameplay must continue to mutate these exclusively through the
     /// ordinary `Turn*` and movement paths.
     #[inline]
-    pub(crate) fn parity_turn_provenance_state(&self) -> (bool, i8, u8, u8) {
+    pub fn parity_turn_provenance_state(&self) -> (bool, i8, u8, u8) {
         (
             self.deviated,
             self.direction_count,
@@ -1579,11 +1581,11 @@ impl PositionInterface {
 
     #[inline]
     #[must_use]
-    pub fn get_material(&self) -> crate::element::GameMaterial {
-        crate::element::GameMaterial::from_u32(self.material)
+    pub fn get_material(&self) -> crate::element_kinds::GameMaterial {
+        crate::element_kinds::GameMaterial::from_u32(self.material)
     }
     #[inline]
-    pub fn set_material(&mut self, m: crate::element::GameMaterial) {
+    pub fn set_material(&mut self, m: crate::element_kinds::GameMaterial) {
         self.material = m.as_u32();
     }
 
@@ -1591,7 +1593,7 @@ impl PositionInterface {
     /// Saved free-flight waypoints can contain allocator residue; copying those
     /// bits is intentional, just as it is during save restoration. Gameplay
     /// material access still validates the value through `get_material`.
-    pub(crate) fn copy_trajectory_material(&mut self, material: u32) {
+    pub fn copy_trajectory_material(&mut self, material: u32) {
         self.material = material;
     }
 
@@ -1693,16 +1695,18 @@ impl PositionInterface {
         self.door
     }
     #[inline]
-    pub(crate) fn set_door(&mut self, door: DoorHandle, direction: bool) {
+    pub fn set_door(&mut self, door: DoorHandle, direction: bool) {
         self.door = Some(door);
         self.door_direction = direction;
     }
     #[inline]
-    pub(crate) fn clear_door(&mut self) {
+    pub fn clear_door(&mut self) {
         self.door = None;
     }
-    #[cfg(test)]
-    pub(crate) fn set_door_for_test(&mut self, door: DoorHandle) {
+    // Fixture helper for the engine's tests, kept unconditional so test and
+    // production builds share one artifact of this crate (no feature split).
+    #[doc(hidden)]
+    pub fn set_door_for_test(&mut self, door: DoorHandle) {
         self.door = Some(door);
     }
     #[inline]
@@ -2318,7 +2322,7 @@ pub fn vector_to_sector_0_to_15(x: f32, y: f32) -> i16 {
     vector_to_sector_0_to_15_with_aspect(x, y, 1.0)
 }
 
-pub(crate) fn vector_to_sector_0_to_15_with_aspect(x: f32, y: f32, aspect_ratio: f32) -> i16 {
+pub fn vector_to_sector_0_to_15_with_aspect(x: f32, y: f32, aspect_ratio: f32) -> i16 {
     if x == 0.0 && y == 0.0 {
         return 0;
     }
@@ -2443,7 +2447,7 @@ pub fn vector_normal_iso(x: f32, y: f32, direct: bool) -> [f32; 2] {
 mod tests {
     #[test]
     fn constructor_posture_precedes_the_first_transition() {
-        use crate::element::Posture;
+        use crate::element_kinds::Posture;
         let mut position = super::PositionInterface::new();
         let initial = position.v48_serialized_state();
         assert_eq!(initial.posture, Posture::Upright);
@@ -2585,7 +2589,7 @@ mod tests {
 
     #[test]
     fn set_posture_advances_serialized_postures_and_refreshes_move_box() {
-        use crate::element::Posture;
+        use crate::element_kinds::Posture;
 
         let mut pi = PositionInterface::new();
         pi.set_move_box(MoveBox::from_corners(

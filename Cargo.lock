@@ -6039,6 +6039,7 @@ dependencies = [
  "num_enum",
  "rayon",
  "robin_data_io",
+ "robin_engine_geometry",
  "robin_engine_types",
  "robin_legacy_save",
  "robin_level_data",
@@ -6063,6 +6064,29 @@ dependencies = [
  "tracing-subscriber",
  "web-time",
  "zstd",
+]
+
+[[package]]
+name = "robin_engine_geometry"
+version = "0.0.0"
+dependencies = [
+ "bitcode 0.6.9 (git+https://github.com/phiresky/bitcode.git?rev=59051e886ff8cd24bfc63ef0cef6321372829604)",
+ "bitflags 2.13.2",
+ "geo",
+ "nonmax",
+ "num_enum",
+ "robin_data_io",
+ "robin_engine_types",
+ "robin_level_data",
+ "robin_state_hash_derive",
+ "robin_util",
+ "rstest",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "strum_macros 0.28.0",
+ "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

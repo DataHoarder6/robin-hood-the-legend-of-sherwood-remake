@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::coordinates::MapPoint;
-use crate::element::ElementKind;
+use crate::element_kinds::ElementKind;
 use crate::order::OrderType;
 use crate::sector::{LiftType, SectorNumber};
 
@@ -115,7 +115,7 @@ pub struct ActorAuthInfo {
     /// Whether this human actor is currently riding a horse.
     pub is_rider: bool,
     /// Actor's current posture (used for lift/door posture restrictions).
-    pub posture: crate::element::Posture,
+    pub posture: crate::element_kinds::Posture,
 }
 
 // ---------------------------------------------------------------------------
@@ -845,7 +845,7 @@ impl Door {
             if !helper_needed {
                 return true;
             }
-            return actor.posture == crate::element::Posture::OnShoulders;
+            return actor.posture == crate::element_kinds::Posture::OnShoulders;
         }
 
         // Reinforcement doors never allow passage unless explicitly permitted
@@ -2547,7 +2547,7 @@ mod tests {
             has_climb: false,
             has_jump: false,
             is_rider: false,
-            posture: crate::element::Posture::Upright,
+            posture: crate::element_kinds::Posture::Upright,
         }
     }
 
@@ -2559,7 +2559,7 @@ mod tests {
             has_climb: false,
             has_jump: false,
             is_rider,
-            posture: crate::element::Posture::Upright,
+            posture: crate::element_kinds::Posture::Upright,
         }
     }
 
@@ -2571,7 +2571,7 @@ mod tests {
             has_climb: false,
             has_jump: false,
             is_rider: false,
-            posture: crate::element::Posture::Upright,
+            posture: crate::element_kinds::Posture::Upright,
         }
     }
 
@@ -2791,7 +2791,7 @@ mod tests {
         };
         let mut pc = pc_actor(false);
         pc.has_jump = true;
-        pc.posture = crate::element::Posture::Upright;
+        pc.posture = crate::element_kinds::Posture::Upright;
         assert!(door.is_actor_authorized(true, &pc, true, false));
         assert!(door.is_actor_authorized(false, &pc, true, false));
     }
@@ -2810,12 +2810,12 @@ mod tests {
 
         // Upright PC: direct (helper needed) rejected; indirect (helper
         // not needed) allowed.
-        pc.posture = crate::element::Posture::Upright;
+        pc.posture = crate::element_kinds::Posture::Upright;
         assert!(!door.is_actor_authorized(true, &pc, true, false));
         assert!(door.is_actor_authorized(false, &pc, true, false));
 
         // On-shoulders PC: both directions allowed.
-        pc.posture = crate::element::Posture::OnShoulders;
+        pc.posture = crate::element_kinds::Posture::OnShoulders;
         assert!(door.is_actor_authorized(true, &pc, true, false));
         assert!(door.is_actor_authorized(false, &pc, true, false));
     }

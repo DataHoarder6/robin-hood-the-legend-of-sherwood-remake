@@ -26,7 +26,7 @@ mod cloak;
 mod commands;
 mod console_dispatch;
 mod corpse_intersection;
-pub(crate) mod diagnostics;
+pub(crate) use robin_engine_geometry::diagnostics;
 mod display_state;
 mod tactical_control;
 pub use display_state::DrawOrder;

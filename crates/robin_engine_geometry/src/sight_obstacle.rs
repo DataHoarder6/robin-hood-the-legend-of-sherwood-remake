@@ -319,7 +319,7 @@ impl ObstaclePoint {
 
 /// Test an obstacle's ground-plane vertices against a domain-typed box while
 /// keeping the legacy computational-geometry adapter private to this module.
-pub(crate) fn obstacle_vertices_intersect_ground_bbox(
+pub fn obstacle_vertices_intersect_ground_bbox(
     points: &[ObstaclePoint],
     bbox: &GroundBBox,
 ) -> bool {
@@ -1411,7 +1411,7 @@ pub struct ImpactResult3D {
 /// `(x, y)`) short-circuit through [`is_reachable_impact_fall_3d`] or
 /// [`is_reachable_impact_up_3d`] depending on direction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ProjectileCollisionDebugIdentity {
+pub struct ProjectileCollisionDebugIdentity {
     pub frame: u32,
     pub shooter: u32,
     pub projectile_creation_order: u32,
@@ -1430,7 +1430,7 @@ fn projectile_collision_debug_config() -> Option<&'static ProjectileCollisionDeb
         std::sync::OnceLock::new();
     CONFIG
         .get_or_init(|| {
-            let gate = crate::engine::diagnostics::ParityGate::from_env_required(
+            let gate = crate::diagnostics::ParityGate::from_env_required(
                 "PARITY_DEBUG_PROJECTILE_COLLISION_CANDIDATES",
                 [
                     "PARITY_DEBUG_PROJECTILE_COLLISION_CANDIDATES_FRAME",
@@ -1454,13 +1454,11 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-pub(crate) fn projectile_collision_debug_requested() -> bool {
+pub fn projectile_collision_debug_requested() -> bool {
     projectile_collision_debug_config().is_some()
 }
 
-pub(crate) fn projectile_collision_debug_matches(
-    identity: ProjectileCollisionDebugIdentity,
-) -> bool {
+pub fn projectile_collision_debug_matches(identity: ProjectileCollisionDebugIdentity) -> bool {
     projectile_collision_debug_config().is_some_and(|config| {
         identity.frame == config.frame
             && identity.shooter == config.shooter
@@ -1468,7 +1466,7 @@ pub(crate) fn projectile_collision_debug_matches(
     })
 }
 
-pub(crate) fn with_projectile_collision_debug_identity<R>(
+pub fn with_projectile_collision_debug_identity<R>(
     identity: ProjectileCollisionDebugIdentity,
     f: impl FnOnce() -> R,
 ) -> R {
@@ -1493,8 +1491,8 @@ pub(crate) fn with_projectile_collision_debug_identity<R>(
     })
 }
 
-pub(crate) fn validate_projectile_collision_debug_spawn(
-    projectile: crate::element::EntityId,
+pub fn validate_projectile_collision_debug_spawn(
+    projectile: crate::entity_id::EntityId,
     creation_order: u32,
 ) {
     let Some(config) = projectile_collision_debug_config() else {
@@ -1935,7 +1933,7 @@ pub fn is_reachable_impact_3d(
 /// The original game's bounding-box/segment intersection uses trivial rejection
 /// with strict comparisons, then inclusive endpoint containment, then the
 /// corner-determinant test of the segment's carrier line.
-pub(crate) fn bbox_intersects_segment_reference(
+pub fn bbox_intersects_segment_reference(
     bbox: &crate::coordinates::GroundBBox,
     a: (f32, f32),
     b: (f32, f32),

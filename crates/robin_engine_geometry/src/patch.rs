@@ -217,7 +217,7 @@ pub struct Patch {
 }
 
 impl Patch {
-    pub(crate) fn persisted_clone(&self) -> Self {
+    pub fn persisted_clone(&self) -> Self {
         let value = self;
         let mut snapshot = value.clone();
         snapshot.display_doors = false;

@@ -1,0 +1,29 @@
+[package]
+name = "robin_engine_geometry"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+bitcode.workspace = true
+bitflags = { workspace = true, features = ["serde"] }
+geo = { workspace = true, features = ["serde"] }
+nonmax = { workspace = true, features = ["serde"] }
+num_enum = "0.7"
+robin_data_io.workspace = true
+robin_engine_types.workspace = true
+robin_level_data.workspace = true
+robin_state_hash_derive.workspace = true
+robin_util.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
+strum = "0.28.0"
+strum_macros = "0.28.0"
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[lints]
+workspace = true

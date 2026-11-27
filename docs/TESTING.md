@@ -62,7 +62,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `core` | `robin_build_info`, `robin_build_identity`, `robin_util`, `robin_display_text`, `robin_state_hash_derive`, `robin_spellforge`, `robin_lua` | Unit, integration and doc tests, including build-identity provenance |
 | `contracts` | `robin_spellforge` ABI test | `executable_abi_digest_is_stable`: every `NATIVE_REGISTRY` change needs a reviewed golden update |
 | `scripting-llvm` | `robin_spellforge`, `robin_lua` | Explicit poison recovery and native-session unwind tests with LLVM package overrides |
-| `engine` | `robin_engine` | Deterministic simulation tests |
+| `engine` | `robin_engine_geometry`, `robin_engine` | Geometry/pathing layer and deterministic simulation tests |
 | `assets` | `robin_assets`, `robin_data_io` | Assets with/without engine adapters; fixture resolver tests; engine and `robin_run_types` graphs exclude `robin_run_protocol`/Ed25519 |
 | `protocols` | `robin_run_types`, `robin_run_protocol`, `robin_replay_format`, `robin_identity_signer` | Wire, bounded replay admission and isolated signer tests |
 | `services` | `robin_highscores`, `robin_replay_verifier` | Server and verifier tests |

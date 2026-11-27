@@ -5,6 +5,8 @@
 //! when their time-to-live expires and they are not playing.
 
 use serde::{Deserialize, Serialize};
+
+pub use robin_engine_geometry::sound_material::Material;
 use std::collections::{BTreeMap, BTreeSet};
 
 // Sound-bank parsers return `String` errors; truncation converts via `?`.
@@ -58,36 +60,6 @@ pub const MENU_SOUND_BANK_FILE: &str = "/Menu/menu.fxg";
 // ---------------------------------------------------------------------------
 // Material enum
 // ---------------------------------------------------------------------------
-
-#[repr(u32)]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum Material {
-    Ground = 0,
-    Wood = 1,
-    Stone = 2,
-    Grass = 3,
-    Leaves = 4,
-    Water = 5,
-    Bush = 6,
-    Ice = 7,
-    Hole = 8,
-}
-
-impl Material {
-    pub const NUM_MATERIALS: usize = 9;
-}
 
 // ---------------------------------------------------------------------------
 // Widget noisy event

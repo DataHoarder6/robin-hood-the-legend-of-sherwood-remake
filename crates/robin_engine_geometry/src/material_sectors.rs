@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::coordinates::{MapBBox, MapPoint};
-use crate::element::GameMaterial;
+use crate::element_kinds::GameMaterial;
 use crate::level_data::RawMaterialSector;
 
 #[derive(Debug, Clone, Copy)]

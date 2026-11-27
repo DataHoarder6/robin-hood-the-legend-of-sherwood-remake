@@ -26,7 +26,7 @@ soldiers first and higher ranks after.
   carrying position, direction, action, obstacle, sector and layer.
   `install_reinforcement_doors_stage`
   (`crates/robin_engine/src/engine/level_loading/finish.rs`) turns them into
-  `DoorType::Reinforcement` doors (`crates/robin_engine/src/gate.rs`) and caches
+  `DoorType::Reinforcement` doors (`crates/robin_engine_geometry/src/gate.rs`) and caches
   `ReinforcementDoorInfo` in `ai.global.reinforcement_doors` (`ai/contexts.rs`).
 - `create_reinforcement` (`crates/robin_engine/src/engine/reinforcement.rs`)
   draws an un-instanced peasant from the gang, places it at the door's outer

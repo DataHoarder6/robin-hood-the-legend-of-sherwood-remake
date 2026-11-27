@@ -1090,7 +1090,7 @@ pub struct FastFindGrid {
 
 impl FastFindGrid {
     /// Own the mutable grid state while leaving level geometry detached.
-    pub(crate) fn persisted_clone(&self) -> Self {
+    pub fn persisted_clone(&self) -> Self {
         Self {
             level: std::sync::Arc::new(LevelGrid::default()),
             line_active: self.line_active.clone(),
@@ -3033,7 +3033,7 @@ impl FastFindGrid {
 
     /// Pathfinder corridor query, retaining its segment-selected grid cells.
     /// A blocked route can stop before collecting lines from distant cells.
-    pub(crate) fn is_path_corridor_clear(&self, layer: u16, corridor: &ThickMoveCorridor) -> bool {
+    pub fn is_path_corridor_clear(&self, layer: u16, corridor: &ThickMoveCorridor) -> bool {
         let mut clear = true;
         self.visit_active_motion_lines_for_segments(
             layer,

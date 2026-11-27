@@ -173,9 +173,9 @@ fn cleaned_map_geometry_modules_do_not_reintroduce_generic_bboxes() {
         "src/engine/movement.rs",
         "src/engine/jump.rs",
         "src/ai.rs",
-        "src/fast_find_grid.rs",
+        "../robin_engine_geometry/src/fast_find_grid.rs",
         "src/pathfinder.rs",
-        "src/position_interface.rs",
+        "../robin_engine_geometry/src/position_interface.rs",
         "src/sound_source.rs",
     ] {
         let src = parse_src(path);
@@ -198,7 +198,7 @@ fn cleaned_vector_math_modules_do_not_reintroduce_raw_geo_points() {
         "src/engine/tick/frame_systems.rs",
         "src/ai_enemy/battle.rs",
         "src/path.rs",
-        "src/material_sectors.rs",
+        "../robin_engine_geometry/src/material_sectors.rs",
     ] {
         let src = parse_src(path);
         assert!(

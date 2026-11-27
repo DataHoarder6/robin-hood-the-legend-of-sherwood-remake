@@ -84,7 +84,7 @@ impl OrderQueue {
             })
     }
 
-    pub(crate) fn lease_slot(&mut self, slot: u64) {
+    pub fn lease_slot(&mut self, slot: u64) {
         if let Some(installed) = &self.installed {
             assert_eq!(
                 installed.slot(),
@@ -100,7 +100,7 @@ impl OrderQueue {
         self.installed = Some(InstalledOrderLease::Queued(slot));
     }
 
-    pub(crate) fn release_slot(&mut self, slot: u64) {
+    pub fn release_slot(&mut self, slot: u64) {
         assert_eq!(
             self.installed.as_ref().map(InstalledOrderLease::slot),
             Some(slot),

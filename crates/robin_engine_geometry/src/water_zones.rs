@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::coordinates::{MapBBox, MapPoint};
 use crate::level_data::RawMaterialSector;
-use crate::sound_cache::Material;
+use crate::sound_material::Material;
 
 /// A single water or hole polygon loaded from the proto material chunk.
 #[derive(
@@ -232,7 +232,7 @@ pub fn determine_water_hole_scoped<'a>(
     obstacle: Option<&'a crate::sight_obstacle::SightObstacle>,
     point: MapPoint,
 ) -> Option<WaterHoleResolution<'a>> {
-    use crate::element::GameMaterial;
+    use crate::element_kinds::GameMaterial;
 
     let Some(obstacle) = obstacle else {
         return water_zones.zones.iter().find_map(|zone| {
@@ -335,7 +335,7 @@ fn segment_line_intersection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::GameMaterial;
+    use crate::element_kinds::GameMaterial;
     use crate::level_data::SectorPolygon;
 
     fn square(material: u8, min: i16, max: i16) -> RawMaterialSector {
@@ -454,7 +454,7 @@ mod tests {
     }
 
     fn material_sector(
-        material: crate::element::GameMaterial,
+        material: crate::element_kinds::GameMaterial,
         min: f32,
         max: f32,
     ) -> crate::material_sectors::MaterialSector {
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn obstacle_hole_retains_its_exact_polygon_for_extension() {
         let zones = WaterZones::build_from_raw(&[square(8, -100, 100)]);
-        let obstacle_hole = material_sector(crate::element::GameMaterial::Hole, 0.0, 10.0);
+        let obstacle_hole = material_sector(crate::element_kinds::GameMaterial::Hole, 0.0, 10.0);
         let obstacle = make_obstacle(2 /* STONE */, vec![obstacle_hole.clone()]);
 
         let resolution =
@@ -592,7 +592,7 @@ mod tests {
         let obstacle = make_obstacle(
             5,
             vec![material_sector(
-                crate::element::GameMaterial::Stone,
+                crate::element_kinds::GameMaterial::Stone,
                 0.0,
                 10.0,
             )],
