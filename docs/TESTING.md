@@ -69,10 +69,10 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `parity` | `robin_parity` | Runner unit/contract tests; does not replay licensed corpora |
 | `parity-cross` | Provisioned native `robin` plus the Windows `robin.exe` under wine | One recording replayed by both builds; the per-25-frame state-hash chains must match exactly |
 | `client` | `robin_rs`, `robin_app`, default features | Client tests and the binary/example tests, then a separate `robin` binary build |
-| `client-release` | `robin_rs`, `robin_app`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates |
+| `client-release` | `robin_rs`, `release` features | Client library tests with desktop/audio/multiplayer/updates; the binary links in CI's `client` |
 | `tools` | `robin_modding_tools`; `robin_app` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
-| `wasm` | `robin_replay_admission_wasm`, `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the published client (threaded `audio,multiplayer`), linked; unpublished feature sets are not compiled |
-| `wasm-release` | `robin_app` `wasm-release` artifact | The published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; gated only when the release plan changes, and run by CI on every push to `main` |
+| `wasm` | `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the published client (threaded `audio,multiplayer`), linked; unpublished feature sets are not compiled |
+| `wasm-release` | `robin_replay_admission_wasm`; `robin_app` `wasm-release` artifact | Replay-admission module check; the published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; gated only when the release plan changes, and run by CI on every push to `main` |
 | `wasm-tests` | `robin_rs` and `robin_app` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |

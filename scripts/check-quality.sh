@@ -39,10 +39,10 @@ case "$1" in
         cargo fmt --all -- --check
         ;;
     lint)
-        # Two feature sets, because one run would lint almost nothing: the
-        # default members are two small crates, and `robin_rs`'s default
-        # features compile a fraction of the client. The shipping client is the
-        # `release` set. No `-A` here: a lint that is wrong for this code is
+        # One run over the whole workspace with the shipping client's `release`
+        # feature set: every crate, every target, the code that ships. Code that
+        # exists only without those features is compiled by CI's `client` suite
+        # but not linted here. No `-A`: a lint that is wrong for this code is
         # allowed by name where it fires, with a reason.
         # `--all-targets` checks every library twice, with and without
         # cfg(test), so `-D warnings` also covers the unused imports and dead
@@ -52,12 +52,11 @@ case "$1" in
         # shared proc-macro and build-script artifacts and every later suite
         # rebuilds the whole dependency graph
         # (docs/slop/build-time-root-causes.md).
-        cargo clippy --locked --workspace --all-targets -- -D warnings
-        # robin_parity is selected so robin_engine resolves with the same
-        # features (`original-parity`) as in the workspace run above and its
-        # check is reused instead of repeated.
-        cargo clippy --locked -p robin_rs -p robin_app -p robin_parity --all-targets \
-            --no-default-features --features robin_rs/release,robin_app/release -- -D warnings
+        # `robin_app/release` forwards to `robin_rs/release`. Naming
+        # `robin_rs/release` directly would also read as robin_parity's
+        # `dep/feature` syntax and switch on its optional robin_rs dependency.
+        cargo clippy --locked --workspace --all-targets \
+            --features robin_app/release -- -D warnings
         ;;
     core)
         cargo test --locked -p robin_build_info -p robin_build_identity -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
@@ -115,8 +114,10 @@ case "$1" in
         cargo check --locked -p robin_app --bins
         ;;
     client-release)
+        # The client's tests with the shipping feature set. The binary's code is
+        # type-checked by `lint` and compiled here; linking the `robin`
+        # executable is CI's `client` suite and the release workflow.
         cargo nextest run --locked -p robin_rs --lib --no-default-features --features release
-        cargo build --locked -p robin_app --bin robin --no-default-features --features release
         ;;
     tools)
         cargo test --locked -p robin_modding_tools
@@ -125,7 +126,6 @@ case "$1" in
         ;;
     wasm)
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_identity_signer --bin leaderboard_identity_bridge --features identity-signer-bridge
-        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_replay_admission_wasm
         # The artifact a browser guest joins with, and the only client
         # configuration published: `wasm-www/scripts/build-runtime.mjs --threads`
         # ships `audio,multiplayer,wasm-threads` (a runtime without multiplayer
@@ -141,6 +141,7 @@ case "$1" in
         # checked. A release-only break cannot hide behind a green wasm-dev
         # compile. push-gate selects it for release-plan changes only; CI runs it
         # on every push to main.
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_replay_admission_wasm
         bash scripts/check-wasm-release-artifact.sh
         ;;
     browser-audio|native-lifecycle)
