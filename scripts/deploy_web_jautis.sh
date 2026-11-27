@@ -15,6 +15,14 @@ build_host=minipc
 public_root=/var/www/robin
 signer_root=/var/www/robin-id
 public_origin=https://robin.jautis.lt
+# The private browser root fetches /campaign.json?build=<short>. The binding is
+# operator-managed beside the licensed corpus, never in git or the built site.
+# Require an explicit path; a missing operator file is a launch error, not a
+# fallback to Demo (D20, #127).
+# CAMPAIGN_INPUT_BEGIN
+campaign_binding=${CAMPAIGN_BINDING_PATH:?usage: CAMPAIGN_BINDING_PATH=<operator-managed campaign.json> scripts/deploy_web_jautis.sh <v-tag>}
+[ -f "$campaign_binding" ] || { echo "deploy_web_jautis: no binding at $campaign_binding" >&2; exit 1; }
+# CAMPAIGN_INPUT_END
 
 git -C "$repo" fetch -q fork --tags
 commit=$(git -C "$repo" rev-parse "$tag^{commit}")
@@ -128,6 +136,17 @@ as_root mkdir -p "$public_new" "$signer_new"
 as_root chown "$(id -u):$(id -g)" "$public_new" "$signer_new"
 scp -q -r "$build_host:$stage_remote/." "$public_new/"
 scp -q -r "$build_host:${stage_remote}-signer/." "$signer_new/"
+# Publish the operator binding at the exact path the client requests. It is
+# validated under HTTP below, before either root is swapped.
+# CAMPAIGN_STAGE_BEGIN
+# The operator file may be private; the served copy must be Caddy-readable.
+# Match an already published file's owner/group rather than guessing one.
+[ -f "$public_new/index.html" ] \
+    || { echo "deploy_web_jautis: no staged index.html to match campaign.json ownership" >&2; exit 1; }
+cp "$campaign_binding" "$public_new/campaign.json"
+chown --reference="$public_new/index.html" "$public_new/campaign.json"
+chmod 0644 "$public_new/campaign.json"
+# CAMPAIGN_STAGE_END
 
 # The existing datadir corpus is retained across deploys; the built runtime's
 # Demo sha must match it exactly, or the site would serve a mismatched game.
@@ -181,6 +200,7 @@ fi
 gate_port_file=$(mktemp)
 gate_body=$(mktemp)
 gate_headers=$(mktemp)
+campaign_parts=$(mktemp)
 python3 - "$public_new" "$gate_port_file" <<'PY' &
 import http.server
 import mimetypes
@@ -204,7 +224,7 @@ with open(sys.argv[2], "w", encoding="ascii") as port_file:
 server.serve_forever()
 PY
 gate_pid=$!
-trap 'kill "$gate_pid" 2>/dev/null || true; rm -f -- "$gate_port_file" "$gate_body" "$gate_headers"' EXIT
+trap 'kill "$gate_pid" 2>/dev/null || true; rm -f -- "$gate_port_file" "$gate_body" "$gate_headers" "$campaign_parts"' EXIT
 gate_port=
 for _ in $(seq 1 50); do
     if [ -s "$gate_port_file" ]; then
@@ -246,10 +266,93 @@ gate_fail() {
     exit 1
 }
 
+# CAMPAIGN_GATE_BEGIN
+# Delimited as one function so the hermetic workflow test executes this exact
+# code against generated fixtures: no live deployment and no secret material.
+# The browser fetches /campaign.json?build=<short> and resolves the binding's
+# relative url against the page origin; validate that same view of the stage.
+gate_campaign_binding() {
+    local staged_root=$1
+    local selector=$2
+    local status rel sha bytes count index part
+
+    status=$(curl -sS --max-time 30 -o "$gate_body" -D "$gate_headers" \
+        -w '%{http_code}' "$gate_base/campaign.json?build=$selector") \
+        || gate_fail "campaign.json fetch failed"
+    [ "$status" = 200 ] || gate_fail "campaign.json -> HTTP $status"
+    [ -f "$staged_root/campaign.json" ] || gate_fail "campaign.json was not staged"
+    cmp -s "$gate_body" "$staged_root/campaign.json" \
+        || gate_fail "served campaign.json differs from the staged bytes"
+
+    # Same shape parseHostedReplayContent consumes; extra keys are ignored by
+    # the browser, but every field it consumes must be present and well typed.
+    # Validate the ORIGINAL JSON strings here: `jq -r` in a command substitution
+    # drops trailing newlines, so a shell-only regex would accept a value the
+    # browser rejects. No shell extraction happens before this check.
+    jq -e '
+        type == "object" and
+        (.url | type == "string" and index("\n") == null and index("\r") == null
+            and test("^/datadirs/full/[0-9a-f]{64}/datadir\\.bin$")) and
+        (.sha256 | type == "string" and index("\n") == null and index("\r") == null
+            and test("^[0-9a-f]{64}$")) and
+        (.byteLength | type == "number" and . == floor and . > 0 and . <= 268435456)
+    ' "$gate_body" >/dev/null || gate_fail "campaign.json is not a valid content binding"
+    rel=$(jq -er '.url' "$gate_body") || gate_fail "campaign.json has no url"
+    sha=$(jq -er '.sha256' "$gate_body") || gate_fail "campaign.json has no sha256"
+    bytes=$(jq -er '.byteLength' "$gate_body") || gate_fail "campaign.json has no byteLength"
+
+    # A path-only url is same-origin by construction. Reject schemes, hosts,
+    # query strings, fragments and traversal with the client's exact regex.
+    [[ $rel =~ ^/datadirs/full/[0-9a-f]{64}/datadir\.bin$ ]] \
+        || gate_fail "campaign url $rel is not a same-origin Full datadir path"
+    [[ $sha =~ ^[0-9a-f]{64}$ ]] || gate_fail "campaign sha256 is not 64 lowercase hex digits"
+    [[ $bytes =~ ^[0-9]+$ ]] || gate_fail "campaign byteLength is not an integer"
+    [ "$bytes" -gt 0 ] && [ "$bytes" -le 268435456 ] \
+        || gate_fail "campaign byteLength $bytes is outside the client's 256 MiB limit"
+
+    # Derive parts exactly as parseHostedReplayContent does; the binding never
+    # names them, so a shifted generation cannot be aliased into this deploy.
+    # TODO(#127): these thresholds and the 256 MiB cap duplicate the client's
+    # constants; the parity test in static-deployment-workflow.test.mjs fails
+    # on drift, but a single shared source would be better.
+    if [ "$bytes" -gt 26214400 ]; then
+        count=$(( (bytes + 25165823) / 25165824 ))
+    else
+        count=1
+    fi
+    : > "$campaign_parts"
+    for (( index = 0; index < count; index++ )); do
+        if [ "$count" -eq 1 ]; then
+            part=$rel
+        else
+            part=${rel}.part${index}
+        fi
+        status=$(curl -sS --max-time 60 -o "$gate_body" -D "$gate_headers" \
+            -w '%{http_code}' "$gate_base$part") || gate_fail "campaign part $part fetch failed"
+        [ "$status" = 200 ] || gate_fail "campaign part $part -> HTTP $status"
+        [ -f "$staged_root$part" ] || gate_fail "campaign part $part was not staged"
+        cmp -s "$gate_body" "$staged_root$part" \
+            || gate_fail "served campaign part $part differs from the staged bytes"
+        cat "$gate_body" >> "$campaign_parts"
+    done
+    [ "$(wc -c < "$campaign_parts")" -eq "$bytes" ] \
+        || gate_fail "campaign parts do not total the declared byteLength"
+    [ "$(sha256sum "$campaign_parts" | cut -d' ' -f1)" = "$sha" ] \
+        || gate_fail "campaign parts do not match the declared sha256"
+}
+# CAMPAIGN_GATE_END
+
 gate_get /wasm/latest.json || gate_fail "latest.json fetch failed"
 gate_same_bytes || gate_fail "served latest.json differs from the staged bytes"
 jq -e --arg short "$short" '.short == $short' "$gate_body" >/dev/null \
     || gate_fail "latest.json does not select $short"
+# Use the selector latest.json actually publishes, exactly as the client does,
+# and refuse to gate a build other than the one this deploy is swapping in.
+campaign_selector=$(jq -er '.short' "$gate_body") \
+    || gate_fail "latest.json has no build selector"
+[ "$campaign_selector" = "$short" ] \
+    || gate_fail "build selector $campaign_selector is not $short"
+gate_campaign_binding "$public_new" "$campaign_selector"
 
 manifest_file=$public_new/wasm/$short/manifest.json
 gate_get "/wasm/$short/manifest.json" || gate_fail "manifest fetch failed"

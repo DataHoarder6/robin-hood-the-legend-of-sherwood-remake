@@ -48,6 +48,41 @@ Stream: browser/WASM Android client. Companion spec:
 - The service worker rejects every `/datadirs/full/*` URL, so the private
   corpus is never cached.
 
+## Operator campaign binding (D20, #127)
+
+The private root fetches `/campaign.json?build=<short>`; the build returns 404
+when deployment has not published that binding. Deployment now stages and gates
+it before the atomic swap.
+
+- Contract: one JSON object with `url`, `sha256` and `byteLength`, exactly the
+  shape `parseHostedReplayContent` accepts (`wasm-www/src/run-replay.ts`).
+  `url` is a same-origin path `/datadirs/full/<64-hex>/datadir.bin`; `sha256`
+  is 64 lowercase hex digits; `byteLength` is a positive integer at most
+  256 MiB. Part names are derived from `byteLength` by the client, not stored
+  in the binding.
+- Fixture location: `/var/www/robin/datadirs/campaign.json` on `oci-vm`, beside
+  the licensed corpus. Not yet created there as of 2026-11-27: the operator
+  writes it, and it never enters git or the built site. Supply it explicitly
+  as `CAMPAIGN_BINDING_PATH=/var/www/robin/datadirs/campaign.json` to
+  `scripts/deploy_web_jautis.sh <v-tag>`; an absent path aborts before staging.
+- Staging contract: the deploy copies the binding to
+  `<staged root>/campaign.json` with mode `0644` and the owner/group of the
+  staged `index.html`. The operator file's own mode is not preserved: a source
+  that is `0600` would pass a loopback fetch but return 403 from Caddy after
+  the swap. No reference file aborts before staging.
+- Gate: the deploy fetches `/campaign.json?build=<short>` over loopback. It
+  requires HTTP 200, served bytes equal to the staged bytes, and the exact
+  `parseHostedReplayContent` shape validated in `jq` before shell extraction
+  (a trailing newline in `url` or `sha256` is rejected). It also checks every
+  derived part's total length and SHA-256. A missing, malformed or mismatched
+  binding exits before either root is swapped; the rollback trees are
+  untouched.
+- Hermetic evidence: `wasm-www/scripts/static-deployment-workflow.test.mjs`
+  executes the gate's shell function against generated fixtures. No live
+  origin, licensed corpus or secret is used.
+- Last verified: 2026-11-27 (workflow tests, deployment suite, wasm-www format
+  and lint).
+
 ## Browser proof
 
 Playwright (owner's visible Chrome, emulated 390x844 phone, current site):
