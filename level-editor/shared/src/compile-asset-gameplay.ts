@@ -2083,22 +2083,6 @@ function compileAssetGameplayAttempt(
     }
   allocateLightReceivingLayers(navigationRegions, lights, layers.length - 1, inside);
   orderNavigationLayers(navigationRegions, warnings);
-  // A generated wall-spline walkway is the gameplay surface over its authored
-  // terrain backdrop. Keep it in the lowest native sector so elevation queries
-  // on the deck find the walkway receiver before the ground behind it.
-  const walkwayRegion = navigationRegions.find((region) =>
-    region.pieces.every((piece) => piece.navigationRegion?.startsWith("wall-spline-")),
-  );
-  const terrainRegion = navigationRegions.find((region) =>
-    region.pieces.every((piece) => piece.navigationRegion?.startsWith("authored-terrain/")),
-  );
-  if (walkwayRegion && terrainRegion && walkwayRegion.layer > terrainRegion.layer) {
-    const higher = walkwayRegion.layer;
-    walkwayRegion.layer = terrainRegion.layer;
-    terrainRegion.layer = higher;
-    for (const piece of walkwayRegion.pieces) piece.layer = walkwayRegion.layer;
-    for (const piece of terrainRegion.pieces) piece.layer = terrainRegion.layer;
-  }
   const liftLayer = compactNavigationLayers(navigationRegions);
   // A raised receiving volume can supply the physical landing over a lower
   // navigation plane. Require an unambiguous ground binding and retain its
