@@ -16,8 +16,5 @@ thiserror.workspace = true
 num_enum = "0.7"
 strum_macros = "0.28.0"
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [lints]
 workspace = true

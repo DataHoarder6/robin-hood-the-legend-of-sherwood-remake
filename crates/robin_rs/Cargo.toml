@@ -97,8 +97,6 @@ mlua = { workspace = true, optional = true }
 dirs = "7"
 rayon = { version = "1", optional = true }
 ogg = { version = "0.9.2", optional = true }
-# convert_datadir: load the pinned libopus to verify its version string.
-libloading = { version = "0.9.0", optional = true }
 # Keep Kira's complete native decoder/backend feature set. Native installs can
 # point at user-supplied data directories, so restricting their accepted audio
 # formats would be an unnecessary compatibility regression.
@@ -145,9 +143,6 @@ wgpu = { workspace = true, default-features = false, features = ["std", "parking
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "dx12", "vulkan", "gles", "wgsl", "glsl", "static-dxc"] }
-# GUI-subsystem binaries have no console; re-attach to the parent process
-# console so logs still reach the terminal when launched from one.
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "metal", "gles", "wgsl", "glsl"] }
@@ -234,8 +229,6 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "m
 # TODO: Upgrade once reqwest updates its stream adapter dependency
 # (reqwest 0.13.5 is on 0.5; 0.7 is the latest release).
 wasm-streams = "0.5"
-console_error_panic_hook = "0.1"
-tracing-wasm = "0.2"
 gloo-timers = { version = "0.4", features = ["futures"] }
 # Durable, transactional browser storage for immutable full-mod envelopes and
 # resumable prefixes.  localStorage remains reserved for the tiny identity and
@@ -278,7 +271,7 @@ multiplayer = [
     "dep:iroh-mainline-address-lookup",
 ]
 # Developer conversion/inspection binaries are built only on demand.
-tools = ["dep:ogg", "dep:rayon", "dep:libloading"]
+tools = ["dep:ogg", "dep:rayon"]
 android = ["audio"]
 audio = ["dep:kira", "dep:lru", "dep:mint", "dep:ogg"]
 dialogs = ["dep:rfd"]

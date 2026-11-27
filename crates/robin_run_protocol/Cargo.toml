@@ -21,7 +21,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 ed25519-dalek.workspace = true
-serde_urlencoded = "0.7"
 
 [lints]
 workspace = true
