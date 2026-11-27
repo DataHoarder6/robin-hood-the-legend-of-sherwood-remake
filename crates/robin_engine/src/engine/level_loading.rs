@@ -1957,6 +1957,90 @@ impl EngineInner {
         }
     }
 
+    /// Build a private view of the loaded mission assets whose sprite cache
+    /// holds exactly the profiles named by this snapshot.
+    ///
+    /// Snapshot sprites serialize their primary and alternate cache keys but
+    /// not the RHS load context. The context is recovered from the entity's
+    /// kind and the snapshot's ambiance, matching the level loader's own
+    /// choices. The scriptor is cloned through `Arc::make_mut` so a rejected
+    /// snapshot cannot mutate the caller's assets; a profile that cannot be
+    /// loaded from the attached resources stays absent and the existing
+    /// world-preflight cache-miss error rejects the restore.
+    ///
+    /// TODO(#90): a snapshot does not record whether a target was authored as
+    /// an animation or a character profile. Candidate contexts are tried in
+    /// the loader's order, which cannot disambiguate two identically named
+    /// RHS profiles in different directories.
+    pub(crate) fn assets_with_snapshot_sprite_profiles(&self, assets: &LevelAssets) -> LevelAssets {
+        let bank_signature = assets.bank_signature;
+        let mut prepared = assets.clone();
+        let scriptor = std::sync::Arc::make_mut(&mut prepared.sprite_scriptor);
+        let ambiance = Some(self.world.weather.ambiance.to_sprite_ambiance());
+        let mut seen = std::collections::BTreeSet::new();
+
+        for (_, entity) in self.world.entities.occupied() {
+            let sprite = entity.sprite();
+            let primary_contexts: &[(crate::sprite_script::FrameKind, &str)] = match entity {
+                Entity::Pc(_) | Entity::Soldier(_) | Entity::Civilian(_) => &[(
+                    crate::sprite_script::FrameKind::Character,
+                    "Data/Characters",
+                )],
+                Entity::Fx(_) => &[(
+                    crate::sprite_script::FrameKind::Animation,
+                    "Data/Animations",
+                )],
+                Entity::Target(_) => &[
+                    (
+                        crate::sprite_script::FrameKind::Animation,
+                        "Data/Animations",
+                    ),
+                    (
+                        crate::sprite_script::FrameKind::Character,
+                        "Data/Characters",
+                    ),
+                    (crate::sprite_script::FrameKind::Object, "Data/Characters"),
+                ],
+                Entity::Bonus(_) | Entity::Scroll(_) | Entity::Projectile(_) | Entity::Net(_) => {
+                    &[(crate::sprite_script::FrameKind::Object, "Data/Characters")]
+                }
+            };
+
+            for cache_key in [
+                &sprite.profile_cache_key,
+                &sprite.alternate_profile_cache_key,
+            ] {
+                if cache_key.is_empty() || !seen.insert(cache_key.as_str()) {
+                    continue;
+                }
+                let mut last_error = None;
+                for &(frame_kind, base_dir) in primary_contexts {
+                    match crate::sprite::Sprite::preload_profile_from_cache_key(
+                        scriptor,
+                        cache_key,
+                        frame_kind,
+                        base_dir,
+                        ambiance,
+                        bank_signature,
+                    ) {
+                        Ok(()) => {
+                            last_error = None;
+                            break;
+                        }
+                        Err(error) => last_error = Some(error),
+                    }
+                }
+                if let Some(error) = last_error {
+                    tracing::warn!(
+                        "snapshot sprite cache key '{cache_key}' is not loadable: {error}"
+                    );
+                }
+            }
+        }
+
+        prepared
+    }
+
     // ─── Level loading ───────────────────────────────────────────
 
     /// Load a level from proto-level + mission files.

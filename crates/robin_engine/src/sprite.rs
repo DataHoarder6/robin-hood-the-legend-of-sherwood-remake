@@ -1220,6 +1220,42 @@ impl Sprite {
         )
     }
 
+    /// Load one serialized profile cache key into `scriptor`.
+    ///
+    /// Snapshots retain `"{filename}/{profile}"` cache keys but not the RHS
+    /// loading context, so the caller supplies the frame kind, base directory
+    /// and ambiance the profile was authored with. An already-cached key is
+    /// left untouched. A genuinely absent profile keeps the scriptor's
+    /// explicit error — no profile is invented or substituted.
+    pub(crate) fn preload_profile_from_cache_key(
+        scriptor: &mut SpriteScriptor,
+        cache_key: &str,
+        frame_kind: FrameKind,
+        base_dir: &str,
+        ambiance: Option<Ambiance>,
+        bank_signature: u32,
+    ) -> Result<(), String> {
+        if scriptor.get(cache_key).is_some() {
+            return Ok(());
+        }
+        let (filename, profile_name) = cache_key
+            .split_once('/')
+            .ok_or_else(|| format!("invalid sprite cache key '{cache_key}'"))?;
+        let path = scriptor.resolve_rhs_path(frame_kind, base_dir, filename, ambiance)?;
+        scriptor.load(&path, profile_name, cache_key, frame_kind, |file| {
+            let signature = robin_data_io::legacy_io::LegacyReader::new(file)
+                .read_u32("bank signature")
+                .map_err(|error| error.to_string())?;
+            if signature != bank_signature {
+                return Err(format!(
+                    "bank signature mismatch: file {signature:#x} != bank {bank_signature:#x}"
+                ));
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// Cache-only counterpart to [`Self::load_frame_info`].
     ///
     /// Takes `&SpriteScriptor` and errors if the sprite has not been
@@ -2253,6 +2289,51 @@ mod tests {
         sprite.alternate_profile_cache_key.clear();
         let error = sprite.validate_runtime_cache(&scriptor).unwrap_err();
         assert!(error.contains("using alternate profile"));
+    }
+
+    #[test]
+    fn preload_profile_from_cache_key_loads_only_the_named_profile() {
+        const KEY: &str = "RobinHood/Robin des bois";
+        const SIGNATURE: u32 = 0x90F1_90F1;
+        let info = crate::sprite_script::SpriteInfo {
+            scripts: std::sync::Arc::new(vec![SpriteScript::default()]),
+            conversion: std::sync::Arc::new(vec![
+                crate::sprite_script::UNMAPPED;
+                crate::sprite_script::NONANIMATION_END
+            ]),
+            size: crate::coordinates::SpriteSize::new(1.0, 1.0),
+            center: crate::coordinates::SpriteAnchor::new(0.0, 0.0),
+        };
+        let profiles = [("Robin des bois".to_owned(), info.clone())];
+        let resources = crate::sprite_script::MissionResourceEnvironment::default()
+            .with_parsed_rhs([("Data/Characters/RobinHood.rhs", SIGNATURE, &profiles[..])])
+            .expect("parsed RHS fixture");
+        let mut scriptor =
+            crate::sprite_script::SpriteScriptor::with_resources(std::sync::Arc::new(resources));
+
+        Sprite::preload_profile_from_cache_key(
+            &mut scriptor,
+            KEY,
+            FrameKind::Character,
+            "Data/Characters",
+            None,
+            SIGNATURE,
+        )
+        .expect("named profile must load from its serialized cache key");
+        let cached = scriptor.get(KEY).expect("named profile cached");
+        assert!(std::sync::Arc::ptr_eq(&cached.scripts, &info.scripts));
+        assert!(scriptor.get("RobinHood/Other profile").is_none());
+
+        let error = Sprite::preload_profile_from_cache_key(
+            &mut scriptor,
+            "MissingFile/Missing profile",
+            FrameKind::Character,
+            "Data/Characters",
+            None,
+            SIGNATURE,
+        )
+        .expect_err("an absent profile must fail explicitly");
+        assert!(error.contains("MissingFile"), "{error}");
     }
 
     fn make_test_sprite() -> Sprite {

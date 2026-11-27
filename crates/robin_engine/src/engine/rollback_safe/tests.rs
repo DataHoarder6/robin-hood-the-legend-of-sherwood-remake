@@ -3089,6 +3089,281 @@ fn adoption_rejects_malformed_fog_grid_atomically() {
     assert_eq!(live.frame_counter(), 92);
 }
 
+/// Issue #90: a decoded save can name a character profile that ordinary
+/// campaign-peasant preloading never loads (crash bundle
+/// 7c0fcc2e9196b6ce, entity 51 `RobinHood/Robin des bois`). The profile
+/// exists in the attached mission resources, so restoration must preload
+/// that exact serialized key before world preflight.
+#[test]
+fn snapshot_restore_preloads_serialized_sprite_profile() {
+    const KEY: &str = "RobinHood/Robin des bois";
+    const ALT_KEY: &str = "RobinHood/Robin des villes";
+    const SIGNATURE: u32 = 0x90F1_90F1;
+
+    let (mut source, mut assets) = frame_api_fixture();
+    let scripts = std::sync::Arc::new(vec![{
+        let mut row = crate::sprite_script::SpriteScript::default();
+        row.action_id = 0;
+        row.frame_ids = vec![9001];
+        row.delays = vec![1];
+        row
+    }]);
+    let alt_scripts = std::sync::Arc::new(vec![{
+        let mut row = crate::sprite_script::SpriteScript::default();
+        row.action_id = 0;
+        row.frame_ids = vec![9002];
+        row.delays = vec![1];
+        row
+    }]);
+    let info = crate::sprite_script::SpriteInfo {
+        scripts: scripts.clone(),
+        conversion: std::sync::Arc::new(vec![
+            crate::sprite_script::UNMAPPED;
+            crate::sprite_script::NONANIMATION_END
+        ]),
+        size: crate::coordinates::SpriteSize::new(32.0, 64.0),
+        center: crate::coordinates::SpriteAnchor::new(16.0, 32.0),
+    };
+    let alt_info = crate::sprite_script::SpriteInfo {
+        scripts: alt_scripts.clone(),
+        conversion: std::sync::Arc::new(vec![
+            crate::sprite_script::UNMAPPED;
+            crate::sprite_script::NONANIMATION_END
+        ]),
+        size: crate::coordinates::SpriteSize::new(32.0, 64.0),
+        center: crate::coordinates::SpriteAnchor::new(16.0, 32.0),
+    };
+    let profiles = [
+        ("Robin des bois".to_owned(), info),
+        ("Robin des villes".to_owned(), alt_info),
+    ];
+    let resources = crate::sprite_script::MissionResourceEnvironment::default()
+        .with_parsed_rhs([("Data/Characters/RobinHood.rhs", SIGNATURE, &profiles[..])])
+        .expect("sprite resource fixture");
+    assets.sprite_scriptor = std::sync::Arc::new(
+        crate::sprite_script::SpriteScriptor::with_resources(std::sync::Arc::new(resources)),
+    );
+    assets.bank_signature = SIGNATURE;
+
+    let owner = source
+        .inner
+        .add_test_entity(crate::engine::test_support::actors::make_test_pc(
+            crate::element::Posture::Upright,
+        ));
+    let sprite = source
+        .inner
+        .world
+        .entities
+        .get_mut(owner)
+        .expect("snapshot PC")
+        .sprite_mut();
+    sprite.profile_cache_key = KEY.to_owned();
+    sprite.alternate_profile_cache_key = ALT_KEY.to_owned();
+
+    assert!(
+        assets.sprite_scriptor.get(KEY).is_none(),
+        "the snapshot key must be absent from ordinary preloading for this to be a regression"
+    );
+    assert!(
+        assets.sprite_scriptor.get(ALT_KEY).is_none(),
+        "the alternate snapshot key must be absent too"
+    );
+    let snapshot = decoded_engine(&source);
+    let restored = Engine::restore_from_snapshot(
+        &mut crate::engine::HostDisplayState::default(),
+        snapshot,
+        &assets,
+    )
+    .expect("snapshot-named sprite profile must be preloaded before world preflight");
+
+    let attached = restored.inner.get_entity(owner).expect("restored PC");
+    assert_eq!(attached.sprite().profile_cache_key, KEY);
+    assert!(
+        std::sync::Arc::ptr_eq(&attached.sprite().scripts, &scripts),
+        "restored sprite must carry the script table from the preloaded profile"
+    );
+    assert_eq!(attached.sprite().alternate_profile_cache_key, ALT_KEY);
+    assert!(
+        std::sync::Arc::ptr_eq(
+            attached
+                .sprite()
+                .alternate_scripts
+                .as_ref()
+                .expect("attached alternate scripts"),
+            &alt_scripts
+        ),
+        "the serialized alternate key must be preloaded and attached too"
+    );
+}
+
+/// A genuinely absent profile stays an explicit failure: no fallback sprite
+/// and no relaxed preflight. The error keeps the existing world-invariant
+/// class and names the missing serialized key.
+#[test]
+fn snapshot_restore_reports_absent_sprite_profile_explicitly() {
+    const KEY: &str = "MissingCharacter/Missing profile";
+
+    let (mut source, mut assets) = frame_api_fixture();
+    let resources = crate::sprite_script::MissionResourceEnvironment::default()
+        .with_parsed_rhs([] as [(&str, u32, &[(String, crate::sprite_script::SpriteInfo)]); 0])
+        .expect("empty sprite resource fixture");
+    assets.sprite_scriptor = std::sync::Arc::new(
+        crate::sprite_script::SpriteScriptor::with_resources(std::sync::Arc::new(resources)),
+    );
+
+    let owner = source
+        .inner
+        .add_test_entity(crate::engine::test_support::actors::make_test_pc(
+            crate::element::Posture::Upright,
+        ));
+    source
+        .inner
+        .world
+        .entities
+        .get_mut(owner)
+        .expect("snapshot PC")
+        .sprite_mut()
+        .profile_cache_key = KEY.to_owned();
+
+    let scriptor_before = assets.sprite_scriptor.clone();
+    let snapshot = decoded_engine(&source);
+    let error = Engine::restore_from_snapshot(
+        &mut crate::engine::HostDisplayState::default(),
+        snapshot,
+        &assets,
+    )
+    .err()
+    .expect("an absent profile must still fail restoration");
+    assert!(
+        matches!(error, SnapshotRestoreError::WorldInvariantViolation { ref detail }
+        if detail.contains(&format!(
+            "sprite cache miss while attaching primary profile '{KEY}'"
+        ))),
+        "missing profile must keep the explicit cache-miss error: {error:?}"
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &assets.sprite_scriptor,
+        &scriptor_before
+    ));
+    assert!(assets.sprite_scriptor.get(KEY).is_none());
+}
+
+#[test]
+fn snapshot_restore_rejects_fx_profile_found_only_in_character_context() {
+    const KEY: &str = "WrongContext/FX profile";
+    const SIGNATURE: u32 = 0x90F1_90F1;
+
+    let (mut source, mut assets) = frame_api_fixture();
+    let info = crate::sprite_script::SpriteInfo {
+        scripts: std::sync::Arc::new(Vec::new()),
+        conversion: std::sync::Arc::new(vec![
+            crate::sprite_script::UNMAPPED;
+            crate::sprite_script::NONANIMATION_END
+        ]),
+        size: crate::coordinates::SpriteSize::new(1.0, 1.0),
+        center: crate::coordinates::SpriteAnchor::new(0.0, 0.0),
+    };
+    let profiles = [("FX profile".to_owned(), info)];
+    let resources = crate::sprite_script::MissionResourceEnvironment::default()
+        .with_parsed_rhs([("Data/Characters/WrongContext.rhs", SIGNATURE, &profiles[..])])
+        .expect("wrong-context sprite resource fixture");
+    assets.sprite_scriptor = std::sync::Arc::new(
+        crate::sprite_script::SpriteScriptor::with_resources(std::sync::Arc::new(resources)),
+    );
+    assets.bank_signature = SIGNATURE;
+
+    let mut element = crate::element::ElementData::default();
+    element.kind = crate::element::ElementKind::Fx;
+    element.sprite.profile_cache_key = KEY.to_owned();
+    source
+        .inner
+        .add_test_entity(crate::element::Entity::Fx(crate::element::ElementFx {
+            element,
+            fx: Default::default(),
+        }));
+
+    let snapshot = decoded_engine(&source);
+    let error = Engine::restore_from_snapshot(
+        &mut crate::engine::HostDisplayState::default(),
+        snapshot,
+        &assets,
+    )
+    .err()
+    .expect("an FX profile found only in the character context must be rejected");
+    assert!(
+        matches!(error, SnapshotRestoreError::WorldInvariantViolation { ref detail }
+        if detail.contains(&format!(
+            "sprite cache miss while attaching primary profile '{KEY}'"
+        ))),
+        "wrong-context profile must keep the explicit cache-miss error: {error:?}"
+    );
+}
+
+#[test]
+fn snapshot_restore_rejects_alternate_profile_found_only_in_character_context() {
+    const PRIMARY_KEY: &str = "ValidAnimation/Primary profile";
+    const ALTERNATE_KEY: &str = "WrongContext/Alternate profile";
+    const SIGNATURE: u32 = 0x90F1_90F1;
+
+    let (mut source, mut assets) = frame_api_fixture();
+    let info = crate::sprite_script::SpriteInfo {
+        scripts: std::sync::Arc::new(Vec::new()),
+        conversion: std::sync::Arc::new(vec![
+            crate::sprite_script::UNMAPPED;
+            crate::sprite_script::NONANIMATION_END
+        ]),
+        size: crate::coordinates::SpriteSize::new(1.0, 1.0),
+        center: crate::coordinates::SpriteAnchor::new(0.0, 0.0),
+    };
+    let primary = [("Primary profile".to_owned(), info.clone())];
+    let alternate = [("Alternate profile".to_owned(), info)];
+    let resources = crate::sprite_script::MissionResourceEnvironment::default()
+        .with_parsed_rhs([
+            (
+                "Data/Animations/ValidAnimation.rhs",
+                SIGNATURE,
+                &primary[..],
+            ),
+            (
+                "Data/Characters/WrongContext.rhs",
+                SIGNATURE,
+                &alternate[..],
+            ),
+        ])
+        .expect("alternate-context sprite resource fixture");
+    assets.sprite_scriptor = std::sync::Arc::new(
+        crate::sprite_script::SpriteScriptor::with_resources(std::sync::Arc::new(resources)),
+    );
+    assets.bank_signature = SIGNATURE;
+
+    let mut element = crate::element::ElementData::default();
+    element.kind = crate::element::ElementKind::Fx;
+    element.sprite.profile_cache_key = PRIMARY_KEY.to_owned();
+    element.sprite.alternate_profile_cache_key = ALTERNATE_KEY.to_owned();
+    source
+        .inner
+        .add_test_entity(crate::element::Entity::Fx(crate::element::ElementFx {
+            element,
+            fx: Default::default(),
+        }));
+
+    let snapshot = decoded_engine(&source);
+    let error = Engine::restore_from_snapshot(
+        &mut crate::engine::HostDisplayState::default(),
+        snapshot,
+        &assets,
+    )
+    .err()
+    .expect("an alternate profile found only in the character context must be rejected");
+    assert!(
+        matches!(error, SnapshotRestoreError::WorldInvariantViolation { ref detail }
+        if detail.contains(&format!(
+            "sprite cache miss while attaching alternate profile '{ALTERNATE_KEY}'"
+        ))),
+        "wrong-context alternate must keep the explicit cache-miss error: {error:?}"
+    );
+}
+
 #[test]
 fn journal_replays_paused_sound_resolutions_before_the_next_fifo_entry() {
     use crate::engine::{ExternalFacts, SimulationFrameInput, SoundBoundary};

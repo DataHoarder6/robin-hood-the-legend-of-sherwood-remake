@@ -1928,12 +1928,16 @@ impl Engine {
         snapshot: Engine,
         assets: &LevelAssets,
     ) -> Result<EngineInner, SnapshotRestoreError> {
-        Self::validate_snapshot_compatibility(&snapshot, assets)?;
+        // The snapshot owns its sprite keys; preload exactly those before any
+        // world preflight, on a private assets view so a rejected restore
+        // cannot mutate the caller's scriptor cache.
+        let assets = snapshot.inner.assets_with_snapshot_sprite_profiles(assets);
+        Self::validate_snapshot_compatibility(&snapshot, &assets)?;
         let mut inner = snapshot.inner;
 
         // Attachment preflight above covers every static lookup, so this phase
         // cannot partially fail. The candidate is still detached from `self`.
-        inner.attach_preflighted_level_assets(assets);
+        inner.attach_preflighted_level_assets(&assets);
         // The sequence index is serialized simulation state. Save loading may
         // repair it, but network adoption must preserve the host's exact state.
         Ok(inner)
