@@ -103,7 +103,8 @@ other's per-test directories and deadlock the env-mutating tests
 (`install_home::tests::*`, `save_file::tests::*`) that serialize on the
 process-local `ENV_LOCK` — all threads end up in `futex_wait` with no log
 progress. `scripts/remote-check.sh` already does this correctly with a
-`mktemp -d /tmp/robin-gate.XXXXXX` per run and an EXIT trap. Ad-hoc runs must
+`mktemp -d /dev/shm/robin-gate.XXXXXX` (tmpfs: fsync on the build host's ext4 `/tmp` costs
+~220 ms, which dominates the persistence tests) per run and an EXIT trap. Ad-hoc runs must
 do the same: create a fresh `mktemp -d` for each suite, set `TMPDIR` to it, and
 remove it only after that suite exits. If a suite has hung in `futex_wait` with
 a static log for several minutes, kill it and rerun with a fresh TMPDIR rather

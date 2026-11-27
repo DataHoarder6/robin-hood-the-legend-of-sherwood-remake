@@ -563,8 +563,11 @@ ssh "$host" bash -s <<EOF
 set -euo pipefail
 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
 # A private TMPDIR per gate keeps `nix develop --command` scratch files from
-# accumulating in the shared /tmp; the trap removes them when the gate ends.
-gate_tmp=\$(mktemp -d /tmp/robin-gate.XXXXXX)
+# accumulating; the trap removes them when the gate ends. It lives on tmpfs: on
+# the build host's ext4 /tmp one file-and-directory fsync costs about 220 ms,
+# on /dev/shm 0.1 ms, and the persistence tests fsync every atomic write (one
+# client test spent 55 s on it, 2026-11-27).
+gate_tmp=\$(mktemp -d /dev/shm/robin-gate.XXXXXX)
 trap 'rm -rf -- "\$gate_tmp"' EXIT
 cd $remote_dir
 systemd-run --user --scope --unit=build-${name}-$$ \
