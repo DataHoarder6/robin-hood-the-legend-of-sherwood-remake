@@ -385,3 +385,60 @@ Tag summary: v0.7.0
 - `27e64cb03` docs: triage builder-check for browser Android design
 - `6a2748b1a` docs: design browser/WASM Android client with campaign and relay cross-play
 - `d1729a8bd` fix(web): alias canonical Demo datadir when the manifest path is versioned
+
+## v0.8.0
+
+Tag summary: v0.8.0
+
+### What's new
+
+
+### Source commits
+
+- `8a55d5c87` style(web): format preload tests for web gate
+- `99028d738` fix(wasm): gate native-only replay artifact test
+- `a33853376` Revert "fix(editor): clear oxfmt drift and type-aware oxlint errors"
+- `42bed2943` Revert "fix(editor): skip licensed-fixture tests with named reasons"
+- `e8baa1ad0` Revert "fix(editor): clear pipeline typecheck errors in shared tests"
+- `a5bde7208` Revert "fix(editor): format native extraction context test"
+- `8578cbab8` Revert "fix(editor): regenerate curved walkway fixture from current compiler"
+- `cec081997` Revert "fix(editor): regenerate sibling walkway fixtures from current compiler"
+- `381689a2c` Revert "fix(editor): retain rising walkway fixture while compiler receiver regression is unresolved"
+- `6a097c4f6` Revert "fix(editor): align pipeline tests with current compiler sections"
+- `dbb30a5b6` Revert "fix(editor): keep generated walkways ahead of terrain in native sectors"
+- `8efc790d0` fix(web): update runtime contract for skill tree protocol bump
+- `e0689c4b5` fix(test): use a const-compatible assertion message
+- `18a5e4d17` fix(build): update parity construction and const assert for new fields
+- `765898037` fix(lint): clear clippy findings in skill tree and effects
+- `156173f18` docs: record the nine-node clover skill tree
+- `c9f06221c` feat(engine): apply skill-tree effects at their authoritative seams
+- `165d42ac4` test(engine): pin skill-tree effects to their gameplay seams
+- `91d049bc7` fix(editor): keep generated walkways ahead of terrain in native sectors
+- `8f3d80913` feat(protocol): bump replay, network and snapshot versions for skill tree
+- `01a10df07` client: render the nine-node skill tree with tier and prerequisite arrows
+- `f53c5f5f9` engine: nine-node clover skill tree with tiered purchase rules
+- `bf9d9743c` fix(editor): align pipeline tests with current compiler sections
+- `a3a7c4fbd` docs: correct hidden-ground reveal modifier to Shift
+- `9ffbe44a3` fix(render): restrict hidden-ground dots and building outlines
+- `27936ea5f` fix(editor): retain rising walkway fixture while compiler receiver regression is unresolved
+- `6ef7916c8` fix(editor): regenerate sibling walkway fixtures from current compiler
+- `5d12caeef` fix(leaderboard): suppress submit offer for /win and refuse /win in Sherwood
+- `8c5e8330d` fix(save): skip terminal checkpoints for automatic resume
+- `b16824ab9` fix(menu): disable Load when the active profile has no savefiles
+- `74a7a39e7` test(host): record blocked #113 alternate-direction acceptance
+- `29629f3dc` fix(engine): give each coop-pause toggle a unique deterministic nonce
+- `a160ecc54` fix(editor): regenerate curved walkway fixture from current compiler
+- `90b2b8b09` fix(menu): player selection owns its frame so nested dialogs keep its background
+- `4a0eeb2cb` fix(editor): format native extraction context test
+- `258f09e6b` fix(editor): clear pipeline typecheck errors in shared tests
+- `8906e96af` fix(editor): skip licensed-fixture tests with named reasons
+- `c0a7626cb` fix(editor): clear oxfmt drift and type-aware oxlint errors
+- `4293ac312` fix(hud): show the pause source for every active pause
+- `6e52bb48e` fix(web): bound asset preload and surface the first failure
+- `ea94e94c7` test(web): reproduce hung preload as a hermetic boot e2e
+- `b862ca7eb` fix(client): minimal pan for number keys and default cursor behind Esc menu
+- `01d3351df` docs(slop): correct the replay-availability claim for #86
+- `60ffc6bcd` docs(slop): record exact commands and honest blockers for gated issues
+- `b66fbdcfe` test(campaign): bind a proof to the exact integration commit (#110)
+- `76cc49abd` test(android): ground APK boot evidence in real producers (#57/#58)
+- `4339afaf1` fix(nix): refresh cargo vendor hash for 0.7.0 lockfile
