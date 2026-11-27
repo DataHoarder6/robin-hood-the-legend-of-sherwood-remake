@@ -258,6 +258,7 @@ impl Default for SpriteScript {
 
 impl SpriteScript {
     /// Number of frames in this animation row.
+    #[inline]
     pub fn num_frames(&self) -> usize {
         // Original-game sprite behavior defines the playable length from frame delays,
         // independently of the paged-frame resource ID vector.
@@ -295,6 +296,7 @@ pub struct SpriteInfo {
 impl SpriteInfo {
     /// Look up which row index corresponds to an action ID.
     /// Returns `None` if the action is unmapped.
+    #[inline]
     pub fn row_for_action(&self, action_id: u16) -> Option<usize> {
         let idx = action_id as usize;
         if idx >= self.conversion.len() {
@@ -309,6 +311,7 @@ impl SpriteInfo {
     }
 
     /// Get the [`SpriteScript`] for a given action ID, if mapped.
+    #[inline]
     pub fn script_for_action(&self, action_id: u16) -> Option<&SpriteScript> {
         self.row_for_action(action_id)
             .and_then(|row| self.scripts.get(row))

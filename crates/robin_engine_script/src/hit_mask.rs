@@ -52,6 +52,7 @@ impl HitMask {
     }
 
     /// Check if the pixel at `(x, y)` is opaque (non-transparent).
+    #[inline]
     pub fn is_opaque(&self, x: u16, y: u16) -> bool {
         if x >= self.width || y >= self.height {
             return false;

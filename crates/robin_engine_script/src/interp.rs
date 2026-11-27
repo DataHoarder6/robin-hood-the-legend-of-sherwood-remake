@@ -320,13 +320,16 @@ pub struct NativeStack {
 }
 
 impl NativeStack {
+    #[inline]
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
     }
 
+    #[inline]
     pub fn push_i32(&mut self, v: i32) {
         self.buffer.extend_from_slice(&v.to_le_bytes());
     }
@@ -334,6 +337,7 @@ impl NativeStack {
     /// Pop the top 4 bytes as an i32. Returns 0 if the stack is empty
     /// (the original engine doesn't bounds-check but would undershoot
     /// into garbage — 0 is the safe read).
+    #[inline]
     pub fn pop_i32(&mut self) -> i32 {
         let n = self.buffer.len();
         if n < 4 {
@@ -349,6 +353,7 @@ impl NativeStack {
         v
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.buffer.clear();
     }
