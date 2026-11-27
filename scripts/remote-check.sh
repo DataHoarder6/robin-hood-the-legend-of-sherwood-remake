@@ -574,5 +574,5 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="--remap-path-prefix=\$PWD=/robin" \
     bash scripts/build-slot.sh $slot_dir $slots \\
-    nix develop --command bash -c '${gate_toolchain_guard}for suite in ${requested[*]}; do bash scripts/check-quality.sh "\$suite"; done'
+    nix develop --command bash -c '${gate_toolchain_guard}bash scripts/run-suites.sh ${requested[*]}'
 EOF

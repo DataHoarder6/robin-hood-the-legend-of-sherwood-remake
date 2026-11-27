@@ -71,7 +71,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `client` | `robin_rs`, `robin_app`, default features | Client tests and the binary/example tests, then a separate `robin` binary build |
 | `client-release` | `robin_rs`, `robin_app`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates |
 | `tools` | `robin_modding_tools`; `robin_app` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
-| `wasm` | `robin_replay_admission_wasm`, `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the shipped `audio,multiplayer` client and its threaded plan, linked |
+| `wasm` | `robin_replay_admission_wasm`, `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the published client (threaded `audio,multiplayer`), linked; unpublished feature sets are not compiled |
 | `wasm-release` | `robin_app` `wasm-release` artifact | The published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; gated only when the release plan changes, and run by CI on every push to `main` |
 | `wasm-tests` | `robin_rs` and `robin_app` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
@@ -163,6 +163,9 @@ suite compiles it. `wasm-release`, the published fat-LTO module, joins only when
 its release plan changes (the build plan, profiles, toolchain or devShell); CI
 builds it on every push to `main`, so a release-only break turns that run red
 without holding every landing for seven minutes.
+
+`scripts/run-suites.sh` runs the suites that never touch Cargo's build directory
+(`tooling`, `docs`, `web`, `editor`) alongside the Cargo suites instead of after them.
 
 No gate suite passes its own rustflags (`--config ...rustflags`, `RUSTFLAGS`).
 Cargo keeps rustflags out of artifact file names, so such a suite overwrites the

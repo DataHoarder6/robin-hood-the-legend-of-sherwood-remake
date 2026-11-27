@@ -126,13 +126,13 @@ case "$1" in
     wasm)
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_identity_signer --bin leaderboard_identity_bridge --features identity-signer-bridge
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_replay_admission_wasm
-        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_app --bin robin --no-default-features
-        # The artifact a browser guest joins with: `wasm-www/scripts/build-runtime.mjs`
-        # ships `audio,multiplayer` (a runtime without multiplayer exports ticket
-        # schema 0, so the stable shell refuses every invitation) and its threaded
-        # plan adds `wasm-threads`, whose std has to be rebuilt with atomics.
-        # Build, not check: only a link exercises the threaded link arguments.
-        cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_app --bin robin --no-default-features --features audio,multiplayer
+        # The artifact a browser guest joins with, and the only client
+        # configuration published: `wasm-www/scripts/build-runtime.mjs --threads`
+        # ships `audio,multiplayer,wasm-threads` (a runtime without multiplayer
+        # exports ticket schema 0, so the stable shell refuses every invitation),
+        # whose std is rebuilt with atomics. Build, not check: only a link
+        # exercises the threaded link arguments. Unpublished feature sets are not
+        # compiled here.
         cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_app --bin robin --no-default-features --features audio,multiplayer,wasm-threads
         ;;
     wasm-release)
@@ -269,6 +269,7 @@ python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
         bash scripts/test_build_host.sh
         bash scripts/test_remote_check.sh
         bash scripts/tests/gate-shared-fifo.sh
+        bash scripts/tests/run-suites.sh
         # The unattended loop's state machine and one-run driver: fixture-only,
         # no network, no gate. They catch wrong-target write-backs and repeated
         # assertions before those behaviours strand a run.

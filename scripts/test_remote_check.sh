@@ -130,6 +130,7 @@ make_repo() {
     local dir=$1 token=$2
     mkdir -p "$dir/scripts"
     cp -- "$source_root/scripts/remote-check.sh" "$dir/scripts/remote-check.sh"
+    cp -- "$source_root/scripts/run-suites.sh" "$dir/scripts/run-suites.sh"
     printf '[package]\nname = "fixture"\nversion = "0.0.0"\n' >"$dir/Cargo.toml"
     printf '%s\n' "$token" >"$dir/tree-token"
     cat >"$dir/scripts/check-quality.sh" <<'SUITE'
