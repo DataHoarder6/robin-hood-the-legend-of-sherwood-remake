@@ -80,7 +80,7 @@ case "$1" in
         cargo test --locked -p robin_lua --test natives_smoke panic_unwind_detaches_native_session \
             --config 'profile.test.package.robin_lua.codegen-backend="llvm"'
         ;;
-    engine) cargo test --locked -p robin_engine_types -p robin_legacy_save -p robin_level_data -p robin_engine_geometry -p robin_engine ;;
+    engine) cargo test --locked -p robin_engine_types -p robin_legacy_save -p robin_level_data -p robin_engine_geometry -p robin_engine_script -p robin_engine ;;
     assets)
         cargo test --locked -p robin_asset_codecs -p robin_assets -p robin_data_io
         cargo test --locked -p robin_assets --no-default-features

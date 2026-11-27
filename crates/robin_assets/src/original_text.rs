@@ -138,7 +138,7 @@ mod tests {
             vfs.install_preloaded_asset(format!("{id}.res"), bytes)
                 .unwrap();
         }
-        let files = std::sync::Arc::new(robin_engine::sbfile::SbFileSystem::new(vfs).snapshot());
+        let files = std::sync::Arc::new(robin_data_io::sbfile::SbFileSystem::new(vfs).snapshot());
         let mut resources = ResourceManager::with_files(files);
         for (id, _) in tables {
             resources
@@ -216,7 +216,7 @@ mod tests {
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u16.to_le_bytes());
         vfs.install_preloaded_asset("wrong.res", bytes).unwrap();
-        let files = std::sync::Arc::new(robin_engine::sbfile::SbFileSystem::new(vfs).snapshot());
+        let files = std::sync::Arc::new(robin_data_io::sbfile::SbFileSystem::new(vfs).snapshot());
         let mut resources = ResourceManager::with_files(files);
         resources.attach_resource_file("wrong.res").unwrap();
         assert!(resources.has_resource(MENU_TEXT_TABLE_ID));
@@ -240,7 +240,7 @@ mod tests {
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&3u16.to_le_bytes()); // claims 3 strings, has none
         vfs.install_preloaded_asset("truncated.res", bytes).unwrap();
-        let files = std::sync::Arc::new(robin_engine::sbfile::SbFileSystem::new(vfs).snapshot());
+        let files = std::sync::Arc::new(robin_data_io::sbfile::SbFileSystem::new(vfs).snapshot());
         let mut resources = ResourceManager::with_files(files);
         assert!(resources.attach_resource_file("truncated.res").is_err());
         assert!(!resources.has_string_resource(MENU_TEXT_TABLE_ID));

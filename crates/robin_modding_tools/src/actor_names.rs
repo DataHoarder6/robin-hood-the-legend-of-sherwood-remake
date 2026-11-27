@@ -25,11 +25,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use robin_data_io::sbfile::{SbFile, SbFileSystem};
-use robin_engine::element_kinds::BonusItemType;
-use robin_engine::level_data::{
+use robin_engine_geometry::element_kinds::BonusItemType;
+use robin_level_data::level_data::{
     LoadedLevel, LoadedMission, LoadedProtoLevel, WaypointCommand, load_level_with_files,
 };
-use robin_engine::profiles::{CivilianType, ProfileManager};
+use robin_level_data::profiles::{CivilianType, ProfileManager};
 
 /// Which engine slot binds this script class. Derived from the mission
 /// data: a class name appearing in `mission.soldiers[].script_class` is
@@ -154,7 +154,7 @@ fn lookup(v: &[Option<String>], position: i32) -> Option<&str> {
 pub enum LoadError {
     Io(std::io::Error),
     Profiles(String),
-    ProfileJson(robin_engine::profiles::ProfileJsonLoadError),
+    ProfileJson(robin_level_data::profiles::ProfileJsonLoadError),
     MissionNotFound(String),
     Level(String),
 }
@@ -522,7 +522,7 @@ fn collect_class_kinds(mission: &LoadedMission) -> HashMap<String, ScriptKind> {
     out
 }
 
-fn push_patch_fx_slots(patches: &[robin_engine::level_data::RawPatch], slots: &mut Slots) {
+fn push_patch_fx_slots(patches: &[robin_level_data::level_data::RawPatch], slots: &mut Slots) {
     // Only patches with a non-empty frame profile spawn a script-element.
     for patch in patches {
         if patch.element_fx.sprite.frame_profile_name.is_empty() {
@@ -626,7 +626,7 @@ fn pick_base_name(script_class: Option<&str>, fallback: Option<&str>) -> Option<
 }
 
 fn collect_patch_names<'a>(
-    patches: impl Iterator<Item = &'a robin_engine::level_data::RawPatch>,
+    patches: impl Iterator<Item = &'a robin_level_data::level_data::RawPatch>,
 ) -> Vec<Option<String>> {
     let mut out = Vec::new();
     let mut used: HashMap<String, usize> = HashMap::new();
@@ -714,7 +714,7 @@ mod tests {
             ShippingDatadir, ShippingMission, ShippingMissionRef, encode_mission_native,
             encode_native, zstd_max_compress,
         };
-        use robin_engine::profiles::MissionProfile;
+        use robin_level_data::profiles::MissionProfile;
 
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("Data");
@@ -730,9 +730,10 @@ mod tests {
             proto_level_filename: "FixtureProto".into(),
             ..Default::default()
         });
-        let fallback_profiles =
-            serde_json::to_vec(&robin_engine::content_patch::profile_document(&profiles).unwrap())
-                .unwrap();
+        let fallback_profiles = serde_json::to_vec(
+            &robin_level_data::content_patch::profile_document(&profiles).unwrap(),
+        )
+        .unwrap();
         let configuration = data.join("Configuration");
         std::fs::create_dir(&configuration).unwrap();
         let profile_path = configuration.join("profile.cpf.json");

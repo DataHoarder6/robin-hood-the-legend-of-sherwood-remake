@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use super::{MouseEntry, ResourceData, ResourceFileEntry, ResourceId, ResourceLifetime};
 use crate::binary_reader::Reader;
 use crate::picture::Picture;
-use robin_engine::coordinates::CursorHotspot;
+use robin_engine_types::coordinates::CursorHotspot;
 
 pub(super) const RES_VERSION_100: u32 = 0x0100;
 

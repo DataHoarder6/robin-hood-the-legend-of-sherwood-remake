@@ -10,7 +10,7 @@ const TOOLS: &[&str] = &[
 
 #[test]
 fn cpf_json_export_applies_ordered_patches_and_round_trips_the_output() {
-    use robin_engine::profiles::{ProfileManager, SoldierProfile};
+    use robin_level_data::profiles::{ProfileManager, SoldierProfile};
     use serde_json::json;
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("profile.cpf.json");
@@ -22,7 +22,7 @@ fn cpf_json_export_applies_ordered_patches_and_round_trips_the_output() {
         }],
         ..Default::default()
     };
-    let original = robin_engine::content_patch::profile_document(&profiles).unwrap();
+    let original = robin_level_data::content_patch::profile_document(&profiles).unwrap();
     std::fs::write(&input, serde_json::to_vec(&original).unwrap()).unwrap();
     let first = temp.path().join("first.json");
     let second = temp.path().join("second.json");

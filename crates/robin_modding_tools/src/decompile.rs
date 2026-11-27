@@ -11,8 +11,8 @@ use std::fmt::{self, Write};
 
 use crate::actor_names::{ActorNames, ScriptKind};
 use robin_assets::scb::{ClassEntry, ScbFile};
-use robin_engine::natives::{native_name, native_signature_by_index};
-use robin_engine::vm::{BinaryOp, Instruction, Symbol, decode_for_preparation};
+use robin_script_types::natives::{native_name, native_signature_by_index};
+use robin_script_types::vm::{BinaryOp, Instruction, Symbol, decode_for_preparation};
 
 // ── Known parameter names for script functions ─────────────────
 //
@@ -1212,8 +1212,8 @@ fn base_method_params(kind: ScriptKind, method: &str) -> &'static str {
 /// Render a member variable's declared type as a TypeScript type name.
 /// Falls through to `any` for tag values that don't round-trip cleanly
 /// (NotDefined, Event, Function, NativeFunction).
-fn member_type_str(ty: &robin_engine::scb::ScType) -> String {
-    use robin_engine::scb::TypeTag;
+fn member_type_str(ty: &robin_script_types::scb::ScType) -> String {
+    use robin_script_types::scb::TypeTag;
     if !ty.native_type_name.is_empty() {
         return ty.native_type_name.clone();
     }
@@ -1538,7 +1538,7 @@ fn build_scroll_popup_text_map(scb: &ScbFile, names: &ActorNames) -> HashMap<usi
 /// immediately before it as the popup-text ID. Returns `None` if the
 /// pattern doesn't match (e.g. the ID is computed, or no popup call).
 fn find_first_popup_text_id(class: &ClassEntry) -> Option<i32> {
-    use robin_engine::vm::Instruction::*;
+    use robin_script_types::vm::Instruction::*;
     let instrs: Vec<_> = class
         .quads
         .iter()
@@ -2043,7 +2043,7 @@ mod tests {
 
     #[test]
     fn popup_constant_inference_stops_at_unknown_instruction() {
-        use robin_engine::vm::Opcode;
+        use robin_script_types::vm::Opcode;
         let mut class = diagnostic_class(
             "Scroll",
             &[
@@ -2054,7 +2054,7 @@ mod tests {
         );
         class.quads[0].operands[4..].copy_from_slice(&17i32.to_le_bytes());
         class.quads[2].operands[..4].copy_from_slice(
-            &(robin_engine::natives::NativeFn::DisplayPopupText as u32).to_le_bytes(),
+            &(robin_script_types::natives::NativeFn::DisplayPopupText as u32).to_le_bytes(),
         );
         assert_eq!(find_first_popup_text_id(&class), Some(17));
         for operation in [58, 107, 208, 229] {
@@ -2069,13 +2069,13 @@ mod tests {
 
     #[test]
     fn scroll_text_uses_authored_identity_not_display_name_suffixes() {
-        use robin_engine::vm::{Opcode, Quad};
+        use robin_script_types::vm::{Opcode, Quad};
         let class = |name: &str, text: i32| {
             let mut constant = [0; 8];
             constant[4..].copy_from_slice(&text.to_le_bytes());
             let mut call = [0; 8];
             call[..4].copy_from_slice(
-                &(robin_engine::natives::NativeFn::DisplayPopupText as u32).to_le_bytes(),
+                &(robin_script_types::natives::NativeFn::DisplayPopupText as u32).to_le_bytes(),
             );
             ClassEntry {
                 source_file: String::new(),

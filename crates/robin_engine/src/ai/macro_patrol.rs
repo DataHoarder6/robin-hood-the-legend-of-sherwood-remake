@@ -397,38 +397,7 @@ pub const PATROL_SPEED_DIVISOR: f32 = 30.0;
 // Position
 // ---------------------------------------------------------------------------
 
-/// 2-D game position with sector and level info.
-///
-/// Sector is currently an opaque handle; once the sector system is fully
-/// integrated this will reference it properly.
-#[derive(
-    Default,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct Position {
-    pub x: f32,
-    pub y: f32,
-    /// Sector handle (nominal newtype from `position_interface`).
-    /// `None` indicates a null sector / unassigned waypoint.
-    pub sector: Option<SectorHandle>,
-    pub level: u16,
-}
-
-impl Position {
-    /// The projected map point `(x, y)`; sector and level are dropped.
-    /// `a.map_point() - b.map_point()` is the `MapVec` `(a.x - b.x, a.y - b.y)`.
-    pub fn map_point(&self) -> crate::coordinates::MapPoint {
-        crate::coordinates::MapPoint::new(self.x, self.y)
-    }
-}
+pub use robin_engine_script::ai_values::Position;
 
 // ---------------------------------------------------------------------------
 // AI destination forecasts

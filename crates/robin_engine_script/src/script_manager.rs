@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use robin_script_types::natives::native_definition_by_index;
+
 use crate::interp::{Frame, HostFunctions, StopReason, Vm};
 use crate::scb::{Function, ScbFile};
 use crate::vm::{self, Instruction};
@@ -112,7 +114,7 @@ impl ScriptProgram {
                             }
                         })?;
                         if let Instruction::NativeCall { index } = instruction
-                            && crate::natives::native_definition_by_index(index).is_none()
+                            && native_definition_by_index(index).is_none()
                         {
                             return Err(ScriptError::UnknownNative {
                                 class: class.class_name.clone(),
@@ -154,7 +156,7 @@ pub struct ScriptManager {
 
 impl ScriptManager {
     /// Share static storage until the next VM write, detaching executable resources.
-    pub(crate) fn persisted_clone(&self) -> Self {
+    pub fn persisted_clone(&self) -> Self {
         Self {
             program: std::sync::Arc::new(ScriptProgram::default()),
             static_area: self.static_area.clone(),

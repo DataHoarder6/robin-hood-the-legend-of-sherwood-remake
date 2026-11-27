@@ -46,7 +46,7 @@ pub use robin_engine_types::gameplay_config;
 pub use robin_engine_types::geo2d;
 pub use robin_engine_types::graphic_config;
 pub mod human_control;
-pub mod interp;
+pub use robin_engine_script::interp;
 pub mod inventory;
 /// Host/diagnostics JSON projection (engine dumps, save identities, parity
 /// reports). Lives here because robin_engine is the lowest crate both
@@ -92,8 +92,8 @@ pub mod ranked_rules;
 pub use robin_engine_geometry::rhline;
 pub mod sbfile;
 pub mod scb;
-pub mod script_manager;
 pub use robin_engine_geometry::sector;
+pub use robin_engine_script::script_manager;
 pub mod sector_production;
 pub mod sequence;
 pub use robin_engine_geometry::shadow_polygon;

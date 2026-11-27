@@ -3,9 +3,9 @@
 
 use crate::resource_manager::{PictureOpacityMetadata, ResourceManager};
 use anyhow::{Context, Result};
-use robin_engine::engine::GroundMarkSpriteData;
-use robin_engine::resource_ids::*;
-use robin_engine::titbit::SpriteRow;
+use robin_engine_script::ground_mark::GroundMarkSpriteData;
+use robin_engine_script::titbit_sprite_row::SpriteRow;
+use robin_engine_types::resource_ids::*;
 
 /// Several titbit rows intentionally reuse one original resource.
 pub fn titbit_sprite_row_resources() -> &'static [(SpriteRow, i32)] {

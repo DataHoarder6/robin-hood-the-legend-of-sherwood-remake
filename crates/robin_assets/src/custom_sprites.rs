@@ -6,8 +6,10 @@ pub mod shipping;
 use crate::frame_holder as assets_frame_holder;
 pub use family::encode_custom_sprite_family;
 use robin_data_io::sbfile as engine_sbfile;
-use robin_engine::coordinates::{SpriteAnchor, SpriteFrameOffset, SpriteLocalPoint, SpriteSize};
-use robin_engine::sprite_script::{NONANIMATION_END, SpriteInfo, SpriteScript, UNMAPPED};
+use robin_engine_script::sprite_script::{NONANIMATION_END, SpriteInfo, SpriteScript, UNMAPPED};
+use robin_engine_types::coordinates::{
+    SpriteAnchor, SpriteFrameOffset, SpriteLocalPoint, SpriteSize,
+};
 pub use shipping::encode_custom_sprite_dir;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

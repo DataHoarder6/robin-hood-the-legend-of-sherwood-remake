@@ -25,10 +25,14 @@ def main():
         ("robin_engine", {"robin_run_protocol", "ed25519-dalek", "robin_rs", "robin_assets"}, []),
         ("robin_run_types", {"robin_run_protocol", "robin_engine", "robin_util", "ed25519-dalek"}, []),
         ("robin_assets", {"robin_engine"}, []),
+        # Asset preparation builds on the script layer, so it compiles beside the
+        # simulation instead of after it (docs/slop/build-time-root-causes.md).
+        ("robin_assets", {"robin_engine"}, ["--features", "engine-adapters"]),
+        ("robin_engine_script", {"robin_engine", "robin_rs", "robin_assets"}, []),
         ("robin_asset_codecs", {"robin_engine", "robin_assets"}, []),
         ("robin_script_types", {"robin_engine", "robin_spellforge"}, []),
         ("robin_spellforge", {"robin_engine"}, []),
-        ("robin_modding_tools", {"robin_rs"}, []),
+        ("robin_modding_tools", {"robin_rs", "robin_engine"}, []),
         ("robin_replay_format", {"robin_rs", "robin_assets", "wgpu", "winit", "kira", "cpal", "ffmpeg-next"}, []),
     ):
         command = ["cargo", "tree", "--locked", "-p", package,

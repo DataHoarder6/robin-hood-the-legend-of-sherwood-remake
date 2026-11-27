@@ -87,7 +87,6 @@ macro_rules! script_error {
 }
 
 mod bindings;
-mod commands;
 mod context;
 mod defs;
 mod dispatch;
@@ -100,10 +99,12 @@ mod state;
 mod tests;
 
 pub use bindings::{AttachedScriptBindings, ScriptBindings, ScriptNameBindings};
-pub use commands::{EngineCommand, NativeCommand, SoundCommand, WorldNativeCommand};
 pub use context::{NativeContext, NativeSessionCapabilities, ScriptCallFrame};
 pub use defs::{NativeFn, ORIGINAL_NATIVE_COUNT, RUST_EXTENSION_NATIVE_START, native_name};
 pub use handle_codec::ScriptHandleCodec;
+pub use robin_engine_script::native_commands::{
+    EngineCommand, NativeCommand, SoundCommand, WorldNativeCommand,
+};
 pub use signatures::{
     NATIVE_REGISTRY, NATIVE_SIGNATURES, NativeAbiType, NativeDefinition, NativeNamespace,
     NativeParamSig, NativeSignature, SPELLFORGE_NATIVE_ALIASES, native_definition_by_index,

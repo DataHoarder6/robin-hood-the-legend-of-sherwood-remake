@@ -634,7 +634,7 @@ impl ShippingDatadir {
     pub fn mission_resource_environment(
         &self,
         mission_name: &str,
-    ) -> Result<Arc<robin_engine::sprite_script::MissionResourceEnvironment>> {
+    ) -> Result<Arc<robin_engine_script::sprite_script::MissionResourceEnvironment>> {
         let (selection, mission) = self.mission_selection_snapshot();
         let mission =
             if selection.mission.as_deref() == Some(mission_name) {
@@ -654,7 +654,7 @@ impl ShippingDatadir {
         if let Some(mission) = &mission {
             files.extend(mission.rhs_files.iter());
         }
-        let resources = robin_engine::sprite_script::MissionResourceEnvironment::default()
+        let resources = robin_engine_script::sprite_script::MissionResourceEnvironment::default()
             .with_parsed_rhs(
                 files
                     .into_iter()
@@ -668,7 +668,7 @@ impl ShippingDatadir {
         let programs = scripts
             .iter()
             .map(|(name, scb)| {
-                robin_engine::script_manager::ScriptProgram::from_scb(scb.clone())
+                robin_engine_script::script_manager::ScriptProgram::from_scb(scb.clone())
                     .map(|program| (name.clone(), Arc::new(program)))
                     .map_err(|error| anyhow!("prepare mission script {name}: {error}"))
             })

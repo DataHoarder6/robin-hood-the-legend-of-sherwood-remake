@@ -1540,42 +1540,8 @@ pub struct LogLine {
 // Simple shared data types
 // ---------------------------------------------------------------------------
 
-/// Noise type.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    num_enum::TryFromPrimitive,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-#[repr(u32)]
-pub enum NoiseType {
-    Plouf = 0,
-    Bonk,
-    Zonk,
-    TapTapTap,
-    ArfArf,
-    Tirili,
-    PutPut,
-    Aaargh,
-    Heeelp,
-    Pling,
-    Pfiiit,
-    Logs,
-    Drawbridge,
-    ZingZing,
-    Off,
-    /// An intentionally thrown object impact. Appended after every Original
-    /// ordinal so legacy enum values remain stable.
-    Distraction,
-}
+// Script requests and native commands name these, so they live in the script layer.
+pub use robin_engine_script::ai_values::{AlertLevel, NoiseType};
 
 /// Spatial origin of a noise. One-shot effects may deliberately have no
 /// world layer (for example a crumpled net launched without a landing
@@ -1675,32 +1641,6 @@ pub enum Detection {
     Recognized,
     /// Internally used by AI.
     Killed,
-}
-
-/// Global alert level.
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    num_enum::TryFromPrimitive,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-#[repr(u32)]
-pub enum AlertLevel {
-    #[default]
-    Green = 0,
-    Yellow,
-    Red,
 }
 
 /// NPC attitude toward PCs / the world.

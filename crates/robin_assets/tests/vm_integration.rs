@@ -1,11 +1,11 @@
-//! Integration tests for `robin_engine::vm` decoder that need the
+//! Integration tests for the `robin_script_types::vm` decoder that need the
 //! `robin_assets::scb` parser. They were `#[cfg(any())]`-gated in-crate
 //! while the parser lived here; now they run as integration tests.
 
 mod support;
 
 use robin_assets::scb;
-use robin_engine::vm::{DecodeError, decode};
+use robin_script_types::vm::{DecodeError, decode};
 use support::{data_directory, data_file};
 
 /// Every quad in every class of the shipped demo script should

@@ -16,13 +16,13 @@ use std::path::Path;
 
 use crate::binary_reader::{self, Reader};
 
-// Sim-side data types live in `robin_engine::scb` so the engine can
+// Sim-side data types live in `robin_script_types::scb` so the engine can
 // consume parsed scripts without depending on robin_assets. The parser
 // in this module produces the engine type directly.
-pub use robin_engine::scb::{
+pub use robin_script_types::scb::{
     ClassEntry, Function, MemberVariable, SCB_MAGIC, SCB_VERSION, ScType, ScbFile, TypeTag,
 };
-pub use robin_engine::vm::Quad;
+pub use robin_script_types::vm::Quad;
 
 #[derive(Debug)]
 pub enum Error {
@@ -263,8 +263,10 @@ mod tests {
 
     #[test]
     fn derby_explorer_callbacks_allocate_locals_and_open_both_bridges() {
-        use robin_engine::interp::{HostFunctions, NativeCallOutcome, NativeStack, StopReason};
-        use robin_engine::script_manager::ScriptManager;
+        use robin_engine_script::interp::{
+            HostFunctions, NativeCallOutcome, NativeStack, StopReason,
+        };
+        use robin_engine_script::script_manager::ScriptManager;
 
         #[derive(Default, serde::Serialize, serde::Deserialize)]
         struct Patches(Vec<i32>);

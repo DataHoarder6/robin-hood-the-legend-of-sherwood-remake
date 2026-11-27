@@ -1,6 +1,6 @@
 use super::*;
 use crate::picture::PixelFormat;
-use robin_engine::resource_ids::{RHID_GROUND_FOCUS, RHMAP_CORNER};
+use robin_engine_types::resource_ids::{RHID_GROUND_FOCUS, RHMAP_CORNER};
 
 fn picture() -> Picture {
     Picture {
@@ -56,7 +56,7 @@ fn exported_opacity_matches_pixels_without_loading_jxl_frames() {
         .iter()
         .map(|px| u16::from_le_bytes([px[0], px[1]]))
         .collect();
-    let expected = robin_engine::minimap::HitMask::from_pixels_u16(2, 3, &words, 0x07c0);
+    let expected = robin_engine_script::hit_mask::HitMask::from_pixels_u16(2, 3, &words, 0x07c0);
     let actual = before_corner[1].clone().unwrap().into_hit_mask().unwrap();
     for y in 0..3 {
         for x in 0..2 {
@@ -167,5 +167,5 @@ fn missing_corrupt_or_mismatched_metadata_is_an_error() {
     let mut malformed = picture();
     malformed.data.pop();
     assert!(PictureOpacityMetadata::from_picture(&malformed, true).is_err());
-    assert!(robin_engine::minimap::HitMask::from_opacity(2, 3, vec![true; 5]).is_err());
+    assert!(robin_engine_script::hit_mask::HitMask::from_opacity(2, 3, vec![true; 5]).is_err());
 }

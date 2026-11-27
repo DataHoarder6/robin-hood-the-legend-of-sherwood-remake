@@ -49,7 +49,7 @@ struct FrozenMissionV15 {
 fn v15_payload_matches_frozen_wire_and_preparation_is_consuming() {
     let mut payload = ShippingMissionPayload::default();
     let mut level = LoadedLevel::empty();
-    level.proto.motion_data = Some(robin_engine::level_data::RawMotionData {
+    level.proto.motion_data = Some(robin_level_data::level_data::RawMotionData {
         legacy_navigation: true,
         layers: vec![],
         graph_bytes: vec![],

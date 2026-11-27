@@ -5,8 +5,8 @@
 //! balling scripts during VM bring-up and for debugging trace divergences.
 
 use robin_assets::scb::{ClassEntry, ScbFile};
-use robin_engine::natives::native_name;
-use robin_engine::vm::{BinaryOp, Instruction, Symbol, decode};
+use robin_script_types::natives::native_name;
+use robin_script_types::vm::{BinaryOp, Instruction, Symbol, decode};
 use std::fmt::Write;
 
 /// Format a VM symbol as a human-readable region + offset.
@@ -278,7 +278,7 @@ mod tests {
     use robin_assets::scb::{
         self, ClassEntry, Function, MemberVariable, Quad, ScType, ScbFile, TypeTag,
     };
-    use robin_engine::vm::Opcode;
+    use robin_script_types::vm::Opcode;
 
     #[test]
     fn formats_every_instruction_variant() {

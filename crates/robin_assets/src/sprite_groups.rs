@@ -229,10 +229,8 @@ mod tests {
     #[test]
     fn independent_groups_decode_in_reverse_order_with_temporal_or_family_bases() {
         use crate::sprite_codec::decode_grids_shipping;
-        use robin_engine::{
-            coordinates::{SpriteAnchor, SpriteFrameOffset, SpriteSize},
-            sprite_script::{SpriteInfo, SpriteScript},
-        };
+        use robin_engine_script::sprite_script::{SpriteInfo, SpriteScript};
+        use robin_engine_types::coordinates::{SpriteAnchor, SpriteFrameOffset, SpriteSize};
         use std::sync::Arc;
         let data: Vec<Vec<u16>> = (0..6)
             .map(|g| (0..32).map(|i| ((i + g * 3) % 16) as u16).collect())

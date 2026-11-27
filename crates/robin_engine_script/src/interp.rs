@@ -98,7 +98,7 @@ pub enum SynchronousScriptRequest {
     },
     SetAiAlertStatus {
         actor: i32,
-        level: crate::ai::AlertLevel,
+        level: crate::ai_values::AlertLevel,
         native_return: i32,
     },
     ApplyAiStateNative {
@@ -134,14 +134,14 @@ pub enum SynchronousScriptRequest {
     /// Persistently follow a script-visible element with the NPC view cone.
     StareActor {
         actor: i32,
-        target: crate::element::EntityId,
+        target: crate::entity_id::EntityId,
         turn_sprite: bool,
         native_return: i32,
     },
     /// Persistently stare at a fully resolved script point.
     StareLocation {
         actor: i32,
-        target: crate::ai::Position,
+        target: crate::ai_values::Position,
         turn_sprite: bool,
         native_return: i32,
     },
@@ -208,9 +208,9 @@ pub enum ScriptAiStateNativeEffect {
 #[derive(Debug, Clone, PartialEq)]
 pub enum NativeOperation {
     ScriptCall(ScriptCallRequest),
-    LaunchSequence(crate::sequence::SequenceId),
+    LaunchSequence(crate::sequence_id::SequenceId),
     EngineAction(SynchronousScriptRequest),
-    Command(crate::natives::NativeCommand),
+    Command(crate::native_commands::NativeCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

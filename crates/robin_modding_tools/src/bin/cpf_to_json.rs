@@ -6,8 +6,8 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 use anyhow::Context;
-use robin_engine::profiles::ProfileManager;
-use robin_engine::sbfile::SbFile;
+use robin_data_io::sbfile::SbFile;
+use robin_level_data::profiles::ProfileManager;
 
 #[derive(clap::Parser, serde::Serialize, serde::Deserialize)]
 #[command(
@@ -51,11 +51,11 @@ fn main() -> anyhow::Result<()> {
             mgr.civilians.len(),
         );
 
-        robin_engine::content_patch::profile_document(&mgr).map_err(anyhow::Error::msg)?
+        robin_level_data::content_patch::profile_document(&mgr).map_err(anyhow::Error::msg)?
     };
     for path in &args.patch {
         let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-        document = robin_engine::content_patch::apply_profile_document(&document, &bytes)
+        document = robin_level_data::content_patch::apply_profile_document(&document, &bytes)
             .map_err(anyhow::Error::msg)
             .with_context(|| format!("apply {}", path.display()))?;
     }

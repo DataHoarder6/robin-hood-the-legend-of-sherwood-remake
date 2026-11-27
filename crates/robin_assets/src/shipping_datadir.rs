@@ -17,9 +17,9 @@ use crate::frame_holder::{FrameDictionary, UNMAPPED_DICT};
 use crate::res_descr::LevelDescriptors;
 use crate::resource_manager::{EncodedPicture, ResourceManager};
 use crate::scb::ScbFile;
-use robin_engine::level_data::LoadedLevel;
-use robin_engine::profiles::ProfileManager;
-use robin_engine::sprite_script::SpriteInfo;
+use robin_engine_script::sprite_script::SpriteInfo;
+use robin_level_data::level_data::LoadedLevel;
+use robin_level_data::profiles::ProfileManager;
 
 mod codec;
 #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
@@ -690,7 +690,7 @@ pub fn derive_chunk_self_refs(
             dy,
         });
     };
-    let off = |s: &robin_engine::sprite_script::SpriteScript, k: usize| {
+    let off = |s: &robin_engine_script::sprite_script::SpriteScript, k: usize| {
         s.offsets
             .get(k)
             .map(|o| (o.x.round() as i32, o.y.round() as i32))
@@ -712,7 +712,7 @@ pub fn derive_chunk_self_refs(
     }
     // Pass 2: adjacent camera directions for whatever is still uncovered.
     for (_name, info) in profiles {
-        let mut by_action: BTreeMap<u16, Vec<&robin_engine::sprite_script::SpriteScript>> =
+        let mut by_action: BTreeMap<u16, Vec<&robin_engine_script::sprite_script::SpriteScript>> =
             BTreeMap::new();
         for s in info.scripts.iter() {
             by_action.entry(s.action_id).or_default().push(s);

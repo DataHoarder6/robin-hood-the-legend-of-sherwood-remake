@@ -77,7 +77,7 @@ pub enum EngineCommand {
     /// Trigger a hero speech barked line on `pc_id`.  Used by script
     /// native helpers that need engine-owned `hero_speaking` state.
     HeroSpeak {
-        pc_id: crate::element::EntityId,
+        pc_id: crate::entity_id::EntityId,
         expression: u16,
     },
     /// Flash a one-frame full-alpha outline on the given actor.
@@ -91,7 +91,7 @@ pub enum EngineCommand {
     /// elevation; volume is derived from the noise type using the
     /// `NOISE_VOLUME_*` table.
     MakeNoise {
-        noise_type: crate::ai::NoiseType,
+        noise_type: crate::ai_values::NoiseType,
         x: f32,
         y: f32,
         layer: u16,
@@ -130,7 +130,7 @@ pub enum SoundCommand {
     Activate(i32),
     Deactivate(i32),
     Destroy(i32),
-    PlayJingle(crate::sound::Jingle),
+    PlayJingle(crate::jingle::Jingle),
 }
 
 /// World operation completed before the native returns to its VM.

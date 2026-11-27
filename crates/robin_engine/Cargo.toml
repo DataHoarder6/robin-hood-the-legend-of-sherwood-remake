@@ -27,6 +27,8 @@ robin_script_types.workspace = true
 robin_engine_types.workspace = true
 # Geometry and pathing layer; re-exported at the old module paths.
 robin_engine_geometry.workspace = true
+# Script VM, sprite scripts and native commands; re-exported at the old paths.
+robin_engine_script.workspace = true
 serde-value.workspace = true
 hex.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }

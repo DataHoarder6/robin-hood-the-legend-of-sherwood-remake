@@ -34,7 +34,7 @@ use original::{read_cursor, read_picture_collection, read_string_table};
 use crate::binary_reader::Reader;
 use crate::picture::Picture;
 use robin_data_io::sbfile::{SbFile, SbFileError, SbFileSystem};
-use robin_engine::coordinates::CursorHotspot;
+use robin_engine_types::coordinates::CursorHotspot;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -314,11 +314,11 @@ impl PictureOpacityMetadata {
         Ok(())
     }
 
-    pub fn into_hit_mask(self) -> Result<robin_engine::minimap::HitMask> {
+    pub fn into_hit_mask(self) -> Result<robin_engine_script::hit_mask::HitMask> {
         let mask = self
             .hit_mask
             .ok_or_else(|| anyhow!("picture metadata has no hit mask"))?;
-        robin_engine::minimap::HitMask::from_opacity(self.width, self.height, mask)
+        robin_engine_script::hit_mask::HitMask::from_opacity(self.width, self.height, mask)
             .map_err(|error| anyhow!(error))
     }
 }
@@ -326,12 +326,13 @@ impl PictureOpacityMetadata {
 fn needs_engine_picture_metadata(id: ResourceId) -> bool {
     matches!(
         id,
-        robin_engine::resource_ids::RHID_GROUND_FOCUS | robin_engine::resource_ids::RHMAP_CORNER
+        robin_engine_types::resource_ids::RHID_GROUND_FOCUS
+            | robin_engine_types::resource_ids::RHMAP_CORNER
     )
 }
 
 fn needs_engine_picture_mask(id: ResourceId, sub_id: usize) -> bool {
-    id == robin_engine::resource_ids::RHMAP_CORNER && sub_id == 1
+    id == robin_engine_types::resource_ids::RHMAP_CORNER && sub_id == 1
 }
 
 // ---------------------------------------------------------------------------

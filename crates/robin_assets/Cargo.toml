@@ -59,7 +59,9 @@ robin_asset_codecs.workspace = true
 robin_engine_types.workspace = true
 robin_util.workspace = true
 robin_data_io.workspace = true
-robin_engine = { workspace = true, optional = true }
+robin_engine_script = { workspace = true, optional = true }
+robin_level_data = { workspace = true, optional = true }
+robin_script_types = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 tracing.workspace = true
 anyhow.workspace = true
@@ -142,9 +144,15 @@ spinning_top = "0.3"
 default = ["engine-adapters"]
 # Expensive offline experiments are built only when explicitly requested.
 research = []
-# Game-level preparation, VM tooling and resource-manager adapters. Raw sprite,
-# picture and compression codecs remain usable without the simulation crate.
-engine-adapters = ["dep:robin_engine", "dep:png"]
+# Game-level preparation, VM tooling and resource-manager adapters, built on
+# the script layer rather than the simulation crate. Raw sprite, picture and
+# compression codecs remain usable without it.
+engine-adapters = [
+    "dep:robin_engine_script",
+    "dep:robin_level_data",
+    "dep:robin_script_types",
+    "dep:png",
+]
 # Threaded sprite decode on wasm32 (rayon worker pool via wasm-bindgen-rayon).
 # Requires an atomics + shared-memory build; without pool initialization at
 # runtime the decode paths fall back to serial.
@@ -171,3 +179,6 @@ required-features = ["engine-adapters"]
 [dev-dependencies]
 robin_test_support.workspace = true
 clap = { workspace = true, features = ["derive"] }
+# The script-manager integration test drives scripts against engine-owned
+# native state; the library itself never depends on the simulation crate.
+robin_engine.workspace = true

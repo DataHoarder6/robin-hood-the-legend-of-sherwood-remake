@@ -10,8 +10,8 @@ use robin_assets::resource_manager::{
 };
 use robin_assets::scb::ScbFile;
 use robin_assets::shipping_datadir::{self, *};
-use robin_engine::level_data::LoadedLevel;
-use robin_engine::profiles::ProfileManager;
+use robin_level_data::level_data::LoadedLevel;
+use robin_level_data::profiles::ProfileManager;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
@@ -195,8 +195,8 @@ fn main() -> Result<()> {
     {
         for manager in verified.res_files.values_mut() {
             for id in [
-                robin_engine::resource_ids::RHID_GROUND_FOCUS,
-                robin_engine::resource_ids::RHMAP_CORNER,
+                robin_engine_types::resource_ids::RHID_GROUND_FOCUS,
+                robin_engine_types::resource_ids::RHMAP_CORNER,
             ] {
                 if manager.has_picture_resource(id) {
                     manager.get_picture_opacity_metadata(id)?;
@@ -207,8 +207,8 @@ fn main() -> Result<()> {
     for locale in verified.locales.values_mut() {
         for manager in locale.res_files.values_mut() {
             for id in [
-                robin_engine::resource_ids::RHID_GROUND_FOCUS,
-                robin_engine::resource_ids::RHMAP_CORNER,
+                robin_engine_types::resource_ids::RHID_GROUND_FOCUS,
+                robin_engine_types::resource_ids::RHMAP_CORNER,
             ] {
                 if manager.has_picture_resource(id) {
                     manager.get_picture_opacity_metadata(id)?;

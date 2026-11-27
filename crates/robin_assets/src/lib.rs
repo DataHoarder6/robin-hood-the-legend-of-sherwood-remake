@@ -1,9 +1,12 @@
 //! Asset-loading layer for Robin Hood.
 //!
 //! Defaults include `engine-adapters`: mission preparation, script tools,
-//! resource managers, and the shipping-datadir container. Format-only users can
-//! disable default features to decode sprite grids, pictures, RLE/JXL canvases,
-//! and legacy frame banks without depending on the simulation engine.
+//! resource managers, and the shipping-datadir container. They build on the
+//! script layer (`robin_engine_script`) and the level and script value crates,
+//! never on `robin_engine`, so this crate compiles beside the simulation and an
+//! engine change does not recompile it. Format-only users can disable default
+//! features to decode sprite grids, pictures, RLE/JXL canvases, and legacy
+//! frame banks without the script layer.
 
 #[cfg(test)]
 mod original_data {

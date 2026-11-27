@@ -840,8 +840,8 @@ fn mission_publication_rejects_invalid_raw_before_replacing_selection() {
 
 #[test]
 fn captured_mission_resources_survive_later_activation() {
-    use robin_engine::coordinates::{SpriteAnchor, SpriteSize};
-    use robin_engine::sprite_script::{FrameKind, SpriteScriptor};
+    use robin_engine_script::sprite_script::{FrameKind, SpriteScriptor};
+    use robin_engine_types::coordinates::{SpriteAnchor, SpriteSize};
 
     let datadir = install_fixture(ShippingDatadir::default());
     for (name, width) in [("first", 12.0), ("second", 24.0)] {

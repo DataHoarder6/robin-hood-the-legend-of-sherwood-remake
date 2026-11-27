@@ -1,0 +1,26 @@
+[package]
+name = "robin_engine_script"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+bitcode.workspace = true
+num_enum = "0.7"
+robin_data_io.workspace = true
+robin_engine_geometry.workspace = true
+robin_engine_types.workspace = true
+robin_script_types.workspace = true
+robin_state_hash_derive.workspace = true
+robin_util.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
+thiserror.workspace = true
+tracing.workspace = true
+# `std::time::Instant::now()` panics on wasm32-unknown-unknown.
+web-time.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

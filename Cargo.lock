@@ -5975,7 +5975,10 @@ dependencies = [
  "robin_asset_codecs",
  "robin_data_io",
  "robin_engine",
+ "robin_engine_script",
  "robin_engine_types",
+ "robin_level_data",
+ "robin_script_types",
  "robin_test_support",
  "robin_util",
  "serde",
@@ -6040,6 +6043,7 @@ dependencies = [
  "rayon",
  "robin_data_io",
  "robin_engine_geometry",
+ "robin_engine_script",
  "robin_engine_types",
  "robin_legacy_save",
  "robin_level_data",
@@ -6087,6 +6091,25 @@ dependencies = [
  "strum_macros 0.28.0",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "robin_engine_script"
+version = "0.0.0"
+dependencies = [
+ "bitcode 0.6.9 (git+https://github.com/phiresky/bitcode.git?rev=59051e886ff8cd24bfc63ef0cef6321372829604)",
+ "num_enum",
+ "robin_data_io",
+ "robin_engine_geometry",
+ "robin_engine_types",
+ "robin_script_types",
+ "robin_state_hash_derive",
+ "robin_util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -6224,7 +6247,9 @@ dependencies = [
  "png",
  "robin_assets",
  "robin_data_io",
- "robin_engine",
+ "robin_engine_geometry",
+ "robin_level_data",
+ "robin_script_types",
  "robin_test_support",
  "robin_util",
  "serde",

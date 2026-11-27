@@ -93,9 +93,9 @@ mod probe {
     use robin_assets::picture::{Picture, PixelFormat};
     use robin_assets::shipping_datadir::derive_chunk_self_refs;
     use robin_assets::sprite_codec::{self, SpriteGrid};
-    use robin_engine::sbfile::SbFile;
-    use robin_engine::sprite_script::{SpriteInfo, SpriteScriptor};
-    use robin_engine::sprite_variant::SpriteVariant;
+    use robin_data_io::sbfile::SbFile;
+    use robin_engine_script::sprite_script::{SpriteInfo, SpriteScriptor};
+    use robin_engine_types::SpriteVariant;
 
     const DEFAULT_RHS: &[&str] = &[
         "Characters/Knight01.rhs",

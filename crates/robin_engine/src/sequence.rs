@@ -39,23 +39,7 @@ use crate::order::{Order, OrderType};
 //  IDs and references
 // ═══════════════════════════════════════════════════════════════════
 
-/// Unique identifier for a [`Sequence`].
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    robin_state_hash_derive::StateHash,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct SequenceId(pub u32);
+pub use robin_engine_script::sequence_id::SequenceId;
 
 /// Reference to a specific [`SequenceElement`] within a [`Sequence`].
 ///
