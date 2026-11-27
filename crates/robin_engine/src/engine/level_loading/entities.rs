@@ -567,6 +567,7 @@ impl EngineInner {
                             character_profile_idx: Some(profile_idx),
                             instanced: false,
                             status,
+                            skills: Default::default(),
                         };
                         campaign.add_to_characters(desc, &profiles)
                     }

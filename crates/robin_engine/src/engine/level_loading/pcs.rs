@@ -117,6 +117,7 @@ impl EngineInner {
                         true,
                         sim.config().difficulty,
                     ),
+                    skills: Default::default(),
                 });
             }
             let campaign = &mut self.mission_domain.campaign;
@@ -381,6 +382,7 @@ impl EngineInner {
                         character_profile_idx: Some(profile_idx),
                         instanced: true,
                         status: crate::pc_status::PcStatus::from_profile(profile, true, difficulty),
+                        skills: Default::default(),
                     });
                     campaign.characters.len() - 1
                 }
@@ -1351,7 +1353,9 @@ mod authored_roster_tests {
             character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
             instanced: true,
             status,
+            skills: Default::default(),
         });
+        campaign.characters[0].grant_skill(crate::campaign::SkillNode::FleetFooted);
         campaign.mission_team_indices = vec![0];
         let before = campaign.characters[0].status.clone();
 
@@ -1371,6 +1375,10 @@ mod authored_roster_tests {
         assert_eq!(
             campaign.characters[0].status, before,
             "an authored spawn point must not rewrite the character's progression"
+        );
+        assert!(
+            campaign.characters[0].has_skill(crate::campaign::SkillNode::FleetFooted),
+            "an authored spawn point keeps skill-tree progression too"
         );
         assert_eq!(campaign.characters[0].status.human_status.bow.capacity, 2);
         assert_eq!(
@@ -1422,6 +1430,7 @@ mod authored_roster_tests {
             character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
             instanced: true,
             status,
+            skills: Default::default(),
         });
         campaign.mission_team_indices = vec![0];
 

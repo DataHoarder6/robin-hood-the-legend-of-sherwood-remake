@@ -1532,6 +1532,14 @@ pub enum PlayerCommand {
     ReseedSelectionHulk {
         pc_id: EntityId,
     },
+    /// Buy one nine-node skill-tree node for a campaign character. Appended
+    /// last to preserve every existing wire/bitcode variant index. The
+    /// campaign authority owns price, prerequisites and the clover floor;
+    /// the panel renders the same rule into its row states.
+    CampaignPurchaseSkill {
+        character_idx: u16,
+        node: crate::campaign::SkillNode,
+    },
 }
 
 impl PlayerCommand {
@@ -1597,6 +1605,7 @@ impl PlayerCommand {
                 | Self::SetKeepMovingInCombat { .. }
                 | Self::SetAutoLoot { .. }
                 | Self::CampaignPurchasePerk { .. }
+                | Self::CampaignPurchaseSkill { .. }
                 | Self::SetNoFriendlyFireDamage { .. }
                 | Self::SetNoFriendlyFireKnockback { .. }
                 | Self::SetCoopPause { .. }

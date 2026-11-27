@@ -25,7 +25,7 @@ pub use object_use::{coin_pickup_target, object_pickup_command};
 use super::{CameraDisplayState, EngineInner, LevelAssets};
 use crate::campaign::{
     CampaignValue, MAXIMUM_AMULETS_NUMBER, MINIMUM_CLOVERS_AFTER_PURCHASE, PerkPurchaseState,
-    perk_purchase_state,
+    SkillNode, perk_purchase_state,
 };
 use crate::element::{Command, EntityId};
 use crate::pc_status::Perk;
@@ -316,6 +316,10 @@ impl EngineInner {
                 character_idx,
                 perk,
             } => self.campaign_purchase_perk(*character_idx, *perk),
+            CampaignPurchaseSkill {
+                character_idx,
+                node,
+            } => self.campaign_purchase_skill(*character_idx, *node),
 
             // ── Sequence-based interactions ──────────────────────
             LaunchInteraction { .. } => self.apply_launch_interaction_command(tcx, cmd),
@@ -1727,6 +1731,35 @@ impl EngineInner {
             "a purchase left the clover counter outside the range its cap documents"
         );
         self.set_pc_perk(character_idx, perk);
+    }
+
+    /// Buy one nine-node skill-tree node.
+    ///
+    /// [`crate::campaign::Campaign::purchase_skill`] is the sole authority for
+    /// price, ownership, prerequisites, the death-save floor and the purse
+    /// cap.  The legacy flat-perk command and this one share the same campaign
+    /// records and therefore the same purchased flags.  Legacy nodes are
+    /// stamped onto live PCs through the existing `set_pc_perk` path; the five
+    /// new nodes are campaign progression read at spawn (TODO: hook the
+    /// movement, health, noise, listen-radius and lockpick/climb effects into
+    /// `PcData` at spawn, then apply them to live PCs here).
+    pub(crate) fn campaign_purchase_skill(&mut self, character_idx: u16, node: SkillNode) {
+        let result = self
+            .mission_domain
+            .campaign
+            .purchase_skill(character_idx, node);
+        if let Err(state) = result {
+            tracing::warn!(
+                character_idx,
+                ?node,
+                ?state,
+                "skill purchase rejected by the campaign authority"
+            );
+            return;
+        }
+        if let Some(perk) = node.legacy_perk() {
+            self.set_pc_perk(character_idx, perk);
+        }
     }
 
     /// Stamp an already-purchased perk onto every live copy of a campaign

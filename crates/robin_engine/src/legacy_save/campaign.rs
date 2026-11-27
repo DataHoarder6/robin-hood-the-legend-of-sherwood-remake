@@ -277,6 +277,7 @@ impl LegacyPcDescriptionAdoption for LegacyPcDescription {
             character_profile_idx: Some(CharacterProfileIdx(profile_index as u32)),
             instanced: self.instanced,
             status: self.status.to_rust(),
+            skills: Default::default(),
         })
     }
 }

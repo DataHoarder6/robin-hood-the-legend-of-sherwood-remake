@@ -39,6 +39,7 @@ fn human_and_pc_records_match_frozen_encoder_with_populated_frontiers() {
                     num_arrows: 29,
                     ..Default::default()
                 },
+                skills: Default::default(),
             });
         let mut soldier_element = ElementData::default();
         soldier_element.kind = ElementKind::ActorSoldier;

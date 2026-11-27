@@ -25,6 +25,13 @@ use crate::pc_status::{LIFEPOINTS_PC, PcStatus, Perk, SkillName};
 use crate::player_profile::DifficultyLevel;
 use crate::profiles::{CharacterProfileIdx, MissionType, ProfileManager};
 
+pub mod skill_tree;
+
+pub use skill_tree::{
+    SkillEffect, SkillNode, SkillPurchaseState, SkillSet, SkillTreeRow, TOTAL_TREE_COST,
+    skill_purchase_state, skill_tree_rows,
+};
+
 // ─── Reservist reintegration coefficients ────────────────────────
 
 /// Experience-scale coefficient applied to a reservist's hand-to-hand
@@ -162,6 +169,33 @@ pub struct PcDescription {
     pub instanced: bool,
     /// Dynamic status: HP, skills, inventory.
     pub status: PcStatus,
+    /// Nine-node skill tree ownership.  Additive field: pre-tree saves get an
+    /// empty set and still report the four legacy `PcStatus` perk flags.
+    #[serde(default)]
+    pub skills: SkillSet,
+}
+
+impl PcDescription {
+    /// Whether this character owns a skill-tree node.
+    ///
+    /// The bitmask is the canonical store for nodes bought through the tree;
+    /// the legacy perk flags are a compatibility view for saves and commands
+    /// written before the tree existed.
+    pub fn has_skill(&self, node: SkillNode) -> bool {
+        self.skills.has(node)
+            || node
+                .legacy_perk()
+                .is_some_and(|perk| self.status.has_perk(perk))
+    }
+
+    /// Grant a node, writing both homes so the legacy command path and the
+    /// mission-scoped `PcData` flags see the same purchase.
+    pub fn grant_skill(&mut self, node: SkillNode) {
+        self.skills.grant(node);
+        if let Some(perk) = node.legacy_perk() {
+            self.status.grant_perk(perk);
+        }
+    }
 }
 
 // ─── Perk purchase rows ─────────────────────────────────────────
@@ -205,18 +239,22 @@ pub const MINIMUM_CLOVERS_AFTER_PURCHASE: i32 = 1;
 /// Both [`perk_purchase_rows`] and the authoritative
 /// [`campaign_purchase_perk`](crate::engine::EngineInner::campaign_purchase_perk)
 /// ask this, so the row state and the refusal cannot drift apart.
-pub const fn perk_purchase_state(perk: Perk, clovers: i32, owned: bool) -> PerkPurchaseState {
-    if owned {
-        return PerkPurchaseState::Owned;
+pub fn perk_purchase_state(perk: Perk, clovers: i32, owned: bool) -> PerkPurchaseState {
+    // Flat perks predate tiers and stay buyable without prerequisites, but
+    // their price and clover floor now come from the one tree table.
+    match skill_tree::skill_purchase_state_ignoring_prerequisites(
+        SkillNode::from_perk(perk),
+        clovers,
+        owned,
+    ) {
+        SkillPurchaseState::Affordable => PerkPurchaseState::Affordable,
+        SkillPurchaseState::Owned => PerkPurchaseState::Owned,
+        SkillPurchaseState::Unaffordable => PerkPurchaseState::Unaffordable,
+        SkillPurchaseState::WouldSpendLastClover => PerkPurchaseState::WouldSpendLastClover,
+        SkillPurchaseState::PrerequisitesMissing => {
+            unreachable!("a legacy perk has no tree prerequisites")
+        }
     }
-    let cost = perk.cost();
-    if clovers < cost {
-        return PerkPurchaseState::Unaffordable;
-    }
-    if clovers - cost < MINIMUM_CLOVERS_AFTER_PURCHASE {
-        return PerkPurchaseState::WouldSpendLastClover;
-    }
-    PerkPurchaseState::Affordable
 }
 
 /// One purchasable perk on one campaign character.
@@ -269,7 +307,7 @@ pub fn perk_purchase_rows(
                 character_idx,
                 character_name: name.clone(),
                 perk,
-                cost: perk.cost(),
+                cost: SkillNode::from_perk(perk).cost(),
                 state: perk_purchase_state(perk, clovers, character.status.has_perk(perk)),
             });
         }
@@ -1268,6 +1306,7 @@ impl Campaign {
                 character_profile_idx: Some(CharacterProfileIdx(i as u32)),
                 instanced: false,
                 status: PcStatus::from_profile(cp, true, difficulty),
+                skills: Default::default(),
             });
             if robin_char_idx.is_none() && cp.profile_name == "Robin des bois" {
                 robin_char_idx = Some(i);
@@ -1786,6 +1825,7 @@ impl Campaign {
                     character_profile_idx: Some(profile_idx),
                     instanced: false,
                     status: PcStatus::from_profile(cp, true, difficulty),
+                    skills: Default::default(),
                 };
                 self.add_to_characters(desc, profiles)
             }
@@ -1892,6 +1932,7 @@ impl Campaign {
             character_profile_idx: Some(profile_idx),
             instanced: false,
             status: PcStatus::from_profile(cp, false, sim.config().difficulty),
+            skills: Default::default(),
         };
         let char_idx = self.add_to_characters(desc, profiles);
         self.add_to_gang(char_idx, profiles);
@@ -2680,6 +2721,55 @@ impl Campaign {
         )
     }
 
+    /// The nine-node skill tree rows the Sherwood panel renders.
+    ///
+    /// Every row's state comes from [`skill_purchase_state`], the same rule
+    /// [`Self::purchase_skill`] enforces, so the panel cannot offer a purchase
+    /// the campaign would refuse.
+    pub fn skill_tree_rows(&self, character_names: &[String]) -> Vec<SkillTreeRow> {
+        skill_tree_rows(
+            &self.characters,
+            character_names,
+            self.get_value(CampaignValue::Amulets),
+        )
+    }
+
+    /// Authoritative tree purchase: check the single rule, charge clovers and
+    /// record ownership in both the bitmask and the legacy perk flags.
+    ///
+    /// Returns the exact [`SkillPurchaseState`] that refused the purchase, or
+    /// `Ok(())`.  No caller may pre-check affordability and skip this check.
+    pub fn purchase_skill(
+        &mut self,
+        character_idx: u16,
+        node: SkillNode,
+    ) -> Result<(), SkillPurchaseState> {
+        let index = usize::from(character_idx);
+        let Some(character) = self.characters.get(index) else {
+            tracing::warn!(
+                character_idx,
+                character_count = self.characters.len(),
+                ?node,
+                "skill purchase rejected: campaign has no such character"
+            );
+            return Err(SkillPurchaseState::Unaffordable);
+        };
+        let state =
+            skill_purchase_state(node, self.get_value(CampaignValue::Amulets), |candidate| {
+                character.has_skill(candidate)
+            });
+        if !state.purchasable() {
+            return Err(state);
+        }
+        self.characters[index].grant_skill(node);
+        self.subtract_value(CampaignValue::Amulets, node.cost());
+        debug_assert!(
+            self.get_value(CampaignValue::Amulets) <= MAXIMUM_AMULETS_NUMBER,
+            "a purchase cannot raise the clover purse above its cap"
+        );
+        Ok(())
+    }
+
     // ── find_character ───────────────────────────────────────────────
 
     /// Check if a character (by profile index) is present in a team.
@@ -2836,6 +2926,7 @@ impl Campaign {
                 character_profile_idx: Some(CharacterProfileIdx(i as u32)),
                 instanced: false,
                 status: PcStatus::from_profile(cp, true, difficulty),
+                skills: Default::default(),
             });
             if robin_char_idx.is_none() && cp.profile_name == "Robin des bois" {
                 robin_char_idx = Some(i);
@@ -2937,6 +3028,7 @@ impl Campaign {
                     character_profile_idx: Some(CharacterProfileIdx(idx as u32)),
                     instanced: false,
                     status: PcStatus::from_profile(cp, true, difficulty),
+                    skills: Default::default(),
                 });
                 self.gang_indices.push(self.characters.len() - 1);
             } else {
@@ -4533,7 +4625,7 @@ mod tests {
     /// The smallest purse that can pay for a perk and still keep a clover
     /// back for the death save.
     const PURSE_FOR_ONE_PERK: i32 =
-        crate::pc_status::PERK_CLOVER_COST + MINIMUM_CLOVERS_AFTER_PURCHASE;
+        crate::pc_status::Perk::KeepMovingInCombat.cost() + MINIMUM_CLOVERS_AFTER_PURCHASE;
 
     #[test]
     fn perk_rows_cover_every_character_and_perk_in_order() {
@@ -4564,12 +4656,12 @@ mod tests {
 
         assert_eq!(state(PURSE_FOR_ONE_PERK), PerkPurchaseState::Affordable);
         assert_eq!(
-            state(crate::pc_status::PERK_CLOVER_COST),
+            state(crate::pc_status::Perk::KeepMovingInCombat.cost()),
             PerkPurchaseState::WouldSpendLastClover,
             "a purse holding exactly the cost would be emptied, losing the death save"
         );
         assert_eq!(
-            state(crate::pc_status::PERK_CLOVER_COST - 1),
+            state(crate::pc_status::Perk::KeepMovingInCombat.cost() - 1),
             PerkPurchaseState::Unaffordable
         );
         assert_eq!(state(0), PerkPurchaseState::Unaffordable);
@@ -4635,7 +4727,10 @@ mod tests {
         campaign.set_value(CampaignValue::Amulets, PURSE_FOR_ONE_PERK);
         assert_eq!(state(&campaign), PerkPurchaseState::Affordable);
 
-        campaign.set_value(CampaignValue::Amulets, crate::pc_status::PERK_CLOVER_COST);
+        campaign.set_value(
+            CampaignValue::Amulets,
+            crate::pc_status::Perk::KeepMovingInCombat.cost(),
+        );
         assert_eq!(state(&campaign), PerkPurchaseState::WouldSpendLastClover);
 
         campaign.set_value(CampaignValue::Amulets, 0);
@@ -4655,5 +4750,274 @@ mod tests {
             PerkPurchaseState::Unaffordable,
             "perks are paid for in clovers, so a full purse must not buy one"
         );
+    }
+
+    // ── Nine-node skill tree (issue #122) ────────────────────────────
+    mod skill_tree_contract {
+        use super::*;
+        use crate::campaign::skill_tree::{
+            FLEET_FOOTED_SPEED_FACTOR, HARDY_BONUS_LIFE_POINTS, KEEN_EAR_LISTEN_RADIUS,
+            SILENT_STEP_NOISE_MULTIPLIER, SkillEffect, SkillNode, SkillPurchaseState, SkillSet,
+            TOTAL_TREE_COST, skill_purchase_state, skill_tree_rows,
+        };
+
+        fn owned(nodes: &[SkillNode]) -> SkillSet {
+            let mut set = SkillSet::empty();
+            for node in nodes {
+                set.grant(*node);
+            }
+            set
+        }
+
+        #[test]
+        fn tree_has_nine_nodes_in_three_tiers_with_the_designed_prices() {
+            assert_eq!(SkillNode::ALL.len(), 9);
+            let tier_counts = [1, 2, 3].map(|tier| {
+                SkillNode::ALL
+                    .iter()
+                    .filter(|node| node.tier() == tier)
+                    .count()
+            });
+            assert_eq!(tier_counts, [4, 4, 1]);
+            for node in SkillNode::ALL {
+                assert_eq!(node.cost(), if node.tier() == 1 { 1 } else { 2 });
+            }
+            assert_eq!(TOTAL_TREE_COST, 14);
+        }
+
+        #[test]
+        fn prerequisites_are_exactly_the_ones_the_issue_names() {
+            for node in SkillNode::ALL {
+                if node.tier() != 3 {
+                    assert!(
+                        node.prerequisites().is_empty(),
+                        "{node:?} has no authored prerequisite"
+                    );
+                }
+            }
+            assert_eq!(
+                SkillNode::SteadyBlade.prerequisites(),
+                &[
+                    SkillNode::FightThrough,
+                    SkillNode::CarefulBlade,
+                    SkillNode::BurglarsKit,
+                    SkillNode::LootTheKnockout,
+                ]
+            );
+        }
+
+        #[test]
+        fn effects_are_player_visible_behaviour_not_raw_stat_increases() {
+            assert_eq!(
+                SkillNode::FleetFooted.effect(),
+                SkillEffect::SpeedFactor(FLEET_FOOTED_SPEED_FACTOR)
+            );
+            assert_eq!(FLEET_FOOTED_SPEED_FACTOR, 1.25);
+            assert_eq!(
+                SkillNode::Hardy.effect(),
+                SkillEffect::BonusLifePoints(HARDY_BONUS_LIFE_POINTS)
+            );
+            assert_eq!(HARDY_BONUS_LIFE_POINTS, 25);
+            assert_eq!(
+                SkillNode::SilentStep.effect(),
+                SkillEffect::WalkNoiseMultiplier(SILENT_STEP_NOISE_MULTIPLIER)
+            );
+            assert_eq!(SILENT_STEP_NOISE_MULTIPLIER, 0.5);
+            assert_eq!(
+                SkillNode::KeenEar.effect(),
+                SkillEffect::ListenRadius(KEEN_EAR_LISTEN_RADIUS)
+            );
+            assert_eq!(KEEN_EAR_LISTEN_RADIUS, 1050);
+            assert_eq!(
+                SkillNode::BurglarsKit.effect(),
+                SkillEffect::LockpickAndClimb
+            );
+        }
+
+        #[test]
+        fn purchase_state_is_the_only_gate_for_affordability_ownership_and_prerequisites() {
+            let node = SkillNode::SteadyBlade;
+            let tier_two = owned(&[
+                SkillNode::FightThrough,
+                SkillNode::CarefulBlade,
+                SkillNode::BurglarsKit,
+                SkillNode::LootTheKnockout,
+            ]);
+            let owns = |set: SkillSet| move |candidate| set.has(candidate);
+
+            assert_eq!(
+                skill_purchase_state(node, 10, owns(SkillSet::empty())),
+                SkillPurchaseState::PrerequisitesMissing,
+                "a missing Tier-II prerequisite is not a clover problem"
+            );
+            let mut almost_all_two = tier_two;
+            almost_all_two.grant(node);
+            assert_eq!(
+                skill_purchase_state(node, 10, owns(almost_all_two)),
+                SkillPurchaseState::Owned
+            );
+            assert_eq!(
+                skill_purchase_state(node, 10, owns(tier_two)),
+                SkillPurchaseState::Affordable,
+                "all four Tier-II nodes unlock the Tier-III node"
+            );
+
+            // Every other node is prerequisite-free; the money gates are the
+            // same three the flat perks had.
+            let free = SkillNode::FleetFooted;
+            assert_eq!(
+                skill_purchase_state(free, 2, owns(SkillSet::empty())),
+                SkillPurchaseState::Affordable
+            );
+            assert_eq!(
+                skill_purchase_state(free, 1, owns(SkillSet::empty())),
+                SkillPurchaseState::WouldSpendLastClover
+            );
+            assert_eq!(
+                skill_purchase_state(free, 0, owns(SkillSet::empty())),
+                SkillPurchaseState::Unaffordable
+            );
+        }
+
+        #[test]
+        fn panel_rows_and_authoritative_purchase_use_one_rule() {
+            let characters = [perk_row_character(&[])];
+            let names = ["Robin".to_owned()];
+            let mut campaign = Campaign::default();
+            campaign.characters.push(perk_row_character(&[]));
+            campaign.set_value(CampaignValue::Amulets, 3);
+
+            let rows = skill_tree_rows(&characters, &names, 3);
+            assert_eq!(rows.len(), 9);
+            for row in &rows {
+                let rule = skill_purchase_state(row.node, 3, |node| {
+                    characters[row.character_idx as usize].has_skill(node)
+                });
+                assert_eq!(
+                    row.state,
+                    rule,
+                    "panel and engine must agree on {}",
+                    rows.len()
+                );
+                assert_eq!(row.cost, row.node.cost());
+            }
+
+            let fleet = rows
+                .iter()
+                .find(|row| row.node == SkillNode::FleetFooted)
+                .expect("a Fleet-footed row");
+            assert!(
+                fleet.state.purchasable(),
+                "the panel may only offer a row the engine accepts"
+            );
+            campaign.purchase_skill(0, SkillNode::FleetFooted).unwrap();
+            assert_eq!(campaign.get_value(CampaignValue::Amulets), 2);
+            assert!(campaign.characters[0].has_skill(SkillNode::FleetFooted));
+            assert_eq!(
+                campaign.purchase_skill(0, SkillNode::FleetFooted),
+                Err(SkillPurchaseState::Owned)
+            );
+
+            let steady = rows
+                .iter()
+                .find(|row| row.node == SkillNode::SteadyBlade)
+                .expect("a Steady Blade row");
+            assert_eq!(steady.state, SkillPurchaseState::PrerequisitesMissing);
+            assert_eq!(
+                campaign.purchase_skill(0, SkillNode::SteadyBlade),
+                Err(SkillPurchaseState::PrerequisitesMissing),
+                "the engine must refuse what the panel marks locked"
+            );
+        }
+
+        #[test]
+        fn legacy_perk_flags_are_visible_as_skill_ownership() {
+            let mut legacy = PcDescription::default();
+            legacy.status.grant_perk(Perk::KeepMovingInCombat);
+            legacy.status.grant_perk(Perk::AutoLoot);
+            assert!(legacy.has_skill(SkillNode::FightThrough));
+            assert!(legacy.has_skill(SkillNode::LootTheKnockout));
+            assert!(!legacy.has_skill(SkillNode::FleetFooted));
+
+            let mut modern = PcDescription::default();
+            modern.grant_skill(SkillNode::FightThrough);
+            assert!(modern.status.has_perk(Perk::KeepMovingInCombat));
+            assert!(modern.has_skill(SkillNode::FightThrough));
+
+            // A save written before the tree has no bitmask field at all; the
+            // serde default plus the legacy flags still report its purchases.
+            let without_field: PcDescription = serde_json::from_str(
+                r#"{"character_profile_idx":null,"instanced":false,"status":{
+                     "human_status":{"hand_to_hand":{"experience":0,"capacity":0},"bow":{"experience":0,"capacity":0}},
+                     "life_points":100,"in_coma":false,"num_ales":0,"num_arrows":0,"num_apples":0,
+                     "num_rations":0,"num_stones":0,"num_wasp_nests":0,"num_nets":0,"num_plants":0,
+                     "num_purses":0,"name":"","name_override":null,
+                     "keep_moving_in_combat":true,"auto_loot":false,
+                     "no_friendly_fire_damage":false,"no_friendly_fire_knockback":false,
+                     "beam_me_index_in_sherwood":-1}}"#,
+            )
+            .expect("a pre-tree campaign character still loads");
+            assert!(without_field.has_skill(SkillNode::FightThrough));
+            assert!(!without_field.has_skill(SkillNode::Hardy));
+        }
+
+        #[test]
+        fn the_whole_tree_fits_the_story_economy_with_slack() {
+            // The measured story corpus grants 18 clovers; the cap is 10 and
+            // one clover must stay for the death save. Spend in three batches
+            // that never exceed the cap and never empty the purse.
+            const STORY_CLOVERS: [i32; 3] = [10, 4, 4];
+            let mut campaign = Campaign::default();
+            campaign.characters.push(perk_row_character(&[]));
+            let mut earned = 0;
+            for (batch, income) in STORY_CLOVERS.iter().enumerate() {
+                earned += *income;
+                let purse = campaign.get_value(CampaignValue::Amulets) + income;
+                assert!(purse <= MAXIMUM_AMULETS_NUMBER);
+                campaign.set_value(CampaignValue::Amulets, purse);
+                let nodes: &[SkillNode] = match batch {
+                    0 => &[
+                        SkillNode::FleetFooted,
+                        SkillNode::Hardy,
+                        SkillNode::SilentStep,
+                        SkillNode::KeenEar,
+                    ],
+                    1 => &[
+                        SkillNode::FightThrough,
+                        SkillNode::CarefulBlade,
+                        SkillNode::BurglarsKit,
+                        SkillNode::LootTheKnockout,
+                    ],
+                    _ => &[SkillNode::SteadyBlade],
+                };
+                for node in nodes {
+                    campaign.purchase_skill(0, *node).unwrap();
+                    assert!(campaign.get_value(CampaignValue::Amulets) >= 1);
+                }
+            }
+            assert_eq!(earned, 18);
+            assert_eq!(TOTAL_TREE_COST, 14);
+            assert!(
+                campaign.get_value(CampaignValue::Amulets) >= 3,
+                "the full tree must leave the three clovers the issue requires"
+            );
+            for node in SkillNode::ALL {
+                assert!(campaign.characters[0].has_skill(node));
+            }
+        }
+
+        #[test]
+        fn legacy_perk_rows_keep_their_price_from_the_tree_table() {
+            for perk in Perk::ALL {
+                assert_eq!(perk.cost(), SkillNode::from_perk(perk).cost());
+            }
+            let characters = [perk_row_character(&[])];
+            let names = ["Robin".to_owned()];
+            assert_eq!(
+                perk_purchase_rows(&characters, &names, 3)[0].cost,
+                SkillNode::from_perk(Perk::KeepMovingInCombat).cost(),
+                "the legacy row shows the tree price, not the old flat one"
+            );
+        }
     }
 }

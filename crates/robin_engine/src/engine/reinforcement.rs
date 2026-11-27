@@ -825,6 +825,7 @@ mod tests {
                 character_profile_idx: Some(crate::profiles::CharacterProfileIdx(0)),
                 instanced: false,
                 status: Default::default(),
+                skills: Default::default(),
             });
         engine.mission_domain.campaign.gang_indices.push(0);
         engine

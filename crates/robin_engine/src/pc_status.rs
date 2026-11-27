@@ -268,9 +268,10 @@ impl Perk {
     ];
 
     /// What the character must pay, in clovers ([`crate::campaign::CampaignValue::Amulets`]),
-    /// to buy this perk.
+    /// to buy this perk.  The nine-node tree is the single price table; the
+    /// four legacy perks are Tier-II/III nodes and cost two clovers each.
     pub const fn cost(self) -> i32 {
-        PERK_CLOVER_COST
+        crate::campaign::SkillNode::from_perk(self).cost()
     }
 }
 

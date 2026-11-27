@@ -4707,6 +4707,7 @@ fn set_experiences_test_host() -> (NativeTestHost, crate::campaign::Campaign, i3
         character_profile_idx: Some(profile_idx),
         instanced: true,
         status,
+        skills: Default::default(),
     });
 
     let mut host = NativeTestHost::new();
