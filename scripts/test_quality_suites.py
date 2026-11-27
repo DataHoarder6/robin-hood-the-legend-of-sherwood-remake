@@ -14,7 +14,7 @@ from check_asset_boundary import assert_boundary
 ROOT = Path(__file__).resolve().parents[1]
 RUST_SUITES = (
     "core", "scripting-llvm", "engine", "assets", "protocols", "services", "parity",
-    "client", "client-release", "tools", "wasm", "gpu", "gpu-gl", "host", "lint",
+    "client", "client-release", "tools", "wasm", "wasm-release", "gpu", "gpu-gl", "host", "lint",
 )
 
 
@@ -55,7 +55,7 @@ class QualitySuitesTests(unittest.TestCase):
         )
         xvfb.chmod(0o755)
 
-        # The wasm suite also builds the published wasm-release artifact through
+        # The wasm-release suite builds the published artifact through
         # the browser plan and verifies it. Stub those tools so the suite can be
         # dispatched here without a wasm toolchain, and record their calls.
         self.node_log = self.directory / "node-calls.jsonl"
@@ -129,6 +129,24 @@ class QualitySuitesTests(unittest.TestCase):
             self.assertNotIn("--all-features", call)
             self.assertNotIn("--target-dir", call)
 
+    def test_gate_suites_never_change_rustflags_per_invocation(self):
+        # Cargo keeps rustflags out of artifact file names. A suite that adds
+        # its own (`--config ...rustflags=...`) overwrites the shared
+        # proc-macro and build-script artifacts, and every later suite on the
+        # gate copy rebuilds the whole dependency graph.
+        for suite in ("format", "lint", "client-release", "engine", "wasm", "wasm-tests", "contracts"):
+            self.run_suite(suite)
+        for call in self.calls():
+            for index, argument in enumerate(call):
+                if argument == "--config":
+                    self.assertNotIn("rustflags", call[index + 1], call)
+
+    def test_wasm_gate_does_not_build_the_release_artifact(self):
+        self.run_suite("wasm")
+        for call in self.calls():
+            self.assertNotIn("wasm-release", call)
+        self.assertFalse(self.node_log.exists() and self.node_log.read_text().strip())
+
     def test_client_build_is_a_separate_command(self):
         self.run_suite("client")
         # nextest runs the tests, the doc pass stays on `cargo test` (nextest
@@ -136,21 +154,21 @@ class QualitySuitesTests(unittest.TestCase):
         # cannot hang a build.
         self.assertEqual([call[0] for call in self.calls()], ["nextest", "test", "build"])
 
-    def test_wasm_gate_builds_and_verifies_the_published_release_artifact(self):
+    def test_wasm_release_builds_and_verifies_the_published_release_artifact(self):
         contract = json.loads((ROOT / "wasm-www/runtime-contract.json").read_text())
-        self.run_suite("wasm")
+        self.run_suite("wasm-release")
         calls = [json.loads(line) for line in self.node_log.read_text().splitlines()]
         self.assertTrue(any(
             any("build-runtime.mjs" in arg for arg in call)
             and "wasm-release" in call
             and "--threads" in call
             for call in calls
-        ), f"wasm suite did not build the shipped plan: {calls}")
+        ), f"wasm-release suite did not build the shipped plan: {calls}")
         self.assertTrue(any(
             any("verify-runtime-multiplayer.mjs" in arg for arg in call)
             and call[call.index("--expect-ticket-schema") + 1] == str(contract["ticketSchema"])
             for call in calls
-        ), f"wasm suite did not verify the artifact schema: {calls}")
+        ), f"wasm-release suite did not verify the artifact schema: {calls}")
 
     def test_replay_format_boundary_rejects_client_packages(self):
         for package in ("robin_rs", "wgpu", "winit", "kira", "cpal", "ffmpeg-next"):

@@ -37,7 +37,7 @@ set -e
     || bad "present-tools-are-not-rejected: rc=$rc out=$out"
 
 set +e
-out=$(PATH="$bins" bash "$preflight" wasm 2>&1)
+out=$(PATH="$bins" bash "$preflight" wasm-release 2>&1)
 rc=$?
 set -e
 [[ $rc -eq 0 ]] && pass 'wasm-tool-set-is-complete' \
@@ -46,7 +46,7 @@ set -e
 # A missing wasm tool fails before a long build.
 rm -f -- "$bins/wasm-objdump"
 set +e
-out=$(PATH="$bins" bash "$preflight" wasm 2>&1)
+out=$(PATH="$bins" bash "$preflight" wasm-release 2>&1)
 rc=$?
 set -e
 [[ $rc -ne 0 && "$out" == *'wasm-objdump'* ]] \

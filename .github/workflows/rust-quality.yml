@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [core, scripting-llvm, engine, assets, protocols, services, parity, client, client-release, tools, wasm, browser-audio, gpu, gpu-gl, host]
+        suite: [core, scripting-llvm, engine, assets, protocols, services, parity, client, client-release, tools, wasm, wasm-release, browser-audio, gpu, gpu-gl, host]
 
     steps:
       - uses: actions/checkout@v5
@@ -96,7 +96,7 @@ jobs:
           key: tests-${{ matrix.suite }}
 
       - name: Install wasm target
-        if: matrix.suite == 'wasm' || matrix.suite == 'browser-audio'
+        if: matrix.suite == 'wasm' || matrix.suite == 'wasm-release' || matrix.suite == 'browser-audio'
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install pinned cargo-nextest
@@ -106,7 +106,7 @@ jobs:
         run: cargo install cargo-nextest --version 0.9.149 --locked
 
       - name: Install pinned wasm tools
-        if: matrix.suite == 'wasm'
+        if: matrix.suite == 'wasm-release'
         run: |
           destination="${RUNNER_TEMP}/wasm-tools"
           paths=$(bash scripts/install_pinned_wasm_tools.sh "$destination")

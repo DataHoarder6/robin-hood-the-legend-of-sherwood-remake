@@ -23,7 +23,7 @@ assert_build_host() {
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint check core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -44,21 +44,17 @@ case "$1" in
         # features compile a fraction of the client. The shipping client is the
         # `release` set. No `-A` here: a lint that is wrong for this code is
         # allowed by name where it fires, with a reason.
+        # `--all-targets` checks every library twice, with and without
+        # cfg(test), so `-D warnings` also covers the unused imports and dead
+        # code only the shipped build sees; no separate `cargo check` suite.
+        # Never add per-invocation rustflags to a suite: Cargo keeps them out of
+        # artifact file names, so a suite with different flags overwrites the
+        # shared proc-macro and build-script artifacts and every later suite
+        # rebuilds the whole dependency graph
+        # (docs/slop/build-time-root-causes.md).
         cargo clippy --locked --workspace --all-targets -- -D warnings
         cargo clippy --locked -p robin_rs --all-targets \
             --no-default-features --features release -- -D warnings
-        ;;
-    check)
-        # Compile the non-test cfg of the whole workspace with warnings denied.
-        # Cargo test and `clippy --all-targets` compile with cfg(test), which
-        # hides unused imports and dead code that only the shipped build sees.
-        # `--lib --bins` selects those targets and no test harnesses.
-        # `cargo check` has no trailing-`--` rustc-argument form, so add -D
-        # warnings through a cfg(all()) rustflag: Cargo joins every matching
-        # target rustflag source (including .cargo/config.toml's target-cpu
-        # baseline) rather than replacing them as a bare RUSTFLAGS would.
-        cargo check --locked --workspace --lib --bins \
-            --config 'target."cfg(all())".rustflags=["-D","warnings"]'
         ;;
     core)
         cargo test --locked -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
@@ -117,7 +113,6 @@ case "$1" in
     client-release)
         cargo nextest run --locked -p robin_rs --lib --no-default-features --features release
         cargo build --locked -p robin_rs --bin robin --no-default-features --features release
-        cargo check --locked -p robin_rs --example audio_decode_bench --no-default-features --features release
         ;;
     tools)
         cargo test --locked -p robin_modding_tools
@@ -135,10 +130,13 @@ case "$1" in
         # Build, not check: only a link exercises the threaded link arguments.
         cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features --features audio,multiplayer
         cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_rs --bin robin --no-default-features --features audio,multiplayer,wasm-threads
-        # wasm-dev links prove compilation; this builds the shipped wasm-release
-        # artifact with the repo's plan and checks the optimized bytes' shared
-        # memory, compatibility export and schema. A release-only break cannot
-        # hide behind a green compile gate.
+        ;;
+    wasm-release)
+        # The shipped wasm-release artifact, built with the repo's plan; the
+        # optimized bytes' shared memory, compatibility export and schema are
+        # checked. A release-only break cannot hide behind a green wasm-dev
+        # compile. push-gate selects it for release-plan changes only; CI runs it
+        # on every push to main.
         bash scripts/check-wasm-release-artifact.sh
         ;;
     browser-audio|native-lifecycle)

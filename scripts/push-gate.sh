@@ -77,27 +77,35 @@ crates_changed=0
 engine_changed=0
 tools_changed=0
 wasm_changed=0
+wasm_release_changed=0
 printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
 printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
 printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_changed=1
-# The browser artifact is built by these files as well as by crates/. `wasm`
-# now builds the actual wasm-release module, so its own inputs and the devShell
-# that provides wasm-opt/wasm-objdump must select it or the gate can drop out
-# silently while a release-only break ships.
-printf '%s\n' "$paths" | grep -qE '^crates/' && wasm_changed=1
-printf '%s\n' "$paths" | grep -qE '^(wasm-www/|flake\.nix$|rust-toolchain\.toml$|scripts/check-wasm-release-artifact\.sh$)' && wasm_changed=1
+# `wasm` compiles and links the browser client with the wasm-dev profile, so it
+# follows every input of that compile: the crates, the build plan Cargo reads and
+# the devShell that supplies the toolchain.
+printf '%s\n' "$paths" | grep -qE '^(crates/|Cargo\.(toml|lock)$|\.cargo/config\.toml$|flake\.(nix|lock)$|rust-toolchain\.toml$|scripts/wasm-threads\.cargo-config\.toml$)' && wasm_changed=1
+# `wasm-release` builds the published fat-LTO artifact, the single most
+# expensive compile in the repo (about 7 minutes warm). A landing pays for it
+# only when the release plan itself changes; CI builds it on every push to
+# `main` (.github/workflows/rust-quality.yml), so a crate change that breaks
+# only the release profile turns that run red instead of holding every gate.
+printf '%s\n' "$paths" | grep -qE '^(wasm-www/scripts/|wasm-www/runtime-contract\.json$|Cargo\.toml$|\.cargo/config\.toml$|flake\.(nix|lock)$|rust-toolchain\.toml$|scripts/(check-wasm-release-artifact\.sh|wasm-threads\.cargo-config\.toml|install_pinned_wasm_bindgen\.sh)$)' && wasm_release_changed=1
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    # `lint` reads the same two feature sets as a crate change, so it follows
-    # the same paths. `check` compiles the non-test cfg with -D warnings,
-    # catching unused imports that cfg(test) hides. `wasm` is selected
-    # separately below: it also depends on the build plan and devShell, not
-    # only on crates/.
-    suites+=(format lint check client-release)
+    # `lint` runs clippy with `-D warnings` over `--all-targets`, which checks
+    # every library both with and without cfg(test), so it also reports the
+    # unused imports and dead code only the shipped build sees. `wasm` is
+    # selected separately below: it also depends on the build plan and devShell,
+    # not only on crates/.
+    suites+=(format lint client-release)
 fi
 if [ "$wasm_changed" = 1 ]; then
     suites+=(wasm)
+fi
+if [ "$wasm_release_changed" = 1 ]; then
+    suites+=(wasm-release)
 fi
 if [ "$engine_changed" = 1 ]; then
     suites+=(engine)
