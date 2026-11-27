@@ -73,35 +73,27 @@ fi
 
 # The suites follow the diff, so a Python-only change never pays for a Rust
 # build and a Rust change never skips the suite that compiles it.
-crates_changed=0
-engine_changed=0
 tools_changed=0
-wasm_changed=0
-printf '%s\n' "$paths" | grep -qE '^crates/' && crates_changed=1
-printf '%s\n' "$paths" | grep -qE '^(crates/robin_engine|Cargo\.)' && engine_changed=1
 printf '%s\n' "$paths" | grep -qE '^(scripts|tools|\.githooks)/' && tools_changed=1
-# `wasm` compiles and links the browser client with the wasm-dev profile, so it
-# follows every input of that compile: the crates, the build plan Cargo reads and
-# the devShell that supplies the toolchain.
-printf '%s\n' "$paths" | grep -qE '^(crates/|Cargo\.(toml|lock)$|\.cargo/config\.toml$|flake\.(nix|lock)$|rust-toolchain\.toml$|scripts/wasm-threads\.cargo-config\.toml$)' && wasm_changed=1
 # `wasm-release` builds the published fat-LTO artifact (7-9 minutes warm). It is
 # never part of the gate, whose end-to-end budget is 60 seconds: CI builds it on
 # every push to `main` (.github/workflows/rust-quality.yml) and the release
 # workflow before publishing.
 
+# The gate proves the changed packages (docs/superpowers/plans/2026-11-27-sixty-second-gate.md):
+# `lint` type-checks the whole workspace, `test` runs the changed packages'
+# tests and `wasm-changed` checks the changed packages in the browser build. A
+# manifest, lockfile, toolchain, Cargo config or devShell change can touch any
+# package, so it gates ALL.
+packages=$(printf '%s\n' "$paths" | awk -F/ '$1 == "crates" && NF > 2 {print $2}' | sort -u | paste -sd' ' -)
+if printf '%s\n' "$paths" | grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|flake\.(nix|lock)$)'; then
+    packages=ALL
+fi
 suites=()
-if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    # `lint` runs clippy with `-D warnings` over every target with the shipping
-    # feature set. `wasm` is selected
-    # separately below: it also depends on the build plan and devShell, not
-    # only on crates/.
-    suites+=(format lint client-release)
-fi
-if [ "$wasm_changed" = 1 ]; then
-    suites+=(wasm)
-fi
-if [ "$engine_changed" = 1 ]; then
-    suites+=(engine)
+if [ -n "$packages" ]; then
+    suites+=(format lint test wasm-changed)
+    ROBIN_GATE_PACKAGES=$packages
+    export ROBIN_GATE_PACKAGES
 fi
 # The editor has its own formatter/lint/test suite; without this selector an
 # editor-only change lands with zero checks (32 unformatted files survived).
@@ -112,12 +104,6 @@ fi
 # same landing, or a stale identity ships and no other suite notices.
 if printf '%s\n' "$paths" | grep -qE '^(crates/robin_script_types/src/natives/signatures\.rs$|crates/robin_spellforge/|vendor/rilua/)'; then
     suites+=(contracts)
-fi
-# `cfg(test)` code compiled for wasm32 is not the shipped artifact; the
-# lifecycle gate's --tests checks are a separate suite so a native-only test
-# module cannot break the browser build unnoticed.
-if printf '%s\n' "$paths" | grep -qE '^crates/robin_rs/.*(/tests/|tests\.rs$|story_regression\.rs$)'; then
-    suites+=(wasm-tests)
 fi
 # `tooling` is the allowlisted shell/Python gate for everything under `scripts/`
 # and `tools/`; it is green on the build host (issue #40).

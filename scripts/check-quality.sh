@@ -23,7 +23,7 @@ assert_build_host() {
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint test wasm-changed core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -39,17 +39,71 @@ case "$1" in
         cargo fmt --all -- --check
         ;;
     lint)
-        # Every target of the workspace with the shipping client's `release`
-        # feature set. `--all-targets` checks each library with and without
-        # cfg(test), so `-D warnings` also reports dead code only the shipped
-        # build sees. `robin_app/release` forwards to `robin_rs/release`;
+        # Every library and binary of the workspace with the shipping client's
+        # `release` feature set, without cfg(test): it type-checks every
+        # dependent of a changed crate and reports dead code only the shipped
+        # build sees. Test code is compiled by `test`, not linted. `robin_app/release` forwards to `robin_rs/release`;
         # naming `robin_rs/release` directly would also read as robin_parity's
         # `dep/feature` syntax. No `-A`: a lint that is wrong for this code is
         # allowed by name where it fires, with a reason. Never add per-invocation
         # rustflags to a suite: Cargo keeps them out of artifact file names, so
         # a suite with different flags overwrites the shared proc-macro and
         # build-script artifacts (docs/slop/build-time-root-causes.md).
-        cargo clippy --locked --workspace --all-targets --features robin_app/release -- -D warnings
+        cargo clippy --locked --workspace --features robin_app/release -- -D warnings
+        ;;
+    test)
+        # The landing gate's tests: the changed packages' own unit and
+        # integration tests (ROBIN_GATE_PACKAGES, set by push-gate; ALL for a
+        # manifest or toolchain change), run concurrently by nextest. Tests of
+        # unchanged dependents do not run; `lint` still type-checks them.
+        packages=${ROBIN_GATE_PACKAGES:?test needs ROBIN_GATE_PACKAGES (push-gate sets it)}
+        selection=()
+        features=()
+        if [ "$packages" = ALL ]; then
+            selection=(--workspace)
+            features=(robin_app/release robin_highscores/test-support)
+        else
+            for package in $packages; do
+                selection+=(-p "$package")
+                case $package in
+                    robin_rs | robin_app) features+=("$package/release") ;;
+                    robin_highscores) features+=(robin_highscores/test-support) ;;
+                esac
+            done
+        fi
+        feature_args=()
+        if [ ${#features[@]} -gt 0 ]; then
+            feature_args=(--features "$(IFS=,; printf '%s' "${features[*]}")")
+        fi
+        cargo nextest run --locked --no-tests=pass "${selection[@]}" "${feature_args[@]}"
+        ;;
+    wasm-changed)
+        # The landing gate's browser check: the changed packages that are part
+        # of the published threaded client, checked for wasm32 in that
+        # configuration. The client binary is checked when the client changed.
+        packages=${ROBIN_GATE_PACKAGES:?wasm-changed needs ROBIN_GATE_PACKAGES (push-gate sets it)}
+        wasm=(--profile wasm-dev --target wasm32-unknown-unknown -Zbuild-std=std,panic_abort
+              --config scripts/wasm-threads.cargo-config.toml)
+        graph=$(cargo tree --locked --target wasm32-unknown-unknown -e normal -p robin_app \
+                --no-default-features --features audio,multiplayer,wasm-threads \
+                --prefix none --format '{p}' | awk '{print $1}' | sort -u)
+        client=0
+        libraries=()
+        for package in $( [ "$packages" = ALL ] && printf '%s\n' "$graph" || printf '%s\n' $packages ); do
+            grep -qx "$package" <<<"$graph" || continue
+            case $package in
+                robin_app | robin_rs) client=1 ;;
+                *) libraries+=(-p "$package") ;;
+            esac
+        done
+        if [ "$client" = 1 ]; then
+            cargo check --locked "${wasm[@]}" -p robin_app --bin robin --no-default-features --features audio,multiplayer,wasm-threads
+        elif [ ${#libraries[@]} -gt 0 ]; then
+            cargo check --locked "${wasm[@]}" --lib "${libraries[@]}"
+        fi
+        if [ "$packages" = ALL ] || grep -qw robin_identity_signer <<<"$packages"; then
+            cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_identity_signer --bin leaderboard_identity_bridge --features identity-signer-bridge
+        fi
         ;;
     core)
         cargo test --locked -p robin_build_info -p robin_build_identity -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support

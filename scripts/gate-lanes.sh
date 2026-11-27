@@ -19,15 +19,14 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 lane_of() {
     case $1 in
-        engine | core | contracts | scripting-llvm | assets) printf engine ;;
-        client-release | client | client-check | protocols | services | parity | tools | gpu | gpu-gl | host) printf client ;;
-        wasm | wasm-tests | wasm-release | browser-audio) printf wasm ;;
+        test | contracts | engine | core | scripting-llvm | assets | client-release | client | protocols | services | parity | tools) printf test ;;
+        wasm | wasm-changed | wasm-tests | wasm-release | browser-audio) printf wasm ;;
         *) printf main ;;
     esac
 }
 
 commit=$(git rev-parse HEAD)
-lanes=(main engine client wasm)
+lanes=(main test wasm)
 declare -A lane_suites=()
 for suite in "$@"; do
     lane=$(lane_of "$suite")
@@ -51,8 +50,11 @@ for lane in "${lanes[@]}"; do
             git worktree add --quiet --detach "$dir" "$commit"
         fi
     fi
+    # The test lane is the gate's critical path; the others yield the cores.
+    priority=10
+    [ "$lane" = test ] && priority=0
     # shellcheck disable=SC2086 # suites are validated names, one word each
-    (cd "$dir" && bash scripts/run-suites.sh $suites) >"$logs/$lane.log" 2>&1 &
+    (cd "$dir" && nice -n "$priority" bash scripts/run-suites.sh $suites) >"$logs/$lane.log" 2>&1 &
     started+=("$lane")
     pids+=("$!")
     printf 'gate-lanes: %s lane: %s\n' "$lane" "$suites" >&2

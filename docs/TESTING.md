@@ -166,8 +166,12 @@ without holding every landing for seven minutes.
 
 The gate's budget is 60 seconds end to end on a warm copy. `scripts/remote-check.sh`
 syncs the gate copy by git (push, then check out only what changed), and
-`scripts/gate-lanes.sh` runs the selected suites in concurrent lanes (lint, engine,
-client, wasm), each a git worktree of the gate copy with its own warm target directory.
+`scripts/gate-lanes.sh` runs the selected suites in concurrent lanes (lint, test,
+wasm), each a git worktree of the gate copy with its own warm target directory; lint
+and wasm run under `nice` so the test lane gets the cores. A landing gates the packages
+it changed: `lint` type-checks the workspace, `test` runs the changed packages' tests,
+`wasm-changed` checks them in the browser build; a manifest or toolchain change gates
+all packages (`docs/superpowers/plans/2026-11-27-sixty-second-gate.md`).
 Inside a lane, `scripts/run-suites.sh` runs the suites that never touch Cargo's build
 directory alongside the Cargo ones, and `tooling` runs only the fixtures the diff can
 affect, concurrently (`scripts/run-fixtures.sh`).

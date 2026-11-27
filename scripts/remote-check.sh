@@ -37,6 +37,7 @@ docs_paths=${ROBIN_DOCS_CHECK_PATHS:-}
 # push-gate exports the landing's diff so `tooling` runs only the fixtures it
 # can affect (scripts/run-fixtures.sh); interactive checks run them all.
 changed_paths=${ROBIN_CHANGED_PATHS:-}
+gate_packages=${ROBIN_GATE_PACKAGES:-}
 # The process-layer e2e suite needs these on the build host. Forward them
 # explicitly instead of making the verifier hand-write an ssh gate: a bare
 # check-quality.sh multiplayer-e2e fails on a missing ROBIN_E2E_BINARY, which
@@ -574,6 +575,7 @@ systemd-run --user --scope --unit=build-${name}-$$ \
     TMPDIR=\$gate_tmp \
     ROBIN_DOCS_CHECK_PATHS=${docs_paths@Q} \
     ROBIN_CHANGED_PATHS=${changed_paths@Q} \
+    ROBIN_GATE_PACKAGES=${gate_packages@Q} \
     ROBIN_E2E_BINARY=${e2e_binary@Q} \
     ROBINHOOD_DATA_DIR=${e2e_data@Q} \
     ROBIN_E2E_EVIDENCE=${e2e_evidence@Q} \

@@ -141,6 +141,31 @@ class QualitySuitesTests(unittest.TestCase):
                 if argument == "--config":
                     self.assertNotIn("rustflags", call[index + 1], call)
 
+    def test_gate_tests_only_the_changed_packages_with_their_features(self):
+        self.environment["ROBIN_GATE_PACKAGES"] = "robin_engine robin_rs robin_highscores"
+        self.run_suite("test")
+        (call,) = self.calls()
+        self.assertEqual(call[:3], ["nextest", "run", "--locked"])
+        self.assertEqual([call[i + 1] for i, a in enumerate(call) if a == "-p"],
+                         ["robin_engine", "robin_rs", "robin_highscores"])
+        self.assertEqual(call[call.index("--features") + 1],
+                         "robin_rs/release,robin_highscores/test-support")
+        self.environment["ROBIN_GATE_PACKAGES"] = "ALL"
+        self.log.unlink()
+        self.run_suite("test")
+        self.assertIn("--workspace", self.calls()[0])
+
+    def test_gate_wasm_checks_the_client_only_when_it_changed(self):
+        # The stub cargo's `tree` reports the browser graph as robin_app alone.
+        self.environment["ROBIN_GATE_PACKAGES"] = "robin_engine"
+        self.run_suite("wasm-changed")
+        self.assertFalse([c for c in self.calls() if c[0] == "check"])
+        self.environment["ROBIN_GATE_PACKAGES"] = "robin_app"
+        self.log.unlink()
+        self.run_suite("wasm-changed")
+        (check,) = [c for c in self.calls() if c[0] == "check"]
+        self.assertIn("wasm-threads", check[check.index("--features") + 1])
+
     def test_wasm_gate_does_not_build_the_release_artifact(self):
         self.run_suite("wasm")
         for call in self.calls():

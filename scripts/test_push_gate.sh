@@ -92,10 +92,10 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$head" "$crates_head" 2>&1) || status=$?
 expect_status 0 'a crates change runs the suites its diff selects'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm tooling' ]; then
-    pass 'the crates change selects lint and wasm, the suites that read every target, and not wasm-release'
+if [ "$selected" = '--suites format lint test wasm-changed tooling' ]; then
+    pass 'a crates change gates its packages: lint, test, wasm-changed'
 else
-    fail "the crates change selects lint and wasm without wasm-release (selected '$selected')"
+    fail "the crates change selects the package suites (selected '$selected')"
 fi
 
 # A change to the browser build plan, the devShell that supplies wasm-opt and
@@ -125,10 +125,10 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$plan_head" "$tools_head" 2>&1) || status=$?
 expect_status 0 'a devShell and release-check change gates wasm, wasm-release and tooling'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites wasm tooling' ]; then
-    pass 'the tool change selects wasm, wasm-release and tooling together'
+if [ "$selected" = '--suites format lint test wasm-changed tooling' ]; then
+    pass 'a devShell change gates every package and the scripts'
 else
-    fail "the tool change selects wasm, wasm-release and tooling (selected '$selected')"
+    fail "the devShell change gates every package (selected '$selected')"
 fi
 
 # A docs-only landing must select the docs link check rather than nothing.
@@ -180,7 +180,7 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$editor_head" "$abi_head" 2>&1) || status=$?
 expect_status 0 'an ABI input change gates the contracts suite'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm contracts' ]; then
+if [ "$selected" = '--suites format lint test wasm-changed contracts' ]; then
     pass 'the ABI change selects contracts'
 else
     fail "the ABI change selects contracts (selected '$selected')"
@@ -197,10 +197,10 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$abi_head" "$wasmtest_head" 2>&1) || status=$?
 expect_status 0 'a wasm test-module change gates wasm-tests'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm wasm-tests' ]; then
-    pass 'the wasm test module selects wasm-tests'
+if [ "$selected" = '--suites format lint test wasm-changed' ]; then
+    pass 'a client test module gates the client package like any source'
 else
-    fail "the wasm test module selects wasm-tests (selected '$selected')"
+    fail "the client test module selects the package suites (selected '$selected')"
 fi
 
 # A change with no gated path must still select nothing.

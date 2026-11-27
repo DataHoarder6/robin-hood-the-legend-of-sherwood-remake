@@ -9,11 +9,11 @@ set -uo pipefail
 suite=${1:?usage: quality-preflight.sh <suite>}
 tools=(cargo)
 case $suite in
-    client | client-release) tools+=(cargo-nextest) ;;
+    client | client-release | test) tools+=(cargo-nextest) ;;
     wasm-release) tools+=(wasm-objdump wasm-opt wasm-strip node python3 sha256sum) ;;
     tooling) tools+=(python3 pnpm node jq) ;;
     editor | editor-browser) tools+=(pnpm node) ;;
-    format | lint | core | contracts | scripting-llvm | engine | assets | protocols | services | parity | parity-cross | client-check | tools | wasm | wasm-tests | browser-audio | native-lifecycle | multiplayer-e2e | gpu | gpu-gl | host | unreferenced-items | web | docs | fixtures-demo | fixtures-fullgame | fixtures-legacy-linux) ;;
+    format | lint | wasm-changed | core | contracts | scripting-llvm | engine | assets | protocols | services | parity | parity-cross | client-check | tools | wasm | wasm-tests | browser-audio | native-lifecycle | multiplayer-e2e | gpu | gpu-gl | host | unreferenced-items | web | docs | fixtures-demo | fixtures-fullgame | fixtures-legacy-linux) ;;
     *) printf 'quality-preflight: unknown-suite %s\n' "$suite" >&2; exit 2 ;;
 esac
 
