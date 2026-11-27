@@ -60,11 +60,7 @@ async function withFixture<T>(fixture: Fixture, run: (base: string) => Promise<T
   }
 }
 
-function bootAgainstFixture(
-  base: string,
-  record: BootRecord,
-  signal: AbortSignal,
-): Promise<void> {
+function bootAgainstFixture(base: string, record: BootRecord, signal: AbortSignal): Promise<void> {
   const wasm: RobinWasmModule = {
     default: async () => {},
     wasm_boot: () => {
@@ -133,7 +129,10 @@ test("e2e: a hung asset fails boot naming it inside the boot budget", async () =
         assert.match(message, /hung\.bin/u);
         return true;
       });
-      assert.ok(!message.includes("did not settle"), "the budget, not the boot, must not decide the outcome");
+      assert.ok(
+        !message.includes("did not settle"),
+        "the budget, not the boot, must not decide the outcome",
+      );
       assert.equal(record.booted, false);
       assert.equal(record.started, false);
       assert.ok(

@@ -197,7 +197,9 @@ test("a stalled asset times out with its URL and releases the remaining workers"
         fetch: async (input) => {
           const url = String(input);
           if (url.endsWith("preload-assets.json"))
-            return Response.json(Array.from({ length: 30 }, (_, i) => (i === 0 ? "hung.bin" : `${i}.bin`)));
+            return Response.json(
+              Array.from({ length: 30 }, (_, i) => (i === 0 ? "hung.bin" : `${i}.bin`)),
+            );
           started.push(url);
           if (url.endsWith("hung.bin")) return new Promise<Response>(() => {});
           // Slow enough that the 30 ms deadline wins before a worker can
@@ -229,7 +231,9 @@ test("a failed asset aborts its siblings before the next batch is fetched", asyn
         fetch: async (input) => {
           const url = String(input);
           if (url.endsWith("preload-assets.json"))
-            return Response.json(Array.from({ length: 30 }, (_, i) => (i === 0 ? "bad.bin" : `${i}.bin`)));
+            return Response.json(
+              Array.from({ length: 30 }, (_, i) => (i === 0 ? "bad.bin" : `${i}.bin`)),
+            );
           started.push(url);
           if (url.endsWith("bad.bin")) return new Response(null, { status: 404 });
           await new Promise((resolve) => setTimeout(resolve, 20));
