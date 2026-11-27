@@ -1581,6 +1581,15 @@ A list of which additional features we have added, which ones we might still wan
 - **Adaptive pressure (opt-in).** With `extra_guards` enabled, sustained noisy
   Yellow/Red play wakes staged reinforcement bodies; stealthy Green play leaves
   them asleep. Default and replay hashes are untouched.
+- **Nine-node clover skill tree.** The flat clover perks are replaced by three
+  tiers of three skills: fleet footed (+25% movement), hardy (+25 HP), silent
+  step (half walk noise), keen ear (longer hearing), burglar's kit (lockpick and
+  climb), and the combat nodes. Purchases are authoritative commands and are
+  deterministic from the campaign's skill bitmask; no save migration is needed
+  and old saves load with the previous perk flags as a compatibility mirror.
+  Replay, network and snapshot versions were bumped for the new command and
+  state representation.
+
 - **Hidden-ground outlines.** Ground hidden behind buildings gets dotted
   outlines; hold Shift (Left or Right) to reveal every hidden zone in the map.
   This is presentation-only.
