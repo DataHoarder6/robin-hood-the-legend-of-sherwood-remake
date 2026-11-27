@@ -89,7 +89,7 @@ export class TextureDisplay {
     this.configured.add(material);
     const qualifiedShader = hasQualifiedSourceDisplayShader(material);
     const previous = material.onBeforeCompile.bind(material);
-    const compile: THREE.Material["onBeforeCompile"] = (shader, renderer) => {
+    material.onBeforeCompile = (shader, renderer) => {
       previous(shader, renderer);
       shader.uniforms.showSynthesized = this.synthesized;
       shader.fragmentShader = "uniform bool showSynthesized;\n" + shader.fragmentShader;
@@ -115,14 +115,16 @@ export class TextureDisplay {
         ),
       );
     };
-    material.onBeforeCompile = compile;
     const previousKey = material.customProgramCacheKey();
     const contractKey = foliage
       ? `foliage-ownership-color-r-v1:${material.userData.source_ownership_backface}:${material.userData.foliage_backface_fill}`
       : "source-ownership-display-v1";
-    const key: THREE.Material["customProgramCacheKey"] = () => `${previousKey}:${contractKey}`;
-    material.customProgramCacheKey = key;
-    if (qualifiedShader) sourceDisplayHooks.set(material, { compile, key });
+    material.customProgramCacheKey = () => `${previousKey}:${contractKey}`;
+    if (qualifiedShader)
+      sourceDisplayHooks.set(material, {
+        compile: material.onBeforeCompile,
+        key: material.customProgramCacheKey,
+      });
     material.needsUpdate = true;
   }
 
@@ -142,17 +144,18 @@ export class TextureDisplay {
     this.ambianceConfigured.add(material);
     const qualifiedShader = hasQualifiedSourceDisplayShader(material);
     const previous = material.onBeforeCompile.bind(material);
-    const compile: THREE.Material["onBeforeCompile"] = (shader, renderer) => {
+    material.onBeforeCompile = (shader, renderer) => {
       previous(shader, renderer);
       if (renderer === this.ambianceRenderer) injectAmbianceField(shader, this.ambiance);
     };
-    material.onBeforeCompile = compile;
     const previousKey = material.customProgramCacheKey();
-    const key: THREE.Material["customProgramCacheKey"] = () =>
-      `${previousKey}:${AMBIANCE_FIELD_PROGRAM_KEY}`;
-    material.customProgramCacheKey = key;
+    material.customProgramCacheKey = () => `${previousKey}:${AMBIANCE_FIELD_PROGRAM_KEY}`;
     // The field is a display-only colour transform like the ownership display hook above.
-    if (qualifiedShader) sourceDisplayHooks.set(material, { compile, key });
+    if (qualifiedShader)
+      sourceDisplayHooks.set(material, {
+        compile: material.onBeforeCompile,
+        key: material.customProgramCacheKey,
+      });
     material.needsUpdate = true;
   }
 

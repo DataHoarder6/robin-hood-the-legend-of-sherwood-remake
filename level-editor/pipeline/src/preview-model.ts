@@ -164,7 +164,5 @@ export async function generatePreview(
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  throw new Error(
-    "Internal module; generate lossy models and previews with refinement/blender/lossy_assets.py",
-  );
+  throw new Error("Internal module; generate lossy models and previews with refinement/blender/lossy_assets.py");
 }

@@ -15,32 +15,13 @@ const signals = JSON.parse(readFileSync(signalsPackage, "utf8"));
 const entry = pathToFileURL(resolve(dirname(solidPackage), "dist/solid.dev.js")).href;
 const script = `const m = await import(${JSON.stringify(entry)}); if (typeof m.createSignal !== 'function' || typeof m.DEV?.setConsoleFooter !== 'function') throw Error('Solid development startup API is incomplete'); console.log('PASS_SOLID_BROWSER_DEVELOPMENT_STARTUP');`;
 try {
-  const result = execFileSync(
-    process.execPath,
-    ["--conditions=browser", "--conditions=development", "--input-type=module", "-e", script],
-    { cwd: app, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
-  console.log(
-    JSON.stringify({
-      status: result.trim(),
-      solid: solid.version,
-      signals: signals.version,
-      solidPackage,
-      signalsPackage,
-      scope:
-        "Browser/development module evaluation; DOM mounting still requires an actual browser smoke.",
-    }),
-  );
+  const result = execFileSync(process.execPath, [
+    "--conditions=browser", "--conditions=development", "--input-type=module", "-e", script,
+  ], { cwd: app, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  console.log(JSON.stringify({ status: result.trim(), solid: solid.version, signals: signals.version,
+    solidPackage, signalsPackage, scope: "Browser/development module evaluation; DOM mounting still requires an actual browser smoke." }));
 } catch (error) {
-  console.error(
-    JSON.stringify({
-      status: "FAIL_SOLID_BROWSER_DEVELOPMENT_STARTUP",
-      solid: solid.version,
-      signals: signals.version,
-      solidPackage,
-      signalsPackage,
-      error: String(error.stderr ?? error),
-    }),
-  );
+  console.error(JSON.stringify({ status: "FAIL_SOLID_BROWSER_DEVELOPMENT_STARTUP", solid: solid.version,
+    signals: signals.version, solidPackage, signalsPackage, error: String(error.stderr ?? error) }));
   process.exitCode = 1;
 }

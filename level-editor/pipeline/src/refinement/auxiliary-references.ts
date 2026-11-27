@@ -46,36 +46,24 @@ export async function auxiliaryReferences(
   if (
     !Array.isArray(manifest.references) ||
     !manifest.references.length ||
-    manifest.references.filter((reference) => reference.source !== "region-guide").length > 4 ||
-    manifest.references.filter((reference) => reference.source === "region-guide").length > 1
+    manifest.references.filter(reference => reference.source !== "region-guide").length > 4 ||
+    manifest.references.filter(reference => reference.source === "region-guide").length > 1
   )
-    throw new Error(
-      "Supply up to four supplementary references and at most one aligned region guide",
-    );
+    throw new Error("Supply up to four supplementary references and at most one aligned region guide");
   const images: Buffer[] = [];
   const records = [];
   const descriptions: string[] = [];
   for (const reference of manifest.references) {
     if (reference.source === "region-guide") {
-      if (!reference.role?.trim())
-        throw new Error("Region guide requires an explicit region legend");
+      if (!reference.role?.trim()) throw new Error("Region guide requires an explicit region legend");
       const image = await fs.readFile(path.resolve(path.dirname(file), reference.file));
       if (sha(image) !== reference.sha256) throw new Error("Region guide hash changed");
-      const [metadata, target] = await Promise.all([
-        sharp(image).metadata(),
-        sharp(input).metadata(),
-      ]);
-      if (
-        metadata.format !== "png" ||
-        metadata.width !== target.width ||
-        metadata.height !== target.height
-      )
+      const [metadata, target] = await Promise.all([sharp(image).metadata(), sharp(input).metadata()]);
+      if (metadata.format !== "png" || metadata.width !== target.width || metadata.height !== target.height)
         throw new Error("Region guide must match the exact input canvas");
       images.push(image);
       records.push(reference);
-      descriptions.push(
-        `Image ${images.length + 2} is an aligned region guide sent as an ordinary image, not a provider edit mask. ${reference.role} Use only its region locations; never copy its diagnostic colors or markings into the output. Local compositing enforces protected pixels independently.`,
-      );
+      descriptions.push(`Image ${images.length + 2} is an aligned region guide sent as an ordinary image, not a provider edit mask. ${reference.role} Use only its region locations; never copy its diagnostic colors or markings into the output. Local compositing enforces protected pixels independently.`);
       continue;
     }
     if (reference.source === "material") {
@@ -84,18 +72,12 @@ export async function auxiliaryReferences(
       const image = await fs.readFile(path.resolve(path.dirname(file), reference.file));
       if (sha(image) !== reference.sha256) throw new Error("Material reference hash changed");
       const metadata = await sharp(image).metadata();
-      if (
-        metadata.format !== "png" ||
-        !metadata.width ||
-        !metadata.height ||
-        Math.max(metadata.width, metadata.height) > 3840
-      )
+      if (metadata.format !== "png" || !metadata.width || !metadata.height ||
+          Math.max(metadata.width, metadata.height) > 3840)
         throw new Error("Material reference must be a PNG no larger than 3840 pixels per edge");
       images.push(image);
       records.push(reference);
-      descriptions.push(
-        `Image ${images.length + 2} is a supplementary material example from ${reference.asset_id}: ${reference.role}. Use its texture character and material detail only; do not copy its shape, proportions, camera, lighting, background, or gray unknown patches.`,
-      );
+      descriptions.push(`Image ${images.length + 2} is a supplementary material example from ${reference.asset_id}: ${reference.role}. Use its texture character and material detail only; do not copy its shape, proportions, camera, lighting, background, or gray unknown patches.`);
       continue;
     }
     if (reference.source !== "input" && reference.source !== "lighting")
@@ -136,9 +118,7 @@ export async function auxiliaryReferences(
       throw new Error("Auxiliary reference is not an exact magnified approved crop");
     images.push(image);
     records.push({ ...reference, source_sha256: sha(source) });
-    descriptions.push(
-      `Image ${images.length + 2} is a ${reference.scale}x crop of the ${reference.source === "input" ? "first" : "second"} image at full-sheet pixel box (${reference.crop.left},${reference.crop.top},${reference.crop.width},${reference.crop.height}).`,
-    );
+    descriptions.push(`Image ${images.length + 2} is a ${reference.scale}x crop of the ${reference.source === "input" ? "first" : "second"} image at full-sheet pixel box (${reference.crop.left},${reference.crop.top},${reference.crop.width},${reference.crop.height}).`);
   }
   return {
     images,

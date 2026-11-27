@@ -14,7 +14,7 @@ export interface NativeExtractionScenes {
   depth: THREE.Object3D;
   dispose(): void;
 }
-const trusted = new WeakSet();
+const trusted = new WeakSet<object>();
 const retirement = new WeakMap<NativeExtractionContext, () => void>();
 const retired = new WeakSet<NativeExtractionContext>();
 export interface NativeExtractionContext {
@@ -43,8 +43,7 @@ export async function bindNativeExtractionContext(input: {
     !/^[a-f0-9]{64}$/.test(input.manifestSha256) ||
     (await digest(manifestBytes)) !== input.manifestSha256 ||
     (await digest(bytes)) !== binding.source.model_sha256
-  )
-    throw new Error("Native extraction context pin mismatch");
+  ) throw new Error("Native extraction context pin mismatch");
   const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (
     bytes.length < 20 ||
@@ -60,7 +59,9 @@ export async function bindNativeExtractionContext(input: {
   const verifyGeometry = createNativeExtractionGeometryVerifier(bytes, json);
   if (JSON.stringify(json) !== JSON.stringify(parserJson))
     throw new Error("Native extraction parser differs from pinned model");
-  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as NativeExtractionManifest;
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestBytes),
+  ) as NativeExtractionManifest;
   if (
     manifest.version !== 1 ||
     manifest.model_sha256 !== binding.source.model_sha256 ||
@@ -104,7 +105,9 @@ export async function bindNativeExtractionContext(input: {
     const key = `${index}:${primitive!.primitives}`;
     if (seenPrimitives.has(key)) throw new Error("Native extraction duplicate loaded primitive");
     seenPrimitives.add(key);
-    geometryChecks.push(verifyGeometry(mesh, primitive!.meshes!, primitive!.primitives!));
+    geometryChecks.push(
+      verifyGeometry(mesh, primitive!.meshes!, primitive!.primitives!),
+    );
     seen.add(index);
     meshRoles.set(mesh, role);
   });
@@ -171,10 +174,8 @@ export async function bindNativeExtractionContext(input: {
             )
               throw new Error("Native extraction context unsupported receiver depth");
             const material = original.clone();
-            // Copy the exact hook references the original uses; cloned materials keep the same
-            // renderer callbacks. Reflect.get reads them as values without an unbound-method.
-            material.onBeforeCompile = Reflect.get(original, "onBeforeCompile");
-            material.customProgramCacheKey = Reflect.get(original, "customProgramCacheKey");
+            material.onBeforeCompile = original.onBeforeCompile;
+            material.customProgramCacheKey = original.customProgramCacheKey;
             material.colorWrite = false;
             materials.push(material);
             return material;
@@ -218,6 +219,7 @@ export function prepareNativeExtractionContext(
   if (!trusted.has(context)) throw new Error("Unverified native extraction context");
   return context.prepare(object, binding);
 }
+
 
 /** Release verification snapshots after an independent pinned session is ready.
  * The strict handle is permanently invalid; this never skips a live strict check.

@@ -579,8 +579,8 @@ export function nativePresentationOrder<T extends Omit<NativePresentationElement
       changed.length !== 2 ||
       changed[1] !== changed[0]! + 1 ||
       !changed.every((index) => verifiedDisjointPair.includes(baseline[index]!)) ||
-      baseline[changed[0]!] !== other[changed[1]] ||
-      baseline[changed[1]] !== other[changed[0]!]
+      baseline[changed[0]!] !== other[changed[1]!] ||
+      baseline[changed[1]!] !== other[changed[0]!]
     )
       throw new Error("Painted ordering equivalence changes another element");
   }
