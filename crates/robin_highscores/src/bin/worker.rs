@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+robin_build_identity::define!();
+
 #[cfg(not(target_os = "linux"))]
 compile_error!("robin-highscores-worker is Linux-only");
 

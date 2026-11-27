@@ -57,8 +57,8 @@ pub struct BrowserRuntimeCompatibility {
 impl BrowserRuntimeCompatibility {
     pub fn current() -> Self {
         Self {
-            engine_commit: crate::replay_format::ENGINE_SOURCE_COMMIT,
-            artifact_short: robin_replay_format::ENGINE_VERSION_HASH,
+            engine_commit: crate::replay_format::engine_source_commit(),
+            artifact_short: robin_replay_format::engine_version_hash(),
             net_protocol: robin_engine::multiplayer::NET_PROTOCOL_VERSION,
             ticket_schema: ticket_schema_or_absent(),
         }

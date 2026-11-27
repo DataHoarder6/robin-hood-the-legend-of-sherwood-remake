@@ -8,6 +8,8 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+# Final artifact: stamps the source commit (robin_build_info).
+robin_build_identity.workspace = true
 robin_replay_format.workspace = true
 sha2.workspace = true
 wasm-bindgen.workspace = true

@@ -18,6 +18,7 @@ robin_modding_tools = { workspace = true, default-features = false }
 robin_engine.workspace = true
 robin_assets.workspace = true
 robin_replay_format.workspace = true
+robin_build_info.workspace = true
 robin_run_protocol = { workspace = true, features = ["authentication"] }
 robin_util.workspace = true
 tempfile.workspace = true
@@ -166,6 +167,9 @@ velopack = { version = "1.2.161", optional = true }
 rfd = { version = "0.17", optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
+# The Android APK loads this library as a `cdylib` (android/app/build.gradle),
+# so on Android it is the final artifact and stamps the source commit itself.
+robin_build_identity.workspace = true
 # Direct JNI calls let android_main ask the Java Activity to leave the
 # Android task before we hard-exit the process for winit's single-EventLoop
 # limitation.
@@ -252,10 +256,6 @@ syn = { workspace = true, features = ["full", "visit"] }
 naga = { version = "30", features = ["wgsl-in", "glsl-out"] }
 robin_engine = { workspace = true, features = ["test-helpers", "test-support"] }
 
-[build-dependencies]
-embed-resource = "3.0"
-cc = "1"
-
 [features]
 # Bare builds are intentionally dependency-minimal. Opt into the normal native
 # game with `desktop`, or select individual integrations as needed.
@@ -305,45 +305,5 @@ retroarch-shaders = ["dep:librashader", "dep:walkdir"]
 # scripts/build-wasm-threads.sh; the plain wasm build must not enable this.
 wasm-threads = ["robin_assets/wasm-threads"]
 
-[[bin]]
-name = "robin"
-path = "src/bin/robin.rs"
-test = false
-
-# This diagnostic binary has no unit tests. Declaring it explicitly keeps
-# `cargo test` from compiling and linking an empty test harness for it.
-[[bin]]
-name = "dump_level"
-path = "src/bin/dump_level.rs"
-test = false
-required-features = ["tools"]
-
-[[bin]]
-name = "convert_datadir"
-path = "src/bin/convert_datadir.rs"
-# Its unit tests run explicitly with --bin convert_datadir; see docs/TESTING.md.
-test = false
-required-features = ["tools"]
-
 [lints]
 workspace = true
-
-[[example]]
-name = "run_script"
-test = true
-
-[[example]]
-name = "batch_run"
-test = true
-
-[[example]]
-name = "verify_rollback"
-test = true
-
-[[example]]
-name = "pak_res_roundtrip"
-test = true
-
-[[example]]
-name = "jxl_map_roundtrip"
-test = true

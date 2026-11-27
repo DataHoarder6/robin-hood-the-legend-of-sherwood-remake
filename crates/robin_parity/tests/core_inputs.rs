@@ -1,3 +1,5 @@
+robin_build_identity::define!();
+
 use robin_engine::audio_durations::AudioDurations;
 use robin_engine::engine::LevelAssets;
 use robin_engine::profiles::ProfileManager;

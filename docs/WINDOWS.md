@@ -36,7 +36,7 @@ toolchain:
 ```powershell
 git clone https://github.com/DataHoarder6/robin-hood-the-legend-of-sherwood-remake
 cd robin-hood-the-legend-of-sherwood-remake
-cargo build --release --features desktop,multiplayer -p robin_rs --bin robin
+cargo build --release --features desktop,multiplayer -p robin_app --bin robin
 $env:ROBINHOOD_DATA_DIR = 'C:\path\to\game'   # the GOG install dir, the one with DATA\
 .\target\release\robin.exe
 ```
@@ -110,11 +110,11 @@ publishing. Neither is implemented yet.
 
 ## Version string
 
-`robin --version` prints `crate::version::CLI_VERSION` —
+`robin --version` prints `robin_rs::version::cli_version()` —
 `<package version>+<12-hex commit>` — so the engine commit a build was made from
 is visible without opening the game, and two seats can be compared before a
-shared session. The commit half is `ROBIN_GIT_HASH`, stamped by
-`build-support/robin_build.rs` from `git rev-parse HEAD`; it is the same prefix
+shared session. The commit half is stamped by
+`crates/robin_build_identity/build.rs` from `git rev-parse HEAD`; it is the same prefix
 replays and multiplayer tickets carry. Build from a checkout with `.git` present,
 or the stamp is the literal `unknown` and the engine rejects it.
 
@@ -124,7 +124,7 @@ is still what a packaged release sets, so a release can label the menu with its
 tag while both binaries agree on the commit:
 
     $env:ROBIN_PACKAGE_VERSION = '0efa52f57'
-    cargo build --release --features desktop,multiplayer -p robin_rs --bin robin
+    cargo build --release --features desktop,multiplayer -p robin_app --bin robin
 
 ## Running
 

@@ -1,5 +1,7 @@
 //! Guard the fast replay build against accidentally regaining client stacks.
 
+robin_build_identity::define!();
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[test]

@@ -33,7 +33,7 @@ fn parse_replay_spec(s: &str) -> Result<String, String> {
 #[derive(Parser, Debug, Clone, Serialize, Deserialize)]
 // `name` is what clap puts in `--version` and `--help`; the crate is `robin_rs`
 // but the binary, the package and every path that installs it say `robin`.
-#[command(name = "robin", version = crate::version::CLI_VERSION, about)]
+#[command(name = "robin", version = crate::version::cli_version(), about)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct CliArgs {
     /// Disable audio playback.
@@ -1469,7 +1469,7 @@ mod tests {
         assert_eq!(command.get_name(), "robin");
         let rendered = command.render_version();
         assert!(
-            rendered.contains(env!("ROBIN_GIT_HASH")),
+            rendered.contains(robin_build_info::short_commit()),
             "--version must identify the built commit, got {rendered}"
         );
     }

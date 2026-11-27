@@ -4,4 +4,4 @@
 set -euo pipefail
 repository=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repository"
-cargo build --locked -p robin_rs --bin robin "$@"
+cargo build --locked -p robin_app --bin robin "$@"

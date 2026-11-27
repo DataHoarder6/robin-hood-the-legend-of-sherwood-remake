@@ -1,6 +1,8 @@
 //! Subprocess tests of the verifier binary contract:
 //! `--job FILE --replay FILE --content-root DIR --result FILE`.
 
+robin_build_identity::define!();
+
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -171,7 +173,8 @@ fn compact_replay(mission_id: &str, sim_config: robin_engine::engine::SimConfig)
     }
     .try_into()
     .unwrap();
-    robin_replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH).unwrap()
+    robin_replay_format::encode_compact(&replay, robin_replay_format::engine_version_hash())
+        .unwrap()
 }
 
 fn assert_rejected(output: &VerifierOutputV2, code: VerificationRejectionCodeV1, detail: &str) {
@@ -401,7 +404,7 @@ fn coop_replay_requires_a_coop_board() {
     disguised_solo.header.sim_config.coop.players = 1;
     let disguised_solo = robin_replay_format::encode_compact(
         &disguised_solo.try_into().unwrap(),
-        robin_replay_format::ENGINE_VERSION_HASH,
+        robin_replay_format::engine_version_hash(),
     )
     .unwrap();
     let fixture = Fixture::new(
@@ -416,7 +419,7 @@ fn coop_replay_requires_a_coop_board() {
     file.frames.get_mut(&0).unwrap().input.commands.clear();
     let replay = robin_replay_format::encode_compact(
         &file.try_into().unwrap(),
-        robin_replay_format::ENGINE_VERSION_HASH,
+        robin_replay_format::engine_version_hash(),
     )
     .unwrap();
     let fixture = Fixture::new(

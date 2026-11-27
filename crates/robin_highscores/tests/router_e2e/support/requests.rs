@@ -34,7 +34,8 @@ pub(crate) fn compact_replay_fixture(label: &str) -> Vec<u8> {
     }
     .try_into()
     .expect("valid replay fixture");
-    robin_replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH).unwrap()
+    robin_replay_format::encode_compact(&replay, robin_replay_format::engine_version_hash())
+        .unwrap()
 }
 
 pub(crate) fn replay_artifact(bytes: &[u8]) -> ReplayArtifactV1 {

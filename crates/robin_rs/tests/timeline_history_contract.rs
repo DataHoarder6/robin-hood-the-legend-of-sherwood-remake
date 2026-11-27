@@ -1,5 +1,7 @@
 //! Black-box contracts for checkpoint/journal lifecycle boundaries.
 
+robin_build_info::define_test_identity!();
+
 use robin_engine::engine::{
     ExternalAction, ExternalFacts, SimCommand, SimulationFrameInput, SoundBoundary,
     SoundBoundaryPolicy,

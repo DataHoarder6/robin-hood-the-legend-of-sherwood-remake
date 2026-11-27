@@ -2047,9 +2047,11 @@ mod required_state_tests {
             recording.reopen().unwrap(),
         ))
         .unwrap();
-        let compact =
-            crate::replay_format::encode_compact(&data, crate::replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let compact = crate::replay_format::encode_compact(
+            &data,
+            crate::replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let (_, decoded) = crate::replay_format::decode_compact(&compact).unwrap();
         let mut profiles = base.clone();
         prepare_replay_mission(

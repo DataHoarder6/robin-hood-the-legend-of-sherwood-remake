@@ -59,7 +59,7 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 
 | Suite argument | Scope | What it checks |
 | --- | --- | --- |
-| `core` | `robin_util`, `robin_display_text`, `robin_state_hash_derive`, `robin_spellforge`, `robin_lua` | Unit, integration and doc tests |
+| `core` | `robin_build_info`, `robin_build_identity`, `robin_util`, `robin_display_text`, `robin_state_hash_derive`, `robin_spellforge`, `robin_lua` | Unit, integration and doc tests, including build-identity provenance |
 | `contracts` | `robin_spellforge` ABI test | `executable_abi_digest_is_stable`: every `NATIVE_REGISTRY` change needs a reviewed golden update |
 | `scripting-llvm` | `robin_spellforge`, `robin_lua` | Explicit poison recovery and native-session unwind tests with LLVM package overrides |
 | `engine` | `robin_engine` | Deterministic simulation tests |
@@ -68,11 +68,12 @@ workspace member has an explicit gate, so adding a crate requires assigning it.
 | `services` | `robin_highscores`, `robin_replay_verifier` | Server and verifier tests |
 | `parity` | `robin_parity` | Runner unit/contract tests; does not replay licensed corpora |
 | `parity-cross` | Provisioned native `robin` plus the Windows `robin.exe` under wine | One recording replayed by both builds; the per-25-frame state-hash chains must match exactly |
-| `client` | `robin_rs`, default features | Client tests, then a separate `robin` binary build |
-| `client-release` | `robin_rs`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates; audio example check |
-| `tools` | `robin_modding_tools`; `robin_rs` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
-| `wasm` | `robin_replay_admission_wasm`, `robin_rs`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the shipped `audio,multiplayer` client and its threaded plan |
-| `wasm-tests` | `robin_rs` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
+| `client` | `robin_rs`, `robin_app`, default features | Client tests and the binary/example tests, then a separate `robin` binary build |
+| `client-release` | `robin_rs`, `robin_app`, `release` features | Client library tests and binary build with desktop/audio/multiplayer/updates |
+| `tools` | `robin_modding_tools`; `robin_app` with `tools` | Modding CLI and encoder tests; explicit converter/dump tests; check tool binaries and examples |
+| `wasm` | `robin_replay_admission_wasm`, `robin_app`, `robin_identity_signer` | Target checks for `wasm32-unknown-unknown` using `wasm-dev`, then the shipped `audio,multiplayer` client and its threaded plan, linked |
+| `wasm-release` | `robin_app` `wasm-release` artifact | The published fat-LTO module built by `wasm-www/scripts/build-runtime.mjs` and its shared-memory, export and schema contract; gated only when the release plan changes, and run by CI on every push to `main` |
+| `wasm-tests` | `robin_rs` and `robin_app` `cfg(test)` code | The two `--tests` checks against wasm32 (`audio` and `audio,multiplayer`); native-only test code must not compile for the browser |
 | `browser-audio` | `robin_rs`, WASM `audio,multiplayer` | Audio and multiplayer target checks, linked module, real Chrome audio ownership/residency, shared protocol and identity tests |
 | `native-lifecycle` | Provisioned prebuilt native `robin` and Leicester demo | Ordinary live/export plus save/load-back, each replayed headlessly and graphically to EOF |
 | `multiplayer-e2e` | Provisioned prebuilt native `robin` and full-game data | Process-layer rows of the scenario corpus: real signals, per-install isolation, assertions over `/state`; core and transport rows name the Rust test that proves them |
@@ -126,17 +127,17 @@ code.
 
 ```sh
 # 1. Why a unit is dirty — no rebuild needed. Use `trace` for the .json reason.
-CARGO_LOG=cargo::compiler::fingerprint=info cargo build -p robin_rs --bin robin
+CARGO_LOG=cargo::compiler::fingerprint=info cargo build -p robin_app --bin robin
 
 # 2. Cold vs warm cost and the critical path; open target/cargo-timings/cargo-timing.html
-cargo build --timings -p robin_rs --bin robin
+cargo build --timings -p robin_app --bin robin
 
 # 3. Attribute the slowest crate from step 2 to a compiler phase.
 cargo rustc -p robin_rs --lib -- -Zself-profile -Zself-profile-events=default,llvm
 summarize summarize *.mm_profdata
 
 # 4. Isolate the link from codegen.
-cargo rustc -p robin_rs --bin robin -- --print link-args
+cargo rustc -p robin_app --bin robin -- --print link-args
 
 # 5. Audit key inputs before blaming the compiler, then record the hit rate.
 env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_INCREMENTAL|CARGO_TARGET_[A-Z0-9_]+_RUSTFLAGS)='
@@ -156,9 +157,20 @@ are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
 host through one `scripts/remote-check.sh --suites` call over a single synced
 copy, and the first failure stops the landing. `wasm` joins them when anything
 under `crates/` changed: the browser client is a shipped artifact and no other
-suite compiles it.
+suite compiles it. `wasm-release`, the published fat-LTO module, joins only when
+its release plan changes (the build plan, profiles, toolchain or devShell); CI
+builds it on every push to `main`, so a release-only break turns that run red
+without holding every landing for seven minutes.
 
-The in-flight gate work adds `check`, `docs`, `web` and `editor` as gate suites,
+No gate suite passes its own rustflags (`--config ...rustflags`, `RUSTFLAGS`).
+Cargo keeps rustflags out of artifact file names, so such a suite overwrites the
+proc-macro and build-script artifacts every other suite shares, and each later
+suite rebuilds the dependency graph. `lint` runs clippy over `--all-targets`
+with `-D warnings`, which checks every library with and without `cfg(test)`, so
+it also covers the dead code only the shipped build sees
+([`build-time-root-causes.md`](slop/build-time-root-causes.md)).
+
+The in-flight gate work adds `docs`, `web` and `editor` as gate suites,
 `client-check` as a local-only suite (`bash scripts/check-quality.sh client-check`)
 and `scripts/build-status.sh` as a build/gate reporter. Run
 `bash scripts/check-quality.sh` for the live suite list; the scripts own
@@ -281,14 +293,14 @@ constants. Run the same contract check locally after changing protocol/schema
 versions:
 
 ```sh
-cargo build --locked -p robin_rs --example export_runtime_contract
+cargo build --locked -p robin_app --example export_runtime_contract
 target/debug/examples/export_runtime_contract --check wasm-www/runtime-contract.json
 ```
 
 Small inspection tools are built on demand:
 
 ```sh
-cargo build -p robin_rs --example count_quads --example list_mods --example verify_rollback
+cargo build -p robin_app --example count_quads --example list_mods --example verify_rollback
 target/debug/examples/count_quads datadirs/demo_leicester_ecoste/Data/Levels/Dem_Lei_MP.scb
 target/debug/examples/list_mods datadirs/mods
 target/debug/examples/verify_rollback --data-dir datadirs/demo_leicester_ecoste

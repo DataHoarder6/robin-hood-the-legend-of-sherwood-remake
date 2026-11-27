@@ -9,6 +9,9 @@
 //! and publishes only verifier-derived results. There is no debug or loopback
 //! HTTP endpoint capable of promoting a submission.
 
+#[cfg(test)]
+robin_build_identity::define!();
+
 // Every storage path (openat2 confinement, statx mount identity, procfs,
 // systemd readiness) is Linux-specific; nothing builds this crate elsewhere.
 #[cfg(not(target_os = "linux"))]

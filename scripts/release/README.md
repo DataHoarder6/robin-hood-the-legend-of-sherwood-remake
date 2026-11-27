@@ -36,7 +36,7 @@ API errors and malformed feeds fail the check rather than removing the floor.
 
 ## Windows application manifest
 
-The game build embeds `crates/robin_rs/windows/robin.manifest` as process
+The game build embeds `crates/robin_app/windows/robin.manifest` as process
 manifest resource 1. It declares `asInvoker` privileges and Windows 10/11
 compatibility so Windows need not infer legacy compatibility behavior.
 Resource compilation failures fail the build. Other target platforms skip

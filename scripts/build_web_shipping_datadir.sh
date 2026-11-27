@@ -34,7 +34,7 @@ fi
 # explicitly: the converter used to look it up relative to the current
 # directory, which silently fell back to the game files when run from a
 # worktree. Which remaster belongs to which track comes from the tracked
-# crates/robin_rs/src/bin/convert_datadir/lossless_music_mapping.json, selected
+# crates/robin_app/src/bin/convert_datadir/lossless_music_mapping.json, selected
 # by the sha256 of the datadir's music files; the drop's own mapping.json is
 # superseded and ignored.
 toolchain=${ROBIN_RELEASE_TOOLCHAIN:-$HOME/.local/share/robin_hood/deployment-toolchain}
@@ -67,7 +67,7 @@ for avif_tool in avifenc avifdec; do
         exit 1
     fi
 done
-cargo build --locked --release -p robin_rs --bin convert_datadir --features tools
+cargo build --locked --release -p robin_app --bin convert_datadir --features tools
 target/release/convert_datadir \
     --input "$source_datadir" \
     --output "$output_dir" \

@@ -2344,7 +2344,7 @@ mod tests {
             let restarted = service.exports().snapshot().unwrap().parse_sync().unwrap();
             let compact = robin_replay_format::encode_compact(
                 &restarted,
-                robin_replay_format::ENGINE_VERSION_HASH,
+                robin_replay_format::engine_version_hash(),
             )
             .unwrap();
             let (_, restarted) = robin_replay_format::decode_compact(&compact).unwrap();
@@ -3290,9 +3290,11 @@ mod tests {
         let mut save_fixups = robin_engine::replay::ReplayFile::from(&jsonl);
         save_fixups.load_backs.get_mut(&1).unwrap().is_continue = true;
         assert!(robin_engine::replay::ReplayData::try_from(save_fixups).is_err());
-        let bytes =
-            crate::replay_format::encode_compact(&jsonl, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let bytes = crate::replay_format::encode_compact(
+            &jsonl,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let (_, compact) = crate::replay_format::decode_compact(&bytes).unwrap();
         for data in [jsonl, compact] {
             assert!(

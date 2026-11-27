@@ -174,7 +174,7 @@ repo=$work/repo
 mkdir -p "$repo/scripts/validation/scenarios" \
     "$repo/scripts/validation/parity_corpus/sherwood-hq-entry" \
     "$repo/crates/robin_rs" \
-    "$repo/crates/robin_rs/tests/fixtures" \
+    "$repo/crates/robin_app/tests/fixtures" \
     "$repo/crates/robin_run_types/src"
 cp -- "$source_root/scripts/release-evidence.sh" "$repo/scripts/release-evidence.sh"
 cp -- "$source_root/scripts/validation/scenario_corpus.py" "$repo/scripts/validation/scenario_corpus.py"
@@ -183,7 +183,7 @@ for row in H01 H23; do
     printf '{"proves":{"layer":"process"}}\n' >"$repo/scripts/validation/scenarios/$row.json"
 done
 printf '[package]\nname = "robin_rs"\nversion = "0.5.0"\n' >"$repo/crates/robin_rs/Cargo.toml"
-printf '{}\n' >"$repo/crates/robin_rs/tests/fixtures/scenario_spec_sherwood_hq.json"
+printf '{}\n' >"$repo/crates/robin_app/tests/fixtures/scenario_spec_sherwood_hq.json"
 printf 'pub const REPLAY_SCHEMA_VERSION: u32 = 80;\n' \
     >"$repo/crates/robin_run_types/src/lib.rs"
 

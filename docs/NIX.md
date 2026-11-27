@@ -13,7 +13,7 @@ into the builder's working tree.
 | Path | What it is |
 | --- | --- |
 | `bin/robin` | wrapper; puts the dlopened X11/Wayland/ALSA/GL/Vulkan libraries on `LD_LIBRARY_PATH` |
-| `libexec/robin/robin` | release binary (`--release --features desktop,multiplayer -p robin_rs --bin robin`) |
+| `libexec/robin/robin` | release binary (`--release --features desktop,multiplayer -p robin_app --bin robin`) |
 | `libexec/robin/assets` | symlink to `../../share/robin/assets` |
 | `share/robin/assets/core-datadir` | validated engine core overlay, copied from this repository's `assets/core-datadir` |
 
@@ -29,7 +29,7 @@ directory (the one containing `DATA/`), or the folder picker selects it on first
 
 ## Build identity
 
-`build-support/robin_build.rs` stamps `ROBIN_GIT_HASH` with `git rev-parse HEAD`, and
+`crates/robin_build_identity/build.rs` stamps the source commit with `git rev-parse HEAD`, and
 `robin_replay_format` accepts only 12 lowercase hex. A Nix build has no `.git` to ask: the
 source is a store copy of the tracked tree, so the build script also takes an explicit
 `ROBIN_PACKAGE_COMMIT`, which `nix/robin.nix` fills from the revision the flake resolved
@@ -45,7 +45,7 @@ runs (`cargo test`, `cargo run`), so a shared name would let that output pose as
 packager's commit there and discovery would never run.
 
 `robin --version` prints `robin <package version>+<12-hex commit>`
-(`crate::version::CLI_VERSION`), the same prefix compact replays and join tickets carry.
+(`robin_rs::version::cli_version()`), the same prefix compact replays and join tickets carry.
 The package version is `crates/robin_rs/Cargo.toml`'s, so the store path, the install
 path and the binary name one build the same way.
 

@@ -49,7 +49,7 @@ packaging. Shipping schema comes from `wasm-www/runtime-contract.json`, generate
 by compiled Rust constants; CI rejects stale generated metadata:
 
 ```sh
-cargo build --locked -p robin_rs --example export_runtime_contract
+cargo build --locked -p robin_app --example export_runtime_contract
 target/debug/examples/export_runtime_contract --check wasm-www/runtime-contract.json
 ```
 

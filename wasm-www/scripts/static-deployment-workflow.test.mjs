@@ -79,7 +79,7 @@ test("shipping datadir wrapper selects the locked converter package and tools fe
   const text = await repositoryFile("scripts/build_web_shipping_datadir.sh");
   assert.match(
     text,
-    /^cargo build --locked --release -p robin_rs --bin convert_datadir --features tools$/mu,
+    /^cargo build --locked --release -p robin_app --bin convert_datadir --features tools$/mu,
   );
   assert.doesNotMatch(text, /^cargo build --release --bin convert_datadir$/mu);
 });

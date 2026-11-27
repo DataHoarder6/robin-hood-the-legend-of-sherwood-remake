@@ -5897,6 +5897,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "robin_app"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bitcode 0.6.9 (git+https://github.com/phiresky/bitcode.git?rev=59051e886ff8cd24bfc63ef0cef6321372829604)",
+ "clap",
+ "console_error_panic_hook",
+ "embed-resource",
+ "futures",
+ "hex",
+ "js-sys",
+ "kira",
+ "libc",
+ "libloading 0.9.0",
+ "ogg",
+ "png",
+ "pollster 1.0.1",
+ "rayon",
+ "robin_assets",
+ "robin_build_identity",
+ "robin_engine",
+ "robin_modding_tools",
+ "robin_rs",
+ "robin_run_protocol",
+ "robin_spellforge",
+ "robin_test_support",
+ "robin_util",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-wasm",
+ "velopack",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "windows-sys 0.61.2",
+ "zstd",
+]
+
+[[package]]
 name = "robin_asset_codecs"
 version = "0.0.0"
 dependencies = [
@@ -5945,6 +5990,17 @@ dependencies = [
  "wasm-bindgen-rayon",
  "zstd",
 ]
+
+[[package]]
+name = "robin_build_identity"
+version = "0.0.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "robin_build_info"
+version = "0.0.0"
 
 [[package]]
 name = "robin_data_io"
@@ -6045,6 +6101,7 @@ dependencies = [
  "ipnet",
  "rand",
  "ring",
+ "robin_build_identity",
  "robin_engine",
  "robin_replay_format",
  "robin_run_protocol",
@@ -6165,6 +6222,7 @@ dependencies = [
  "hex",
  "png",
  "robin_assets",
+ "robin_build_identity",
  "robin_engine",
  "robin_rs",
  "robin_util",
@@ -6182,6 +6240,7 @@ dependencies = [
 name = "robin_replay_admission_wasm"
 version = "0.0.0"
 dependencies = [
+ "robin_build_identity",
  "robin_replay_format",
  "sha2 0.11.1",
  "wasm-bindgen",
@@ -6192,6 +6251,7 @@ name = "robin_replay_format"
 version = "0.0.0"
 dependencies = [
  "bitcode 0.6.9 (git+https://github.com/phiresky/bitcode.git?rev=59051e886ff8cd24bfc63ef0cef6321372829604)",
+ "robin_build_info",
  "robin_engine",
  "serde",
  "serde_json",
@@ -6209,6 +6269,7 @@ dependencies = [
  "mimalloc",
  "nix",
  "robin_assets",
+ "robin_build_identity",
  "robin_engine",
  "robin_replay_format",
  "robin_run_protocol",
@@ -6233,13 +6294,11 @@ dependencies = [
  "bitcode 0.6.9 (git+https://github.com/phiresky/bitcode.git?rev=59051e886ff8cd24bfc63ef0cef6321372829604)",
  "bitflags 2.13.2",
  "bytemuck",
- "cc",
  "clap",
  "console_error_panic_hook",
  "dirs",
  "earcutr",
  "ed25519-dalek",
- "embed-resource",
  "enum-map",
  "fastrand",
  "ffmpeg-next",
@@ -6281,6 +6340,8 @@ dependencies = [
  "rexie",
  "rfd",
  "robin_assets",
+ "robin_build_identity",
+ "robin_build_info",
  "robin_engine",
  "robin_lua",
  "robin_modding_tools",

@@ -312,7 +312,7 @@ fn verify_web_content_package(manifest_path: &Path) -> Result<String, Multiplaye
     if manifest.schema != WEB_CONTENT_MANIFEST_SCHEMA {
         return Err(invalid("web content manifest has unsupported schema"));
     }
-    if manifest.engine_version != crate::replay_format::ENGINE_SOURCE_COMMIT {
+    if manifest.engine_version != crate::replay_format::engine_source_commit() {
         return Err(invalid(
             "web content manifest was built for a different engine commit",
         ));
@@ -566,7 +566,7 @@ mod tests {
         let manifest = WebContentManifest {
             schema: WEB_CONTENT_MANIFEST_SCHEMA,
             edition: WebContentEdition::Full,
-            engine_version: crate::replay_format::ENGINE_SOURCE_COMMIT.to_string(),
+            engine_version: crate::replay_format::engine_source_commit().to_string(),
             native_content_sha256: identity.clone(),
             datadir: WebContentDatadir {
                 path: "datadir.bin".to_string(),

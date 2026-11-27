@@ -3,6 +3,8 @@
 //! The sandbox must never regain presentation, media-device, gamepad, or
 //! multiplayer transport stacks through an innocent-looking transitive edge.
 
+robin_build_identity::define!();
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[test]

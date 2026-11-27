@@ -151,7 +151,7 @@ jobs:
       - name: Check compiled runtime contract
         if: matrix.suite == 'client'
         run: |
-          cargo build --locked -p robin_rs --example export_runtime_contract
+          cargo build --locked -p robin_app --example export_runtime_contract
           target/debug/examples/export_runtime_contract --check wasm-www/runtime-contract.json
 
   tooling:

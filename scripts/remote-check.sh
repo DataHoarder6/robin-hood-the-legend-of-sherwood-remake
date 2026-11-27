@@ -310,7 +310,7 @@ EOF
     ssh "$host" bash -s <<EOF
 set -euo pipefail
 cd $remote_dir
-# build-support/robin_build.rs stamps ROBIN_GIT_HASH from "git rev-parse HEAD",
+# crates/robin_build_identity/build.rs stamps the commit from "git rev-parse HEAD",
 # and the replay format rejects anything that is not 12 lowercase hex. A copy
 # with no usable repository stamps "unknown", and the replay and leaderboard
 # suites then fail version validation (27 tests, 2026-11-15). The copy needs a

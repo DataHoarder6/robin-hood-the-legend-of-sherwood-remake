@@ -691,7 +691,7 @@ impl ReplaySnapshot {
                 ExportError::Internal(error)
             }
         })?;
-        robin_replay_format::encode_compact(&data, robin_replay_format::ENGINE_VERSION_HASH)
+        robin_replay_format::encode_compact(&data, robin_replay_format::engine_version_hash())
             .map_err(|error| ExportError::Internal(format!("encode compact replay: {error}")))
     }
 
@@ -1223,9 +1223,11 @@ mod tests {
 
         let jsonl = spool.snapshot().unwrap().to_vec();
         let replay = engine_replay::ReplayData::from_reader(std::io::Cursor::new(jsonl)).unwrap();
-        let compact =
-            robin_replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let compact = robin_replay_format::encode_compact(
+            &replay,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let (_, decoded) = robin_replay_format::decode_compact(&compact).unwrap();
         assert_eq!(decoded.frame_count(), 1);
         assert!(decoded.frame(0).unwrap().input.run_hourglass);

@@ -1,6 +1,8 @@
 //! Runs the shell test for `ops/deploy.sh` and `ops/rollback.sh` (stubbed
 //! systemctl/curl/binaries in a temporary HOME). Skipped when bash is missing.
 
+robin_build_identity::define!();
+
 use std::process::Command;
 
 #[test]

@@ -60,10 +60,12 @@ async fn prepare(
     // Check reconstructibility before the bounded ranked codec: a local save
     // snapshot may be much larger than a ranked command collection.
     let (artifact, bytes): (_, Arc<[u8]>) = if unavailable.is_none() {
-        let bytes: Arc<[u8]> =
-            crate::replay_format::encode_compact(replay, robin_replay_format::ENGINE_VERSION_HASH)
-                .map_err(|error| RankedError::evidence(error.to_string()))?
-                .into();
+        let bytes: Arc<[u8]> = crate::replay_format::encode_compact(
+            replay,
+            robin_replay_format::engine_version_hash(),
+        )
+        .map_err(|error| RankedError::evidence(error.to_string()))?
+        .into();
         (
             Some(canonical_replay_artifact(&bytes, &header.mission_id)?),
             bytes,

@@ -2,6 +2,8 @@
 //! request builders live in `support`.
 #![forbid(unsafe_code)]
 
+robin_build_identity::define!();
+
 mod boards;
 mod storage;
 mod submission;

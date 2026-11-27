@@ -32,7 +32,7 @@ client resolves through the chronology beside it (the same path a player's
   ```sh
   ROBINHOOD_DATA_DIR=/path/to/robin-hood/game \
     robin --headless --no-sound --mission Sherwood \
-      --spec crates/robin_rs/tests/fixtures/scenario_spec_sherwood_hq.json \
+      --spec crates/robin_app/tests/fixtures/scenario_spec_sherwood_hq.json \
       --record DIR
   # then move DIR (mission.json and 00000000.rhrec.jsonl) here, renamed
   ```

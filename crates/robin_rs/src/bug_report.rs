@@ -171,7 +171,7 @@ pub fn capture(
         schema_version: 1,
         kind,
         description: bound_text(description.into(), 16384),
-        engine_commit: crate::replay_format::ENGINE_SOURCE_COMMIT.into(),
+        engine_commit: crate::replay_format::engine_source_commit().into(),
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         occurred_at_unix_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?

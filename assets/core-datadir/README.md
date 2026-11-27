@@ -34,7 +34,7 @@ Include both the base sounds (actor definitions, effects) and English voice
 directory. The GOG English release uses `2047`, despite that folder number.
 
 ```sh
-cargo build -p robin_rs --example generate_audio_durations
+cargo build -p robin_app --example generate_audio_durations
 target/debug/examples/generate_audio_durations assets/core-datadir \
   /path/to/fullgame_gog/DATA/Sounds \
   /path/to/fullgame_gog/2047/data/Sounds \

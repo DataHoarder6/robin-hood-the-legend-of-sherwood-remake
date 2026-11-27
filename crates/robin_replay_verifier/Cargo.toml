@@ -12,6 +12,8 @@ name = "robin-replay-verifier"
 path = "src/bin/robin-replay-verifier.rs"
 
 [dependencies]
+# Final artifact: stamps the source commit (robin_build_info).
+robin_build_identity.workspace = true
 bitcode.workspace = true
 bytemuck.workspace = true
 robin_assets.workspace = true

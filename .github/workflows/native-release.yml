@@ -211,7 +211,7 @@ jobs:
         run: |
           # TODO: Bundle FFmpeg DLLs on Windows, then switch `release` to
           # `full` so packaged builds also include video and RetroArch presets.
-          cargo build --locked --release --no-default-features --features release -p robin_rs --bin robin --target ${{ matrix.target }}
+          cargo build --locked --release --no-default-features --features release -p robin_app --bin robin --target ${{ matrix.target }}
           cargo build --locked --release -p robin_modding_tools --bins --target ${{ matrix.target }}
 
       - name: Prove the Windows binary starts

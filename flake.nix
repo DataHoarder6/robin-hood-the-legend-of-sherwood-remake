@@ -43,7 +43,7 @@
       # release workflow tags; the workspace's 0.0.0 is a placeholder.
       robinVersion = (builtins.fromTOML (builtins.readFile ./crates/robin_rs/Cargo.toml)).package.version;
 
-      # `build-support/robin_build.rs` stamps the commit into the binary so the
+      # `crates/robin_build_identity/build.rs` stamps the commit into the binary so the
       # replay format and multiplayer ticket carry it. A Nix build has no
       # `.git`, so the commit is supplied from the flake's own git metadata
       # (`ROBIN_PACKAGE_COMMIT`) and never guessed: no revision here is an
@@ -88,7 +88,7 @@
               # Must precede the rustup proxies: this `cargo` refuses runtime
               # builds; the shellHook below pins it to the front of PATH.
               cargoGuard
-              # `build-support/robin_build.rs` shells out to `git rev-parse
+              # `crates/robin_build_identity/build.rs` shells out to `git rev-parse
               # HEAD` and falls back to the literal "unknown" when it cannot:
               # the replay format tags every recording with that hash, so a
               # shell without git silently produces replays that fail version

@@ -1,5 +1,7 @@
 //! Guard the fast default client build against opt-in integrations leaking in.
 
+robin_build_info::define_test_identity!();
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[test]

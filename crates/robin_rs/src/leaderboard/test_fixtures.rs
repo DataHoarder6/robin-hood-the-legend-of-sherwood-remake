@@ -53,7 +53,7 @@ pub(crate) fn single_frame_replay(campaign_bytes: Vec<u8>) -> robin_engine::repl
 /// Compact canonical bytes of [`single_frame_replay`] with a default campaign.
 pub(crate) fn compact_replay_bytes() -> Vec<u8> {
     let replay = single_frame_replay(bitcode::encode(&robin_engine::campaign::Campaign::default()));
-    robin_replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH)
+    robin_replay_format::encode_compact(&replay, robin_replay_format::engine_version_hash())
         .expect("fixture replay encodes")
 }
 

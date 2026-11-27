@@ -41,7 +41,7 @@ export function runtimeBuildPlan({
   else
     cargo.push(
       "-p",
-      "robin_rs",
+      "robin_app",
       "--bin",
       "robin",
       "--no-default-features",

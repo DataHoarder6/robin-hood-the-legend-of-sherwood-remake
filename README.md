@@ -132,7 +132,7 @@ builds; `ffmpeg-next` and OS-data-dir support stay disabled.
         --profile wasm-dev            \
         --no-default-features         \
         --features audio,multiplayer  \
-        -p robin_rs --bin robin
+        -p robin_app --bin robin
 
 `multiplayer` is not optional for a published browser runtime: without it
 `wasm_multiplayer_compatibility()` reports ticket schema 0 and the shell
@@ -207,7 +207,7 @@ Production uses only Cloudflare Static Assets and the VPS:
 
 There is no GitHub-hosted production site, engine/data origin, or fallback.
 The runtime Worker stores only wasm builds under `/wasm/`, indexed by the same
-12-character git hash that Rust embeds in `ROBIN_GIT_HASH`:
+12-character commit prefix every final artifact stamps (`robin_build_info::short_commit`):
 
     /wasm/<short-hash>/robin.js
     /wasm/<short-hash>/robin.js.gz
@@ -403,7 +403,7 @@ prints the rollback for the failed stage. Logs go to
 The engine expects a `Data/` folder (and a locale subfolder like `1033/`)
 in the current working directory, or pointed at via `ROBINHOOD_DATA_DIR`:
 
-    ROBINHOOD_DATA_DIR=datadirs/demo_leicester_ecoste cargo run -p robin_rs --bin robin
+    ROBINHOOD_DATA_DIR=datadirs/demo_leicester_ecoste cargo run -p robin_app --bin robin
 
 Logging verbosity is controlled by `RUST_LOG` (`info`, `debug`,
 `robin_rs=debug`, `trace`, etc.).

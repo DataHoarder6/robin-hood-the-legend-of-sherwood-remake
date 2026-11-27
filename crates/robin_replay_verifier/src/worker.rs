@@ -777,9 +777,11 @@ mod tests {
     #[test]
     fn decode_rejects_compact_single_frame_command_amplification() {
         let replay = single_frame_replay_with_commands(4_096);
-        let compact =
-            robin_replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let compact = robin_replay_format::encode_compact(
+            &replay,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let limits = robin_replay_format::ReplayAdmissionLimits {
             max_input_bytes: compact.len(),
             max_entries_per_frame: 64,
@@ -794,7 +796,7 @@ mod tests {
     fn decode_accepts_another_recording_commit_and_rejects_other_schemas() {
         let replay = single_frame_replay_with_commands(0);
         let recorded_hash = "0123456789ab";
-        assert_ne!(recorded_hash, robin_replay_format::ENGINE_VERSION_HASH);
+        assert_ne!(recorded_hash, robin_replay_format::engine_version_hash());
         let compact = robin_replay_format::encode_compact(&replay, recorded_hash).unwrap();
         let (hash, decoded) = decode_replay_bounded(&compact, SCHEMA, &Default::default()).unwrap();
         assert_eq!(hash, recorded_hash);
@@ -812,9 +814,11 @@ mod tests {
         archive
             .try_edit_header(|header| header.mission_assets = archive_mission_assets())
             .unwrap();
-        let compact =
-            robin_replay_format::encode_compact(&archive, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let compact = robin_replay_format::encode_compact(
+            &archive,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let failure = decode_replay_bounded(&compact, SCHEMA, &Default::default()).unwrap_err();
         assert_eq!(failure.code, VerificationRejectionCodeV1::ContentNotAllowed);
         assert_eq!(failure.detail, "ranked_archive_mission_not_allowed");
@@ -822,9 +826,11 @@ mod tests {
         archive
             .try_edit_header(|header| header.spellforge_package = Some(spellforge_package()))
             .unwrap();
-        let compact =
-            robin_replay_format::encode_compact(&archive, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let compact = robin_replay_format::encode_compact(
+            &archive,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         let failure = decode_replay_bounded(&compact, SCHEMA, &Default::default()).unwrap_err();
         assert_eq!(failure.code, VerificationRejectionCodeV1::ContentNotAllowed);
         assert_eq!(failure.detail, "ranked_spellforge_package_not_allowed");

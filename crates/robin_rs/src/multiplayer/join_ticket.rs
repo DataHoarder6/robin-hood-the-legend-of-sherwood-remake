@@ -133,7 +133,7 @@ impl BrowserJoinTicket {
             schema: JOIN_TICKET_SCHEMA,
             transport: IROH_RELAY_TRANSPORT.to_string(),
             net_protocol: NET_PROTOCOL_VERSION,
-            engine_version: crate::replay_format::ENGINE_SOURCE_COMMIT.to_string(),
+            engine_version: crate::replay_format::engine_source_commit().to_string(),
             host_endpoint_id: endpoint_addr.id.to_string(),
             host_public_key: URL_SAFE_NO_PAD.encode(endpoint_addr.id.as_bytes()),
             relay_url,
@@ -358,11 +358,11 @@ fn validate_static_payload(payload: &BrowserJoinTicketPayload) -> Result<(), Mul
             payload.net_protocol
         )));
     }
-    if payload.engine_version != crate::replay_format::ENGINE_SOURCE_COMMIT {
+    if payload.engine_version != crate::replay_format::engine_source_commit() {
         return Err(invitation(format!(
             "multiplayer build mismatch: host uses `{}`, this game uses `{}`",
             payload.engine_version,
-            crate::replay_format::ENGINE_SOURCE_COMMIT
+            crate::replay_format::engine_source_commit()
         )));
     }
     let endpoint = payload

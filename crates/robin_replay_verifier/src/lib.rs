@@ -5,6 +5,9 @@
 //! compact replay and the read-only raw game content, resimulates the replay
 //! and writes one `VerifierOutputV2`.
 
+#[cfg(test)]
+robin_build_identity::define!();
+
 pub mod ranked_verification;
 pub mod result_projection;
 pub mod worker;

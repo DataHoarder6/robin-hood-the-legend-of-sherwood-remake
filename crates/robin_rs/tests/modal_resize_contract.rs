@@ -1,6 +1,8 @@
 //! These screens must synchronize renderer dimensions before interpreting
 //! pointer events. This is a source-boundary guard, not a GPU resize test.
 
+robin_build_info::define_test_identity!();
+
 use syn::visit::Visit;
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]

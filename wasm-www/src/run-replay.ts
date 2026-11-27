@@ -1,6 +1,6 @@
 // `?run=<run id>`: play a verified leaderboard run on a compatible engine build.
 // RunDetailV2.viewer.runtime_build is the replay's recorded engine
-// version, the 12-hex ROBIN_GIT_HASH prefix that also names `/wasm/<short>/`.
+// version, the 12-hex build commit prefix that also names `/wasm/<short>/`.
 
 export const RUN_QUERY_KEY = "run";
 export const RANKED_REPLAY_MEDIA_TYPE = "application/x-robin-rhrec";

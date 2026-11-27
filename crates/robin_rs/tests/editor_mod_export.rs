@@ -1,6 +1,8 @@
 //! The fixture is produced by the editor's browser bake acceptance test.
 //! It exercises the same archive discovery and terrain decoders as installed mods.
 
+robin_build_info::define_test_identity!();
+
 use std::sync::Arc;
 
 use robin_engine::level_data::LoadedLevel;

@@ -180,7 +180,7 @@ fn snapshots_are_pure_and_recording_boundaries_are_explicit() {
     assert_eq!(file.load_backs.len(), 1);
     assert!(file.load_backs.values().all(|load| load.snapshot.is_none()));
     replay.ranked_submission_verdict().unwrap();
-    crate::replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH)
+    crate::replay_format::encode_compact(&replay, robin_replay_format::engine_version_hash())
         .unwrap();
     let save_file::ReplaySaveIdentity::Payload(digest) = resumed.replay_identity().unwrap() else {
         panic!("published saves require a payload identity");

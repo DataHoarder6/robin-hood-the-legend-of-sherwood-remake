@@ -383,9 +383,11 @@ mod native {
         ));
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recording.rhrec");
-        let bytes =
-            crate::replay_format::encode_compact(&replay, robin_replay_format::ENGINE_VERSION_HASH)
-                .unwrap();
+        let bytes = crate::replay_format::encode_compact(
+            &replay,
+            robin_replay_format::engine_version_hash(),
+        )
+        .unwrap();
         std::fs::write(&path, bytes).unwrap();
         assert!(!directory.path().join("ranked.json").exists());
         assert_eq!(

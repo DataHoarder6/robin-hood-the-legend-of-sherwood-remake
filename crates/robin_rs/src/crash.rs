@@ -101,7 +101,7 @@ fn installed() -> Option<Install> {
 /// Version line of this binary: the package version plus the commit the build
 /// script stamped in, the same string `--version` prints.
 pub(crate) fn version() -> &'static str {
-    crate::version::CLI_VERSION
+    crate::version::cli_version()
 }
 
 /// The panic-hook body: bundle first, upload second, nothing may unwind.
@@ -276,7 +276,7 @@ fn write_bundle(install: &Install, info: &std::panic::PanicHookInfo<'_>) -> Resu
         "location": location,
         "backtrace": std::backtrace::Backtrace::force_capture().to_string(),
         "version": version(),
-        "engine_commit": crate::replay_format::ENGINE_SOURCE_COMMIT,
+        "engine_commit": crate::replay_format::engine_source_commit(),
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "install_home": install.install_home.to_string_lossy(),

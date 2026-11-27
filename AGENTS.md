@@ -48,7 +48,7 @@
   pre-existing warnings, never defer a warning your change introduces.
 - Run cargo unfiltered — no `| head`, no shared log path; a hidden error costs
   more than the extra lines, and parallel agents clobber fixed log names.
-- Build and run in separate steps — `cargo build -p robin_rs --bin robin` without
+- Build and run in separate steps — `cargo build -p robin_app --bin robin` without
   a timeout, then `cargo run …` with one — so neither can kill the other.
 - `RUST_LOG=debug` (or `robin_rs=debug`, `trace`) drives the `env_logger` /
   `tracing` output.

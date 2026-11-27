@@ -65,8 +65,8 @@ export async function stageRuntimeAddition({
   const demo = await readDatadirRelease(datadirRelease);
   const full = validateFullManifestSha256(fullSha);
   const contract = await readRuntimeContract();
-  // `/wasm/<short>/` is the same 12-hex prefix Rust records as
-  // ROBIN_GIT_HASH in every replay, so viewers select a run's runtime by it.
+  // `/wasm/<short>/` is the same 12-hex build commit prefix Rust records in
+  // every replay, so viewers select a run's runtime by it.
   const commit = output("git", ["rev-parse", "HEAD"]);
   const short = commit.slice(0, 12);
   // Refuse to mix prior outputs or silently replace an immutable addition.
@@ -76,7 +76,7 @@ export async function stageRuntimeAddition({
   await mkdir(artifact, { recursive: true });
   // Operator staging can run on an unreviewed checkout. Validating JSON alone
   // cannot detect a stale generated document after an engine protocol change.
-  run("cargo", ["build", "--locked", "-p", "robin_rs", "--example", "export_runtime_contract"], {
+  run("cargo", ["build", "--locked", "-p", "robin_app", "--example", "export_runtime_contract"], {
     env: { ...process.env, ROBIN_REQUIRE_BUILD_IDENTITY: "1" },
   });
   run(resolve("target/debug/examples/export_runtime_contract"), [

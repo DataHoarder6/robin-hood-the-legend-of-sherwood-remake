@@ -44,11 +44,11 @@ rustPlatform.buildRustPackage {
     hash = "sha256-U9JJ/uLLXzlII6rsBeIkUkrfP6QV5DaWoaeFEGwZO0Y=";
   };
 
-  # `--release --features desktop,multiplayer -p robin_rs --bin robin`, the
+  # `--release --features desktop,multiplayer -p robin_app --bin robin`, the
   # combination docs/WINDOWS.md documents for a local release build.
   cargoBuildFlags = [
     "-p"
-    "robin_rs"
+    "robin_app"
     "--bin"
     "robin"
     "--features"
@@ -59,10 +59,10 @@ rustPlatform.buildRustPackage {
   # game data; a package build only has to produce the binary.
   doCheck = false;
 
-  # `build-support/robin_build.rs` derives the engine commit from
+  # `crates/robin_build_identity/build.rs` derives the engine commit from
   # `git rev-parse HEAD` and the replay format rejects anything that is not 12
   # lowercase hex. A Nix build has no `.git`, so hand the build script the
-  # commit the flake resolved; it is the only way `ROBIN_GIT_HASH` can be right
+  # commit the flake resolved; it is the only way the stamped commit can be right
   # here, and a malformed value panics instead of falling back. The variable is
   # named for this input, not for the `ROBIN_GIT_COMMIT` the script emits: Cargo
   # exports a package's own build-script `rustc-env` output to the binaries it

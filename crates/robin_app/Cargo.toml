@@ -1,0 +1,131 @@
+[package]
+name = "robin_app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Every executable of the client: the game, the developer tools and the
+# examples. They live outside `robin_rs` because a final artifact is where the
+# source commit is stamped (`robin_build_identity`): a dependency on that crate
+# rebuilds its dependent on every commit, so the 11 MB `robin_rs` library must
+# not have one. Only these thin roots rebuild and relink on a new commit
+# (`robin_build_info` documents the contract).
+#
+# Features forward to `robin_rs`; the extra `dep:` entries are the integrations
+# the binaries call directly.
+
+[dependencies]
+robin_rs.workspace = true
+robin_build_identity.workspace = true
+robin_assets.workspace = true
+robin_engine.workspace = true
+robin_modding_tools = { workspace = true, default-features = false }
+robin_run_protocol = { workspace = true, features = ["authentication"] }
+robin_spellforge.workspace = true
+robin_util.workspace = true
+anyhow.workspace = true
+bitcode.workspace = true
+clap = { workspace = true, features = ["derive"] }
+futures = "0.3"
+hex.workspace = true
+libc.workspace = true
+png.workspace = true
+pollster = "1.0"
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+web-time.workspace = true
+zstd.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1", optional = true }
+ogg = { version = "0.9.2", optional = true }
+libloading = { version = "0.9.0", optional = true }
+kira = { version = "0.12", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+velopack = { version = "1.2.161", optional = true }
+
+# The browser entry point; feature sets unify with `robin_rs`'s declarations.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
+
+[dev-dependencies]
+robin_test_support.workspace = true
+
+[build-dependencies]
+embed-resource = "3.0"
+
+[features]
+default = []
+desktop = ["audio", "dialogs", "gamepad", "hardware-info", "script-rpc"]
+script-rpc = ["robin_rs/script-rpc"]
+release = ["desktop", "multiplayer", "auto-update"]
+full = ["release", "video", "retroarch-shaders"]
+multiplayer = ["robin_rs/multiplayer"]
+tools = ["robin_rs/tools", "dep:ogg", "dep:rayon", "dep:libloading"]
+android = ["robin_rs/android", "audio"]
+audio = ["robin_rs/audio", "dep:kira"]
+dialogs = ["robin_rs/dialogs"]
+gamepad = ["robin_rs/gamepad"]
+hardware-info = ["robin_rs/hardware-info"]
+video = ["robin_rs/video", "audio"]
+lua = ["robin_rs/lua"]
+auto-update = ["robin_rs/auto-update", "dep:velopack"]
+retroarch-shaders = ["robin_rs/retroarch-shaders"]
+wasm-threads = ["robin_rs/wasm-threads"]
+
+[[bin]]
+name = "robin"
+path = "src/bin/robin.rs"
+test = false
+
+# This diagnostic binary has no unit tests. Declaring it explicitly keeps
+# `cargo test` from compiling and linking an empty test harness for it.
+[[bin]]
+name = "dump_level"
+path = "src/bin/dump_level.rs"
+test = false
+required-features = ["tools"]
+
+[[bin]]
+name = "convert_datadir"
+path = "src/bin/convert_datadir.rs"
+# Its unit tests run explicitly with --bin convert_datadir; see docs/TESTING.md.
+test = false
+required-features = ["tools"]
+
+[[example]]
+name = "run_script"
+test = true
+
+[[example]]
+name = "batch_run"
+test = true
+
+[[example]]
+name = "verify_rollback"
+test = true
+
+[[example]]
+name = "pak_res_roundtrip"
+test = true
+
+[[example]]
+name = "jxl_map_roundtrip"
+test = true
+
+[lints]
+workspace = true

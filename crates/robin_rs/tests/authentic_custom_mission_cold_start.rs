@@ -18,6 +18,8 @@
 //! substitutes content: an absent, changed, or newly reordered install is a
 //! failure that names the affected archive or picker row.
 
+robin_build_info::define_test_identity!();
+
 use robin_engine::mission_assets::{
     ArchiveIdentity, ArchiveMissionAssets, InstalledArchiveLocator, InstalledModsRoot,
     MissionAssetDescriptor, MissionAssetSource,
@@ -953,7 +955,7 @@ fn record_compact_replay(
         File::open(&jsonl_path).expect("reopen recorded custom replay"),
     ))
     .expect("load recorded custom replay JSONL");
-    robin_rs::replay_format::encode_compact(&replay, robin_rs::replay_format::ENGINE_VERSION_HASH)
+    robin_rs::replay_format::encode_compact(&replay, robin_rs::replay_format::engine_version_hash())
         .expect("encode canonical compact custom replay")
 }
 

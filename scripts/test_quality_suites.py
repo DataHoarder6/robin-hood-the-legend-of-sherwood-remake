@@ -310,7 +310,7 @@ class QualitySuitesTests(unittest.TestCase):
                 self.run_suite(suite)
                 calls = [call for call in self.calls() if "convert_datadir" in call]
                 self.assertEqual(calls, [
-                    ["test", "--locked", "-p", "robin_rs", "--features", "tools",
+                    ["test", "--locked", "-p", "robin_app", "--features", "tools",
                      "--bin", "convert_datadir", name, "--", "--ignored", "--exact"]
                     for name in names
                 ])

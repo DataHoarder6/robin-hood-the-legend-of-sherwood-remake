@@ -66,7 +66,7 @@ By hand: `git branch archive/main-$(date +%F) main && git reset --hard fork/main
 ## "InvalidVersionHash in the replay and leaderboard tests on the build host"
 
 Symptom: 27 replay/leaderboard tests fail with `InvalidVersionHash`, and the
-binary reports `ROBIN_GIT_HASH=unknown`.
+binary's `--version` ends in `+unknown`.
 
 Cause: a worktree's `.git` is a **file** naming
 `<main-checkout>/.git/worktrees/<name>`, a path that exists only on the sender.

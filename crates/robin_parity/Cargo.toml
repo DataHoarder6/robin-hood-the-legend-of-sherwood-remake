@@ -15,6 +15,8 @@ default = []
 client = ["dep:robin_rs"]
 
 [dependencies]
+# Final artifact: stamps the source commit (robin_build_info).
+robin_build_identity.workspace = true
 clap = { workspace = true, features = ["derive"] }
 base64.workspace = true
 # Authoritative v68 trace bytes are frozen to this release independently of

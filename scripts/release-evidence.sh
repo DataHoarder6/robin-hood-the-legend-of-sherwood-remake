@@ -46,7 +46,7 @@ gh_repo=${ROBIN_RELEASE_REPO:-DataHoarder6/robin-hood-the-legend-of-sherwood-rem
 data_dir=${ROBIN_RELEASE_DATA_DIR:-"~/Games/robin-hood/game"}
 corpus=scripts/validation/parity_corpus
 corpus_schema=crates/robin_run_types/src/lib.rs
-fixture_sherwood=crates/robin_rs/tests/fixtures/scenario_spec_sherwood_hq.json
+fixture_sherwood=crates/robin_app/tests/fixtures/scenario_spec_sherwood_hq.json
 
 for tool in git jq python3 ssh scp; do
     command -v "$tool" >/dev/null || die "missing-tool:$tool"
@@ -138,7 +138,7 @@ cd -- "$remote_abs"
 # copy's own (no --target-dir, no CARGO_TARGET_DIR).
 export SCCACHE_DISABLE=1
 nix develop --command cargo build --locked --release --no-default-features \
-    --features release -p robin_rs --bin robin
+    --features release -p robin_app --bin robin
 bin="$binary"
 [ -x "\$bin" ] || { printf 'release-evidence: no binary at \$bin\n' >&2; exit 1; }
 rendered=\$("\$bin" --version)

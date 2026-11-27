@@ -10,6 +10,8 @@
 //! The journal retains the complete transaction: external facts, pre/late
 //! commands, the hourglass/body gates, and the PostInitialize boundary.
 
+robin_build_info::define_test_identity!();
+
 use robin_engine::campaign::Campaign;
 use robin_engine::engine::{
     DevState, ExternalAction, ExternalActionResult, FrameConsoleResponse, HostEvent, LevelAssets,

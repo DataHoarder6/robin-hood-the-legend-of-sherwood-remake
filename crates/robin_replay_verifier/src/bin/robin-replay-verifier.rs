@@ -1,3 +1,5 @@
+robin_build_identity::define!();
+
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

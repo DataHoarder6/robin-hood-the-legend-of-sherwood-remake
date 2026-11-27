@@ -1,3 +1,5 @@
+robin_build_info::define_test_identity!();
+
 #[test]
 fn ranked_protocol_tracks_exact_runtime_schemas() {
     assert_eq!(

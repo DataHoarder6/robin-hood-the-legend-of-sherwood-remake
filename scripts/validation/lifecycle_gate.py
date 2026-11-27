@@ -132,9 +132,11 @@ def browser(evidence, summary):
     cargo = ["cargo", "--locked"]
     selection = ["--profile", "wasm-dev", "--target", "wasm32-unknown-unknown",
                  "-p", "robin_rs", "--no-default-features", "--features", "audio"]
-    run([cargo[0], "check", cargo[1], *selection, "--bin", "robin", "--tests"])
     multiplayer_selection = ["audio,multiplayer" if item == "audio" else item for item in selection]
-    run([cargo[0], "check", cargo[1], *multiplayer_selection, "--bin", "robin", "--tests"])
+    # The `robin` binary lives in robin_app (the final artifact that stamps the
+    # build identity); its cfg(test) modules and the client's compile together.
+    for features in (selection, multiplayer_selection):
+        run([cargo[0], "check", cargo[1], *features, "-p", "robin_app", "--bins", "--tests"])
     # Cargo's JSON artifact event identifies the exact linked test executable;
     # never guess using glob order or a stale target-directory timestamp.
     argv = [cargo[0], "test", cargo[1], *multiplayer_selection, "--lib", "--no-run",

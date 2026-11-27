@@ -13,8 +13,11 @@
 
 pub use robin_replay_format::*;
 
-/// Exact source commit used by multiplayer artifact selection.
-pub const ENGINE_SOURCE_COMMIT: &str = env!("ROBIN_GIT_COMMIT");
+/// Exact source commit used by multiplayer artifact selection, supplied by the
+/// final artifact (`robin_build_info`).
+pub fn engine_source_commit() -> &'static str {
+    robin_build_info::commit()
+}
 
 /// Validate the game-runtime part of the exact executable replay contract.
 ///

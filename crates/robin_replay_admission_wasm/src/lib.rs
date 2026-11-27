@@ -5,6 +5,8 @@
 //! hard 384 MiB maximum. CI inspects that declaration after wasm-bindgen and
 //! optimization; a missing/shared/imported/oversized memory fails publishing.
 
+robin_build_identity::define!();
+
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn validate_replay_seek_sidecar(
     compact: &[u8],

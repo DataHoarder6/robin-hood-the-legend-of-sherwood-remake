@@ -996,12 +996,14 @@ fn host_crate_targets_use_engine_facade_instead_of_engine_inner() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let trees = [
         "../robin_rs/src",
-        "../robin_rs/examples",
         "../robin_rs/tests",
+        "../robin_app/src",
+        "../robin_app/examples",
+        "../robin_app/tests",
     ]
     .into_iter()
     .map(|relative| manifest.join(relative))
-    .filter(|directory| directory.is_dir())
+    .inspect(|directory| assert!(directory.is_dir(), "missing host tree {directory:?}"))
     .map(|directory| support::rust_sources(&directory))
     .collect::<Vec<_>>();
     assert!(

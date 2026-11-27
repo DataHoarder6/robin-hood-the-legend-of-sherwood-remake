@@ -1925,7 +1925,7 @@ A list of which additional features we have added, which ones we might still wan
   never saved or recorded.
 
 - **Mission-start full-map renderer**
-  (`crates/robin_rs/examples/render_mission_map.rs`). Loads a mission through
+  (`crates/robin_app/examples/render_mission_map.rs`). Loads a mission through
   the regular engine and GPU renderer, captures the complete map after the
   requested number of normal simulation frames (`--frame`, default zero), and
   writes a HUD-free PNG. `--reveal-all` (alias `--unblip-all`) switches every

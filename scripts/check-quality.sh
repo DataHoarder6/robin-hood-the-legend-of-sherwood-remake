@@ -53,11 +53,11 @@ case "$1" in
         # rebuilds the whole dependency graph
         # (docs/slop/build-time-root-causes.md).
         cargo clippy --locked --workspace --all-targets -- -D warnings
-        cargo clippy --locked -p robin_rs --all-targets \
+        cargo clippy --locked -p robin_rs -p robin_app --all-targets \
             --no-default-features --features release -- -D warnings
         ;;
     core)
-        cargo test --locked -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
+        cargo test --locked -p robin_build_info -p robin_build_identity -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
         ;;
     contracts)
         # The executable Spellforge identity: every NATIVE_REGISTRY definition
@@ -68,8 +68,8 @@ case "$1" in
     wasm-tests)
         # The lifecycle gate's two `cfg(test)`-on-wasm32 checks, run separately
         # from the shipped-artifact `wasm` suite.
-        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --no-default-features --features audio --bin robin --tests
-        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --no-default-features --features audio,multiplayer --bin robin --tests
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs -p robin_app --no-default-features --features audio --bins --tests
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs -p robin_app --no-default-features --features audio,multiplayer --bins --tests
         ;;
     scripting-llvm)
         # LLVM verifies unwind/destructor semantics, not just panic detection.
@@ -100,36 +100,37 @@ case "$1" in
         # nextest runs each test in its own process on one scheduler, which is
         # where the wall time goes on a workspace with this many test binaries.
         # It runs no doctests, so they stay on `cargo test`.
-        cargo nextest run --locked -p robin_rs
+        cargo nextest run --locked -p robin_rs -p robin_app
         cargo test --locked -p robin_rs --doc
-        cargo build --locked -p robin_rs --bin robin
+        cargo build --locked -p robin_app --bin robin
         ;;
     client-check)
         # Compile-only local iteration on the client: no nextest, no release
         # build. The push gate stays authoritative; this is not substituted
         # for `client-release` when landing.
-        cargo check --locked -p robin_rs --lib --bins
+        cargo check --locked -p robin_rs --lib
+        cargo check --locked -p robin_app --bins
         ;;
     client-release)
         cargo nextest run --locked -p robin_rs --lib --no-default-features --features release
-        cargo build --locked -p robin_rs --bin robin --no-default-features --features release
+        cargo build --locked -p robin_app --bin robin --no-default-features --features release
         ;;
     tools)
         cargo test --locked -p robin_modding_tools
-        cargo test --locked -p robin_rs --features tools --bin convert_datadir --bin dump_level
-        cargo check --locked -p robin_rs --features tools --bins --examples
+        cargo test --locked -p robin_app --features tools --bin convert_datadir --bin dump_level
+        cargo check --locked -p robin_app --features tools --bins --examples
         ;;
     wasm)
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_identity_signer --bin leaderboard_identity_bridge --features identity-signer-bridge
         cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_replay_admission_wasm
-        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features
+        cargo check --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_app --bin robin --no-default-features
         # The artifact a browser guest joins with: `wasm-www/scripts/build-runtime.mjs`
         # ships `audio,multiplayer` (a runtime without multiplayer exports ticket
         # schema 0, so the stable shell refuses every invitation) and its threaded
         # plan adds `wasm-threads`, whose std has to be rebuilt with atomics.
         # Build, not check: only a link exercises the threaded link arguments.
-        cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_rs --bin robin --no-default-features --features audio,multiplayer
-        cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_rs --bin robin --no-default-features --features audio,multiplayer,wasm-threads
+        cargo build --locked --profile wasm-dev --target wasm32-unknown-unknown -p robin_app --bin robin --no-default-features --features audio,multiplayer
+        cargo build --locked -Zbuild-std=std,panic_abort --profile wasm-dev --target wasm32-unknown-unknown --config scripts/wasm-threads.cargo-config.toml -p robin_app --bin robin --no-default-features --features audio,multiplayer,wasm-threads
         ;;
     wasm-release)
         # The shipped wasm-release artifact, built with the repo's plan; the
@@ -367,15 +368,15 @@ python3 -m unittest discover -s scripts/validation -p campaign_proof_test.py
         python3 scripts/run_fixture_test.py --locked -p robin_assets --lib frame_holder::tests::test_validate_all_sprite_bank_streams -- --ignored --exact
         python3 scripts/run_fixture_test.py --locked -p robin_assets --features engine-adapters --lib picture::tests::original_demo_dialogue_portraits -- --ignored --exact
         python3 scripts/run_fixture_test.py --locked -p robin_assets demo_script -- --ignored
-        python3 scripts/run_fixture_test.py --locked -p robin_rs --features tools --bin convert_datadir tests::authentic_demo_start_sxt_is_a_sixteen_picture -- --ignored --exact
-        python3 scripts/run_fixture_test.py --locked -p robin_rs --features tools --bin convert_datadir tests::authentic_demo_root_has_exact_typed_edition -- --ignored --exact
+        python3 scripts/run_fixture_test.py --locked -p robin_app --features tools --bin convert_datadir tests::authentic_demo_start_sxt_is_a_sixteen_picture -- --ignored --exact
+        python3 scripts/run_fixture_test.py --locked -p robin_app --features tools --bin convert_datadir tests::authentic_demo_root_has_exact_typed_edition -- --ignored --exact
         ;;
     fixtures-fullgame)
         : "${ROBINHOOD_DATA_DIR:?Set ROBINHOOD_DATA_DIR to the full-game root containing Data/}"
         python3 scripts/run_fixture_test.py --locked -p robin_level_data --lib profiles::tests::load_fullgame_profile_cpf -- --ignored --exact
         python3 scripts/run_fixture_test.py --locked -p robin_level_data --lib profiles::tests::original_cpf_and_exported_document_share_profile_validation -- --ignored --exact
         python3 scripts/run_fixture_test.py --locked -p robin_assets fullgame_scripts -- --ignored
-        python3 scripts/run_fixture_test.py --locked -p robin_rs --features tools --bin convert_datadir tests::authentic_fullgame_root_has_exact_typed_edition -- --ignored --exact
+        python3 scripts/run_fixture_test.py --locked -p robin_app --features tools --bin convert_datadir tests::authentic_fullgame_root_has_exact_typed_edition -- --ignored --exact
         ;;
     fixtures-legacy-linux)
         : "${ROBINHOOD_DATA_DIR:?Set ROBINHOOD_DATA_DIR to the Linux i386 v48 root containing the required profile.cpf and profile saves}"

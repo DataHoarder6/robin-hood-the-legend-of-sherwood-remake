@@ -373,7 +373,7 @@ fn build() -> Value {
     let contract_json = serde_json::to_vec(&contract).expect("the runtime contract serializes");
     json!({
         "version": crate::crash::version(),
-        "git_rev": crate::replay_format::ENGINE_SOURCE_COMMIT,
+        "git_rev": crate::replay_format::engine_source_commit(),
         "target": env!("ROBIN_BUILD_TARGET"),
         "profile": env!("ROBIN_BUILD_PROFILE"),
         "release": env!("ROBIN_BUILD_PROFILE") == "release",

@@ -13,6 +13,13 @@
 // `#[allow(clippy::disallowed_methods)]` with a comment.
 #![warn(clippy::disallowed_methods)]
 
+#[cfg(test)]
+robin_build_info::define_test_identity!();
+// Android packages this library as the APK's `cdylib`: it is the final artifact
+// there (robin_build_info documents the contract).
+#[cfg(all(target_os = "android", not(test)))]
+robin_build_identity::define!();
+
 use std::sync::Once;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, OnceLock};

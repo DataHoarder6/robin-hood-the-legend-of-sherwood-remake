@@ -6,6 +6,9 @@
 
 #![recursion_limit = "256"]
 
+#[cfg(test)]
+robin_build_identity::define!();
+
 pub mod original_parity_replay;
 pub mod result;
 

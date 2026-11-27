@@ -29,6 +29,9 @@
 //! bounded memory; input size, decompressed size, zstd window and
 //! collection/string limits still apply.
 
+#[cfg(test)]
+robin_build_info::define_test_identity!();
+
 pub mod seek;
 
 use robin_engine::campaign::Campaign;
@@ -44,8 +47,11 @@ use std::io::Read as _;
 /// Short source provenance embedded in compact artifacts made by this build.
 /// It is not a compatibility gate: decoders accept any well-formed recorded
 /// hash and preserve it; replay schema and network protocol versions decide
-/// compatibility.
-pub const ENGINE_VERSION_HASH: &str = env!("ROBIN_GIT_HASH");
+/// compatibility. The final artifact supplies it (`robin_build_info`), so a
+/// commit does not rebuild this crate or anything that depends on it.
+pub fn engine_version_hash() -> &'static str {
+    robin_build_info::short_commit()
+}
 
 pub const COMPACT_PREFIX: &[u8] = b"RHREC\x01";
 pub const HEADER_BYTES: usize = COMPACT_PREFIX.len() + VERSION_HASH_BYTES;
@@ -2204,7 +2210,7 @@ mod tests {
     fn admission_and_playback_accept_other_commits_without_rewriting_provenance() {
         let file = sample_file();
         let compact = encode_file(&file);
-        assert_ne!(TEST_HASH, ENGINE_VERSION_HASH);
+        assert_ne!(TEST_HASH, engine_version_hash());
         for limits in [
             &DEFAULT_REPLAY_ADMISSION_LIMITS,
             &LOCAL_CUSTOM_REPLAY_ADMISSION_LIMITS,
