@@ -577,6 +577,7 @@ impl GridSector {
     /// point on an edge or vertex as inside. Test the closed edge before the
     /// parity toggle so ray-cast half-open endpoint conventions cannot reject
     /// an exact boundary click.
+    #[inline]
     pub fn contains_point(&self, pt: MapPoint) -> bool {
         self.contains_point_with_edges(pt, 0..self.points.len())
     }
@@ -621,6 +622,7 @@ impl GridSector {
     /// edge (including the closing edge) intersects the box, or the
     /// box's top-left corner lies inside the polygon (box fully
     /// contained).
+    #[inline]
     pub fn intersects_bbox(&self, bbox: &MapBBox) -> bool {
         self.intersects_bbox_with_edges(bbox, 0..self.points.len())
     }
@@ -729,6 +731,7 @@ pub struct ProjectileLandingResolution {
 
 impl SectorScreenResult {
     /// Whether a valid sector was found.
+    #[inline]
     pub fn is_valid(&self) -> bool {
         self.sector_idx.is_some() && self.sector.is_some()
     }
@@ -994,11 +997,13 @@ impl LiftRuntimeState {
     }
 
     /// Mark an actor as entering/leaving the lift going downwards.
+    #[inline]
     pub fn set_occupied_downwards(&mut self, entering: bool, is_pc: bool) {
         self.set_occupied(entering, is_pc, false);
     }
 
     /// Mark an actor as entering/leaving the lift going upwards.
+    #[inline]
     pub fn set_occupied_upwards(&mut self, entering: bool, is_pc: bool) {
         self.set_occupied(entering, is_pc, true);
     }
@@ -1319,6 +1324,7 @@ impl FastFindGrid {
 
     // ── Move box half-diagonals ──
 
+    #[inline]
     pub fn add_move_box_half_diagonal(&mut self, hd: MoveBoxHalfDiagonal) {
         self.level_mut().move_box_half_diagonals.push(hd);
     }
@@ -1327,6 +1333,7 @@ impl FastFindGrid {
     /// been populated yet (e.g. pre-level-load) or the index is out of
     /// range.  Callers building a `PositionInterface` fall back to a
     /// unit-sized box in that case.
+    #[inline]
     pub fn try_move_box_half_diagonal(&self, index: usize) -> Option<MoveBoxHalfDiagonal> {
         self.level.move_box_half_diagonals.get(index).copied()
     }
@@ -1380,6 +1387,7 @@ impl FastFindGrid {
     }
 
     /// Set the active state of a line.
+    #[inline]
     pub fn set_line_active(&mut self, line_idx: LineIndex, active: bool) {
         if let Some(slot) = self.line_active.get_mut(usize::from(line_idx)) {
             *slot = active;
@@ -1387,6 +1395,7 @@ impl FastFindGrid {
     }
 
     /// Set the active state of a sector.
+    #[inline]
     pub fn set_sector_active(&mut self, sector_idx: u32, active: bool) {
         if let Some(slot) = self.sector_active.get_mut(sector_idx as usize) {
             *slot = active;
@@ -1394,6 +1403,7 @@ impl FastFindGrid {
     }
 
     /// Set the active state of a mask.
+    #[inline]
     pub fn set_mask_active(&mut self, mask_idx: crate::mask::MaskIndex, active: bool) {
         if let Some(slot) = self.mask_active.get_mut(usize::from(mask_idx)) {
             *slot = active;
@@ -3490,6 +3500,7 @@ impl FastFindGrid {
     /// by iteratively pushing it away from intersecting motion lines.
     ///
     /// Returns `true` if a valid position was found (modifying `bbox` in place).
+    #[inline]
     pub fn find_authorized_position(&self, bbox: &mut MapBBox, layer: u16) -> bool {
         self.find_authorized_position_map(bbox, layer)
     }

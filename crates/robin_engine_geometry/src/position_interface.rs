@@ -220,6 +220,7 @@ pub enum Posture {
 }
 
 impl Posture {
+    #[inline]
     pub fn is_dead(self) -> bool {
         matches!(self, Self::Dead | Self::DeadBack)
     }
@@ -589,6 +590,7 @@ pub use crate::gate::DoorIndex as DoorHandle;
 pub struct ElementHandle(pub u32);
 impl ElementHandle {
     pub const NULL: Self = Self(u32::MAX);
+    #[inline]
     pub fn is_null(self) -> bool {
         self == Self::NULL
     }
@@ -1042,6 +1044,7 @@ impl PositionInterface {
     /// constructor. This is distinct from [`Self::set_posture`]: construction
     /// initializes both `mposture` and `mpostureOld` to the same value rather
     /// than recording a transition from an earlier posture.
+    #[inline]
     pub fn initialize_constructor_posture(&mut self, posture: crate::element_kinds::Posture) {
         self.saved_posture = posture;
         self.saved_old_posture = posture;
@@ -1241,6 +1244,7 @@ impl PositionInterface {
         self.goal
     }
 
+    #[inline]
     pub fn map_goal(&self) -> MapPoint {
         self.goal_map
     }
@@ -1360,6 +1364,7 @@ impl PositionInterface {
     /// Publish the increment installed by the projectile update.
     /// Projectile flight has no position goal, so it must not use the actor
     /// flight helper above (which would fabricate one).
+    #[inline]
     pub fn set_projectile_increment(&mut self, increment: WorldVec3D) {
         self.increment = increment;
         self.computed_increment = IncrementComputed::INCREMENT;
@@ -1485,11 +1490,13 @@ impl PositionInterface {
     /// equally satisfied by the hysteresis-free path.
     /// the direction count is left untouched, mirroring how
     /// Disabling anti-collision clears only the latch, never the counter.
+    #[inline]
     pub fn clear_deviated_for_aligned_transition_start(&mut self) {
         self.deviated = false;
     }
 
     /// Turn one step toward the goal direction.  Returns `true` if still turning.
+    #[inline]
     pub fn turn(&mut self) -> bool {
         if self.deviated {
             return self.turn_anti_vibration();
@@ -1549,6 +1556,7 @@ impl PositionInterface {
     }
 
     /// Very slow turn (delay of 5 ticks).
+    #[inline]
     pub fn turn_very_slow(&mut self) -> bool {
         self.turn_slow(5)
     }
@@ -1593,6 +1601,7 @@ impl PositionInterface {
     /// Saved free-flight waypoints can contain allocator residue; copying those
     /// bits is intentional, just as it is during save restoration. Gameplay
     /// material access still validates the value through `get_material`.
+    #[inline]
     pub fn copy_trajectory_material(&mut self, material: u32) {
         self.material = material;
     }
@@ -1639,6 +1648,7 @@ impl PositionInterface {
     }
 
     /// Move box in map coordinates.
+    #[inline]
     pub fn get_move_box_map(&self) -> &MapBBox {
         &self.move_box_map
     }
@@ -1668,6 +1678,7 @@ impl PositionInterface {
 
     /// Half diagonal of the current move box (bottom-right corner).
     #[must_use = "method returns MoveBoxHalfDiagonal by value; `pi.get_half_diagonal().x = v` silently modifies a temporary."]
+    #[inline]
     pub fn get_half_diagonal(&self) -> MoveBoxHalfDiagonal {
         let hd = self.move_box.bottom_right();
         MoveBoxHalfDiagonal::new(hd.x, hd.y)
@@ -1733,6 +1744,7 @@ impl PositionInterface {
         self.forecasted_movement
     }
 
+    #[inline]
     pub fn reset_forecasted_movement(&mut self) {
         self.forecasted_movement = WorldVec3D::ZERO;
     }
@@ -1766,6 +1778,7 @@ impl PositionInterface {
     // ====================================================================
 
     /// Snapshot current position as "old" before a new move step.
+    #[inline]
     pub fn new_move(&mut self) {
         self.old_position = self.position;
         self.old_position_map = self.position_map;
@@ -1829,6 +1842,7 @@ impl PositionInterface {
     // ====================================================================
 
     /// Derive map increment from 3D increment or from goal.
+    #[inline]
     pub fn compute_increment_map(&mut self) {
         if self.is_increment_map_computed() {
             return;
@@ -1846,6 +1860,7 @@ impl PositionInterface {
     }
 
     /// Derive all increments + direction.
+    #[inline]
     pub fn compute_increment_all(&mut self, compute_direction: bool) {
         if self.is_increment_all_computed() {
             return;
@@ -1979,6 +1994,7 @@ impl PositionInterface {
         self.accumulate_movement_map = v;
     }
 
+    #[inline]
     pub fn initialize_average_speed_map(&mut self, pt: MapPoint) {
         let map = self.map_position();
         self.accumulated_movement_map = MapVec::new(map.x - pt.x, map.y - pt.y);
@@ -2053,6 +2069,7 @@ impl PositionInterface {
         }
     }
 
+    #[inline]
     pub fn is_blocked(&self) -> bool {
         self.blocked_count > 50
     }
@@ -2257,6 +2274,7 @@ impl PositionInterface {
     }
 
     /// Test whether the current map position is inside the grid bounds.
+    #[inline]
     pub fn is_inside_grid(&self, grid: &FastFindGrid) -> bool {
         grid.is_inside_grid_point(self.position_map)
     }
@@ -2318,10 +2336,12 @@ pub struct AnticollisionData {
 /// Convert a 2D vector `(x, y)` to a 16-sector compass direction.
 ///
 /// Sector 0 = north (negative Y), increasing clockwise.
+#[inline]
 pub fn vector_to_sector_0_to_15(x: f32, y: f32) -> i16 {
     vector_to_sector_0_to_15_with_aspect(x, y, 1.0)
 }
 
+#[inline]
 pub fn vector_to_sector_0_to_15_with_aspect(x: f32, y: f32, aspect_ratio: f32) -> i16 {
     if x == 0.0 && y == 0.0 {
         return 0;
@@ -2363,6 +2383,7 @@ pub fn vector_to_sector_0_to_15_with_aspect(x: f32, y: f32, aspect_ratio: f32) -
 ///
 /// Thin [`Direction`]-returning alias over [`vector_to_sector_0_to_15`]
 /// for internal callers that want the strongly-typed compass value.
+#[inline]
 pub fn vector_to_direction(x: f32, y: f32) -> Direction {
     Direction::from_raw(vector_to_sector_0_to_15(x, y) as i32)
 }
