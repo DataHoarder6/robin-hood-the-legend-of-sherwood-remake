@@ -73,8 +73,14 @@ Ordered by measured cost.
    never reaches back into the engine moved out: `robin_engine_geometry`
    (positions, sectors, gates, sight obstacles, fast-find grid, patches,
    material zones, element kinds, orders, the parity diagnostics gate; about
-   0.9 MB), re-exported at the old paths. Everything else sits on the cycle
-   described below.
+   0.9 MB), re-exported at the old paths. The script layer followed:
+   `robin_engine_script` (the VM, script programs, sprite scripts, the native
+   command enums and the values they name; about 0.25 MB). `robin_assets` and
+   `robin_modding_tools` reached the engine only for that layer and for
+   re-exports of lower crates, so they now depend on it instead and compile
+   beside `robin_engine` rather than after it; an engine edit recompiles
+   neither. `scripts/check_asset_boundary.py` keeps both graphs free of
+   `robin_engine`. Everything else sits on the cycle described below.
 8. **`test` and `dev` differed only in `debug`.** That gave every dependency and
    workspace library two artifacts, so nextest and the `robin` build in one gate
    compiled `robin_engine` twice. `profile.test` now inherits `dev` unchanged
@@ -103,9 +109,17 @@ shows why item 7 needs a compile-driven refactor rather than a mechanical move:
 
 Seams that look free are not: `legacy_save` (775 KB, two inbound uses) and the
 `test-helpers` mutation surface both write `EngineInner` state directly, which
-`engine_facade_contract` keeps out of other crates. The geometry layer was the
-one cluster whose outbound references reduced to movable value types
-(`sector_production::Type`, `sound_cache::Material`, `engine::diagnostics`), so
-it is the part that moved. The next step that would pay is breaking `element`
-free of `engine` behind data-only types, which changes visibility across
-hundreds of call sites and has to be compiled step by step.
+`engine_facade_contract` keeps out of other crates. Two clusters had outbound
+references that reduced to movable value types: the geometry layer
+(`sector_production::Type`, `sound_cache::Material`, `engine::diagnostics`) and
+the script layer (`ai::{AlertLevel, NoiseType, Position}`, `sound::Jingle`,
+`sequence::SequenceId`, the native command enums). Those are the parts that
+moved. The next step that would pay is the state layer: `element`, `ai*`,
+`sequence`, `sprite`, `campaign` and the smaller modules they use (about
+2.5 MB with tests). Its outbound references to `engine` are few but structural:
+inherent `impl EngineInner` blocks in `sequence/{dispatch,callbacks,movement}.rs`
+and `campaign.rs` (which must move into `engine/`, widening the private items
+they use), `engine::SimConfig` held by `Campaign`, `TickCtx` and
+`engine::script::ActiveScriptCall` in sequence callbacks, and the
+`engine::diagnostics` gates. Each needs a compile-checked visibility pass, so
+it is a compile-driven step, not a blind move.
