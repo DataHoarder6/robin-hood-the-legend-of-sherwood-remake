@@ -48,7 +48,21 @@ fi
 
 # The main checkout is the first worktree git prints, and it is the one a
 # shared `main` lives in: never a candidate, whatever its branch.
-main_checkout=$(git -C "$root" worktree list --porcelain -z | { IFS= read -r -d '' first; printf '%s\n' "${first#worktree }"; })
+listing=$(mktemp "${TMPDIR:-/tmp}/robin-prune-worktrees.XXXXXX")
+trap 'rm -f -- "$listing"' EXIT
+if ! git -C "$root" worktree list --porcelain -z >"$listing"; then
+    printf 'prune-worktrees: git worktree list failed\n' >&2
+    exit 2
+fi
+mapfile -d '' -t worktree_fields <"$listing"
+if (( ${#worktree_fields[@]} == 0 )); then
+    printf 'prune-worktrees: git worktree list returned no records\n' >&2
+    exit 2
+fi
+case ${worktree_fields[0]} in
+    'worktree '*) main_checkout=${worktree_fields[0]#worktree } ;;
+    *) printf 'prune-worktrees: git worktree list returned an invalid first record\n' >&2; exit 2 ;;
+esac
 current=$(readlink -f -- "$root")
 
 removed=0
@@ -154,7 +168,7 @@ flush() {
     path= branch= detached=0 locked=0
 }
 
-while IFS= read -r -d '' field; do
+for field in "${worktree_fields[@]}"; do
     case $field in
         '') flush ;;
         'worktree '*) path=${field#worktree } ;;
@@ -162,7 +176,7 @@ while IFS= read -r -d '' field; do
         detached) detached=1 ;;
         locked | locked\ *) locked=1 ;;
     esac
-done < <(git -C "$root" worktree list --porcelain -z)
+done
 flush
 
 printf 'prune-worktrees: %s, integration ref %s: %d to remove, %d kept\n' \

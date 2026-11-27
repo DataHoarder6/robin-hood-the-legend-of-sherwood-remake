@@ -175,6 +175,39 @@ expect_status 0 'running from a merged worktree exits 0'
 expect_exists 'the running checkout stays' "$repo/.worktrees/current"
 expect_contains 'the running checkout is named' 'this checkout'
 
+# A producer with more NUL-delimited output than the first-record reader
+# consumes must not turn SIGPIPE into a failed plan under `pipefail`.
+git() {
+    command git "$@"
+    local status=$?
+    if [[ "$*" == *"worktree list --porcelain -z"* ]]; then
+        printf '\0%.0s' {1..131072}
+    fi
+    return "$status"
+}
+export -f git
+run_prune "$repo"
+unset -f git
+expect_status 0 'a large worktree listing does not SIGPIPE the planner'
+expect_contains 'the large listing still produces a plan' 'to remove'
+
+# A listing that emits a valid first record and then fails must not produce a
+# successful destructive plan from partial data.
+git() {
+    if [[ "$*" == *"worktree list --porcelain -z"* ]]; then
+        local -a fields
+        mapfile -d '' -t fields < <(command git "$@")
+        printf '%s\0' "${fields[0]}"
+        return 42
+    fi
+    command git "$@"
+}
+export -f git
+run_prune "$repo"
+unset -f git
+expect_status 2 'a failed worktree listing is refused'
+expect_contains 'the refusal names the failed listing' 'git worktree list failed'
+
 # A repository without an integration ref is refused, not guessed at.
 git init --quiet "$work/lonely"
 git -C "$work/lonely" commit --quiet --allow-empty -m base
