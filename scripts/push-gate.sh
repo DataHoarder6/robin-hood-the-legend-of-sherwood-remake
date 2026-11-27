@@ -94,12 +94,11 @@ printf '%s\n' "$paths" | grep -qE '^(wasm-www/scripts/|wasm-www/runtime-contract
 
 suites=()
 if [ "$crates_changed" = 1 ] || printf '%s\n' "$paths" | grep -qE '^(Cargo\.|rust-toolchain)'; then
-    # `lint` runs clippy with `-D warnings` over `--all-targets`, which checks
-    # every library both with and without cfg(test), so it also reports the
-    # unused imports and dead code only the shipped build sees. `wasm` is
-    # selected separately below: it also depends on the build plan and devShell,
-    # not only on crates/.
-    suites+=(format lint client-release)
+    # `lint` runs clippy with `-D warnings` over libraries and binaries, the
+    # code that ships; `lint-tests` adds the test targets. `wasm` is selected
+    # separately below: it also depends on the build plan and devShell, not
+    # only on crates/.
+    suites+=(format lint lint-tests client-release)
 fi
 if [ "$wasm_changed" = 1 ]; then
     suites+=(wasm)
@@ -158,6 +157,45 @@ fi
 if [ ${#suites[@]} -eq 0 ]; then
     printf 'push-gate: no gated path changed; nothing to run.\n' >&2
     exit 0
+fi
+
+# Two tiers (docs/adr/0014-two-tier-landing-gate.md). Before the push, only the
+# suites that finish in seconds on a warm copy: format, lint, docs. Everything
+# else is verified right after the push on its own warm copy
+# (scripts/post-land-verify.sh, started by land.sh), and a red verification
+# stops the line: while scripts/main-red.sh reports red, every landing runs the
+# full set, plus the suites that failed, before it may push.
+#
+# The deferred tier needs a caller that runs it. land.sh names a file in
+# ROBIN_GATE_DEFERRED_FILE and starts the verification after its push; a plain
+# `git push` through the pre-push hook has no such caller, so it gates the full
+# set here.
+red_suites=$(bash scripts/main-red.sh suites)
+if [ -n "$red_suites" ]; then
+    printf 'push-gate: main is red (%s); this landing runs the full gate\n' "$red_suites" >&2
+    [ -z "${ROBIN_GATE_DEFERRED_FILE:-}" ] || printf '#full\n' >"$ROBIN_GATE_DEFERRED_FILE"
+    for suite in $red_suites; do
+        case " ${suites[*]} " in *" $suite "*) ;; *) suites+=("$suite") ;; esac
+    done
+fi
+if [ -n "${ROBIN_GATE_DEFERRED_FILE:-}" ] && [ -z "$red_suites" ]; then
+    fast=()
+    deferred=()
+    for suite in "${suites[@]}"; do
+        case $suite in
+            format | lint | docs) fast+=("$suite") ;;
+            *) deferred+=("$suite") ;;
+        esac
+    done
+    printf '%s\n' "${deferred[@]}" >"$ROBIN_GATE_DEFERRED_FILE"
+    if [ ${#deferred[@]} -gt 0 ]; then
+        printf 'push-gate: verified after the push: %s\n' "${deferred[*]}" >&2
+    fi
+    suites=("${fast[@]}")
+    if [ ${#suites[@]} -eq 0 ]; then
+        printf 'push-gate: nothing to run before the push.\n' >&2
+        exit 0
+    fi
 fi
 
 # One remote-check call for the whole push: it syncs this checkout once and runs

@@ -61,6 +61,9 @@ remote_root=build/robin
 # delete a gate's cwd mid-build (observed 2026-11-20 with gate-shared).
 gate_root=build/robin-gate
 gate_copy_name=gate-shared
+# Post-land verification (scripts/post-land-verify.sh) proves landed trees on
+# its own stable copy, so it never queues behind the next landing's gate.
+post_land_copy_name=post-land
 copy_root=$remote_root
 slots=${ROBIN_BUILD_SLOTS:-2}
 slot_dir="~/$remote_root/.slots"
@@ -271,24 +274,6 @@ require_disk() {
     fi
 }
 
-# A Nix GC that removed a devShell input makes the gate fail deep in a compile
-# with an opaque glibc error. Prove cargo and rustc can exec inside the very
-# devShell the suites use before syncing a tree, so the failure names the cause.
-require_toolchain() {
-    printf 'remote-check: checking the gate toolchain on %s\n' "$host" >&2
-    if ! ssh "$host" bash -s <<EOF
-set -euo pipefail
-mkdir -p $remote_dir
-cd $remote_dir
-nix develop --command bash -c 'cargo --version && rustc --version'
-EOF
-    then
-        printf 'remote-check: cargo/rustc failed inside the gate devShell on %s.\n' "$host" >&2
-        printf 'remote-check: a Nix GC may have removed a devShell input; rebuild the shell before retrying.\n' >&2
-        return 1
-    fi
-}
-
 sync_worktree() {
     remote_dir="~/$copy_root/$name"
     printf 'remote-check: sync %s -> %s:%s\n' "$repository" "$host" "$remote_dir" >&2
@@ -464,9 +449,9 @@ else
     requested=("$1")
 fi
 
-if [ "$name" = "$gate_copy_name" ]; then
-    copy_root=$gate_root
-fi
+case $name in
+    "$gate_copy_name" | "$post_land_copy_name") copy_root=$gate_root ;;
+esac
 
 # Validate against the script's own suite list, so nothing user-controlled is
 # interpolated into the remote command.
@@ -525,21 +510,15 @@ lock_copy
 # the profiles' incremental default (docs/adr/0013-gate-incremental-without-sccache.md).
 # Pool copies are swapped between worktrees, so they keep sccache with one
 # basedir per copy and Cargo incremental off, which sccache cannot cache.
-if [ "$name" = "$gate_copy_name" ]; then
+if [ "$copy_root" = "$gate_root" ]; then
     cache_env="RUSTC_WRAPPER="
 else
     prepare_cache
     cache_env="SCCACHE_BASEDIRS=${ROBIN_SCCACHE_BASEDIRS@Q} CARGO_INCREMENTAL=0 SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH SCCACHE_IDLE_TIMEOUT=0 SCCACHE_CLIENT_SIDE=1"
 fi
 remote_dir="~/$copy_root/$name"
-# A warm copy already carries the gate's flake, so prove the toolchain can exec
-# before rsyncing a tree into it. A first-time copy has no flake yet; its check
-# runs as the first command inside the gate devShell below.
-if ssh "$host" "test -f $remote_dir/flake.nix" 2>/dev/null; then
-    require_toolchain
-else
-    printf 'remote-check: no devShell in the copy yet; toolchain is checked inside the gate.\n' >&2
-fi
+# The toolchain is proved as the first command inside the gate's devShell
+# (gate_toolchain_guard), which names a GC'd devShell input before any compile.
 sync_worktree
 lock="$remote_dir.lock"
 printf 'remote-check: %s -> %s:%s\n' "${requested[*]}" "$host" "$remote_dir" >&2

@@ -150,7 +150,10 @@ To decide whether a heavy suite is still owed by a path, `cargo tree -i
 --workspace <crate>` lists reverse dependencies. Treat it as a hint only: the
 tree is not exactly what a build compiles.
 
-The push that updates the integration branch is gated. The suites a landing owes
+The push that updates the integration branch is gated in two tiers
+([ADR 0014](adr/0014-two-tier-landing-gate.md)): `format`, `lint` and `docs` before the
+push; every other selected suite right after it, on the `post-land` copy, with a
+red result stopping the line (`scripts/main-red.sh show`). The suites a landing owes
 are selected in one place, `scripts/push-gate.sh`: `format`, `lint` and
 `client-release` when anything under `crates/` or a gate script changed,
 `engine` when engine crates did, `tooling` when anything under `scripts/`,

@@ -3,8 +3,8 @@
 #
 #   scripts/run-suites.sh SUITE...
 #
-# Suites that never touch Cargo's build directory (shell, Python and pnpm
-# fixtures, the Markdown link check) run concurrently with the Cargo suites
+# Suites that never touch Cargo's build directory (rustfmt, shell, Python and
+# pnpm fixtures, the Markdown link check) run concurrently with the Cargo suites
 # instead of waiting behind them: on 2026-11-27 `tooling` alone held a landing
 # for 4m41 after every compile had finished. The Cargo suites run in order and
 # stop at the first failure, since they share one target directory. Each
@@ -15,7 +15,7 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 (( $# > 0 )) || { printf 'usage: scripts/run-suites.sh SUITE...\n' >&2; exit 2; }
 
-independent=" tooling docs web editor "
+independent=" format tooling docs web editor "
 logs=$(mktemp -d "${TMPDIR:-/tmp}/robin-suites.XXXXXX")
 trap 'rm -rf -- "$logs"' EXIT
 

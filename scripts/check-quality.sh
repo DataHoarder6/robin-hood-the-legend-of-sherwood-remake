@@ -23,7 +23,7 @@ assert_build_host() {
 
 if (( $# != 1 )); then
     printf 'usage: bash scripts/check-quality.sh SUITE\n' >&2
-    printf 'suites: format lint core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
+    printf 'suites: format lint lint-tests core contracts scripting-llvm engine assets protocols services parity parity-cross client client-check client-release tools wasm wasm-release wasm-tests browser-audio native-lifecycle multiplayer-e2e tooling unreferenced-items web editor editor-browser gpu gpu-gl host fixtures-demo fixtures-fullgame fixtures-legacy-linux docs\n' >&2
     exit 2
 fi
 
@@ -39,24 +39,21 @@ case "$1" in
         cargo fmt --all -- --check
         ;;
     lint)
-        # One run over the whole workspace with the shipping client's `release`
-        # feature set: every crate, every target, the code that ships. Code that
-        # exists only without those features is compiled by CI's `client` suite
-        # but not linted here. No `-A`: a lint that is wrong for this code is
-        # allowed by name where it fires, with a reason.
-        # `--all-targets` checks every library twice, with and without
-        # cfg(test), so `-D warnings` also covers the unused imports and dead
-        # code only the shipped build sees; no separate `cargo check` suite.
-        # Never add per-invocation rustflags to a suite: Cargo keeps them out of
-        # artifact file names, so a suite with different flags overwrites the
-        # shared proc-macro and build-script artifacts and every later suite
-        # rebuilds the whole dependency graph
-        # (docs/slop/build-time-root-causes.md).
-        # `robin_app/release` forwards to `robin_rs/release`. Naming
-        # `robin_rs/release` directly would also read as robin_parity's
-        # `dep/feature` syntax and switch on its optional robin_rs dependency.
-        cargo clippy --locked --workspace --all-targets \
-            --features robin_app/release -- -D warnings
+        # The code that ships: every library and binary of the workspace with
+        # the shipping client's `release` feature set, without cfg(test), so
+        # `-D warnings` reports the dead code and unused imports only the
+        # shipped build sees. `robin_app/release` forwards to `robin_rs/release`;
+        # naming `robin_rs/release` directly would also read as robin_parity's
+        # `dep/feature` syntax. No `-A`: a lint that is wrong for this code is
+        # allowed by name where it fires, with a reason. Never add per-invocation
+        # rustflags to a suite: Cargo keeps them out of artifact file names, so
+        # a suite with different flags overwrites the shared proc-macro and
+        # build-script artifacts (docs/slop/build-time-root-causes.md).
+        cargo clippy --locked --workspace --features robin_app/release -- -D warnings
+        ;;
+    lint-tests)
+        # The same lint over every target, test code included.
+        cargo clippy --locked --workspace --all-targets --features robin_app/release -- -D warnings
         ;;
     core)
         cargo test --locked -p robin_build_info -p robin_build_identity -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support

@@ -9,6 +9,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/robin-push-gate.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 
 export HOME=$work/home
+export XDG_STATE_HOME=$work/state
 export GIT_CONFIG_GLOBAL=$work/gitconfig
 export GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$HOME"
@@ -41,8 +42,9 @@ git init --quiet "$work/repo"
 cd -- "$work/repo"
 mkdir -p scripts
 cp -- "$source_root/scripts/push-gate.sh" scripts/push-gate.sh
+cp -- "$source_root/scripts/main-red.sh" scripts/main-red.sh
 printf 'base\n' >file.txt
-git add file.txt scripts/push-gate.sh
+git add file.txt scripts/push-gate.sh scripts/main-red.sh
 git commit --quiet -m base
 head=$(git rev-parse HEAD)
 
@@ -91,7 +93,7 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$head" "$crates_head" 2>&1) || status=$?
 expect_status 0 'a crates change runs the suites its diff selects'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm tooling' ]; then
+if [ "$selected" = '--suites format lint lint-tests client-release wasm tooling' ]; then
     pass 'the crates change selects lint and wasm, the suites that read every target, and not wasm-release'
 else
     fail "the crates change selects lint and wasm without wasm-release (selected '$selected')"
@@ -179,7 +181,7 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$editor_head" "$abi_head" 2>&1) || status=$?
 expect_status 0 'an ABI input change gates the contracts suite'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm contracts' ]; then
+if [ "$selected" = '--suites format lint lint-tests client-release wasm contracts' ]; then
     pass 'the ABI change selects contracts'
 else
     fail "the ABI change selects contracts (selected '$selected')"
@@ -196,11 +198,44 @@ status=0
 output=$(GATE_SUITES="$work/suites" bash scripts/push-gate.sh "$abi_head" "$wasmtest_head" 2>&1) || status=$?
 expect_status 0 'a wasm test-module change gates wasm-tests'
 selected=$(cat "$work/suites" 2>/dev/null || true)
-if [ "$selected" = '--suites format lint client-release wasm wasm-tests' ]; then
+if [ "$selected" = '--suites format lint lint-tests client-release wasm wasm-tests' ]; then
     pass 'the wasm test module selects wasm-tests'
 else
     fail "the wasm test module selects wasm-tests (selected '$selected')"
 fi
+
+# land.sh names a deferred file: only format, lint and docs gate the push; the
+# rest is written for the post-land verification.
+status=0
+output=$(GATE_SUITES="$work/suites" ROBIN_GATE_DEFERRED_FILE="$work/deferred" \
+    bash scripts/push-gate.sh "$editor_head" "$wasmtest_head" 2>&1) || status=$?
+expect_status 0 'a landing with a deferred file gates the fast tier'
+selected=$(cat "$work/suites" 2>/dev/null || true)
+deferred=$(paste -sd' ' "$work/deferred" 2>/dev/null || true)
+if [ "$selected" = '--suites format lint' ] &&
+   [ "$deferred" = 'lint-tests client-release wasm contracts wasm-tests' ]; then
+    pass 'format and lint gate the push; the rest is deferred'
+else
+    fail "fast tier '$selected', deferred '$deferred'"
+fi
+
+# A red main stops the line: the full set plus the failed suites, and `#full`
+# tells land.sh it may clear the record after its push.
+bash scripts/main-red.sh set deadbeef 'runbg log post-land-deadbeef' engine
+status=0
+output=$(GATE_SUITES="$work/suites" ROBIN_GATE_DEFERRED_FILE="$work/deferred" \
+    bash scripts/push-gate.sh "$editor_head" "$wasmtest_head" 2>&1) || status=$?
+selected=$(cat "$work/suites" 2>/dev/null || true)
+if [ "$selected" = '--suites format lint lint-tests client-release wasm contracts wasm-tests engine' ] &&
+   [ "$(head -1 "$work/deferred")" = '#full' ]; then
+    pass 'a red main runs the full set plus the failed suites'
+else
+    fail "red main ran '$selected', deferred file '$(cat "$work/deferred")'"
+fi
+expect_contains 'the red gate says why it runs everything' 'main is red (engine)'
+bash scripts/main-red.sh clear cafebabe 2>/dev/null
+[ -z "$(bash scripts/main-red.sh suites)" ] && pass 'clearing the record turns main green' ||
+    fail 'the red record survived clear'
 
 # A change with no gated path must still select nothing.
 mkdir -p assets

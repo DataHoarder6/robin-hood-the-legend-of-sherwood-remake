@@ -45,6 +45,9 @@
   `cargo test` selects only the two default members, never a gate. The
   `.githooks/pre-commit` hook formats the files a commit touches. For one test,
   use the `--sync` + `ssh … cargo test <name>` recipe in `docs/TESTING.md`.
+- Landings gate in two tiers: format, lint and docs before the push, the rest right
+  after it; a red post-land run makes every landing run the full gate until one
+  passes — `docs/adr/0014-two-tier-landing-gate.md`, `scripts/main-red.sh show`.
 - Clippy is a landing gate (`docs/slop/clippy-gate.md`); batch only fixes of
   pre-existing warnings, never defer a warning your change introduces.
 - Run cargo unfiltered — no `| head`, no shared log path; a hidden error costs
