@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
-import { skipWithoutLicensedData } from "../../shared/test-fixtures/licensed-data.ts";
 import { type Level3D, validateMission, parseStoredMap } from "@rle/shared";
 import { compileMap } from "./map-compile.ts";
 import { assetCompilerFixture } from "../../shared/test-fixtures/asset-gameplay.ts";
@@ -194,75 +192,66 @@ test("resizing omits out-of-frame mission markers even in strict export and reta
   assert.deepEqual(doc, before);
 });
 
-const licensedSourceSkip = skipWithoutLicensedData(
-  resolve(import.meta.dirname, "../../.."),
-  "level-editor/library/mission-states/croisement02/source/Emb05_FoB_MP.rhm.json",
-  "level-editor/library/mission-states/croisement02/source/Croisement02.rhp.json",
-);
-test(
-  "native source staging keeps complete patch slots and script topology without claiming execution",
-  { skip: licensedSourceSkip },
-  async () => {
-    const { prepareNativeMissionSource } = await import("./compile-mission.ts");
-    const { readFile } = await import("node:fs/promises");
-    const source = new URL("../../library/mission-states/croisement02/source/", import.meta.url);
-    const bytes = new Map([
-      [
-        "Data/Levels/Emb05_FoB_MP.rhm.json",
-        new Uint8Array(await readFile(new URL("Emb05_FoB_MP.rhm.json", source))),
-      ],
-      [
-        "Data/Levels/Croisement02.rhp.json",
-        new Uint8Array(await readFile(new URL("Croisement02.rhp.json", source))),
-      ],
-      // Pinning alone deliberately does not attest that a program decodes or can execute.
-      ["Data/Levels/Emb05_FoB_MP.scb", new Uint8Array([1, 2, 3])],
-    ]);
-    const pin = async (path: string) => ({
-      path,
-      sha256: Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.get(path)!)))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(""),
-    });
-    const request = {
-      version: 1 as const,
-      mission: "Emb05_FoB_MP",
-      map: "Croisement02",
-      mission_data: await pin("Data/Levels/Emb05_FoB_MP.rhm.json"),
-      level_data: await pin("Data/Levels/Croisement02.rhp.json"),
-      script: await pin("Data/Levels/Emb05_FoB_MP.scb"),
-      runtime_resources: [],
-    };
-    const read = async (path: string) => {
-      const row = bytes.get(path);
-      if (!row) throw Error("Missing " + path);
-      return row;
-    };
-    const result = await prepareNativeMissionSource(request, read);
-    assert.equal(result.level.patches.length, 9);
-    assert.equal(
-      result.identities.find((r) => r.kind === "mission-patch" && r.index === 0)!.patch_slot,
-      9,
-    );
-    assert.equal(result.identities.filter((r) => r.kind === "map-animation").length, 15);
-    assert.ok(result.required_script_classes.includes("filet01_80000019"));
-    assert.deepEqual(
-      result.files.get(request.mission_data.path),
-      bytes.get(request.mission_data.path),
-    );
-    assert.equal(result.status, "source-pinned-runtime-validation-required");
-    assert.equal(result.runtime_validation_required, true);
-    bytes.get(request.script.path)![0] = 4;
-    await assert.rejects(prepareNativeMissionSource(request, read), /hash differs/);
-    await assert.rejects(
-      prepareNativeMissionSource(
-        { ...request, script: { ...request.script, path: "Data/Levels/other.scb" } },
-        read,
-      ),
-      /script path/,
-    );
-  },
-);
+test("native source staging keeps complete patch slots and script topology without claiming execution", async () => {
+  const { prepareNativeMissionSource } = await import("./compile-mission.ts");
+  const { readFile } = await import("node:fs/promises");
+  const source = new URL("../../library/mission-states/croisement02/source/", import.meta.url);
+  const bytes = new Map([
+    [
+      "Data/Levels/Emb05_FoB_MP.rhm.json",
+      new Uint8Array(await readFile(new URL("Emb05_FoB_MP.rhm.json", source))),
+    ],
+    [
+      "Data/Levels/Croisement02.rhp.json",
+      new Uint8Array(await readFile(new URL("Croisement02.rhp.json", source))),
+    ],
+    // Pinning alone deliberately does not attest that a program decodes or can execute.
+    ["Data/Levels/Emb05_FoB_MP.scb", new Uint8Array([1, 2, 3])],
+  ]);
+  const pin = async (path: string) => ({
+    path,
+    sha256: Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.get(path)!)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(""),
+  });
+  const request = {
+    version: 1 as const,
+    mission: "Emb05_FoB_MP",
+    map: "Croisement02",
+    mission_data: await pin("Data/Levels/Emb05_FoB_MP.rhm.json"),
+    level_data: await pin("Data/Levels/Croisement02.rhp.json"),
+    script: await pin("Data/Levels/Emb05_FoB_MP.scb"),
+    runtime_resources: [],
+  };
+  const read = async (path: string) => {
+    const row = bytes.get(path);
+    if (!row) throw Error("Missing " + path);
+    return row;
+  };
+  const result = await prepareNativeMissionSource(request, read);
+  assert.equal(result.level.patches.length, 9);
+  assert.equal(
+    result.identities.find((r) => r.kind === "mission-patch" && r.index === 0)!.patch_slot,
+    9,
+  );
+  assert.equal(result.identities.filter((r) => r.kind === "map-animation").length, 15);
+  assert.ok(result.required_script_classes.includes("filet01_80000019"));
+  assert.deepEqual(
+    result.files.get(request.mission_data.path),
+    bytes.get(request.mission_data.path),
+  );
+  assert.equal(result.status, "source-pinned-runtime-validation-required");
+  assert.equal(result.runtime_validation_required, true);
+  bytes.get(request.script.path)![0] = 4;
+  await assert.rejects(prepareNativeMissionSource(request, read), /hash differs/);
+  await assert.rejects(
+    prepareNativeMissionSource(
+      { ...request, script: { ...request.script, path: "Data/Levels/other.scb" } },
+      read,
+    ),
+    /script path/,
+  );
+});
 
 test("native appearance mapping is exhaustive and has one authoritative patch per compiled transition", async () => {
   const { validateNativeAppearanceBindings: validate } =
