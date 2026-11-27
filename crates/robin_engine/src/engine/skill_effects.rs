@@ -77,8 +77,10 @@ mod tests {
 
     #[test]
     fn spawn_stamps_health_and_movement_authorization_into_existing_fields() {
-        let mut description = PcDescription::default();
-        description.skills = SkillSet::empty();
+        let mut description = PcDescription {
+            skills: SkillSet::empty(),
+            ..Default::default()
+        };
         description.grant_skill(SkillNode::Hardy);
         description.grant_skill(SkillNode::BurglarsKit);
 
@@ -98,8 +100,10 @@ mod tests {
 
     #[test]
     fn spawn_without_skills_leaves_the_serialized_fields_untouched() {
-        let mut pc = PcData::default();
-        pc.life_points = 63;
+        let mut pc = PcData {
+            life_points: 63,
+            ..Default::default()
+        };
         apply_spawn_effects(&mut pc, &PcDescription::default());
         assert_eq!(pc.life_points, 63);
         assert!(!pc.has_lockpick);

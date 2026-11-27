@@ -165,13 +165,16 @@ impl EngineInner {
         // authored sequence factor is consumed. Deriving it from the campaign
         // record (rather than storing a new field) keeps state hashes and
         // replays deterministic for a given skill set.
-        let skill_speed_factor = self
+        let skill_speed_factor = if self
             .world
             .entities
             .get(entity_id)
             .is_some_and(|entity| entity.is_pc())
-            .then(|| self.pc_skill_effects(entity_id).speed_factor)
-            .unwrap_or(1.0);
+        {
+            self.pc_skill_effects(entity_id).speed_factor
+        } else {
+            1.0
+        };
         let mut seek_operands = self.movement_seek_operands(entity_id, selected, ft);
         let entity = self
             .world

@@ -33,7 +33,7 @@ pub const BASE_LISTEN_RADIUS: i32 = 750;
 pub const KEEN_EAR_LISTEN_RADIUS: i32 = 1050;
 /// Cost of buying every node: four Tier-I at one, four Tier-II and the single
 /// Tier-III at two.  The story corpus grants 18 clovers, leaving four spare.
-pub const TOTAL_TREE_COST: i32 = 4 * 1 + 4 * 2 + 1 * 2;
+pub const TOTAL_TREE_COST: i32 = 4 + 8 + 2;
 
 // ─── Node ────────────────────────────────────────────────────────
 
