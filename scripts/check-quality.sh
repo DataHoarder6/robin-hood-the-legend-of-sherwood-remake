@@ -53,8 +53,11 @@ case "$1" in
         # rebuilds the whole dependency graph
         # (docs/slop/build-time-root-causes.md).
         cargo clippy --locked --workspace --all-targets -- -D warnings
-        cargo clippy --locked -p robin_rs -p robin_app --all-targets \
-            --no-default-features --features release -- -D warnings
+        # robin_parity is selected so robin_engine resolves with the same
+        # features (`original-parity`) as in the workspace run above and its
+        # check is reused instead of repeated.
+        cargo clippy --locked -p robin_rs -p robin_app -p robin_parity --all-targets \
+            --no-default-features --features robin_rs/release,robin_app/release -- -D warnings
         ;;
     core)
         cargo test --locked -p robin_build_info -p robin_build_identity -p robin_util -p robin_display_text -p robin_state_hash_derive -p robin_script_types -p robin_spellforge -p robin_lua -p robin_test_support
