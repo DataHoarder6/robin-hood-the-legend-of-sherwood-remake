@@ -660,6 +660,7 @@ mod tests {
     /// #120: a forced win is a real win for the debriefing and the boards,
     /// but the `/win` command's explicit `ForceMissionEnd` must keep the
     /// controller out of `AwaitingConsent`. A scripted win keeps its offer.
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn forced_win_shows_boards_without_offering_submission() {
         use crate::leaderboard::test_fixtures::{
