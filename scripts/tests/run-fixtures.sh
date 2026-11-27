@@ -14,7 +14,7 @@ printf 'import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n  
 failures=0
 pass() { printf 'ok   %s\n' "$1"; }
 fail() { printf 'FAIL %s\n' "$1"; failures=$((failures + 1)); }
-run() { status=0; output=$(cd "$work" && env "$@" bash scripts/run-fixtures.sh \
+run() { status=0; output=$(cd "$work" && env -u ROBIN_CHANGED_PATHS "$@" bash scripts/run-fixtures.sh \
     'bash scripts/test_land.sh' 'bash scripts/test_other.sh' \
     'python3 -m unittest discover -s scripts/sub -p case_test.py' 2>&1) || status=$?; }
 
@@ -27,7 +27,7 @@ run X=1
 [[ $output == *'3 of 3 fixtures affected'* && $status -eq 0 ]] &&
     pass 'without a diff every fixture runs' || fail "$output"
 status=0
-output=$(cd "$work" && bash scripts/run-fixtures.sh 'bash scripts/test_broken.sh' 'bash scripts/test_other.sh' 2>&1) || status=$?
+output=$(cd "$work" && env -u ROBIN_CHANGED_PATHS bash scripts/run-fixtures.sh 'bash scripts/test_broken.sh' 'bash scripts/test_other.sh' 2>&1) || status=$?
 [ "$status" -eq 1 ] && [[ $output == *'failed: bash scripts/test_broken.sh'* ]] &&
     pass 'a failing fixture fails the run and is named' || fail "exit $status: $output"
 
