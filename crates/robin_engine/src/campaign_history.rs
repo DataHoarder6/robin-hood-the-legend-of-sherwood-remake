@@ -1500,7 +1500,7 @@ mod tests {
             crate::achievement::AchievementAggregationStatus::MissingRequirements
         );
 
-        campaign.select_next_mission(Some(2), &profiles);
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
         campaign.snapshot_with_simulation(9, SimConfig::default());
         campaign.current_mission_idx = Some(2);
         campaign.record_mission_attempt(

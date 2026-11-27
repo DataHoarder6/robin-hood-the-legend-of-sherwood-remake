@@ -4999,7 +4999,7 @@ mod availability_tests {
 
         // This is the selection the map dispatches for a completed pin: the
         // engine captures its return snapshot before the practice run starts.
-        campaign.select_next_mission(Some(idx), &profiles);
+        campaign.select_next_mission(Some(idx), &profiles).unwrap();
         assert_eq!(campaign.history_replay_mission(), Some(idx));
         campaign.current_mission_idx = Some(idx);
 

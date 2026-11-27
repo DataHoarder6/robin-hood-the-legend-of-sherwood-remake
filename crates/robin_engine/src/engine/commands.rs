@@ -441,10 +441,18 @@ impl EngineInner {
                 self.dispatch_startup_message(tcx, *msg, *arg1, *arg2)
             }
             RevealAllBlips => self.reveal_all_blips(),
-            CampaignSelectNextMission { mission_idx } => self
-                .mission_domain
-                .campaign
-                .select_next_mission(*mission_idx, &tcx.assets.profile_manager),
+            CampaignSelectNextMission { mission_idx } => {
+                // A switch that would strand a pending practice return is a
+                // named refusal, not a host-authority panic: log the reason and
+                // leave campaign state untouched.
+                if let Err(error) = self
+                    .mission_domain
+                    .campaign
+                    .select_next_mission(*mission_idx, &tcx.assets.profile_manager)
+                {
+                    tracing::warn!(seat, %error, "refused mission selection");
+                }
+            }
             CampaignSwapPendingToAccessibleMissions => self
                 .mission_domain
                 .campaign

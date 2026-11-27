@@ -871,6 +871,19 @@ pub fn calculate_warcrime_recruitment(
     (min_new_team_members + bonus) as u32
 }
 
+/// A mission selection that would abandon a pending practice return.
+///
+/// The named refusal is surfaced by the command layer; the campaign stays
+/// byte-for-byte unchanged so the original practice run can still restore
+/// its checkpoint exactly once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum MissionSelectionError {
+    #[error(
+        "cannot select mission {requested} while a completed-mission practice return is pending"
+    )]
+    PracticeReturnPending { requested: usize },
+}
+
 impl Campaign {
     /// Canonical missions actually won on this campaign path.
     ///
@@ -2351,7 +2364,14 @@ impl Campaign {
     /// Select a mission from the accessible list as the next to play.
     /// Non-selected missions get their age increased; if they exceed
     /// lifetime, ARES refused state is set.
-    pub fn select_next_mission(&mut self, mission_idx: Option<usize>, profiles: &ProfileManager) {
+    ///
+    /// Refuses a switch to a different mission while a practice return is
+    /// pending; see [`MissionSelectionError`].
+    pub fn select_next_mission(
+        &mut self,
+        mission_idx: Option<usize>,
+        profiles: &ProfileManager,
+    ) -> Result<(), MissionSelectionError> {
         let target_idx = mission_idx
             .or(self.next_mission_idx)
             .expect("select_next_mission: no mission specified");
@@ -2360,6 +2380,20 @@ impl Campaign {
             target_idx < self.missions.len(),
             "select_next_mission: mission index {target_idx} out of range"
         );
+
+        // D19 (#92/#93): a completed mission selected for practice owns a
+        // snapshot of the exact pre-selection campaign. Switching to any other
+        // mission before the terminal boundary would either strand that
+        // snapshot or make `record_mission_attempt` treat the new mission as a
+        // history replay of the old one. Refuse before touching any state.
+        if self.history_replay_mission_idx.is_some() || self.practice_return_snapshot.is_some() {
+            if self.history_replay_mission_idx == Some(target_idx) {
+                return Ok(());
+            }
+            return Err(MissionSelectionError::PracticeReturnPending {
+                requested: target_idx,
+            });
+        }
 
         if !self.is_mission_accessible(target_idx) {
             // Committing removed this mission from the accessible list. A
@@ -2372,7 +2406,7 @@ impl Campaign {
             if self.next_mission_idx == Some(target_idx)
                 && (mission_idx.is_none() || !self.is_mission_replayable(target_idx))
             {
-                return;
+                return Ok(());
             }
             assert!(
                 self.is_mission_replayable(target_idx),
@@ -2392,7 +2426,7 @@ impl Campaign {
             self.history_replay_mission_idx = Some(target_idx);
             self.next_mission_idx = Some(target_idx);
             self.add_all_to_mission_team();
-            return;
+            return Ok(());
         }
 
         let indices = self.accessible_mission_indices.clone();
@@ -2424,12 +2458,33 @@ impl Campaign {
         if let Some(pos) = removal_pos {
             self.accessible_mission_indices.remove(pos);
         }
+        Ok(())
     }
 
     // ── force_next_mission ───────────────────────────────────────────
 
+    fn pending_practice_switch_refused(&self, requested: usize) -> bool {
+        if (self.history_replay_mission_idx.is_some() || self.practice_return_snapshot.is_some())
+            && self.history_replay_mission_idx != Some(requested)
+        {
+            tracing::warn!(
+                requested,
+                "refused forced mission selection while a completed-mission practice return is pending"
+            );
+            return true;
+        }
+        false
+    }
+
     /// Force a specific mission (by index) as the next mission.
+    ///
+    /// This authoritative debug/ranked path still refuses to abandon a pending
+    /// practice return. It logs the named reason and leaves all state unchanged
+    /// rather than creating the ordinary-attempt mismatch that #92/#93 hit.
     pub fn force_next_mission(&mut self, mission_idx: usize) {
+        if self.pending_practice_switch_refused(mission_idx) {
+            return;
+        }
         self.next_mission_idx = Some(mission_idx);
         self.add_all_to_mission_team();
     }
@@ -2463,12 +2518,18 @@ impl Campaign {
         });
 
         if let Some(i) = found {
-            self.next_mission_idx = Some(i);
-            self.add_all_to_mission_team();
+            if self.pending_practice_switch_refused(i) {
+                return None;
+            }
+            self.force_next_mission(i);
             return Some(i);
         }
 
         if add_forced {
+            let i = self.missions.len();
+            if self.pending_practice_switch_refused(i) {
+                return None;
+            }
             // Construct a new Mission from a freshly-allocated profile
             // in the profile manager.  NOTE: callers must hold a
             // `&mut ProfileManager` to mutate the manager — currently
@@ -2481,10 +2542,8 @@ impl Campaign {
             let mut m = Mission::new();
             m.profile_idx = Some(profile_idx);
             m.blazon_price = profiles.missions[profile_idx as usize].blazon_price;
-            let i = self.missions.len();
             self.missions.push(m);
-            self.next_mission_idx = Some(i);
-            self.add_all_to_mission_team();
+            self.force_next_mission(i);
             return Some(i);
         }
 
@@ -3643,14 +3702,14 @@ mod tests {
         let mut campaign = achievement_test_campaign(&profiles);
         campaign.accessible_mission_indices = vec![1, 2];
 
-        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
         let accessible = campaign.accessible_mission_indices.clone();
         assert_eq!(campaign.next_mission_idx, Some(1));
 
         // Backing out to the map and re-picking the same mission: by index…
-        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
         // …and through `None`, which older recordings used to cancel a commit.
-        campaign.select_next_mission(None, &profiles);
+        campaign.select_next_mission(None, &profiles).unwrap();
 
         assert_eq!(campaign.next_mission_idx, Some(1));
         assert_eq!(campaign.accessible_mission_indices, accessible);
@@ -3668,12 +3727,12 @@ mod tests {
         let mut campaign = achievement_test_campaign(&profiles);
         campaign.accessible_mission_indices = vec![1, 2];
 
-        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
         campaign.missions[1].status = MissionStatus::Won;
         assert_eq!(campaign.next_mission_idx, Some(1));
         assert!(!campaign.is_mission_accessible(1));
 
-        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
 
         assert_eq!(campaign.history_replay_mission_idx, Some(1));
         assert_eq!(campaign.next_mission_idx, Some(1));
@@ -3686,11 +3745,147 @@ mod tests {
         let mut campaign = achievement_test_campaign(&profiles);
         campaign.accessible_mission_indices = vec![1, 2];
 
-        campaign.select_next_mission(Some(1), &profiles);
-        campaign.select_next_mission(Some(2), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
 
         assert_eq!(campaign.next_mission_idx, Some(2));
         assert!(!campaign.accessible_mission_indices.contains(&2));
+    }
+
+    /// D19 (#92/#93): while a completed mission's practice return is pending,
+    /// switching to a different, accessible mission must be refused and leave
+    /// campaign and practice state untouched. Pre-fix this silently
+    /// re-committed the other mission and later panicked in
+    /// `record_mission_attempt` against the wrong checkpoint.
+    #[test]
+    fn selecting_a_different_mission_during_pending_practice_is_refused() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+
+        // Start practice for the completed mission 2: this captures the
+        // pre-selection return snapshot and marks the replay target.
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
+        assert_eq!(campaign.history_replay_mission(), Some(2));
+        assert!(campaign.practice_return_snapshot.is_some());
+
+        let before = bitcode::encode(&campaign);
+
+        // Mission 1 is accessible. Switching to it must return the named
+        // refusal and leave the pending practice state untouched.
+        assert_eq!(
+            campaign.select_next_mission(Some(1), &profiles),
+            Err(MissionSelectionError::PracticeReturnPending { requested: 1 })
+        );
+
+        assert_eq!(
+            bitcode::encode(&campaign),
+            before,
+            "a refused mission switch must leave all campaign and practice state unchanged"
+        );
+        assert_eq!(campaign.history_replay_mission(), Some(2));
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        assert_eq!(campaign.accessible_mission_indices, vec![1]);
+    }
+
+    #[test]
+    fn reselecting_the_pending_practice_mission_is_an_idempotent_noop() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
+        let before = bitcode::encode(&campaign);
+
+        assert_eq!(campaign.select_next_mission(Some(2), &profiles), Ok(()));
+        assert_eq!(bitcode::encode(&campaign), before);
+    }
+
+    #[test]
+    fn forcing_a_different_mission_during_pending_practice_is_refused() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
+        let before = bitcode::encode(&campaign);
+
+        campaign.force_next_mission(1);
+
+        assert_eq!(bitcode::encode(&campaign), before);
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        assert_eq!(campaign.history_replay_mission(), Some(2));
+    }
+
+    #[test]
+    fn forcing_a_different_mission_by_name_during_pending_practice_is_refused() {
+        let mut profiles = achievement_test_profiles();
+        profiles.missions[1].mission_filename = "mission-one".into();
+        profiles.missions[1].proto_level_filename = "proto-one".into();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
+        let before = bitcode::encode(&campaign);
+        let profile_count = profiles.missions.len();
+
+        let selected =
+            campaign.force_next_mission_by_name(&mut profiles, "mission-one", "proto-one", true);
+
+        assert_eq!(selected, None);
+        assert_eq!(bitcode::encode(&campaign), before);
+        assert_eq!(profiles.missions.len(), profile_count);
+        assert_eq!(campaign.next_mission_idx, Some(2));
+        assert_eq!(campaign.history_replay_mission(), Some(2));
+
+        let selected =
+            campaign.force_next_mission_by_name(&mut profiles, "new-mission", "new-proto", true);
+        assert_eq!(selected, None);
+        assert_eq!(bitcode::encode(&campaign), before);
+        assert_eq!(profiles.missions.len(), profile_count);
+    }
+
+    #[test]
+    fn refused_switch_still_allows_the_original_practice_to_complete() {
+        let profiles = achievement_test_profiles();
+        let mut campaign = achievement_test_campaign(&profiles);
+        campaign.accessible_mission_indices = vec![1];
+        campaign.missions[2].status = MissionStatus::Won;
+        campaign.set_value(CampaignValue::Score, 17);
+        campaign.set_value(CampaignValue::Ransom, 321);
+        let expected_values = bitcode::encode(&campaign.values);
+
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
+        assert_eq!(
+            campaign.select_next_mission(Some(1), &profiles),
+            Err(MissionSelectionError::PracticeReturnPending { requested: 1 })
+        );
+
+        campaign.current_mission_idx = Some(2);
+        campaign.next_mission_idx = None;
+        campaign.set_value(CampaignValue::Score, 9_999);
+        campaign.set_value(CampaignValue::Ransom, 0);
+        campaign.record_mission_attempt(
+            2,
+            MissionAttemptOutcome::Won,
+            Some(123_456),
+            Some(987_654),
+            80,
+            crate::engine::SimConfig::default(),
+            &crate::mission_stat::MissionStat::default(),
+            None,
+        );
+
+        assert_eq!(campaign.history_replay_mission(), None);
+        assert!(campaign.practice_return_snapshot.is_none());
+        assert_eq!(bitcode::encode(&campaign.values), expected_values);
+        let attempts = campaign.missions[2].attempt_history().attempts();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].kind(),
+            crate::campaign_history::MissionAttemptKind::HistoryReplay
+        );
     }
 
     #[test]
@@ -3699,7 +3894,7 @@ mod tests {
         let profiles = achievement_test_profiles();
         let mut campaign = achievement_test_campaign(&profiles);
         campaign.accessible_mission_indices = vec![1];
-        campaign.select_next_mission(Some(2), &profiles);
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
     }
 
     #[test]
@@ -3724,7 +3919,7 @@ mod tests {
         campaign.accessible_mission_indices = vec![1];
         campaign.missions[2].status = MissionStatus::Won;
 
-        campaign.select_next_mission(Some(2), &profiles);
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
 
         assert_eq!(campaign.history_replay_mission_idx, Some(2));
         assert_eq!(campaign.next_mission_idx, Some(2));
@@ -3871,7 +4066,7 @@ mod tests {
         );
 
         let required_before = campaign.required_achievement_mission_ids(&profiles);
-        campaign.select_next_mission(Some(2), &profiles);
+        campaign.select_next_mission(Some(2), &profiles).unwrap();
         campaign.snapshot_with_simulation(7, crate::engine::SimConfig::default());
         campaign.current_mission_idx = Some(2);
         let replay = record_and_attest_achievement_attempt(
@@ -4096,7 +4291,7 @@ mod tests {
         let expected_character = campaign.characters[0].status.clone();
         let expected_production = bitcode::encode(&campaign.production_sectors);
 
-        campaign.select_next_mission(Some(1), &profiles);
+        campaign.select_next_mission(Some(1), &profiles).unwrap();
         assert_eq!(campaign.history_replay_mission(), Some(1));
         campaign.validate_history_schema().unwrap();
         let json_practice = serde_json::to_string(&campaign)
