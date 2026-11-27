@@ -38,6 +38,7 @@ does not by itself authorize publishing a release or modifying a live service.
 ## Historical assessments and design evidence
 
 - [Interviews](interviews/) contain supporting source material.
+- [Fighting mechanics backlog](slop/fighting-mechanics-backlog.md) — combat is already implemented; the frozen entry is an unscoped placeholder.
 
 Keep original-game ordering, format, and resource-behavior evidence beside the
 implementation it explains. Historical evidence is retained for that purpose;
