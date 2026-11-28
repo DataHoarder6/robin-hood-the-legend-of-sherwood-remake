@@ -2195,6 +2195,18 @@ A list of which additional features we have added, which ones we might still wan
   remains fixed at 25 Hz; 60/90/120/144/240 Hz are covered without a
   hard-coded refresh-rate policy.
 
+- **Touch secondary actions, quick-group latch and finger-sized HUD targets.**
+   A held finger (450 ms) or a timely second finger (250 ms) produces the
+   existing secondary click; slop cancels it without emitting one. Two
+   touch-only HUD controls latch quick-action planning and cycle quick-group
+   assignment/recall; a latched touch portrait tap assigns or recalls that
+   slot, while physical clicks and every keyboard path stay unchanged. HUD
+   presses show presentation-only feedback and never issue a `PlayerCommand`.
+   Zoom, corner, stature, Sherwood, plan and quick-group targets share one
+   boundary-inclusive 48×48 logical-pixel helper; points beyond the padding
+   stay world clicks. The gesture map is in `android/README.md`. Arm64
+   device/emulator evidence remains BLOCKED: only code-level fixtures run.
+
 - **Level selection tree and campaign history.** Campaign progress is
   available through selectable Classic Map, prerequisite/progress tree, and a
   modal Sherwood Hall of Deeds exhibit grid. Every Rust campaign always

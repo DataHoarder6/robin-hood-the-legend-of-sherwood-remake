@@ -1785,4 +1785,103 @@ mod viewport_touch_tests {
         assert!(point.x >= rect.0 && point.x <= rect.2);
         assert!(point.y >= rect.1 && point.y <= rect.3);
     }
+
+    /// The world gate builds its dead zone from exactly these drawn rects.
+    /// Every one of them must grow to the same 48×48 minimum through the
+    /// shared helper, and a point beyond that padding stays a world point.
+    #[test]
+    fn every_hud_control_claims_its_finger_sized_padding() {
+        use crate::corner_hud::CornerHudLayout;
+        use crate::sherwood_hud::{SherwoodHudLayout, SherwoodRail};
+        use crate::stature_hud::StatureHudLayout;
+        use crate::touch_plan_hud::touch_target_hit;
+        use crate::zoom_hud::ZoomHudLayout;
+
+        let (w, h) = (800_u32, 600_u32);
+        let zoom =
+            ZoomHudLayout::for_screen_width(w, &crate::zoom_hud::ZoomButtonSprites::default());
+        let corner = CornerHudLayout::for_resolution(
+            w,
+            h,
+            &crate::corner_hud::CornerButtonSprites::default(),
+        );
+        let stature =
+            StatureHudLayout::for_resolution(w, h, &crate::stature_hud::StatureSprites::default());
+        let sherwood = SherwoodHudLayout::for_resolution(
+            w,
+            h,
+            &crate::sherwood_hud::SherwoodButtonSprites::default(),
+        );
+
+        let rects = [
+            ("zoom up", zoom.zoom_up),
+            ("zoom down", zoom.zoom_down),
+            ("clock", corner.clock),
+            ("sight", corner.sight),
+            ("quickstart", corner.quickstart),
+            ("stature up", stature.up),
+            ("stature down", stature.down),
+        ]
+        .into_iter()
+        .chain(
+            sherwood
+                .occupied(SherwoodRail::PostCommit)
+                .into_iter()
+                .map(|rect| ("sherwood", rect)),
+        );
+
+        for (name, base) in rects {
+            let centre_x = base.x() + base.width() as i32 / 2;
+            let centre_y = base.y() + base.height() as i32 / 2;
+            let bottom = base.y() + base.height() as i32;
+            let padded = touch_target_rect(
+                centre_x as f32,
+                centre_y as f32,
+                base.width() as f32,
+                base.height() as f32,
+            );
+            assert!(
+                padded.1 < base.y() as f32 || padded.3 > bottom as f32,
+                "{name}: the drawn rect itself must grow"
+            );
+            assert!(
+                touch_target_hit(base, centre_x, base.y() - 1),
+                "{name}: one pixel of padding above the drawn rect is a hit"
+            );
+            assert!(
+                touch_target_hit(base, centre_x, bottom),
+                "{name}: one pixel of padding below the drawn rect is a hit"
+            );
+            assert!(
+                touch_target_hit(base, padded.0 as i32, padded.1 as i32)
+                    && touch_target_hit(base, padded.2 as i32, padded.3 as i32),
+                "{name}: padded bounds are inclusive"
+            );
+            assert!(
+                !touch_target_hit(base, centre_x, base.y() - 25)
+                    && !touch_target_hit(base, centre_x, bottom + 25),
+                "{name}: beyond the padded target is a miss"
+            );
+        }
+    }
+
+    /// A point no padded target owns stays a world point; the gate does not
+    /// turn the whole screen into a HUD dead zone.
+    #[test]
+    fn padding_does_not_steal_unclaimed_world_clicks() {
+        use crate::gfx_types::Rect as ScreenRect;
+        use crate::touch_plan_hud::touch_target_claims;
+
+        let hud = [
+            ScreenRect::new(100, 100, 24, 24),
+            ScreenRect::new(200, 300, 118, 34),
+        ];
+        assert!(touch_target_claims(hud, 100, 100));
+        assert!(touch_target_claims(hud, 100, 88), "padded edge is claimed");
+        assert!(!touch_target_claims(hud, 100, 75), "outside the padding");
+        assert!(
+            !touch_target_claims(hud, 500, 500),
+            "an empty screen point belongs to the world"
+        );
+    }
 }

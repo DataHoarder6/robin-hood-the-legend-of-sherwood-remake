@@ -295,7 +295,6 @@ fn touch_point_is_world(
         return false;
     }
 
-    let point = crate::gfx_types::Point::new(point.x as i32, point.y as i32);
     let reserved = [
         hud.zoom_layout.zoom_up,
         hud.zoom_layout.zoom_down,
@@ -307,11 +306,13 @@ fn touch_point_is_world(
     ];
     // Every control the rail offers claims its rect, gate open or closed: an
     // absent button must not swallow a world click, and a greyed one must not
-    // pass one through to the world behind it.
-    !reserved.iter().any(|rect| rect.contains_point(point))
-        && !hud
-            .sherwood_layout
-            .claims_point(hud.sherwood_rail, point.x, point.y)
+    // pass one through to the world behind it. Both gates put those same drawn
+    // rects through `touch_target_claims`, so the padded finger-sized target
+    // is a world dead zone exactly where the HUD will answer the tap.
+    let claimed = reserved
+        .into_iter()
+        .chain(hud.sherwood_layout.occupied(hud.sherwood_rail));
+    !crate::touch_plan_hud::touch_target_claims(claimed, point.x as i32, point.y as i32)
 }
 
 /// The empty input batch of a frame whose mission UI owns input.

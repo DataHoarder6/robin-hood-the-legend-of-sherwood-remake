@@ -115,27 +115,41 @@ or state-hash assertion.
   Code-level fixtures prove the typed mapping, not that a finger reached the
   mission on glass.
 
-## Touch gesture map (code-level fixtures)
+## Touch controls (code-level fixtures)
 
-`crates/robin_rs/src/input_translator.rs` defines the typed touch vocabulary and
-pure mapping; `crates/robin_rs/src/game_input.rs` converts the sticky modifier
-latch into the existing click modifiers; `crates/robin_rs/src/host/viewport.rs`
-holds the touch-camera paths whose tests consume the finger-sized hit-target
-helper in `input_translator.rs`.
+The typed vocabulary, thresholds and pure recognition live in
+`crates/robin_rs/src/input_translator.rs`; the recogniser is
+`crates/robin_rs/src/touch_input.rs` and the window emitter is
+`crates/robin_rs/src/window.rs`. Code-level fixtures cover the mapping, not a
+glass run.
 
-| Gesture | Mapped action |
+| Gesture | Player-visible effect |
 | --- | --- |
-| tap | primary pointer down/up |
-| long press (450 ms) | secondary pointer down/up — cancel/stop, deselect, plan cancel |
-| two-finger tap (250 ms) | secondary pointer down/up |
-| long drag | secondary drag start |
-| latched modifier + tap | Shift edges around the primary click (add to selection) |
-| quick-group HUD buttons | typed assign/recall commands for slots 1-9 |
-| finger down/up | presentation-only press feedback, no command side effect |
+| tap | primary click: select, order, open a HUD control |
+| long press (450 ms), no slop breach | secondary click — cancel/stop, deselect, plan cancel |
+| second finger inside 250 ms | secondary click at the two fingers' centroid |
+| movement past the 12 px slop | cancels the pending tap; no click is emitted |
+| long drag / two-finger drag | world pan and anchored pinch zoom |
+| touch-only plan control | latches quick-action planning; tap again to cancel |
+| touch-only quick-group control | cycles `QG OFF → QG ASSIGN → QG RECALL → QG OFF` |
+| latched quick-group + portrait tap | assigns or recalls that portrait's slot 1-9 |
+| finger down/up | pressed border on HUD buttons; no gameplay command |
 
-Hit targets grow to at least 48x48 logical pixels around the widget centre from
-one shared `touch_target_rect()` helper; boundary points count as hits.
+The world gate claims zoom, corner, stature and Sherwood rail points through
+one padded rect per drawn control; the plan and quick-group controls route taps
+through the same helper (`crates/robin_rs/src/touch_plan_hud.rs`). Every hit
+area grows about its drawn centre to the shared 48x48 logical-pixel minimum
+from `touch_target_rect()`, bounds included. The drawn artwork never moves, and
+a point outside every padded target stays a world point, so padding cannot
+steal a selection or order.
 
-The real recogniser (`touch_input.rs`), dispatch (`window.rs`) and HUD gates
-remain the integration point for these mappings: a device/emulator run that
-drives a mission with these gestures is the retained evidence still owed.
+The quick-group latch is touch-only. It cycles from the HUD control; a latched
+portrait tap is consumed only when the click carries touch provenance. Physical
+mouse clicks keep normal selection, and keyboard modifiers and shortcuts are
+unchanged in every mode. Press feedback is presentation-only: it never becomes
+a `PlayerCommand`, and clears on release, cancel, focus loss and gesture
+takeover.
+
+No arm64 device or emulator run drives these controls here. That evidence stays
+**BLOCKED**: the fixtures prove the typed mapping and the two hit gates agree;
+they do not prove a finger reached the mission on glass.

@@ -2,7 +2,8 @@
 //! modifier latch. Both are host-only HUD affordances; neither produces a
 //! `PlayerCommand` on its own tap.
 
-use crate::input_translator::TouchQuickGroupMode;
+use crate::gfx_types::Rect as ScreenRect;
+use crate::input_translator::{TouchQuickGroupMode, touch_target_rect};
 use crate::renderer::Renderer;
 
 pub const WIDTH: i32 = 118;
@@ -19,19 +20,50 @@ pub const fn platform_has_touch_planning_hud() -> bool {
     ))
 }
 
+/// The single finger-sized hit policy shared by both HUD gates. A widget's
+/// drawn rect is never moved or resized: the hit area grows about the same
+/// centre to the 48×48 logical-pixel minimum from `touch_target_rect`, and its
+/// bounds are inclusive on every edge. Callers pass only rects the renderer
+/// draws, so a point that misses every padded target is still a world point.
+pub fn touch_target_hit(base: ScreenRect, x: i32, y: i32) -> bool {
+    let (min_x, min_y, max_x, max_y) = touch_target_rect(
+        base.x() as f32 + base.width() as f32 / 2.0,
+        base.y() as f32 + base.height() as f32 / 2.0,
+        base.width() as f32,
+        base.height() as f32,
+    );
+    let (x, y) = (f64::from(x), f64::from(y));
+    x >= f64::from(min_x) && x <= f64::from(max_x) && y >= f64::from(min_y) && y <= f64::from(max_y)
+}
+
+/// Whether any of the drawn rects' padded targets owns the point. The world
+/// gate and HUD routing ask this same question of the same rects, so padding
+/// cannot make one gate disagree with the other.
+pub fn touch_target_claims(rects: impl IntoIterator<Item = ScreenRect>, x: i32, y: i32) -> bool {
+    rects.into_iter().any(|rect| touch_target_hit(rect, x, y))
+}
+
+fn as_screen_rect((left, top, right, bottom): (i32, i32, i32, i32)) -> ScreenRect {
+    ScreenRect::new(
+        left,
+        top,
+        (right - left).max(0) as u32,
+        (bottom - top).max(0) as u32,
+    )
+}
+
 pub fn rect(screen_width: u16) -> (i32, i32, i32, i32) {
     let right = i32::from(screen_width).saturating_sub(10);
     (right - WIDTH, 46, right, 46 + HEIGHT)
 }
 
 pub fn hit_test(screen_width: u16, x: i32, y: i32) -> bool {
-    let (left, top, right, bottom) = rect(screen_width);
-    (left..=right).contains(&x) && (top..=bottom).contains(&y)
+    touch_target_hit(as_screen_rect(rect(screen_width)), x, y)
 }
 
 /// The quick-group modifier sits immediately left of the planning control,
-/// sharing its vertical band. Task 3 pads this rect with the shared
-/// finger-sized helper; the geometry here stays the raw drawing box.
+/// sharing its vertical band. This is the raw drawing box; the hit test pads
+/// it through the same helper as every other HUD target.
 pub fn quick_group_rect(screen_width: u16) -> (i32, i32, i32, i32) {
     let (plan_left, top, _, bottom) = rect(screen_width);
     let right = plan_left - CONTROL_GAP;
@@ -39,8 +71,7 @@ pub fn quick_group_rect(screen_width: u16) -> (i32, i32, i32, i32) {
 }
 
 pub fn hit_test_quick_group(screen_width: u16, x: i32, y: i32) -> bool {
-    let (left, top, right, bottom) = quick_group_rect(screen_width);
-    (left..=right).contains(&x) && (top..=bottom).contains(&y)
+    touch_target_hit(as_screen_rect(quick_group_rect(screen_width)), x, y)
 }
 
 pub fn quick_group_label(mode: TouchQuickGroupMode) -> &'static str {
@@ -203,5 +234,78 @@ mod tests {
             latched,
             "assign and recall share the armed border; the label differs"
         );
+    }
+
+    #[test]
+    fn plan_hit_target_is_finger_sized_and_boundary_inclusive() {
+        let (left, top, right, bottom) = rect(1024);
+        // The drawn box is 118x34; only its height grows to 48 logical
+        // pixels, centred on the same drawing rect.
+        assert!(
+            hit_test(1024, left, top - 7),
+            "one pixel inside the padded top edge is a hit"
+        );
+        assert!(
+            hit_test(1024, right, bottom + 7),
+            "one pixel inside the padded bottom edge is a hit"
+        );
+        assert!(
+            !hit_test(1024, left, top - 8),
+            "one pixel outside the padded top edge is a miss"
+        );
+        assert!(
+            !hit_test(1024, right, bottom + 8),
+            "one pixel outside the padded bottom edge is a miss"
+        );
+    }
+
+    #[test]
+    fn quick_group_hit_target_is_finger_sized_without_stealing_plan() {
+        let (left, top, right, bottom) = quick_group_rect(1024);
+        assert!(hit_test_quick_group(1024, left, top - 7));
+        assert!(hit_test_quick_group(1024, right, bottom + 7));
+        assert!(!hit_test_quick_group(1024, left, top - 8));
+        assert!(!hit_test_quick_group(1024, right, bottom + 8));
+
+        let (plan_left, _, _, _) = rect(1024);
+        // Both boxes are wider than a finger, so padding only grows them
+        // vertically: the ten-pixel horizontal gap stays unclaimed.
+        let gap = (right + plan_left) / 2;
+        assert!(
+            !hit_test_quick_group(1024, gap, top),
+            "the modifier must not claim the gap"
+        );
+        assert!(
+            !hit_test(1024, gap, top),
+            "the plan control must not claim the gap"
+        );
+        assert!(
+            !hit_test_quick_group(1024, plan_left, top + 1),
+            "the modifier must not steal the neighbouring control"
+        );
+    }
+
+    #[test]
+    fn world_gate_and_control_hit_tests_share_one_policy() {
+        let sw = 1024;
+        let hud = [
+            as_screen_rect(rect(sw)),
+            as_screen_rect(quick_group_rect(sw)),
+        ];
+        let (plan_left, plan_top, _, plan_bottom) = rect(sw);
+        let (qg_left, qg_top, qg_right, qg_bottom) = quick_group_rect(sw);
+        for (x, y) in [
+            (plan_left, plan_top - 7),
+            (plan_left, plan_bottom + 7),
+            (qg_left, qg_top - 7),
+            (qg_right, qg_bottom + 7),
+            ((qg_right + plan_left) / 2, qg_top + 1),
+        ] {
+            assert_eq!(
+                super::touch_target_claims(hud, x, y),
+                hit_test(sw, x, y) || hit_test_quick_group(sw, x, y),
+                "world gate and control routing disagree at ({x}, {y})"
+            );
+        }
     }
 }
