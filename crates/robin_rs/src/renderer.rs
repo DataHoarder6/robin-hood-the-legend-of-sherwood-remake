@@ -997,20 +997,22 @@ impl Renderer {
             .upload_background_texture(&self.gpu, width, height, pixels)
     }
 
-    /// Install the second pre-baked terrain. Separate from the base upload so
-    /// an absent alternate never displaces the shipped background.
+    /// Install the pre-baked terrain for direction step `1..=23`. Separate
+    /// from the base upload so an absent bake never displaces the shipped
+    /// background.
     pub fn upload_directional_background_texture(
         &mut self,
+        step: u8,
         width: u32,
         height: u32,
         pixels: &[u16],
     ) -> bool {
         self.resources
-            .upload_directional_background_texture(&self.gpu, width, height, pixels)
+            .upload_directional_background_texture(&self.gpu, step, width, height, pixels)
     }
 
-    pub(crate) fn clear_directional_background_texture(&mut self) {
-        self.resources.clear_directional_background_texture();
+    pub(crate) fn clear_directional_background_textures(&mut self) {
+        self.resources.clear_directional_background_textures();
     }
 
     /// Host-only background selection, applied by `draw_background` from the

@@ -15,58 +15,59 @@ use super::{
     sprite_rgba_for_upload, upload_rgba_texture,
 };
 
-/// Which pre-baked background a direction step draws. Host-only: the engine
-/// never sees this choice and no simulation state depends on it.
+/// Which installed background a direction step draws. `Base` is the shipped
+/// yaw-0 bake; `Direction` names a slot `1..=23`, one per 15° step. Host-only:
+/// the engine never sees this choice and no simulation state depends on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BackgroundVariant {
+pub(super) enum BackgroundSlot {
     Base,
-    Directional,
+    Direction(u8),
 }
 
 /// One entry per `ViewportState::direction_step()` value (`0..24`). A table,
 /// not arithmetic, so giving an individual step its own bake is an explicit
 /// edit here rather than a change to the renderer.
-pub(super) const DIRECTION_BACKGROUND_VARIANTS: [BackgroundVariant; 24] = [
-    BackgroundVariant::Base,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
-    BackgroundVariant::Directional,
+pub(super) const DIRECTION_BACKGROUND_SLOTS: [BackgroundSlot; 24] = [
+    BackgroundSlot::Base,
+    BackgroundSlot::Direction(1),
+    BackgroundSlot::Direction(2),
+    BackgroundSlot::Direction(3),
+    BackgroundSlot::Direction(4),
+    BackgroundSlot::Direction(5),
+    BackgroundSlot::Direction(6),
+    BackgroundSlot::Direction(7),
+    BackgroundSlot::Direction(8),
+    BackgroundSlot::Direction(9),
+    BackgroundSlot::Direction(10),
+    BackgroundSlot::Direction(11),
+    BackgroundSlot::Direction(12),
+    BackgroundSlot::Direction(13),
+    BackgroundSlot::Direction(14),
+    BackgroundSlot::Direction(15),
+    BackgroundSlot::Direction(16),
+    BackgroundSlot::Direction(17),
+    BackgroundSlot::Direction(18),
+    BackgroundSlot::Direction(19),
+    BackgroundSlot::Direction(20),
+    BackgroundSlot::Direction(21),
+    BackgroundSlot::Direction(22),
+    BackgroundSlot::Direction(23),
 ];
 
-pub(super) fn background_variant_for_direction_step(step: u8) -> BackgroundVariant {
-    DIRECTION_BACKGROUND_VARIANTS[usize::from(step)]
+pub(super) fn background_slot_for_direction_step(step: u8) -> BackgroundSlot {
+    DIRECTION_BACKGROUND_SLOTS[usize::from(step)]
 }
 
 /// Pick the installed texture for the step. A missing directional bake yields
 /// no background — it is never silently replaced with the base bake.
 pub(super) fn select_background<'a, T>(
     base: Option<&'a T>,
-    directional: Option<&'a T>,
+    directions: [Option<&'a T>; 23],
     step: u8,
 ) -> Option<&'a T> {
-    match background_variant_for_direction_step(step) {
-        BackgroundVariant::Base => base,
-        BackgroundVariant::Directional => directional,
+    match background_slot_for_direction_step(step) {
+        BackgroundSlot::Base => base,
+        BackgroundSlot::Direction(slot) => directions[usize::from(slot) - 1],
     }
 }
 
@@ -81,10 +82,10 @@ pub(super) struct GpuResources {
     pub(super) sprite_cache: SpriteTextureCache,
     pub(super) mask_alpha_cache: HashMap<u32, MaskAlpha>,
     pub(super) background_texture: Option<BackgroundTexture>,
-    /// Second pre-baked terrain, selected when `direction_step() != 0`.
-    /// Boxed for the same stack budget as `background_texture`: the renderer
-    /// is embedded in the production frontend assembly future.
-    pub(super) directional_background_texture: Option<Box<BackgroundTexture>>,
+    /// One pre-baked terrain per nonzero direction step, indexed by `step - 1`.
+    /// Boxed: the renderer is embedded in the production frontend assembly
+    /// future, whose construction has a hard 32 KiB stack budget.
+    pub(super) directional_background_textures: Box<[Option<BackgroundTexture>; 23]>,
     direction_step: u8,
     pub(super) sampler: wgpu::Sampler,
     pub(super) linear_sampler: wgpu::Sampler,
@@ -526,7 +527,7 @@ impl GpuResources {
             sprite_cache: SpriteTextureCache::default(),
             mask_alpha_cache: HashMap::new(),
             background_texture: None,
-            directional_background_texture: None,
+            directional_background_textures: Box::new(std::array::from_fn(|_| None)),
             direction_step: 0,
             sampler,
             linear_sampler,
@@ -589,7 +590,7 @@ impl GpuResources {
         width: u32,
         height: u32,
         pixels: &[u16],
-        variant: BackgroundVariant,
+        slot: BackgroundSlot,
     ) -> bool {
         if width == 0 || height == 0 || pixels.len() != width as usize * height as usize {
             return false;
@@ -616,10 +617,14 @@ impl GpuResources {
             width,
             height,
         };
-        match variant {
-            BackgroundVariant::Base => self.background_texture = Some(background),
-            BackgroundVariant::Directional => {
-                self.directional_background_texture = Some(Box::new(background))
+        match slot {
+            BackgroundSlot::Base => self.background_texture = Some(background),
+            BackgroundSlot::Direction(step) => {
+                assert!(
+                    (1..=23).contains(&step),
+                    "direction slot outside 1..=23: {step}"
+                );
+                self.directional_background_textures[usize::from(step) - 1] = Some(background);
             }
         }
         true
@@ -632,21 +637,22 @@ impl GpuResources {
         height: u32,
         pixels: &[u16],
     ) -> bool {
-        self.store_background_texture(gpu, width, height, pixels, BackgroundVariant::Base)
+        self.store_background_texture(gpu, width, height, pixels, BackgroundSlot::Base)
     }
 
     pub(super) fn upload_directional_background_texture(
         &mut self,
         gpu: &GpuContext,
+        step: u8,
         width: u32,
         height: u32,
         pixels: &[u16],
     ) -> bool {
-        self.store_background_texture(gpu, width, height, pixels, BackgroundVariant::Directional)
+        self.store_background_texture(gpu, width, height, pixels, BackgroundSlot::Direction(step))
     }
 
-    pub(super) fn clear_directional_background_texture(&mut self) {
-        self.directional_background_texture = None;
+    pub(super) fn clear_directional_background_textures(&mut self) {
+        *self.directional_background_textures = std::array::from_fn(|_| None);
     }
 
     /// Host-only selector. The viewport owns the step; no engine state,
@@ -657,9 +663,11 @@ impl GpuResources {
     }
 
     pub(super) fn selected_background_texture(&self) -> Option<&BackgroundTexture> {
+        let directions =
+            std::array::from_fn(|index| self.directional_background_textures[index].as_ref());
         select_background(
             self.background_texture.as_ref(),
-            self.directional_background_texture.as_deref(),
+            directions,
             self.direction_step,
         )
     }
@@ -771,63 +779,68 @@ fn mask_atlas_enabled() -> bool {
 #[cfg(test)]
 mod background_variant_tests {
     use super::{
-        BackgroundVariant, DIRECTION_BACKGROUND_VARIANTS, background_variant_for_direction_step,
+        BackgroundSlot, DIRECTION_BACKGROUND_SLOTS, background_slot_for_direction_step,
         select_background,
     };
 
     #[test]
-    fn direction_step_zero_selects_the_base_background() {
-        assert_eq!(
-            background_variant_for_direction_step(0),
-            BackgroundVariant::Base
-        );
-    }
+    fn each_direction_step_selects_a_distinct_installed_slot() {
+        let base = 0_i32;
+        let installed: [i32; 23] = std::array::from_fn(|index| index as i32 + 1);
+        let slots = installed.each_ref().map(Some);
 
-    #[test]
-    fn every_nonzero_direction_step_selects_the_directional_background() {
-        for step in 1..24 {
+        assert_eq!(DIRECTION_BACKGROUND_SLOTS.len(), 24);
+        assert_eq!(DIRECTION_BACKGROUND_SLOTS[0], BackgroundSlot::Base);
+        for (index, slot) in DIRECTION_BACKGROUND_SLOTS.iter().enumerate() {
+            assert!(
+                DIRECTION_BACKGROUND_SLOTS[..index]
+                    .iter()
+                    .all(|earlier| earlier != slot),
+                "step {index} reuses a slot"
+            );
             assert_eq!(
-                background_variant_for_direction_step(step),
-                BackgroundVariant::Directional,
-                "step {step} must select the alternate bake"
+                select_background(Some(&base), slots, index as u8),
+                if index == 0 {
+                    Some(&base)
+                } else {
+                    Some(&installed[index - 1])
+                },
+                "step {index} must select its own baked background"
             );
         }
+        assert_eq!(select_background(Some(&base), slots, 23), Some(&23));
     }
 
     #[test]
-    fn selection_uses_the_installed_slot_for_each_step() {
+    fn direction_step_zero_selects_the_base_background() {
         let base = 1;
-        let directional = 2;
-        assert_eq!(
-            select_background(Some(&base), Some(&directional), 0),
-            Some(&1)
-        );
-        assert_eq!(
-            select_background(Some(&base), Some(&directional), 1),
-            Some(&2)
-        );
-        assert_eq!(
-            select_background(Some(&base), Some(&directional), 23),
-            Some(&2)
-        );
+        let directions: [Option<&i32>; 23] = [None; 23];
+        assert_eq!(background_slot_for_direction_step(0), BackgroundSlot::Base);
+        assert_eq!(select_background(Some(&base), directions, 0), Some(&1));
     }
 
     #[test]
-    fn a_missing_directional_bake_yields_no_background() {
+    fn a_missing_direction_bake_yields_no_background() {
         let base = 1;
-        assert_eq!(select_background(Some(&base), None, 0), Some(&1));
-        assert_eq!(select_background(Some(&base), None, 7), None);
+        let installed = 7;
+        let mut directions: [Option<&i32>; 23] = [None; 23];
+        directions[6] = Some(&installed);
+        assert_eq!(select_background(Some(&base), directions, 7), Some(&7));
+        assert_eq!(select_background(Some(&base), directions, 8), None);
+        assert_eq!(select_background(Some(&base), directions, 23), None);
     }
 
     #[test]
-    fn selection_table_has_one_entry_per_direction_step() {
-        assert_eq!(DIRECTION_BACKGROUND_VARIANTS.len(), 24);
-        assert_eq!(DIRECTION_BACKGROUND_VARIANTS[0], BackgroundVariant::Base);
-        assert!(
-            DIRECTION_BACKGROUND_VARIANTS[1..]
-                .iter()
-                .all(|variant| *variant == BackgroundVariant::Directional)
-        );
+    fn direction_slots_are_one_per_nonzero_step() {
+        assert_eq!(DIRECTION_BACKGROUND_SLOTS.len(), 24);
+        assert_eq!(DIRECTION_BACKGROUND_SLOTS[0], BackgroundSlot::Base);
+        for step in 1..24 {
+            assert_eq!(
+                background_slot_for_direction_step(step),
+                BackgroundSlot::Direction(step),
+                "step {step} must name its own slot"
+            );
+        }
     }
 }
 

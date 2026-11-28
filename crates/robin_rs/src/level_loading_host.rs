@@ -793,86 +793,90 @@ impl PendingTerrainDecode {
     }
 }
 
-/// Install the optional second pre-baked terrain, named `<map>-dir1.map.png`
-/// beside the base map in the same mod. See
+/// Install the optional pre-baked terrains named `<map>-dir<N>.map.png` for
+/// `N = 1..=23`, beside the base map in the same mod. See
 /// `/tmp/opencode/research/two-direction-contract.md`.
 ///
-/// The bake reuses the base map's occlusion depth and appearance regions, so
+/// Each bake reuses the base map's occlusion depth and appearance regions, so
 /// engine `MaskIndex` keys and the single mask-alpha namespace stay untouched.
-/// A missing or mismatched bake is reported and leaves the slot empty; the
-/// base map remains installed.
-fn install_directional_background(
+/// All slots are cleared first; a missing or mismatched bake is reported once
+/// for its step and leaves that slot empty. The base map remains installed.
+fn install_directional_backgrounds(
     engine: &Engine,
     host: &Host,
     renderer: &mut Renderer,
     expected_width: u16,
     expected_height: u16,
 ) {
+    renderer.clear_directional_background_textures();
     let map_name = engine.mission_map_name();
     let ambiance = engine.weather().ambiance.directory();
     let level_directory = &host.application_context().options().level_directory;
     let files = match host.preparation_files() {
         Ok(files) => files,
         Err(error) => {
-            tracing::warn!(%error, "cannot probe directional background; leaving slot empty");
-            renderer.clear_directional_background_texture();
+            tracing::warn!(%error, "cannot probe directional backgrounds; leaving slots empty");
             return;
         }
     };
-    let candidates = [
-        format!("{level_directory}/{ambiance}/{map_name}-dir1.map.png"),
-        format!("{level_directory}/Day/{map_name}-dir1.map.png"),
-        format!("{level_directory}/{map_name}-dir1.map.png"),
-    ];
-    for path in &candidates {
-        let file = match open_candidate(path, files) {
-            Ok(Some(file)) => file,
-            Ok(None) => continue,
-            Err(error) => {
-                tracing::warn!(%path, %error, "directional background probe failed");
+    for step in 1..=23u8 {
+        let bake_name = format!("{map_name}-dir{step}");
+        let candidates = candidate_paths(level_directory, ambiance, &bake_name, "map.png");
+        let mut installed = false;
+        for path in &candidates {
+            let file = match open_candidate(path, files) {
+                Ok(Some(file)) => file,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::warn!(%path, %error, "directional background probe failed");
+                    continue;
+                }
+            };
+            let picture = match decode_hackable_terrain_png(&file.into_shared_bytes(), path) {
+                Ok(picture) => picture,
+                Err(error) => {
+                    tracing::warn!(%path, %error, "failed to decode directional background");
+                    continue;
+                }
+            };
+            if picture.width != expected_width || picture.height != expected_height {
+                tracing::warn!(
+                    %path,
+                    width = picture.width,
+                    height = picture.height,
+                    expected_width,
+                    expected_height,
+                    "directional background dimensions differ from the base map; ignoring"
+                );
                 continue;
             }
-        };
-        let picture = match decode_hackable_terrain_png(&file.into_shared_bytes(), path) {
-            Ok(picture) => picture,
-            Err(error) => {
-                tracing::warn!(%path, %error, "failed to decode directional background");
-                continue;
-            }
-        };
-        if picture.width != expected_width || picture.height != expected_height {
-            tracing::warn!(
-                %path,
-                width = picture.width,
-                height = picture.height,
-                expected_width,
-                expected_height,
-                "directional background dimensions differ from the base map; ignoring"
+            let pixels = decode_rgb565_words(&picture.data);
+            assert!(
+                renderer.upload_directional_background_texture(
+                    step,
+                    u32::from(picture.width),
+                    u32::from(picture.height),
+                    &pixels,
+                ),
+                "failed to upload directional background texture {path}"
             );
-            continue;
+            tracing::info!(
+                %path,
+                "Directional background loaded: {}x{} pixels",
+                picture.width,
+                picture.height
+            );
+            installed = true;
+            break;
         }
-        let pixels = decode_rgb565_words(&picture.data);
-        assert!(
-            renderer.upload_directional_background_texture(
-                u32::from(picture.width),
-                u32::from(picture.height),
-                &pixels,
-            ),
-            "failed to upload directional background texture {path}"
-        );
-        tracing::info!(
-            %path,
-            "Directional background loaded: {}x{} pixels",
-            picture.width,
-            picture.height
-        );
-        return;
+        if !installed {
+            tracing::warn!(
+                step,
+                ?candidates,
+                "no directional background bake found; direction step has no terrain"
+            );
+        }
     }
-    tracing::warn!(
-        ?candidates,
-        "no directional background bake found; direction steps have no terrain"
-    );
-    renderer.clear_directional_background_texture();
 }
 
 /// Upload the decoded background bitmap to the renderer and upload the
@@ -899,7 +903,7 @@ pub fn apply_background_map(
             decoded.width, decoded.height
         );
     }
-    install_directional_background(engine, host, renderer, decoded.width, decoded.height);
+    install_directional_backgrounds(engine, host, renderer, decoded.width, decoded.height);
 
     tracing::info!(
         "Background map loaded: {}x{} pixels",

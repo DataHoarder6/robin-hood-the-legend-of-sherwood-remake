@@ -10,6 +10,8 @@
     "build": "pnpm --filter app build",
     "test": "pnpm --filter pipeline exec node --test ../shared/src/*.test.ts ../app/src/*.test.ts ../app/tests/*.test.mjs",
     "test:browser": "node app/tests/run-lifecycle.mjs",
+    "ring:bake": "node pipeline/direction-ring-bake.ts",
+    "ring:package": "node pipeline/direction-ring.ts package",
     "build:browser": "pnpm --filter app exec vite build --config vite.lifecycle.config.ts",
     "serve:browser": "pnpm --filter app exec vite preview --config vite.lifecycle.config.ts --host 127.0.0.1 --strictPort",
     "lint": "oxlint app/src app/tests app/*.ts app/*.mjs pipeline/src shared/src shared/test-fixtures",
