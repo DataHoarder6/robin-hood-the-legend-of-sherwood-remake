@@ -4431,46 +4431,113 @@ mod touch_quick_group_tests {
     }
 
     #[test]
-    fn touch_click_source_is_walked_in_channel_order_by_mouse_dispatch() {
-        let (engine, assets, mut host) = fixture();
+    fn touch_click_source_survives_deferred_release_across_frame_boundary() {
+        let (mut engine, assets, mut host) = fixture();
+        let pc_id = crate::host::test_support::add_pc_with_status(
+            &mut engine,
+            50.0,
+            50.0,
+            Posture::Upright,
+            true,
+            100,
+        );
         let cache = PortraitCache::new();
+        let x = i32::from(ui_panel::slot_left_x(800, 0, 5)) + 50;
+        let y = 550;
+        let hit = ui_panel::hit_test_portrait_detailed(
+            &engine.presentation_view(),
+            host.transport.local_seat(),
+            &cache,
+            800,
+            600,
+            x as f32,
+            y as f32,
+        )
+        .expect("the click must land on a portrait slot");
+        assert_eq!(hit.pc_id, pc_id);
+
+        host.frontend.cycle_touch_quick_group_mode();
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Assign
+        );
         let mut commands = FrameCommands::new();
 
-        // The press marker is set before the paired events, and a click must
-        // still observe it while its MouseUp is being resolved.
+        // Frame 1: the immediate press marker and paired button-1 MouseDown.
         handle_mouse_input(
             click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
             &[
                 GameEvent::TouchClickSource { pressed: true },
-                GameEvent::MouseDown(1, 1, 3, 1),
-                GameEvent::MouseUp(1, 1, 3),
+                GameEvent::MouseDown(x, y, 1, 1),
             ],
             None,
             false,
         );
+        assert!(host.frontend.touch_primary_click());
+
+        // Frame boundary. The old frame-start clear erased in-flight
+        // provenance here, so the deferred release resolved as a selection.
+        host.frontend.clear_touch_click_source();
         assert!(
             host.frontend.touch_primary_click(),
-            "the paired click must keep its source marker"
+            "a press awaiting its deferred release must survive a frame boundary"
+        );
+
+        // Frame 2: the deferred release batch resolves the portrait click.
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[
+                GameEvent::MouseUp(x, y, 1),
+                GameEvent::TouchClickSource { pressed: false },
+            ],
+            None,
+            false,
+        );
+        assert_eq!(
+            quick_group_command(&commands),
+            Some((true, hit.slot)),
+            "a touch tap split across frames must still emit the quick-group command"
+        );
+        assert!(
+            !commands.commands.iter().any(|input| matches!(
+                input.command,
+                PlayerCommand::SelectPc { .. } | PlayerCommand::SelectByPortrait { .. }
+            )),
+            "the deferred release must not fall through to portrait selection"
+        );
+        assert!(!host.frontend.touch_primary_click());
+    }
+
+    #[test]
+    fn touch_click_source_cancel_and_reset_retire_pending_provenance() {
+        let (engine, assets, mut host) = fixture();
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[GameEvent::TouchClickSource { pressed: true }],
+            None,
+            false,
+        );
+        assert!(host.frontend.touch_primary_click());
+        host.frontend.clear_touch_click_source();
+        assert!(
+            host.frontend.touch_primary_click(),
+            "a pending click's provenance survives a frame boundary hint"
         );
 
         handle_mouse_input(
             click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
-            &[GameEvent::TouchClickSource { pressed: false }],
+            &[GameEvent::PointerCancel],
             None,
             false,
         );
         assert!(!host.frontend.touch_primary_click());
 
-        // A cancellation after a press retires the marker without a release.
-        handle_mouse_input(
-            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
-            &[
-                GameEvent::TouchClickSource { pressed: true },
-                GameEvent::PointerCancel,
-            ],
-            None,
-            false,
-        );
+        host.frontend
+            .route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+        host.frontend.cancel_touch_quick_group_mode();
         assert!(!host.frontend.touch_primary_click());
     }
 

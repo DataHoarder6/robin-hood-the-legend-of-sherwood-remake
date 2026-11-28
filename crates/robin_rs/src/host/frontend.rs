@@ -276,6 +276,10 @@ pub struct HostFrontend {
     /// window path, read by portrait-click dispatch, and retired with the
     /// pointer sequence. Never persisted or sent to the engine.
     touch_primary_click: bool,
+    /// A primary touch press whose release has not been routed yet. While set,
+    /// a frame-boundary hint cannot erase provenance the paired click still
+    /// needs; explicit cancel/reset boundaries clear both flags.
+    touch_click_release_pending: bool,
     /// Cosmetic fixed-tick easing, invalidated when the entity timeline changes.
     queue_strip_animations: QueueStripAnimations,
     /// Entity-bound targeting/hover feedback, invalidated at interaction boundaries.
@@ -630,24 +634,34 @@ impl HostFrontend {
         self.touch_primary_click
     }
 
-    /// Retire a marker from a previous frame before this frame's events are
-    /// walked. A tap's press and release arrive in one deferred batch, so a
-    /// click always sees its own marker and a later physical click sees none.
+    /// Frame-boundary hint. A completed click's marker is retired, but a press
+    /// still awaiting its deferred release keeps its provenance: the release
+    /// may be delivered by a later poll, and that click must still be touch.
+    /// Explicit cancel/reset boundaries use `cancel_touch_quick_group_mode`.
     pub fn clear_touch_click_source(&mut self) {
-        self.touch_primary_click = false;
+        if !self.touch_click_release_pending {
+            self.touch_primary_click = false;
+        }
     }
 
     /// Consume the window's host-only click-source events. The press marker
-    /// survives the paired click; cancellations, transform takeover, focus
-    /// loss and pointer-sequence resets retire any stale marker.
+    /// survives the paired click; the release marker retires it after dispatch.
+    /// Cancellations, transform takeover, focus loss and pointer-sequence
+    /// resets retire both the marker and any pending release.
     pub fn route_touch_click_source(&mut self, event: &crate::gfx_types::GameEvent) {
         use crate::gfx_types::GameEvent;
         match *event {
-            GameEvent::TouchClickSource { pressed } => self.touch_primary_click = pressed,
+            GameEvent::TouchClickSource { pressed } => {
+                self.touch_primary_click = pressed;
+                self.touch_click_release_pending = pressed;
+            }
             GameEvent::PointerCancel
             | GameEvent::TouchDragCancelled { .. }
             | GameEvent::TouchTransformStart { .. }
-            | GameEvent::WindowFocusChanged(false) => self.touch_primary_click = false,
+            | GameEvent::WindowFocusChanged(false) => {
+                self.touch_primary_click = false;
+                self.touch_click_release_pending = false;
+            }
             _ => {}
         }
     }
@@ -663,6 +677,7 @@ impl HostFrontend {
         self.touch_quick_group_mode = crate::input_translator::TouchQuickGroupMode::Off;
         self.touch_quick_group_captured = false;
         self.touch_primary_click = false;
+        self.touch_click_release_pending = false;
     }
 
     /// Own one tap on the quick-group HUD control from press through release.
