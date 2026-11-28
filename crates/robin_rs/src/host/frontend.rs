@@ -637,6 +637,9 @@ impl HostFrontend {
     pub fn cancel_left_pointer(&mut self) {
         self.pointer_sequence.cancel_left(&mut self.input);
     }
+    pub fn cancel_right_pointer(&mut self) {
+        self.pointer_sequence.cancel_right(&mut self.input);
+    }
     pub fn begin_minimap_drag(&mut self, camera: bool) {
         self.pointer_sequence.begin_minimap_drag(camera);
     }

@@ -267,6 +267,12 @@ impl ScrollView {
                 self.drag_grab = None;
                 false
             }
+            // Scrollbars capture primary drags only. A secondary touch cancel
+            // is still a cancellation, but it cannot retire that primary drag.
+            GameEvent::TouchDragCancelled { button: 3 } => false,
+            GameEvent::TouchDragCancelled { button } => {
+                panic!("unsupported touch drag cancellation button {button}");
+            }
             _ => false,
         }
     }
@@ -540,5 +546,13 @@ mod tests {
         v.drag_grab = Some(3);
         v.handle_event(&GameEvent::PointerCancel, t, (200, 25));
         assert_eq!(v.drag_grab, None);
+
+        v.drag_grab = Some(3);
+        assert!(!v.handle_event(&GameEvent::TouchDragCancelled { button: 3 }, t, (200, 25)));
+        assert_eq!(
+            v.drag_grab,
+            Some(3),
+            "a secondary touch cancel cannot retire a primary scrollbar drag"
+        );
     }
 }

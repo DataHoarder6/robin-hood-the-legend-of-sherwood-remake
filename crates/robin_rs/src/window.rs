@@ -1033,7 +1033,11 @@ impl AppHandler {
                     }
                     continue;
                 }
-                TouchOutput::PointerCancel => GameEvent::PointerCancel,
+                TouchOutput::PointerCancel { button } => match button {
+                    1 => GameEvent::PointerCancel,
+                    3 => GameEvent::TouchDragCancelled { button },
+                    _ => panic!("unsupported touch drag button {button}"),
+                },
                 TouchOutput::PressFeedback {
                     contact,
                     x,

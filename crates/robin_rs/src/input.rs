@@ -330,7 +330,9 @@ impl ThreadedInput {
                     self.clear_position();
                     self.touch_feedback.clear();
                 }
-                GameEvent::PointerCancel => self.touch_feedback.clear(),
+                GameEvent::PointerCancel | GameEvent::TouchDragCancelled { .. } => {
+                    self.touch_feedback.clear();
+                }
                 GameEvent::Resized(..)
                 | GameEvent::TextInput { .. }
                 | GameEvent::ViewportPan { .. }
@@ -681,6 +683,7 @@ mod tests {
     fn touch_press_feedback_clears_on_cancel_focus_loss_and_transform_takeover() {
         for clear_event in [
             GameEvent::PointerCancel,
+            GameEvent::TouchDragCancelled { button: 3 },
             GameEvent::WindowFocusChanged(false),
             GameEvent::TouchTransformStart {
                 first_x: 10.0,

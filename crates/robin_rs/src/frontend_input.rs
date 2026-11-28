@@ -66,6 +66,11 @@ impl FrontendPointerSequence {
         self.capture.end_minimap_drag();
         self.mouse_way.clear();
     }
+    pub(crate) fn cancel_right(&mut self, input: &mut robin_engine::engine::InputState) {
+        input.controls.right_mouse_down = false;
+        input.cancel_multi_unselection();
+        self.capture.cancel_button(3);
+    }
     pub(crate) fn reset(&mut self, input: &mut robin_engine::engine::InputState) {
         input.reset_pointer_sequence();
         self.capture.cancel_sequence();
@@ -187,6 +192,9 @@ impl FrontendPointerCapture {
         if let Some(button) = self.hud_button {
             match *event {
                 GameEvent::PointerCancel => self.hud_button = None,
+                GameEvent::TouchDragCancelled { button: cancelled } => {
+                    self.cancel_button(cancelled);
+                }
                 GameEvent::MouseUp(_, _, released) if released == button => {
                     self.hud_button = None;
                     return true;
@@ -205,6 +213,15 @@ impl FrontendPointerCapture {
 
     fn right_button_down(&mut self, clicks: u8) {
         self.right_double_click_pending = clicks >= 2;
+    }
+
+    fn cancel_button(&mut self, button: u8) {
+        if button == 3 {
+            self.right_double_click_pending = false;
+        }
+        if self.hud_button == Some(button) {
+            self.hud_button = None;
+        }
     }
 
     fn take_right_double_click(&mut self) -> bool {
@@ -234,6 +251,11 @@ impl FrontendPointerCapture {
                     self.touch_plan_captured = false;
                     return TouchPlanRoute::Forward;
                 }
+                GameEvent::TouchDragCancelled { button: 1 } => {
+                    self.touch_plan_captured = false;
+                    return TouchPlanRoute::Forward;
+                }
+                GameEvent::TouchDragCancelled { .. } => return TouchPlanRoute::Forward,
                 GameEvent::MouseUp(_, _, 1) => {
                     self.touch_plan_captured = false;
                     return TouchPlanRoute::Captured;
@@ -316,6 +338,78 @@ mod tests {
         assert!(input.controls.right_mouse_down);
         assert!(sequence.release_right(&mut input));
         assert!(!sequence.release_right(&mut input));
+    }
+
+    #[test]
+    fn touch_right_cancel_retires_only_synthetic_right_state() {
+        use robin_engine::coordinates::MapPoint;
+
+        let mut sequence = FrontendPointerSequence::default();
+        let mut input = robin_engine::engine::InputState::default();
+        sequence.begin_left(&mut input, Default::default(), 2);
+        sequence.begin_right(&mut input, 2);
+        input.start_multi_selection(MapPoint::new(1.0, 2.0));
+        input.start_multi_unselection(MapPoint::new(3.0, 4.0));
+        input.latch_selection_outline();
+        assert!(sequence.route_hud_event(&GameEvent::MouseDown(10, 10, 3, 2), true));
+
+        sequence.cancel_right(&mut input);
+
+        assert!(input.left_mouse_down());
+        assert!(!input.controls.right_mouse_down);
+        assert!(input.multi_selection_active());
+        assert!(!input.multi_unselection_active());
+        assert!(!input.draw_multi_selection());
+        assert_eq!(sequence.capture().hud_button, None);
+        assert!(!sequence.release_right(&mut input));
+        assert!(sequence.release_left(&mut input));
+    }
+
+    #[test]
+    fn hud_capture_retires_only_the_touch_cancelled_button() {
+        let mut capture = FrontendPointerCapture::default();
+        assert!(capture.route_hud_event(&GameEvent::MouseDown(10, 10, 1, 1), true));
+        assert!(!capture.route_hud_event(&GameEvent::TouchDragCancelled { button: 3 }, false));
+        assert_eq!(capture.hud_button, Some(1));
+        assert!(!capture.route_hud_event(&GameEvent::TouchDragCancelled { button: 1 }, false));
+        assert_eq!(capture.hud_button, None);
+    }
+
+    #[test]
+    fn touch_plan_capture_retires_only_for_its_cancelled_button() {
+        let mut capture = FrontendPointerCapture::default();
+        let mut planning = FrontendPlanning::new(true);
+        assert_eq!(
+            capture.route_touch_plan_event(
+                &mut planning,
+                &GameEvent::MouseDown(10, 10, 1, 1),
+                true,
+                |_, _| true
+            ),
+            TouchPlanRoute::Toggled {
+                cancel_planned: false
+            }
+        );
+        assert_eq!(
+            capture.route_touch_plan_event(
+                &mut planning,
+                &GameEvent::TouchDragCancelled { button: 3 },
+                true,
+                |_, _| true
+            ),
+            TouchPlanRoute::Forward
+        );
+        assert!(capture.touch_plan_captured());
+        assert_eq!(
+            capture.route_touch_plan_event(
+                &mut planning,
+                &GameEvent::TouchDragCancelled { button: 1 },
+                true,
+                |_, _| true
+            ),
+            TouchPlanRoute::Forward
+        );
+        assert!(!capture.touch_plan_captured());
     }
 
     #[test]

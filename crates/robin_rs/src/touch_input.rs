@@ -74,8 +74,10 @@ pub(crate) enum TouchOutput {
         y: f64,
         button: u8,
     },
-    /// Abort a mouse drag without running its release/click action.
-    PointerCancel,
+    /// Abort the active touch drag without running its release/click action.
+    PointerCancel {
+        button: u8,
+    },
     /// Presentation-only contact state. It never becomes a gameplay command.
     PressFeedback {
         contact: u64,
@@ -221,8 +223,8 @@ impl TouchClassifier {
                     }]
                 }
             }
-            GestureState::PointerDrag { .. } if self.touches.len() == 2 => {
-                let mut output = vec![TouchOutput::PointerCancel];
+            GestureState::PointerDrag { button, .. } if self.touches.len() == 2 => {
+                let mut output = vec![TouchOutput::PointerCancel { button }];
                 output.extend(self.begin_transform(now_ms));
                 output
             }
@@ -481,7 +483,7 @@ impl TouchClassifier {
                 let mut output = self.release_feedback(id, x, y);
                 self.last_tap = None;
                 if cancelled {
-                    output.push(TouchOutput::PointerCancel);
+                    output.push(TouchOutput::PointerCancel { button });
                 } else {
                     output.extend([
                         TouchOutput::PointerMove { x, y },
@@ -571,7 +573,9 @@ impl TouchClassifier {
     pub(crate) fn cancel_all(&mut self) -> Vec<TouchOutput> {
         let mut output = self.clear_feedback();
         match self.state {
-            GestureState::PointerDrag { .. } => output.push(TouchOutput::PointerCancel),
+            GestureState::PointerDrag { button, .. } => {
+                output.push(TouchOutput::PointerCancel { button });
+            }
             GestureState::Transform { .. } => {
                 output.push(TouchOutput::TransformEnd {
                     velocity_x: 0.0,
@@ -889,7 +893,7 @@ mod tests {
         assert!(matches!(
             touch.started(2, 30.0, 10.0, 20).as_slice(),
             [
-                TouchOutput::PointerCancel,
+                TouchOutput::PointerCancel { button: 1 },
                 TouchOutput::PressFeedback {
                     contact: 1,
                     pressed: false,
@@ -903,6 +907,66 @@ mod tests {
                 TouchOutput::TransformStart { .. },
             ]
         ));
+    }
+
+    #[test]
+    fn second_finger_cancels_a_secondary_drag_with_its_active_button() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 10.0, 0);
+        assert!(matches!(
+            touch.moved(1, 30.0, 10.0, 550).as_slice(),
+            [
+                TouchOutput::PointerDown { button: 3, .. },
+                TouchOutput::PointerMove { .. }
+            ]
+        ));
+        assert!(matches!(
+            touch.started(2, 50.0, 10.0, 600).as_slice(),
+            [
+                TouchOutput::PointerCancel { button: 3 },
+                TouchOutput::PressFeedback { pressed: false, .. },
+                TouchOutput::PressFeedback { pressed: false, .. },
+                TouchOutput::TransformStart { .. },
+            ]
+        ));
+    }
+
+    #[test]
+    fn cancelled_end_carries_the_active_secondary_drag_button() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 10.0, 0);
+        touch.moved(1, 30.0, 10.0, 550);
+        assert_eq!(
+            touch.ended(1, 30.0, 10.0, 600, true),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    x: 30.0,
+                    y: 10.0,
+                    pressed: false,
+                },
+                TouchOutput::PointerCancel { button: 3 },
+            ]
+        );
+    }
+
+    #[test]
+    fn cancel_all_carries_the_active_secondary_drag_button() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 10.0, 0);
+        touch.moved(1, 30.0, 10.0, 550);
+        assert_eq!(
+            touch.cancel_all(),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    x: 30.0,
+                    y: 10.0,
+                    pressed: false,
+                },
+                TouchOutput::PointerCancel { button: 3 },
+            ]
+        );
     }
 
     #[test]

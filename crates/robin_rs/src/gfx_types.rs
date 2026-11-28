@@ -338,6 +338,12 @@ pub enum GameEvent {
     /// Cancel an in-progress primary-pointer drag without treating it as a
     /// click/release. Touch emits this when a second finger takes ownership.
     PointerCancel,
+    /// Cancel a synthetic touch drag without manufacturing a mouse release.
+    /// Unlike `PointerCancel`, this identifies the touched button so a physical
+    /// right-button release remains owned by the physical pointer sequence.
+    TouchDragCancelled {
+        button: u8,
+    },
     /// Host-only visual contact state. This never becomes a gameplay command.
     TouchPressFeedback {
         contact: u64,

@@ -118,6 +118,7 @@ pub(super) fn handle_mouse_input(
                     | GameEvent::MouseMove { .. }
                     | GameEvent::ViewportPan { .. }
                     | GameEvent::PointerCancel
+                    | GameEvent::TouchDragCancelled { .. }
                     | GameEvent::TouchMotionStop
                     | GameEvent::TouchTransformStart { .. }
                     | GameEvent::TouchTransform { .. }
@@ -157,6 +158,12 @@ pub(super) fn handle_mouse_input(
             GameEvent::TouchMotionStop => {}
             GameEvent::PointerCancel => {
                 cancel_left_pointer(ctx.host, ctx.frame_cmds);
+            }
+            GameEvent::TouchDragCancelled { button: 3 } => {
+                ctx.host.frontend.cancel_right_pointer();
+            }
+            GameEvent::TouchDragCancelled { button } => {
+                panic!("unsupported touch drag cancellation button {button}");
             }
             GameEvent::MouseDown(mx, my, 1, clicks) => {
                 ctx.on_left_mouse_down(mx, my, clicks);
@@ -3282,6 +3289,68 @@ mod shift_planning_tests {
             .input
             .press_left_pointer(Default::default(), 2);
         assert!(host.frontend.input.release_left_pointer());
+    }
+
+    #[test]
+    fn touch_right_cancel_dispatches_no_release_or_click_command() {
+        use crate::host::test_support::fixture;
+
+        let (engine, assets, mut host) = fixture();
+        host.frontend
+            .input
+            .press_left_pointer(Default::default(), 2);
+        host.frontend.begin_right_pointer(2);
+        host.frontend
+            .input
+            .start_multi_selection(engine_coordinates::MapPoint::new(1.0, 2.0));
+        host.frontend
+            .input
+            .start_multi_unselection(engine_coordinates::MapPoint::new(3.0, 4.0));
+        host.frontend.input.latch_selection_outline();
+        assert!(
+            host.frontend
+                .route_hud_event(&GameEvent::MouseDown(10, 10, 3, 2), true)
+        );
+        let mut commands = FrameCommands::new();
+        let cache = PortraitCache::new();
+
+        handle_mouse_input(
+            MouseCtx {
+                engine: &engine,
+                host: &mut host,
+                assets: &assets,
+                portrait_cache: &cache,
+                frame_cmds: &mut commands,
+                screen_width: 800,
+                screen_height: 600,
+                modifiers: InputModifiers {
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    plan: false,
+                },
+            },
+            &[GameEvent::TouchDragCancelled { button: 3 }],
+            None,
+            false,
+        );
+
+        assert!(
+            commands.is_empty(),
+            "touch cancellation cannot dispatch a release"
+        );
+        assert!(host.frontend.input.left_mouse_down());
+        assert!(!host.frontend.input.controls.right_mouse_down);
+        assert!(host.frontend.input.multi_selection_active());
+        assert!(!host.frontend.input.multi_unselection_active());
+        assert!(!host.frontend.input.draw_multi_selection());
+        assert!(
+            !host
+                .frontend
+                .route_hud_event(&GameEvent::MouseUp(10, 10, 3), false)
+        );
+        assert!(!host.frontend.release_right_pointer());
+        assert!(host.frontend.release_left_pointer());
     }
 
     #[test]

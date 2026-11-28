@@ -345,6 +345,27 @@ fn touch_pointer_outputs_preserve_the_recognized_button() {
 }
 
 #[test]
+fn touch_cancel_outputs_preserve_source_and_active_button() {
+    use crate::gfx_types::GameEvent;
+
+    let (mut handler, events) = touch_handler();
+    handler.emit_touch_outputs(vec![TouchOutput::PointerCancel { button: 1 }]);
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::Event(GameEvent::PointerCancel))
+    ));
+
+    let (mut handler, events) = touch_handler();
+    handler.emit_touch_outputs(vec![TouchOutput::PointerCancel { button: 3 }]);
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::Event(GameEvent::TouchDragCancelled {
+            button: 3
+        }))
+    ));
+}
+
+#[test]
 fn touch_tap_defers_release_feedback_with_its_pointer_up() {
     use crate::gfx_types::GameEvent;
 

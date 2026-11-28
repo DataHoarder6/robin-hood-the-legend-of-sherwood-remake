@@ -902,6 +902,16 @@ impl ModalInputState {
                 self.hover_before_press = false;
                 self.capture.clear();
             }
+            GameEvent::TouchDragCancelled { button: 3 } => {
+                self.buttons.remove(MouseButtons::RIGHT_DOWN);
+                self.buttons.remove(MouseButtons::RIGHT_CLICK);
+                self.buttons.remove(MouseButtons::RIGHT_DOUBLE_CLICK);
+                self.pending_double_click_right = false;
+                self.capture.clear();
+            }
+            GameEvent::TouchDragCancelled { button } => {
+                panic!("unsupported touch drag cancellation button {button}");
+            }
             GameEvent::TextInput { text } => {
                 self.text_input.push_str(text);
             }
@@ -1961,6 +1971,31 @@ mod noisy_tracker_tests {
 
         assert!(input.buttons.contains(MouseButtons::LEFT_CLICK));
         assert!(!input.buttons.contains(MouseButtons::LEFT_DOWN));
+    }
+
+    #[test]
+    fn touch_right_cancel_clears_right_edges_without_consuming_left_press() {
+        let mut input = ModalInputState::new();
+        input.buttons |= MouseButtons::LEFT_DOWN
+            | MouseButtons::RIGHT_DOWN
+            | MouseButtons::RIGHT_CLICK
+            | MouseButtons::RIGHT_DOUBLE_CLICK;
+        input.pending_double_click_left = true;
+        input.pending_double_click_right = true;
+        input.hover_before_press = true;
+
+        input.update_from_event(
+            &GameEvent::TouchDragCancelled { button: 3 },
+            MenuTransform::centered(640, 480),
+        );
+
+        assert!(input.buttons.contains(MouseButtons::LEFT_DOWN));
+        assert!(input.pending_double_click_left);
+        assert!(input.hover_before_press);
+        assert!(!input.buttons.contains(MouseButtons::RIGHT_DOWN));
+        assert!(!input.buttons.contains(MouseButtons::RIGHT_CLICK));
+        assert!(!input.buttons.contains(MouseButtons::RIGHT_DOUBLE_CLICK));
+        assert!(!input.pending_double_click_right);
     }
 }
 
