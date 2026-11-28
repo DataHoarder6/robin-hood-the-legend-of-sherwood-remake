@@ -1017,6 +1017,13 @@ impl AppHandler {
                     clicks,
                 } => {
                     self.last_cursor = (x as i32, y as i32);
+                    if button == 1 {
+                        // The source marker precedes the paired click so the
+                        // dispatch path can see it on the press as well.
+                        report_window_send(self.events_tx.try_send(HostMsg::Event(
+                            GameEvent::TouchClickSource { pressed: true },
+                        )));
+                    }
                     GameEvent::MouseDown(x as i32, y as i32, button, clicks)
                 }
                 TouchOutput::PointerUp { x, y, button } => {
@@ -1030,6 +1037,17 @@ impl AppHandler {
                     pointer_up_emitted = true;
                     for event in deferred_feedback.drain(..) {
                         report_window_send(self.events_tx.try_send(HostMsg::DeferredEvent(event)));
+                    }
+                    if button == 1 {
+                        // The release marker follows the paired release so a
+                        // portrait click resolves while the source is known.
+                        // Keep it in the same (possibly deferred) channel phase.
+                        let release = GameEvent::TouchClickSource { pressed: false };
+                        report_window_send(if defer_pointer_up {
+                            self.events_tx.try_send(HostMsg::DeferredEvent(release))
+                        } else {
+                            self.events_tx.try_send(HostMsg::Event(release))
+                        });
                     }
                     continue;
                 }

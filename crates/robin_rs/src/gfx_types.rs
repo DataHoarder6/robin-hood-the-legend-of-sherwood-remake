@@ -351,6 +351,14 @@ pub enum GameEvent {
         y: f32,
         pressed: bool,
     },
+    /// Host-only source marker for a button-1 mouse click produced by a touch
+    /// contact. Emitted before the paired `MouseDown` and after the paired
+    /// `MouseUp`; it marks the click so host-only consumers can distinguish it
+    /// from a physical mouse click. Never a gameplay command, never serialized,
+    /// and deliberately separate from `TouchPressFeedback`'s presentation role.
+    TouchClickSource {
+        pressed: bool,
+    },
     /// Stop host-local touch-camera inertia on a new primary contact.
     TouchMotionStop,
     MouseWheel(i32),

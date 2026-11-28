@@ -98,6 +98,10 @@ pub(super) fn handle_mouse_input(
     host.frontend.input.controls.has_focus = true;
 
     for event in events {
+        // Walk provenance in channel order: the press marker is set before the
+        // paired MouseDown and cleared after the paired MouseUp, so the click
+        // resolved by `on_left_mouse_up` still sees its touch origin.
+        ctx.host.frontend.route_touch_click_source(event);
         if matches!(event, GameEvent::WindowFocusChanged(false)) {
             cancel_left_pointer(ctx.host, ctx.frame_cmds);
             ctx.host.frontend.lose_pointer_focus();
@@ -1046,11 +1050,17 @@ impl MouseCtx<'_> {
 
         // Touch-only quick-group latch. This is the sole consumer of the mode:
         // keyboard modifiers and unlatched taps keep their existing selection
-        // path, and a latched tap dispatches exactly one quick-group command.
-        let quick_group = match host.frontend.touch_quick_group_mode() {
-            crate::input_translator::TouchQuickGroupMode::Off => None,
-            crate::input_translator::TouchQuickGroupMode::Assign => Some(true),
-            crate::input_translator::TouchQuickGroupMode::Recall => Some(false),
+        // path, and a latched *touch* tap dispatches exactly one command. The
+        // host-only source marker keeps an armed latch from capturing a
+        // physical left click, which has no such marker.
+        let quick_group = if host.frontend.touch_primary_click() {
+            match host.frontend.touch_quick_group_mode() {
+                crate::input_translator::TouchQuickGroupMode::Off => None,
+                crate::input_translator::TouchQuickGroupMode::Assign => Some(true),
+                crate::input_translator::TouchQuickGroupMode::Recall => Some(false),
+            }
+        } else {
+            None
         };
         if let Some(assign) = quick_group {
             let cmd = if assign {
@@ -4364,6 +4374,11 @@ mod touch_quick_group_tests {
             })
     }
 
+    fn start_touch_click(host: &mut Host) {
+        host.frontend
+            .route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+    }
+
     #[test]
     fn touch_quick_group_latched_portrait_tap_dispatches_slot_command() {
         let (mut engine, assets, mut host) = fixture();
@@ -4382,6 +4397,7 @@ mod touch_quick_group_tests {
             host.frontend.touch_quick_group_mode(),
             TouchQuickGroupMode::Assign
         );
+        start_touch_click(&mut host);
         let mut commands = FrameCommands::new();
         click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
             .on_normal_portrait_click(&visage_hit(pc_id, 3));
@@ -4403,6 +4419,7 @@ mod touch_quick_group_tests {
             host.frontend.touch_quick_group_mode(),
             TouchQuickGroupMode::Recall
         );
+        start_touch_click(&mut host);
         let mut commands = FrameCommands::new();
         click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
             .on_normal_portrait_click(&visage_hit(pc_id, 7));
@@ -4410,6 +4427,120 @@ mod touch_quick_group_tests {
             quick_group_command(&commands),
             Some((false, 7)),
             "recall mode must recall the tapped portrait slot"
+        );
+    }
+
+    #[test]
+    fn touch_click_source_is_walked_in_channel_order_by_mouse_dispatch() {
+        let (engine, assets, mut host) = fixture();
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+
+        // The press marker is set before the paired events, and a click must
+        // still observe it while its MouseUp is being resolved.
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[
+                GameEvent::TouchClickSource { pressed: true },
+                GameEvent::MouseDown(1, 1, 3, 1),
+                GameEvent::MouseUp(1, 1, 3),
+            ],
+            None,
+            false,
+        );
+        assert!(
+            host.frontend.touch_primary_click(),
+            "the paired click must keep its source marker"
+        );
+
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[GameEvent::TouchClickSource { pressed: false }],
+            None,
+            false,
+        );
+        assert!(!host.frontend.touch_primary_click());
+
+        // A cancellation after a press retires the marker without a release.
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[
+                GameEvent::TouchClickSource { pressed: true },
+                GameEvent::PointerCancel,
+            ],
+            None,
+            false,
+        );
+        assert!(!host.frontend.touch_primary_click());
+    }
+
+    #[test]
+    fn touch_quick_group_armed_physical_click_keeps_selection() {
+        let (mut engine, assets, mut host) = fixture();
+        let pc_id = crate::host::test_support::add_pc_with_status(
+            &mut engine,
+            50.0,
+            50.0,
+            Posture::Upright,
+            true,
+            100,
+        );
+        let cache = PortraitCache::new();
+
+        // The latch is armed, but no touch source marker accompanies this
+        // left press: it is a physical mouse click and must still select.
+        host.frontend.cycle_touch_quick_group_mode();
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Assign
+        );
+        assert!(!host.frontend.touch_primary_click());
+        let mut commands = FrameCommands::new();
+        click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
+            .on_normal_portrait_click(&visage_hit(pc_id, 5));
+        assert_eq!(
+            quick_group_command(&commands),
+            None,
+            "a physical left click must never consume the quick-group latch"
+        );
+        assert!(
+            commands.commands.iter().any(|input| matches!(
+                input.command,
+                PlayerCommand::SelectPc { pc_id: clicked, .. } if clicked == pc_id
+            )),
+            "the armed latch must not change physical portrait selection"
+        );
+    }
+
+    #[test]
+    fn touch_quick_group_unlatched_touch_tap_keeps_selection() {
+        let (mut engine, assets, mut host) = fixture();
+        let pc_id = crate::host::test_support::add_pc_with_status(
+            &mut engine,
+            50.0,
+            50.0,
+            Posture::Upright,
+            true,
+            100,
+        );
+        let cache = PortraitCache::new();
+
+        // A touch tap with no latch is still an ordinary selection.
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Off
+        );
+        start_touch_click(&mut host);
+        let mut commands = FrameCommands::new();
+        click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
+            .on_normal_portrait_click(&visage_hit(pc_id, 6));
+        assert_eq!(quick_group_command(&commands), None);
+        assert!(
+            commands.commands.iter().any(|input| matches!(
+                input.command,
+                PlayerCommand::SelectPc { pc_id: clicked, .. } if clicked == pc_id
+            )),
+            "an unlatched touch tap keeps the existing selection behavior"
         );
     }
 

@@ -249,6 +249,11 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         step_back_repeat_at_ms,
     } = context;
 
+    // Provenance is frame-scoped: no marker from a previous poll may leak into
+    // this frame's click dispatch. The chronological set/clear happens in the
+    // mouse walk, where the paired click is resolved.
+    host.frontend.clear_touch_click_source();
+
     // Active graphical modals own the raw event queue. Do not drain it from
     // underneath them or allow global gameplay shortcuts to fire.
     let scripted_modal_input_active = ui.active_modal.is_some() || modal_state_pending(host);

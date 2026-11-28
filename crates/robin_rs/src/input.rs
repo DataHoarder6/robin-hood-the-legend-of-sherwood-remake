@@ -333,6 +333,10 @@ impl ThreadedInput {
                 GameEvent::PointerCancel | GameEvent::TouchDragCancelled { .. } => {
                     self.touch_feedback.clear();
                 }
+                GameEvent::TouchClickSource { .. } => {
+                    // Host-only click provenance. Consumed by the frontend
+                    // pointer sequence; it never becomes sampled gameplay input.
+                }
                 GameEvent::Resized(..)
                 | GameEvent::TextInput { .. }
                 | GameEvent::ViewportPan { .. }

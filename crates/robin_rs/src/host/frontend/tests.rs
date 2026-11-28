@@ -891,4 +891,44 @@ mod touch_quick_group_tests {
         );
         assert_eq!(frontend.touch_quick_group_mode(), Assign);
     }
+
+    #[test]
+    fn touch_click_source_marker_follows_the_pointer_lifecycle() {
+        let mut frontend = HostFrontend::default();
+        assert!(!frontend.touch_primary_click());
+
+        frontend.route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+        assert!(frontend.touch_primary_click());
+        // The paired click itself must not clear the marker before dispatch.
+        frontend.route_touch_click_source(&GameEvent::MouseDown(100, 60, 1, 1));
+        assert!(frontend.touch_primary_click());
+        frontend.route_touch_click_source(&GameEvent::TouchClickSource { pressed: false });
+        assert!(!frontend.touch_primary_click());
+
+        // Cancel, transform takeover, focus loss and modal/session resets all
+        // retire a marker left behind by an interrupted gesture.
+        for cancel in [
+            GameEvent::PointerCancel,
+            GameEvent::TouchDragCancelled { button: 1 },
+            GameEvent::TouchTransformStart {
+                first_x: 10.0,
+                first_y: 20.0,
+                second_x: 30.0,
+                second_y: 40.0,
+            },
+            GameEvent::WindowFocusChanged(false),
+        ] {
+            frontend.route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+            assert!(frontend.touch_primary_click());
+            frontend.route_touch_click_source(&cancel);
+            assert!(
+                !frontend.touch_primary_click(),
+                "stale marker after {cancel:?}"
+            );
+        }
+
+        frontend.route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+        frontend.cancel_touch_quick_group_mode();
+        assert!(!frontend.touch_primary_click());
+    }
 }

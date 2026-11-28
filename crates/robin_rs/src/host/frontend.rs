@@ -272,6 +272,10 @@ pub struct HostFrontend {
     /// modifier, or replay input; it retires at every interaction boundary.
     touch_quick_group_mode: crate::input_translator::TouchQuickGroupMode,
     touch_quick_group_captured: bool,
+    /// Host-only provenance of the paired primary click. Set by the touch
+    /// window path, read by portrait-click dispatch, and retired with the
+    /// pointer sequence. Never persisted or sent to the engine.
+    touch_primary_click: bool,
     /// Cosmetic fixed-tick easing, invalidated when the entity timeline changes.
     queue_strip_animations: QueueStripAnimations,
     /// Entity-bound targeting/hover feedback, invalidated at interaction boundaries.
@@ -619,6 +623,35 @@ impl HostFrontend {
         self.touch_quick_group_mode
     }
 
+    /// Whether the current paired primary click came from a touch contact.
+    /// Only the quick-group latch reads this; keyboard and physical paths do
+    /// not. A physical click has no marker and therefore never consumes it.
+    pub fn touch_primary_click(&self) -> bool {
+        self.touch_primary_click
+    }
+
+    /// Retire a marker from a previous frame before this frame's events are
+    /// walked. A tap's press and release arrive in one deferred batch, so a
+    /// click always sees its own marker and a later physical click sees none.
+    pub fn clear_touch_click_source(&mut self) {
+        self.touch_primary_click = false;
+    }
+
+    /// Consume the window's host-only click-source events. The press marker
+    /// survives the paired click; cancellations, transform takeover, focus
+    /// loss and pointer-sequence resets retire any stale marker.
+    pub fn route_touch_click_source(&mut self, event: &crate::gfx_types::GameEvent) {
+        use crate::gfx_types::GameEvent;
+        match *event {
+            GameEvent::TouchClickSource { pressed } => self.touch_primary_click = pressed,
+            GameEvent::PointerCancel
+            | GameEvent::TouchDragCancelled { .. }
+            | GameEvent::TouchTransformStart { .. }
+            | GameEvent::WindowFocusChanged(false) => self.touch_primary_click = false,
+            _ => {}
+        }
+    }
+
     /// One short tap on the touch-only control advances the latch.
     pub fn cycle_touch_quick_group_mode(&mut self) {
         self.touch_quick_group_mode = self.touch_quick_group_mode.next();
@@ -629,6 +662,7 @@ impl HostFrontend {
     pub fn cancel_touch_quick_group_mode(&mut self) {
         self.touch_quick_group_mode = crate::input_translator::TouchQuickGroupMode::Off;
         self.touch_quick_group_captured = false;
+        self.touch_primary_click = false;
     }
 
     /// Own one tap on the quick-group HUD control from press through release.

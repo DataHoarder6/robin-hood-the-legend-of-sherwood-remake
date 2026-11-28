@@ -333,6 +333,16 @@ fn touch_pointer_outputs_preserve_the_recognized_button() {
                 button,
             },
         ]);
+        // Only the primary click is marked as touch-originated. The marker
+        // brackets the paired mouse events so dispatch can see it.
+        if button == 1 {
+            assert!(matches!(
+                events.try_recv(),
+                Ok(super::HostMsg::Event(GameEvent::TouchClickSource {
+                    pressed: true
+                }))
+            ));
+        }
         assert!(matches!(
             events.try_recv(),
             Ok(super::HostMsg::Event(GameEvent::MouseDown(10, 20, actual, 1))) if actual == button
@@ -341,6 +351,18 @@ fn touch_pointer_outputs_preserve_the_recognized_button() {
             events.try_recv(),
             Ok(super::HostMsg::DeferredEvent(GameEvent::MouseUp(10, 20, actual))) if actual == button
         ));
+        if button == 1 {
+            assert!(matches!(
+                events.try_recv(),
+                Ok(super::HostMsg::DeferredEvent(GameEvent::TouchClickSource {
+                    pressed: false
+                }))
+            ));
+        }
+        assert!(
+            events.try_recv().is_err(),
+            "no extra marker on button {button}"
+        );
     }
 }
 
