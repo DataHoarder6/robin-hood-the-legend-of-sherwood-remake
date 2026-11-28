@@ -33,7 +33,8 @@ pub fn touch_target_hit(base: ScreenRect, x: i32, y: i32) -> bool {
         base.height() as f32,
     );
     let (x, y) = (f64::from(x), f64::from(y));
-    x >= f64::from(min_x) && x <= f64::from(max_x) && y >= f64::from(min_y) && y <= f64::from(max_y)
+    (f64::from(min_x)..=f64::from(max_x)).contains(&x)
+        && (f64::from(min_y)..=f64::from(max_y)).contains(&y)
 }
 
 /// Whether any of the drawn rects' padded targets owns the point. The world

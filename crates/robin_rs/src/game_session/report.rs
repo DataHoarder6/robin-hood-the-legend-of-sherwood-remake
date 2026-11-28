@@ -184,9 +184,18 @@ fn cursor_element(
     tested.push(CURSOR_LAYERS[0]);
     let mut found = touch_hud_element(sw, x, y, quick_group_mode);
 
+    let hover = super::event_hud::sprite_hud_hit(
+        &hud.zoom_layout,
+        &hud.corner_layout,
+        &hud.stature_layout,
+        false,
+        x,
+        y,
+    );
+
     if found.is_none() {
         tested.push(CURSOR_LAYERS[1]);
-        if let Some(button) = hud.zoom_layout.hit_test_geometric(x, y) {
+        if let Some(button) = hover.zoom {
             let (id, name, rect, mt) = match button {
                 ZoomButton::ZoomUp => (
                     "zoom.up",
@@ -213,7 +222,7 @@ fn cursor_element(
 
     if found.is_none() {
         tested.push(CURSOR_LAYERS[2]);
-        if let Some(button) = hud.corner_layout.hit_test_geometric(x, y) {
+        if let Some(button) = hover.corner {
             let (id, name, rect) = match button {
                 CornerButton::Clock => (
                     "corner.clock",
@@ -239,7 +248,7 @@ fn cursor_element(
 
     if found.is_none() {
         tested.push(CURSOR_LAYERS[3]);
-        if let Some(button) = hud.stature_layout.hit_test_geometric(x, y) {
+        if let Some(button) = hover.stature {
             let (id, name, rect) = match button {
                 StatureButton::Up => ("stature.up", "Stand up", &hud.stature_layout.up),
                 StatureButton::Down => ("stature.down", "Crouch", &hud.stature_layout.down),
@@ -256,7 +265,9 @@ fn cursor_element(
 
     if found.is_none() {
         tested.push(CURSOR_LAYERS[4]);
-        if let Some(button) = hud.sherwood_layout.hover_test(x, y, hud.sherwood_rail) {
+        if let Some(button) =
+            super::mouse_input::sherwood_hover_at(&hud.sherwood_layout, x, y, hud.sherwood_rail)
+        {
             let (id, name) = match button {
                 SherwoodButton::DisplayCampaignMap => ("sherwood.map", "Campaign map"),
                 SherwoodButton::GoToExit => ("sherwood.exit", "Go to exit"),

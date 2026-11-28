@@ -46,6 +46,67 @@ pub(super) enum EventHudOutcome {
     Control(HandlerAction),
 }
 
+/// The sprite HUD buttons under one point, in dispatch priority order. This is
+/// the single padded hit computation used by direct HUD dispatch and by cursor
+/// reporting: a widget whose gate is closed still owns its pixels, so the
+/// enable masks are applied by the caller, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SpriteHudHit {
+    pub(super) zoom: Option<ZoomButton>,
+    pub(super) corner: Option<CornerButton>,
+    pub(super) stature: Option<StatureButton>,
+}
+
+impl SpriteHudHit {
+    pub(super) fn is_empty(self) -> bool {
+        self.zoom.is_none() && self.corner.is_none() && self.stature.is_none()
+    }
+}
+
+pub(super) fn sprite_hud_hit(
+    zoom_layout: &crate::zoom_hud::ZoomHudLayout,
+    corner_layout: &CornerHudLayout,
+    stature_layout: &StatureHudLayout,
+    is_sherwood: bool,
+    x: i32,
+    y: i32,
+) -> SpriteHudHit {
+    use crate::touch_plan_hud::touch_target_hit;
+
+    let zoom = if touch_target_hit(zoom_layout.zoom_up, x, y) {
+        Some(ZoomButton::ZoomUp)
+    } else if touch_target_hit(zoom_layout.zoom_down, x, y) {
+        Some(ZoomButton::ZoomDown)
+    } else {
+        None
+    };
+    let corner = if is_sherwood {
+        None
+    } else if touch_target_hit(corner_layout.clock, x, y) {
+        Some(CornerButton::Clock)
+    } else if touch_target_hit(corner_layout.sight, x, y) {
+        Some(CornerButton::Sight)
+    } else if touch_target_hit(corner_layout.quickstart, x, y) {
+        Some(CornerButton::QuickStart)
+    } else {
+        None
+    };
+    let stature = if is_sherwood {
+        None
+    } else if touch_target_hit(stature_layout.up, x, y) {
+        Some(StatureButton::Up)
+    } else if touch_target_hit(stature_layout.down, x, y) {
+        Some(StatureButton::Down)
+    } else {
+        None
+    };
+    SpriteHudHit {
+        zoom,
+        corner,
+        stature,
+    }
+}
+
 /// Explicit mutable inputs for the event/HUD collection boundary.
 pub(super) struct EventHudContext<'a> {
     pub(super) host: &'a mut Host,
@@ -420,14 +481,15 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         let GameEvent::MouseDown(mx, my, button, _) = *event else {
             return true;
         };
-        let zoom = hud.zoom_layout.hit_test_geometric(mx, my);
-        let corner = (!game.is_sherwood)
-            .then(|| hud.corner_layout.hit_test_geometric(mx, my))
-            .flatten();
-        let stature_hit = (!game.is_sherwood)
-            .then(|| hud.stature_layout.hit_test_geometric(mx, my))
-            .flatten();
-        if zoom.is_none() && corner.is_none() && stature_hit.is_none() {
+        let hit = sprite_hud_hit(
+            &hud.zoom_layout,
+            &hud.corner_layout,
+            &hud.stature_layout,
+            game.is_sherwood,
+            mx,
+            my,
+        );
+        if hit.is_empty() {
             return true;
         }
         if button != 1 && button != 3 {
@@ -435,25 +497,34 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
         }
         host.frontend.route_hud_event(event, true);
         if button == 1 {
-            if let Some(button) = hud.zoom_layout.hit_test(mx, my, zoom_enable) {
+            let zoom_button = hit.zoom.filter(|button| match button {
+                ZoomButton::ZoomUp => zoom_enable.zoom_up,
+                ZoomButton::ZoomDown => zoom_enable.zoom_down,
+            });
+            let corner_button = hit.corner.filter(|button| match button {
+                CornerButton::Clock => corner_enable.clock,
+                CornerButton::Sight => corner_enable.sight,
+                CornerButton::QuickStart => corner_enable.quickstart,
+            });
+            let stature_button = hit.stature.filter(|button| match button {
+                StatureButton::Up => stature_enable.up_enabled,
+                StatureButton::Down => stature_enable.down_enabled,
+            });
+            if let Some(button) = zoom_button {
                 let direction = match button {
                     ZoomButton::ZoomUp => ZoomDirection::In,
                     ZoomButton::ZoomDown => ZoomDirection::Out,
                 };
                 host.frontend.viewport.zoom_to_original_level(direction);
-            } else if corner.is_some() {
-                if let Some(button) = hud.corner_layout.hit_test(mx, my, corner_enable) {
-                    dispatch_corner_button_left_click(
-                        button,
-                        &manager.engine,
-                        game,
-                        host,
-                        &mut frame.stage_commands(),
-                    );
-                }
-            } else if stature_hit.is_some()
-                && let Some(button) = hud.stature_layout.hit_test(mx, my, stature_enable)
-            {
+            } else if let Some(button) = corner_button {
+                dispatch_corner_button_left_click(
+                    button,
+                    &manager.engine,
+                    game,
+                    host,
+                    &mut frame.stage_commands(),
+                );
+            } else if let Some(button) = stature_button {
                 let command = if planning_active {
                     PlayerCommand::QueueQuickAction {
                         action: robin_engine::profiles::Action::NoAction,
@@ -477,7 +548,7 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
                     }
                 }
             }
-        } else if let Some(button) = corner {
+        } else if let Some(button) = hit.corner {
             dispatch_corner_button_right_click(button, host, &mut frame.stage_commands());
         }
         false
@@ -839,6 +910,103 @@ mod tests {
                 plan: false,
             }
         );
+    }
+
+    /// The dispatch gate and cursor hover both ask `sprite_hud_hit`. A point
+    /// outside the drawn sprite but inside the shared 48x48 target must be
+    /// reported as that control, not fall through to the world.
+    #[test]
+    fn padded_sprite_points_are_dispatch_and_hover_targets() {
+        use crate::corner_hud::CornerHudLayout;
+        use crate::stature_hud::StatureHudLayout;
+        use crate::zoom_hud::ZoomHudLayout;
+
+        let (w, h) = (800_u32, 600_u32);
+        let zoom =
+            ZoomHudLayout::for_screen_width(w, &crate::zoom_hud::ZoomButtonSprites::default());
+        let corner = CornerHudLayout::for_resolution(
+            w,
+            h,
+            &crate::corner_hud::CornerButtonSprites::default(),
+        );
+        let stature =
+            StatureHudLayout::for_resolution(w, h, &crate::stature_hud::StatureSprites::default());
+
+        let below =
+            |rect: crate::gfx_types::Rect| (rect.x() + 2, rect.y() + rect.height() as i32 + 6);
+
+        let hit = sprite_hud_hit(
+            &zoom,
+            &corner,
+            &stature,
+            false,
+            below(zoom.zoom_down).0,
+            below(zoom.zoom_down).1,
+        );
+        assert_eq!(
+            hit.zoom,
+            Some(ZoomButton::ZoomDown),
+            "zoom padding is a hit"
+        );
+
+        let hit = sprite_hud_hit(
+            &zoom,
+            &corner,
+            &stature,
+            false,
+            below(corner.clock).0,
+            below(corner.clock).1,
+        );
+        assert_eq!(
+            hit.corner,
+            Some(CornerButton::Clock),
+            "corner padding is a hit"
+        );
+
+        let hit = sprite_hud_hit(
+            &zoom,
+            &corner,
+            &stature,
+            false,
+            below(stature.up).0,
+            below(stature.up).1,
+        );
+        assert_eq!(
+            hit.stature,
+            Some(StatureButton::Up),
+            "stature padding is a hit"
+        );
+
+        let miss = sprite_hud_hit(&zoom, &corner, &stature, false, 400, 300);
+        assert!(miss.is_empty(), "an empty screen point stays a world point");
+    }
+
+    /// Sherwood suppresses corner and stature controls but never the zoom
+    /// control; padding must not change that priority.
+    #[test]
+    fn padded_sprite_hit_keeps_the_sherwood_suppression_rule() {
+        use crate::corner_hud::CornerHudLayout;
+        use crate::stature_hud::StatureHudLayout;
+        use crate::zoom_hud::ZoomHudLayout;
+
+        let (w, h) = (800_u32, 600_u32);
+        let zoom =
+            ZoomHudLayout::for_screen_width(w, &crate::zoom_hud::ZoomButtonSprites::default());
+        let corner = CornerHudLayout::for_resolution(
+            w,
+            h,
+            &crate::corner_hud::CornerButtonSprites::default(),
+        );
+        let stature =
+            StatureHudLayout::for_resolution(w, h, &crate::stature_hud::StatureSprites::default());
+        let point = (
+            corner.clock.x() + 2,
+            corner.clock.y() + corner.clock.height() as i32 + 6,
+        );
+
+        let hit = sprite_hud_hit(&zoom, &corner, &stature, true, point.0, point.1);
+        assert_eq!(hit.corner, None);
+        assert_eq!(hit.stature, None);
     }
 
     #[test]

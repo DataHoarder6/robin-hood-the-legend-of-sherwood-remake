@@ -1962,6 +1962,42 @@ enum SherwoodRailPress {
     Missed,
 }
 
+/// The shared padded hit policy applied to each offered Sherwood button, in
+/// draw order. A closed gate still owns its pixels: callers consume a press as
+/// `Claimed` rather than passing it to the world.
+fn sherwood_button_at(
+    layout: &SherwoodHudLayout,
+    x: i32,
+    y: i32,
+    rail: SherwoodRail,
+    enable: SherwoodButtonEnable,
+) -> Option<SherwoodButton> {
+    use crate::touch_plan_hud::touch_target_hit;
+    rail.visible()
+        .find(|button| enable.is_enabled(*button) && touch_target_hit(layout.rect(*button), x, y))
+}
+
+/// Hover uses the same padded rects, gate open or closed, so a tooltip still
+/// names the button under a finger at the edge of its target.
+pub(super) fn sherwood_hover_at(
+    layout: &SherwoodHudLayout,
+    x: i32,
+    y: i32,
+    rail: SherwoodRail,
+) -> Option<SherwoodButton> {
+    use crate::touch_plan_hud::touch_target_hit;
+    rail.visible()
+        .find(|button| touch_target_hit(layout.rect(*button), x, y))
+}
+
+fn sherwood_claims_at(layout: &SherwoodHudLayout, x: i32, y: i32, rail: SherwoodRail) -> bool {
+    use crate::touch_plan_hud::touch_target_hit;
+    layout
+        .occupied(rail)
+        .into_iter()
+        .any(|rect| touch_target_hit(rect, x, y))
+}
+
 /// Match the frame's first left press against the Sherwood rail.
 fn sherwood_rail_press(
     events: &[GameEvent],
@@ -1973,10 +2009,10 @@ fn sherwood_rail_press(
         let GameEvent::MouseDown(mx, my, 1 /* left */, count) = *event else {
             continue;
         };
-        if let Some(button) = layout.hit_test(mx, my, rail, enable) {
+        if let Some(button) = sherwood_button_at(layout, mx, my, rail, enable) {
             return SherwoodRailPress::Button(SherwoodHudClick::new(button, count));
         }
-        if layout.claims_point(rail, mx, my) {
+        if sherwood_claims_at(layout, mx, my, rail) {
             return SherwoodRailPress::Claimed;
         }
     }
@@ -1994,9 +2030,9 @@ fn sherwood_release_is_hud_owned(
     layout: &SherwoodHudLayout,
     rail: SherwoodRail,
 ) -> bool {
-    events.iter().any(
-        |event| matches!(event, GameEvent::MouseUp(x, y, 1) if layout.claims_point(rail, *x, *y)),
-    )
+    events.iter().any(|event| {
+        matches!(event, GameEvent::MouseUp(x, y, 1) if sherwood_claims_at(layout, *x, *y, rail))
+    })
 }
 
 /// Commands one press on the Sherwood `GoToExit` control issues.
@@ -2090,7 +2126,7 @@ pub(super) fn handle_sherwood_hud_buttons(
             let GameEvent::MouseDown(mx, my, 1, _) = *event else {
                 continue;
             };
-            match sherwood_layout.hit_test(mx, my, *sherwood_rail, *sherwood_enable) {
+            match sherwood_button_at(sherwood_layout, mx, my, *sherwood_rail, *sherwood_enable) {
                 Some(SherwoodButton::StartMission) => {
                     if let Some(resources) = menu_resources.as_ref() {
                         *sherwood_flow = Some(SherwoodCampaignFlow::Confirmation {
@@ -2125,7 +2161,7 @@ pub(super) fn handle_sherwood_hud_buttons(
                 _ => {
                     // An offered control whose gate is closed still owns its
                     // pixels: consume the click instead of walking the men.
-                    if sherwood_layout.claims_point(*sherwood_rail, mx, my) {
+                    if sherwood_claims_at(sherwood_layout, mx, my, *sherwood_rail) {
                         return HandlerAction::Continue;
                     }
                 }
@@ -3582,6 +3618,92 @@ mod tests {
         assert!(
             !sherwood_release_is_hud_owned(&right_button, &layout, rail),
             "only the left release is the paired world click"
+        );
+    }
+
+    /// A point inside the shared 48×48 target but outside the drawn sprite
+    /// must reach the same dispatch function as a press on the sprite itself.
+    #[test]
+    fn padded_sherwood_press_activates_the_button_instead_of_falling_through() {
+        let (layout, enable) = post_commit_rail();
+        let rail = SherwoodRail::PostCommit;
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        // The fallback sprite is 80x32: the drawn bottom is y=32, the padded
+        // bottom is y=40. Four pixels below the sprite is a padded hit.
+        let padded = (
+            rect.x() + rect.width() as i32 / 2,
+            rect.y() + rect.height() as i32 + 4,
+        );
+        let events = [GameEvent::MouseDown(padded.0, padded.1, 1, 1)];
+
+        match sherwood_rail_press(&events, &layout, rail, enable) {
+            SherwoodRailPress::Button(click) => {
+                assert_eq!(click.button, SherwoodButton::GoToExit);
+            }
+            SherwoodRailPress::Claimed => panic!("padded press was merely claimed"),
+            SherwoodRailPress::Missed => panic!("padded press missed the control"),
+        }
+    }
+
+    #[test]
+    fn padded_sherwood_hover_names_the_control() {
+        let (layout, _enable) = post_commit_rail();
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        let padded = (
+            rect.x() + rect.width() as i32 / 2,
+            rect.y() + rect.height() as i32 + 4,
+        );
+
+        assert_eq!(
+            sherwood_hover_at(&layout, padded.0, padded.1, SherwoodRail::PostCommit),
+            Some(SherwoodButton::GoToExit),
+            "hover reporting uses the same padded rect as dispatch"
+        );
+        assert_eq!(
+            sherwood_hover_at(&layout, 0, 0, SherwoodRail::PostCommit),
+            None,
+            "an empty screen point is not a rail hover"
+        );
+    }
+
+    /// The paired release over the padded band is HUD-owned too, so it cannot
+    /// fall through to `on_left_mouse_up` and walk the selection on the world.
+    #[test]
+    fn padded_sherwood_release_is_hud_owned() {
+        let (layout, _enable) = post_commit_rail();
+        let rail = SherwoodRail::PostCommit;
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        let padded = (
+            rect.x() + rect.width() as i32 / 2,
+            rect.y() + rect.height() as i32 + 4,
+        );
+        let events = [GameEvent::MouseUp(padded.0, padded.1, 1)];
+
+        assert!(
+            sherwood_release_is_hud_owned(&events, &layout, rail),
+            "the padded band owns its release; it is not a world click"
+        );
+    }
+
+    /// A greyed control still owns its padded pixels: the click is consumed as
+    /// `Claimed`, never passed to the world behind it.
+    #[test]
+    fn padded_sherwood_press_on_a_closed_gate_is_claimed_not_world() {
+        let (layout, mut enable) = post_commit_rail();
+        enable.go_to_exit = false;
+        let rect = layout.rect(SherwoodButton::GoToExit);
+        let padded = (
+            rect.x() + rect.width() as i32 / 2,
+            rect.y() + rect.height() as i32 + 4,
+        );
+        let events = [GameEvent::MouseDown(padded.0, padded.1, 1, 1)];
+
+        assert!(
+            matches!(
+                sherwood_rail_press(&events, &layout, SherwoodRail::PostCommit, enable),
+                SherwoodRailPress::Claimed
+            ),
+            "a greyed control still owns its padded hit target"
         );
     }
 
