@@ -117,6 +117,8 @@ enum GestureState {
     /// Two stationary contacts may still become one secondary tap. Movement or
     /// expiry promotes them to the existing camera transform.
     PendingTransform {
+        /// First contact's down time. One 250 ms window gates both second-down
+        /// and last-up; a later second contact intentionally starts a transform.
         started_ms: u32,
         released: Option<(f64, f64)>,
     },
@@ -1339,6 +1341,31 @@ mod tests {
                     button: 3,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn two_finger_tap_window_uses_first_down_through_last_up() {
+        let mut boundary = TouchClassifier::default();
+        boundary.started(1, 10.0, 20.0, 0);
+        boundary.started(2, 30.0, 40.0, 200);
+        boundary.ended(1, 10.0, 20.0, 240, false);
+        let at_boundary = boundary.ended(2, 30.0, 40.0, 250, false);
+        assert!(
+            at_boundary
+                .iter()
+                .any(|event| { matches!(event, TouchOutput::PointerDown { button: 3, .. }) })
+        );
+
+        let mut late_second = TouchClassifier::default();
+        late_second.started(1, 10.0, 20.0, 0);
+        late_second.started(2, 30.0, 40.0, 290);
+        late_second.ended(1, 10.0, 20.0, 300, false);
+        let after_window = late_second.ended(2, 30.0, 40.0, 310, false);
+        assert!(
+            !after_window
+                .iter()
+                .any(|event| { matches!(event, TouchOutput::PointerDown { button: 3, .. }) })
         );
     }
 
