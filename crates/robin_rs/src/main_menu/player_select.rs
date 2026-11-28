@@ -36,6 +36,7 @@ use crate::ingame_menu::widget_bridge::{
     self, AnimatedScreenIo, ModalInputState, ScreenFrame, ScreenKey,
 };
 use crate::ingame_menu::yesno::show_yesno;
+use crate::renderer::Renderer;
 use crate::ui::{MouseButtons, UiKeyboard, UiState};
 use crate::ui_screens::MAX_PLAYER_NAME_LENGTH;
 use crate::widget::{FrameWnd, Widget, WidgetInput, WidgetInputField};
@@ -492,8 +493,7 @@ impl SelectPlayerState {
         // erase-profile confirmation included) freezes this screen rather
         // than the stale main-menu composite left in the render target.
         if selection_owns_frame() {
-            renderer.begin_gpu_frame_clear();
-            renderer.begin_ui_only_frame();
+            begin_selection_frame(renderer);
         } else {
             screen.begin_draw(renderer);
         }
@@ -562,6 +562,19 @@ struct PlayerProfileRow {
 /// A nested dialog then freezes the selection screen behind itself.
 pub(super) fn selection_owns_frame() -> bool {
     true
+}
+
+/// Start the selection-owned frame. Kept as one call so the renderer-level
+/// regression in `gpu_contract_tests` exercises the same path as the screen.
+pub(crate) fn begin_selection_frame(renderer: &mut Renderer) {
+    // D17/#117: a prior modal (e.g. the main-menu erase confirmation) can
+    // leave a frozen snapshot held. `freeze_scene_for_modal` is idempotent, so
+    // a nested dialog would otherwise keep that stale backdrop. Drop it before
+    // composing the selection-owned frame. Presentation-only: no simulation
+    // or replay state is touched.
+    renderer.clear_frozen_scene();
+    renderer.begin_gpu_frame_clear();
+    renderer.begin_ui_only_frame();
 }
 
 impl From<&PlayerProfile> for PlayerProfileRow {

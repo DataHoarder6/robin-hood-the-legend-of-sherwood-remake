@@ -334,6 +334,7 @@ pub(crate) fn verify_offscreen_gpu_contract(gpu: GpuContext) {
     verify_map_patch_camera_alignment(gpu.clone(), true, -2);
     verify_mouse_trail_pixels(gpu.clone());
     verify_loading_dissolve_pixels(gpu.clone());
+    verify_selection_replaces_stale_modal_backdrop(gpu.clone());
     verify_mask_atlas_pixels(gpu.clone());
     let mut other_renderer =
         Renderer::with_optional_surface(gpu.clone(), None, None, 3, 2, TextureScaleMode::Nearest);
@@ -1345,6 +1346,40 @@ fn verify_deferred_menu_surfaces(renderer: &mut Renderer) {
         );
         assert_eq!(pixel[3], 255);
     }
+    renderer.clear_frozen_scene();
+}
+
+/// A modal on a prior screen can leave a frozen snapshot in the renderer.
+/// Player selection owns its frame, so the next nested modal (erase-profile
+/// confirmation) must freeze the selection composite, not that stale
+/// backdrop. Regression for #117 / D17.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn verify_selection_replaces_stale_modal_backdrop(gpu: GpuContext) {
+    let mut renderer =
+        Renderer::with_optional_surface(gpu, None, None, 3, 2, TextureScaleMode::Nearest);
+
+    // Stale main-menu backdrop: red, frozen by a modal on the prior screen.
+    let stale = [255, 0, 0, 255].repeat(6);
+    renderer.render_gpu_rect(0, 0, 3, 2, [255, 0, 0, 255]);
+    assert_eq!(renderer.try_capture_frame_rgba().unwrap().2, stale);
+    renderer.freeze_scene_for_modal();
+    assert!(renderer.frame.frozen_scene.is_some());
+
+    // Player selection draws its own full-screen composite: green here, the
+    // menu background and roster in the real screen.
+    crate::main_menu::player_select::begin_selection_frame(&mut renderer);
+    renderer.render_gpu_rect(0, 0, 3, 2, [0, 255, 0, 255]);
+    let selection = [0, 255, 0, 255].repeat(6);
+    assert_eq!(renderer.try_capture_frame_rgba().unwrap().2, selection);
+
+    // The erase-confirmation modal freezes whatever snapshot is held. It must
+    // be the selection composite, not the earlier main-menu one.
+    renderer.freeze_scene_for_modal();
+    let backdrop = renderer.try_capture_frame_rgba().unwrap().2;
+    assert_eq!(
+        backdrop, selection,
+        "nested modal froze the stale main-menu backdrop instead of the player-selection composite"
+    );
     renderer.clear_frozen_scene();
 }
 
