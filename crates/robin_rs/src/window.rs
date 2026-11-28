@@ -765,6 +765,9 @@ impl GameWindow {
                     *xrel = (*xrel as f32 * scale.0) as i32;
                     *yrel = (*yrel as f32 * scale.1) as i32;
                 }
+                GameEvent::TouchPressFeedback { x, y, .. } => {
+                    (*x, *y) = self.window_to_logical_f32(*x, *y);
+                }
                 GameEvent::TouchTransformStart {
                     first_x,
                     first_y,
@@ -993,6 +996,8 @@ impl AppHandler {
         // of lifetime for widget/input state. An ordinary drag already
         // emitted Down on an earlier move, so its release remains immediate.
         let defer_pointer_up = touch_output_needs_deferred_up(&output);
+        let mut deferred_feedback = Vec::new();
+        let mut pointer_up_emitted = false;
         for event in output {
             let event = match event {
                 TouchOutput::MotionStop => GameEvent::TouchMotionStop,
@@ -1005,21 +1010,55 @@ impl AppHandler {
                         yrel: 0,
                     }
                 }
-                TouchOutput::PointerDown { x, y, clicks } => {
+                TouchOutput::PointerDown {
+                    x,
+                    y,
+                    button,
+                    clicks,
+                } => {
                     self.last_cursor = (x as i32, y as i32);
-                    GameEvent::MouseDown(x as i32, y as i32, 1, clicks)
+                    GameEvent::MouseDown(x as i32, y as i32, button, clicks)
                 }
-                TouchOutput::PointerUp { x, y } => {
+                TouchOutput::PointerUp { x, y, button } => {
                     self.last_cursor = (x as i32, y as i32);
-                    let mouse_up = GameEvent::MouseUp(x as i32, y as i32, 1);
+                    let mouse_up = GameEvent::MouseUp(x as i32, y as i32, button);
                     report_window_send(if defer_pointer_up {
                         self.events_tx.try_send(HostMsg::DeferredEvent(mouse_up))
                     } else {
                         self.events_tx.try_send(HostMsg::Event(mouse_up))
                     });
+                    pointer_up_emitted = true;
+                    for event in deferred_feedback.drain(..) {
+                        report_window_send(self.events_tx.try_send(HostMsg::DeferredEvent(event)));
+                    }
                     continue;
                 }
                 TouchOutput::PointerCancel => GameEvent::PointerCancel,
+                TouchOutput::PressFeedback {
+                    contact,
+                    x,
+                    y,
+                    pressed: false,
+                } if defer_pointer_up => {
+                    deferred_feedback.push(GameEvent::TouchPressFeedback {
+                        contact,
+                        x: x as f32,
+                        y: y as f32,
+                        pressed: false,
+                    });
+                    continue;
+                }
+                TouchOutput::PressFeedback {
+                    contact,
+                    x,
+                    y,
+                    pressed,
+                } => GameEvent::TouchPressFeedback {
+                    contact,
+                    x: x as f32,
+                    y: y as f32,
+                    pressed,
+                },
                 TouchOutput::TransformStart {
                     first_x,
                     first_y,
@@ -1059,6 +1098,15 @@ impl AppHandler {
                 },
             };
             report_window_send(self.events_tx.try_send(HostMsg::Event(event)));
+        }
+        if !deferred_feedback.is_empty() {
+            assert!(
+                pointer_up_emitted,
+                "release-classified touch sequence lost its pointer up"
+            );
+            for event in deferred_feedback {
+                report_window_send(self.events_tx.try_send(HostMsg::DeferredEvent(event)));
+            }
         }
     }
 

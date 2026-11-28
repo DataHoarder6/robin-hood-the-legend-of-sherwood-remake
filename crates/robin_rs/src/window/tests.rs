@@ -280,12 +280,132 @@ fn only_release_classified_pointer_sequences_defer_their_up() {
         TouchOutput::PointerDown {
             x: 10.0,
             y: 20.0,
+            button: 1,
             clicks: 1,
         },
-        TouchOutput::PointerUp { x: 10.0, y: 20.0 },
+        TouchOutput::PointerUp {
+            x: 10.0,
+            y: 20.0,
+            button: 1,
+        },
     ]));
     assert!(!touch_output_needs_deferred_up(&[
         TouchOutput::PointerMove { x: 30.0, y: 40.0 },
-        TouchOutput::PointerUp { x: 30.0, y: 40.0 },
+        TouchOutput::PointerUp {
+            x: 30.0,
+            y: 40.0,
+            button: 1,
+        },
     ]));
+}
+
+fn touch_handler() -> (super::AppHandler, async_channel::Receiver<super::HostMsg>) {
+    let (events_tx, events_rx) = async_channel::unbounded();
+    let (_cmd_tx, cmd_rx) = async_channel::unbounded();
+    let handler = super::AppHandler::new(
+        "touch test",
+        1280,
+        720,
+        true,
+        events_tx,
+        cmd_rx,
+        Box::new(|_| {}),
+    );
+    (handler, events_rx)
+}
+
+#[test]
+fn touch_pointer_outputs_preserve_the_recognized_button() {
+    use crate::gfx_types::GameEvent;
+
+    for button in [1, 3] {
+        let (mut handler, events) = touch_handler();
+        handler.emit_touch_outputs(vec![
+            TouchOutput::PointerDown {
+                x: 10.0,
+                y: 20.0,
+                button,
+                clicks: 1,
+            },
+            TouchOutput::PointerUp {
+                x: 10.0,
+                y: 20.0,
+                button,
+            },
+        ]);
+        assert!(matches!(
+            events.try_recv(),
+            Ok(super::HostMsg::Event(GameEvent::MouseDown(10, 20, actual, 1))) if actual == button
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(super::HostMsg::DeferredEvent(GameEvent::MouseUp(10, 20, actual))) if actual == button
+        ));
+    }
+}
+
+#[test]
+fn touch_tap_defers_release_feedback_with_its_pointer_up() {
+    use crate::gfx_types::GameEvent;
+
+    let (mut handler, events) = touch_handler();
+    handler.emit_touch_outputs(vec![
+        TouchOutput::PointerDown {
+            x: 10.0,
+            y: 20.0,
+            button: 3,
+            clicks: 1,
+        },
+        TouchOutput::PointerUp {
+            x: 10.0,
+            y: 20.0,
+            button: 3,
+        },
+        TouchOutput::PressFeedback {
+            contact: 7,
+            x: 10.0,
+            y: 20.0,
+            pressed: false,
+        },
+    ]);
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::Event(GameEvent::MouseDown(10, 20, 3, 1)))
+    ));
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::DeferredEvent(GameEvent::MouseUp(10, 20, 3)))
+    ));
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::DeferredEvent(
+            GameEvent::TouchPressFeedback {
+                contact: 7,
+                pressed: false,
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn touch_press_feedback_maps_to_a_host_only_game_event() {
+    use crate::gfx_types::GameEvent;
+
+    let (mut handler, events) = touch_handler();
+    handler.emit_touch_outputs(vec![TouchOutput::PressFeedback {
+        contact: 7,
+        x: 10.5,
+        y: 20.5,
+        pressed: true,
+    }]);
+    assert!(matches!(
+        events.try_recv(),
+        Ok(super::HostMsg::Event(GameEvent::TouchPressFeedback {
+            contact: 7,
+            x: 10.5,
+            y: 20.5,
+            pressed: true,
+        }))
+    ));
 }

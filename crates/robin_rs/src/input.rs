@@ -72,6 +72,9 @@ pub struct ThreadedInput {
     /// Defaults to `true`.
     enabled: bool,
     synthetic_events: Vec<GameEvent>,
+    /// Active presentation-only touch contacts. These never move the pointer
+    /// or enter the command stream.
+    touch_feedback: BTreeSet<u64>,
     /// Key transitions carried to the next [`feed_events`](Self::feed_events)
     /// call because the same physical key already changed state earlier in
     /// that batch. Consumers sample `keyboard_state` once per frame, so a
@@ -91,6 +94,7 @@ impl Default for ThreadedInput {
             ended: false,
             enabled: true,
             synthetic_events: Vec::new(),
+            touch_feedback: BTreeSet::new(),
             deferred_key_events: Vec::new(),
         }
     }
@@ -109,6 +113,11 @@ impl ThreadedInput {
 
     pub fn has_position(&self) -> bool {
         self.has_position
+    }
+
+    /// Whether any touch contact is currently held for HUD press feedback.
+    pub fn touch_pressed(&self) -> bool {
+        !self.touch_feedback.is_empty()
     }
 
     pub fn clear_position(&mut self) {
@@ -302,18 +311,29 @@ impl ThreadedInput {
                 GameEvent::Quit => {
                     self.ended = true;
                 }
+                GameEvent::TouchPressFeedback {
+                    contact, pressed, ..
+                } => {
+                    if *pressed {
+                        self.touch_feedback.insert(*contact);
+                    } else {
+                        self.touch_feedback.remove(contact);
+                    }
+                }
                 GameEvent::WindowFocusChanged(false) => {
                     self.clear_position();
+                    self.touch_feedback.clear();
                 }
                 GameEvent::TouchTransformStart { .. } => {
                     // A touch contact must not leave the synthetic mouse parked
                     // on an edge and continue keyboard-style edge scrolling.
                     self.clear_position();
+                    self.touch_feedback.clear();
                 }
+                GameEvent::PointerCancel => self.touch_feedback.clear(),
                 GameEvent::Resized(..)
                 | GameEvent::TextInput { .. }
                 | GameEvent::ViewportPan { .. }
-                | GameEvent::PointerCancel
                 | GameEvent::TouchMotionStop
                 | GameEvent::TouchTransform { .. }
                 | GameEvent::TouchTransformEnd { .. }
@@ -350,6 +370,7 @@ impl ThreadedInput {
         self.deferred_key_events.clear();
         self.wheel_delta = 0;
         self.synthetic_events.clear();
+        self.touch_feedback.clear();
     }
 
     /// Accumulated mouse wheel delta for the current frame.
@@ -618,5 +639,88 @@ mod tests {
         assert!(matches!(events[0], GameEvent::MouseDown(123, 45, 1, 1)));
         assert!(matches!(events[1], GameEvent::MouseUp(123, 45, 1)));
         assert!(ti.drain_synthetic_events().is_empty());
+    }
+
+    #[test]
+    fn touch_press_feedback_tracks_contacts_without_moving_the_pointer() {
+        let mut input = ThreadedInput::new();
+        input.feed_events(&[
+            GameEvent::TouchPressFeedback {
+                contact: 1,
+                x: 10.0,
+                y: 20.0,
+                pressed: true,
+            },
+            GameEvent::TouchPressFeedback {
+                contact: 2,
+                x: 30.0,
+                y: 40.0,
+                pressed: true,
+            },
+        ]);
+        assert!(input.touch_pressed());
+        assert!(!input.has_position());
+
+        input.feed_events(&[GameEvent::TouchPressFeedback {
+            contact: 1,
+            x: 10.0,
+            y: 20.0,
+            pressed: false,
+        }]);
+        assert!(input.touch_pressed());
+        input.feed_events(&[GameEvent::TouchPressFeedback {
+            contact: 2,
+            x: 30.0,
+            y: 40.0,
+            pressed: false,
+        }]);
+        assert!(!input.touch_pressed());
+    }
+
+    #[test]
+    fn touch_press_feedback_clears_on_cancel_focus_loss_and_transform_takeover() {
+        for clear_event in [
+            GameEvent::PointerCancel,
+            GameEvent::WindowFocusChanged(false),
+            GameEvent::TouchTransformStart {
+                first_x: 10.0,
+                first_y: 20.0,
+                second_x: 30.0,
+                second_y: 40.0,
+            },
+        ] {
+            let mut input = ThreadedInput::new();
+            input.feed_events(&[
+                GameEvent::TouchPressFeedback {
+                    contact: 1,
+                    x: 10.0,
+                    y: 20.0,
+                    pressed: true,
+                },
+                GameEvent::TouchPressFeedback {
+                    contact: 2,
+                    x: 30.0,
+                    y: 40.0,
+                    pressed: true,
+                },
+            ]);
+            assert!(input.touch_pressed());
+            input.feed_events(&[clear_event]);
+            assert!(!input.touch_pressed());
+        }
+    }
+
+    #[test]
+    fn resetting_input_clears_touch_press_feedback() {
+        let mut input = ThreadedInput::new();
+        input.feed_events(&[GameEvent::TouchPressFeedback {
+            contact: 1,
+            x: 10.0,
+            y: 20.0,
+            pressed: true,
+        }]);
+        assert!(input.touch_pressed());
+        input.reset_input_state();
+        assert!(!input.touch_pressed());
     }
 }

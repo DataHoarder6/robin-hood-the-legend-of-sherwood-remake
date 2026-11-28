@@ -338,6 +338,13 @@ pub enum GameEvent {
     /// Cancel an in-progress primary-pointer drag without treating it as a
     /// click/release. Touch emits this when a second finger takes ownership.
     PointerCancel,
+    /// Host-only visual contact state. This never becomes a gameplay command.
+    TouchPressFeedback {
+        contact: u64,
+        x: f32,
+        y: f32,
+        pressed: bool,
+    },
     /// Stop host-local touch-camera inertia on a new primary contact.
     TouchMotionStop,
     MouseWheel(i32),

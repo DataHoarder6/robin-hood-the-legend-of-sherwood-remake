@@ -523,6 +523,15 @@ fn allied_portrait_tooltip(
     }
 }
 
+/// Pointer state sampled by every sprite HUD button. Touch feedback is
+/// presentation-only and deliberately does not alter engine input.
+fn hud_mouse_pressed(
+    frontend: &crate::host::HostFrontend,
+    threaded_input: &crate::input::ThreadedInput,
+) -> bool {
+    frontend.input.left_mouse_down() || threaded_input.touch_pressed()
+}
+
 /// Update the zoom-HUD presentation area once for the current simulation
 /// frame. The renderer retains the frame-addressed immutable snapshot so all
 /// render passes in this loop iteration consume identical data.
@@ -542,7 +551,11 @@ pub(super) fn prepare_zoom_presentation(
     let enable = ZoomButtonEnable::from_engine(engine, &host.frontend.viewport);
     let mouse = threaded_input.position();
     let hovered = layout.hit_test_geometric(mouse.x as i32, mouse.y as i32);
-    let input = ZoomPresentationUpdate::new(enable, hovered, host.frontend.input.left_mouse_down());
+    let input = ZoomPresentationUpdate::new(
+        enable,
+        hovered,
+        hud_mouse_pressed(host.frontend, threaded_input),
+    );
     renderer.update_zoom_presentation(frame_id, input, tooltip);
 }
 
@@ -2266,7 +2279,7 @@ impl OverlayHudInputs<'_> {
             sherwood_layout.hit_test(mp.x as i32, mp.y as i32, sherwood_rail, sherwood_enable);
         let hover = sherwood_hud::SherwoodHoverState {
             hovered: hovered_btn,
-            mouse_pressed: host.frontend.input.left_mouse_down(),
+            mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),
         };
         sherwood_hud::draw_with_sprites(
             renderer,
@@ -2380,7 +2393,7 @@ impl OverlayHudInputs<'_> {
         let hovered_btn = corner_layout.hit_test_geometric(mp.x as i32, mp.y as i32);
         let hover = CornerHoverState {
             hovered: hovered_btn,
-            mouse_pressed: host.frontend.input.left_mouse_down(),
+            mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),
         };
         corner_hud::draw_with_sprites(
             renderer,
@@ -2407,7 +2420,7 @@ impl OverlayHudInputs<'_> {
         let stature_hovered = stature_layout.hit_test(mp.x as i32, mp.y as i32, stature_enable);
         let stature_hover = StatureHoverState {
             hovered: stature_hovered,
-            mouse_pressed: host.frontend.input.left_mouse_down(),
+            mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),
         };
         stature_hud::draw_with_sprites(
             renderer,
@@ -2716,6 +2729,29 @@ mod tests {
         )
         .unwrap();
         Host::new(context.try_into().unwrap(), 800.0, 600.0).unwrap()
+    }
+
+    #[test]
+    fn hud_pressed_feedback_includes_active_touch_contacts() {
+        let host = Host::scratch(800.0, 600.0);
+        let mut input = crate::input::ThreadedInput::new();
+        assert!(!hud_mouse_pressed(&host.frontend, &input));
+
+        input.feed_events(&[crate::gfx_types::GameEvent::TouchPressFeedback {
+            contact: 7,
+            x: 10.0,
+            y: 20.0,
+            pressed: true,
+        }]);
+        assert!(hud_mouse_pressed(&host.frontend, &input));
+
+        input.feed_events(&[crate::gfx_types::GameEvent::TouchPressFeedback {
+            contact: 7,
+            x: 10.0,
+            y: 20.0,
+            pressed: false,
+        }]);
+        assert!(!hud_mouse_pressed(&host.frontend, &input));
     }
 
     #[derive(serde::Serialize, serde::Deserialize)]

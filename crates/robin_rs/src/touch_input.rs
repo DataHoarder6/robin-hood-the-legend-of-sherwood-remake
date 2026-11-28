@@ -14,8 +14,12 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_TOUCH_SLOP_PX: f64 = 12.0;
 const DOUBLE_TAP_INTERVAL_MS: u32 = 300;
 const DEFAULT_DOUBLE_TAP_SLOP_PX: f64 = 32.0;
+const LONG_PRESS_MS: u32 = 450;
+const TWO_FINGER_TAP_MS: u32 = 250;
 const VELOCITY_FILTER_NEW_SAMPLE: f64 = 0.35;
 const MAX_FLING_SAMPLE_AGE_MS: u32 = 100;
+const PRIMARY_BUTTON: u8 = 1;
+const SECONDARY_BUTTON: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct TouchPoint {
@@ -23,6 +27,7 @@ struct TouchPoint {
     start_y: f64,
     x: f64,
     y: f64,
+    feedback_active: bool,
 }
 
 impl TouchPoint {
@@ -32,6 +37,7 @@ impl TouchPoint {
             start_y: y,
             x,
             y,
+            feedback_active: true,
         }
     }
 
@@ -41,6 +47,10 @@ impl TouchPoint {
 
     fn origin(self) -> (f64, f64) {
         (self.start_x, self.start_y)
+    }
+
+    fn moved_beyond(self, slop_px: f64) -> bool {
+        distance(self.origin(), self.current()) >= slop_px
     }
 }
 
@@ -56,14 +66,23 @@ pub(crate) enum TouchOutput {
     PointerDown {
         x: f64,
         y: f64,
+        button: u8,
         clicks: u8,
     },
     PointerUp {
         x: f64,
         y: f64,
+        button: u8,
     },
     /// Abort a mouse drag without running its release/click action.
     PointerCancel,
+    /// Presentation-only contact state. It never becomes a gameplay command.
+    PressFeedback {
+        contact: u64,
+        x: f64,
+        y: f64,
+        pressed: bool,
+    },
     TransformStart {
         first_x: f64,
         first_y: f64,
@@ -91,11 +110,17 @@ enum GestureState {
     Idle,
     PendingTap {
         id: u64,
-        start_x: f64,
-        start_y: f64,
+        started_ms: u32,
+    },
+    /// Two stationary contacts may still become one secondary tap. Movement or
+    /// expiry promotes them to the existing camera transform.
+    PendingTransform {
+        started_ms: u32,
+        released: Option<(f64, f64)>,
     },
     PointerDrag {
         id: u64,
+        button: u8,
     },
     Transform {
         last_centroid_x: f64,
@@ -167,50 +192,62 @@ impl TouchClassifier {
             GestureState::Idle if self.touches.len() == 1 => {
                 self.state = GestureState::PendingTap {
                     id,
-                    start_x: x,
-                    start_y: y,
+                    started_ms: now_ms,
                 };
-                vec![TouchOutput::MotionStop]
+                vec![
+                    TouchOutput::MotionStop,
+                    TouchOutput::PressFeedback {
+                        contact: id,
+                        x,
+                        y,
+                        pressed: true,
+                    },
+                ]
             }
-            GestureState::PendingTap { .. } | GestureState::PointerDrag { .. }
-                if self.touches.len() == 2 =>
-            {
-                let mut output = Vec::new();
-                if matches!(self.state, GestureState::PointerDrag { .. }) {
-                    output.push(TouchOutput::PointerCancel);
-                }
-                let (first, second) = self.two_touches();
-                let (first_x, first_y) = first.origin();
-                let (second_x, second_y) = second.origin();
-                let (centroid_x, centroid_y, distance) =
-                    transform_geometry(first.current(), second.current());
-                self.state = GestureState::Transform {
-                    last_centroid_x: centroid_x,
-                    last_centroid_y: centroid_y,
-                    last_distance: distance,
-                    velocity_sample_centroid_x: centroid_x,
-                    velocity_sample_centroid_y: centroid_y,
-                    velocity_sample_ms: now_ms,
-                    velocity_x: 0.0,
-                    velocity_y: 0.0,
-                };
+            GestureState::PendingTap { started_ms, .. } if self.touches.len() == 2 => {
                 self.last_tap = None;
-                output.push(TouchOutput::TransformStart {
-                    first_x,
-                    first_y,
-                    second_x,
-                    second_y,
-                });
+                if now_ms.wrapping_sub(started_ms) > TWO_FINGER_TAP_MS {
+                    self.begin_transform(now_ms)
+                } else {
+                    self.state = GestureState::PendingTransform {
+                        started_ms,
+                        released: None,
+                    };
+                    vec![TouchOutput::PressFeedback {
+                        contact: id,
+                        x,
+                        y,
+                        pressed: true,
+                    }]
+                }
+            }
+            GestureState::PointerDrag { .. } if self.touches.len() == 2 => {
+                let mut output = vec![TouchOutput::PointerCancel];
+                output.extend(self.begin_transform(now_ms));
                 output
             }
-            GestureState::Suppressed | GestureState::Transform { .. } => Vec::new(),
+            GestureState::PendingTransform { .. } if self.touches.len() == 2 => {
+                self.last_tap = None;
+                self.begin_transform(now_ms)
+            }
+            GestureState::Suppressed => vec![TouchOutput::PressFeedback {
+                contact: id,
+                x,
+                y,
+                pressed: true,
+            }],
             state => {
                 tracing::warn!(
                     ?state,
                     touch_count = self.touches.len(),
                     "unexpected touch start"
                 );
-                Vec::new()
+                vec![TouchOutput::PressFeedback {
+                    contact: id,
+                    x,
+                    y,
+                    pressed: true,
+                }]
             }
         }
     }
@@ -227,25 +264,54 @@ impl TouchClassifier {
         match self.state {
             GestureState::PendingTap {
                 id: primary,
-                start_x,
-                start_y,
+                started_ms,
             } if primary == id => {
-                if distance((start_x, start_y), (x, y)) < self.touch_slop_px {
+                let point = self
+                    .touches
+                    .get(&primary)
+                    .expect("pending tap lost its contact");
+                if !point.moved_beyond(self.touch_slop_px) {
                     return Vec::new();
                 }
-                self.state = GestureState::PointerDrag { id };
+                let (start_x, start_y) = point.origin();
+                let button = if now_ms.wrapping_sub(started_ms) >= LONG_PRESS_MS {
+                    SECONDARY_BUTTON
+                } else {
+                    PRIMARY_BUTTON
+                };
+                self.state = GestureState::PointerDrag { id, button };
                 self.last_tap = None;
                 vec![
                     TouchOutput::PointerDown {
                         x: start_x,
                         y: start_y,
+                        button,
                         clicks: 1,
                     },
                     TouchOutput::PointerMove { x, y },
                 ]
             }
-            GestureState::PointerDrag { id: primary } if primary == id => {
+            GestureState::PointerDrag { id: primary, .. } if primary == id => {
                 vec![TouchOutput::PointerMove { x, y }]
+            }
+            GestureState::PendingTransform { started_ms, .. } => {
+                let movement_cancels_tap = self
+                    .touches
+                    .values()
+                    .any(|point| point.moved_beyond(self.touch_slop_px));
+                if self.touches.len() == 2
+                    && (movement_cancels_tap || now_ms.wrapping_sub(started_ms) > TWO_FINGER_TAP_MS)
+                {
+                    let mut output = self.begin_transform(now_ms);
+                    output.extend(self.moved(id, x, y, now_ms));
+                    output
+                } else if self.touches.len() == 1 && movement_cancels_tap {
+                    self.state = GestureState::Suppressed;
+                    self.last_tap = None;
+                    self.clear_feedback()
+                } else {
+                    Vec::new()
+                }
             }
             GestureState::Transform {
                 last_centroid_x,
@@ -339,102 +405,266 @@ impl TouchClassifier {
             }
             return Vec::new();
         }
-        let Some(point) = self.touches.get(&id) else {
+        let Some(previous) = self.touches.get(&id).copied() else {
             return Vec::new();
         };
-        let final_transform_update = !cancelled
-            && matches!(self.state, GestureState::Transform { .. })
-            && (point.x != x || point.y != y);
-        let mut output = if final_transform_update {
+        let final_position_changed = previous.x != x || previous.y != y;
+        let point = self
+            .touches
+            .get_mut(&id)
+            .expect("ending touch disappeared before classification");
+        point.x = x;
+        point.y = y;
+        let point = *point;
+        let state = self.state;
+        let mut output = if final_position_changed
+            && !cancelled
+            && matches!(state, GestureState::Transform { .. })
+        {
             self.moved(id, x, y, now_ms)
         } else {
             Vec::new()
         };
-        let state = self.state;
         output.extend(match state {
             GestureState::PendingTap {
                 id: primary,
-                start_x,
-                start_y,
+                started_ms,
             } if primary == id => {
+                let mut output = self.release_feedback(id, x, y);
                 if cancelled {
                     self.last_tap = None;
-                    Vec::new()
-                } else if distance((start_x, start_y), (x, y)) >= self.touch_slop_px {
+                } else if point.moved_beyond(self.touch_slop_px) {
                     // Some platforms coalesce a short drag into Start+End
                     // without an intermediate Move. Preserve release-time
                     // classification by materializing that complete drag now.
+                    let (start_x, start_y) = point.origin();
+                    let button = if now_ms.wrapping_sub(started_ms) >= LONG_PRESS_MS {
+                        SECONDARY_BUTTON
+                    } else {
+                        PRIMARY_BUTTON
+                    };
                     self.last_tap = None;
-                    vec![
+                    output.extend([
                         TouchOutput::PointerDown {
                             x: start_x,
                             y: start_y,
+                            button,
                             clicks: 1,
                         },
                         TouchOutput::PointerMove { x, y },
-                        TouchOutput::PointerUp { x, y },
-                    ]
+                        TouchOutput::PointerUp { x, y, button },
+                    ]);
                 } else {
-                    let clicks = self.tap_count(now_ms, x, y);
-                    vec![
+                    let (button, clicks) = if now_ms.wrapping_sub(started_ms) >= LONG_PRESS_MS {
+                        self.last_tap = None;
+                        (SECONDARY_BUTTON, 1)
+                    } else {
+                        (PRIMARY_BUTTON, self.tap_count(now_ms, x, y))
+                    };
+                    output.extend([
                         TouchOutput::PointerMove { x, y },
-                        TouchOutput::PointerDown { x, y, clicks },
-                        TouchOutput::PointerUp { x, y },
-                    ]
+                        TouchOutput::PointerDown {
+                            x,
+                            y,
+                            button,
+                            clicks,
+                        },
+                        TouchOutput::PointerUp { x, y, button },
+                    ]);
                 }
+                output
             }
-            GestureState::PointerDrag { id: primary } if primary == id => {
+            GestureState::PointerDrag {
+                id: primary,
+                button,
+            } if primary == id => {
+                let mut output = self.release_feedback(id, x, y);
                 self.last_tap = None;
                 if cancelled {
-                    vec![TouchOutput::PointerCancel]
+                    output.push(TouchOutput::PointerCancel);
                 } else {
-                    vec![
+                    output.extend([
                         TouchOutput::PointerMove { x, y },
-                        TouchOutput::PointerUp { x, y },
-                    ]
+                        TouchOutput::PointerUp { x, y, button },
+                    ]);
+                }
+                output
+            }
+            GestureState::PendingTransform {
+                started_ms,
+                released,
+            } => {
+                if cancelled {
+                    self.state = GestureState::Suppressed;
+                    self.last_tap = None;
+                    self.clear_feedback()
+                } else if self.touches.len() == 2 {
+                    let movement_cancels_tap = self
+                        .touches
+                        .values()
+                        .any(|point| point.moved_beyond(self.touch_slop_px));
+                    if movement_cancels_tap || now_ms.wrapping_sub(started_ms) > TWO_FINGER_TAP_MS {
+                        self.last_tap = None;
+                        let mut output = self.begin_transform(now_ms);
+                        if final_position_changed {
+                            output.extend(self.moved(id, x, y, now_ms));
+                        }
+                        output.push(self.transform_end(now_ms, false));
+                        output
+                    } else {
+                        self.state = GestureState::PendingTransform {
+                            started_ms,
+                            released: Some((x, y)),
+                        };
+                        self.release_feedback(id, x, y)
+                    }
+                } else {
+                    let mut output = self.release_feedback(id, x, y);
+                    if now_ms.wrapping_sub(started_ms) <= TWO_FINGER_TAP_MS
+                        && !point.moved_beyond(self.touch_slop_px)
+                    {
+                        let (released_x, released_y) =
+                            released.expect("two-finger tap lost its first release");
+                        let centroid_x = (released_x + x) * 0.5;
+                        let centroid_y = (released_y + y) * 0.5;
+                        self.last_tap = None;
+                        output.extend([
+                            TouchOutput::PointerMove {
+                                x: centroid_x,
+                                y: centroid_y,
+                            },
+                            TouchOutput::PointerDown {
+                                x: centroid_x,
+                                y: centroid_y,
+                                button: SECONDARY_BUTTON,
+                                clicks: 1,
+                            },
+                            TouchOutput::PointerUp {
+                                x: centroid_x,
+                                y: centroid_y,
+                                button: SECONDARY_BUTTON,
+                            },
+                        ]);
+                    } else {
+                        self.last_tap = None;
+                    }
+                    output
                 }
             }
-            GestureState::Transform {
-                velocity_x,
-                velocity_y,
-                velocity_sample_ms,
-                ..
-            } => {
+            GestureState::Transform { .. } => {
                 self.last_tap = None;
-                let velocity_is_fresh =
-                    now_ms.wrapping_sub(velocity_sample_ms) <= MAX_FLING_SAMPLE_AGE_MS;
-                vec![TouchOutput::TransformEnd {
-                    velocity_x: if velocity_is_fresh { velocity_x } else { 0.0 },
-                    velocity_y: if velocity_is_fresh { velocity_y } else { 0.0 },
-                    cancelled,
-                }]
+                vec![self.transform_end(now_ms, cancelled)]
             }
-            _ => Vec::new(),
+            _ => self.release_feedback(id, x, y),
         });
         self.touches.remove(&id);
         self.state = if self.touches.is_empty() && self.ignored_touches.is_empty() {
             GestureState::Idle
-        } else {
+        } else if !matches!(self.state, GestureState::PendingTransform { .. }) {
             GestureState::Suppressed
+        } else {
+            self.state
         };
         output
     }
 
     pub(crate) fn cancel_all(&mut self) -> Vec<TouchOutput> {
-        let output = match self.state {
-            GestureState::PointerDrag { .. } => vec![TouchOutput::PointerCancel],
-            GestureState::Transform { .. } => vec![TouchOutput::TransformEnd {
-                velocity_x: 0.0,
-                velocity_y: 0.0,
-                cancelled: true,
-            }],
-            _ => Vec::new(),
-        };
+        let mut output = self.clear_feedback();
+        match self.state {
+            GestureState::PointerDrag { .. } => output.push(TouchOutput::PointerCancel),
+            GestureState::Transform { .. } => {
+                output.push(TouchOutput::TransformEnd {
+                    velocity_x: 0.0,
+                    velocity_y: 0.0,
+                    cancelled: true,
+                });
+            }
+            _ => {}
+        }
         self.touches.clear();
         self.ignored_touches.clear();
         self.state = GestureState::Idle;
         self.last_tap = None;
         output
+    }
+
+    fn release_feedback(&mut self, id: u64, x: f64, y: f64) -> Vec<TouchOutput> {
+        let Some(point) = self.touches.get_mut(&id) else {
+            return Vec::new();
+        };
+        if !point.feedback_active {
+            return Vec::new();
+        }
+        point.feedback_active = false;
+        vec![TouchOutput::PressFeedback {
+            contact: id,
+            x,
+            y,
+            pressed: false,
+        }]
+    }
+
+    fn clear_feedback(&mut self) -> Vec<TouchOutput> {
+        self.touches
+            .iter_mut()
+            .filter_map(|(&contact, point)| {
+                if !point.feedback_active {
+                    return None;
+                }
+                point.feedback_active = false;
+                Some(TouchOutput::PressFeedback {
+                    contact,
+                    x: point.x,
+                    y: point.y,
+                    pressed: false,
+                })
+            })
+            .collect()
+    }
+
+    fn begin_transform(&mut self, now_ms: u32) -> Vec<TouchOutput> {
+        let mut output = self.clear_feedback();
+        let (first, second) = self.two_touches();
+        let (first_x, first_y) = first.origin();
+        let (second_x, second_y) = second.origin();
+        let (centroid_x, centroid_y, distance) =
+            transform_geometry(first.current(), second.current());
+        self.state = GestureState::Transform {
+            last_centroid_x: centroid_x,
+            last_centroid_y: centroid_y,
+            last_distance: distance,
+            velocity_sample_centroid_x: centroid_x,
+            velocity_sample_centroid_y: centroid_y,
+            velocity_sample_ms: now_ms,
+            velocity_x: 0.0,
+            velocity_y: 0.0,
+        };
+        self.last_tap = None;
+        output.push(TouchOutput::TransformStart {
+            first_x,
+            first_y,
+            second_x,
+            second_y,
+        });
+        output
+    }
+
+    fn transform_end(&self, now_ms: u32, cancelled: bool) -> TouchOutput {
+        let GestureState::Transform {
+            velocity_x,
+            velocity_y,
+            velocity_sample_ms,
+            ..
+        } = self.state
+        else {
+            panic!("transform end requested without an active transform");
+        };
+        let velocity_is_fresh = now_ms.wrapping_sub(velocity_sample_ms) <= MAX_FLING_SAMPLE_AGE_MS;
+        TouchOutput::TransformEnd {
+            velocity_x: if velocity_is_fresh { velocity_x } else { 0.0 },
+            velocity_y: if velocity_is_fresh { velocity_y } else { 0.0 },
+            cancelled,
+        }
     }
 
     fn two_points(&self) -> ((f64, f64), (f64, f64)) {
@@ -517,13 +747,27 @@ mod tests {
         touch.started(20, 10.0, 20.0, 0);
         touch.moved(20, 14.0, 20.0, 10);
         assert_eq!(
-            touch.started(10, 30.0, 20.0, 20),
-            vec![TouchOutput::TransformStart {
-                first_x: 30.0,
-                first_y: 20.0,
-                second_x: 10.0,
-                second_y: 20.0,
-            }]
+            touch.started(10, 30.0, 20.0, 251),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 10,
+                    x: 30.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::PressFeedback {
+                    contact: 20,
+                    x: 14.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::TransformStart {
+                    first_x: 30.0,
+                    first_y: 20.0,
+                    second_x: 10.0,
+                    second_y: 20.0,
+                },
+            ]
         );
         assert!(matches!(
             touch.state,
@@ -541,18 +785,37 @@ mod tests {
         let mut touch = TouchClassifier::default();
         assert_eq!(
             touch.started(7, 10.0, 20.0, 100),
-            vec![TouchOutput::MotionStop]
+            vec![
+                TouchOutput::MotionStop,
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 10.0,
+                    y: 20.0,
+                    pressed: true,
+                },
+            ]
         );
         assert_eq!(
             touch.ended(7, 11.0, 21.0, 140, false),
             vec![
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 11.0,
+                    y: 21.0,
+                    pressed: false,
+                },
                 TouchOutput::PointerMove { x: 11.0, y: 21.0 },
                 TouchOutput::PointerDown {
                     x: 11.0,
                     y: 21.0,
-                    clicks: 1
+                    button: 1,
+                    clicks: 1,
                 },
-                TouchOutput::PointerUp { x: 11.0, y: 21.0 }
+                TouchOutput::PointerUp {
+                    x: 11.0,
+                    y: 21.0,
+                    button: 1,
+                },
             ]
         );
     }
@@ -565,13 +828,24 @@ mod tests {
         assert_eq!(
             touch.ended(7, 30.0, 20.0, 140, false),
             vec![
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 30.0,
+                    y: 20.0,
+                    pressed: false,
+                },
                 TouchOutput::PointerDown {
                     x: 10.0,
                     y: 20.0,
+                    button: 1,
                     clicks: 1,
                 },
                 TouchOutput::PointerMove { x: 30.0, y: 20.0 },
-                TouchOutput::PointerUp { x: 30.0, y: 20.0 },
+                TouchOutput::PointerUp {
+                    x: 30.0,
+                    y: 20.0,
+                    button: 1,
+                },
             ]
         );
     }
@@ -580,11 +854,21 @@ mod tests {
     fn second_finger_cancels_pending_tap_without_mouse_release() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 10.0, 10.0, 0);
-        let output = touch.started(2, 30.0, 10.0, 20);
-        assert!(matches!(
-            output.as_slice(),
-            [TouchOutput::TransformStart { .. }]
-        ));
+        assert_eq!(
+            touch.started(2, 30.0, 10.0, 20),
+            vec![TouchOutput::PressFeedback {
+                contact: 2,
+                x: 30.0,
+                y: 10.0,
+                pressed: true,
+            }]
+        );
+        let output = touch.moved(2, 42.0, 10.0, 30);
+        assert!(
+            output
+                .iter()
+                .any(|event| { matches!(event, TouchOutput::TransformStart { .. }) })
+        );
         assert!(!output.iter().any(|event| matches!(
             event,
             TouchOutput::PointerDown { .. } | TouchOutput::PointerUp { .. }
@@ -606,7 +890,17 @@ mod tests {
             touch.started(2, 30.0, 10.0, 20).as_slice(),
             [
                 TouchOutput::PointerCancel,
-                TouchOutput::TransformStart { .. }
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    pressed: false,
+                    ..
+                },
+                TouchOutput::PressFeedback {
+                    contact: 2,
+                    pressed: false,
+                    ..
+                },
+                TouchOutput::TransformStart { .. },
             ]
         ));
     }
@@ -615,8 +909,8 @@ mod tests {
     fn transform_reports_simultaneous_pan_scale_and_velocity() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
-        let output = touch.moved(2, 22.0, 0.0, 100);
+        touch.started(2, 10.0, 0.0, 251);
+        let output = touch.moved(2, 22.0, 0.0, 351);
         let [
             TouchOutput::TransformUpdate {
                 centroid_x,
@@ -639,16 +933,16 @@ mod tests {
     fn transform_end_includes_a_coalesced_final_position() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
+        touch.started(2, 10.0, 0.0, 251);
 
-        let output = touch.ended(2, 20.0, 0.0, 100, false);
+        let output = touch.ended(2, 22.0, 0.0, 351, false);
         assert!(matches!(
             output.as_slice(),
             [
                 TouchOutput::TransformUpdate {
-                    centroid_x: 10.0,
-                    pan_x: 5.0,
-                    scale: 2.0,
+                    centroid_x: 11.0,
+                    pan_x: 6.0,
+                    scale: 2.2,
                     ..
                 },
                 TouchOutput::TransformEnd {
@@ -663,12 +957,12 @@ mod tests {
     fn remaining_finger_after_transform_cannot_turn_into_tap() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
+        touch.started(2, 10.0, 0.0, 251);
         assert!(matches!(
-            touch.ended(2, 10.0, 0.0, 50, false).as_slice(),
+            touch.ended(2, 10.0, 0.0, 301, false).as_slice(),
             [TouchOutput::TransformEnd { .. }]
         ));
-        assert!(touch.ended(1, 0.0, 0.0, 60, false).is_empty());
+        assert!(touch.ended(1, 0.0, 0.0, 310, false).is_empty());
     }
 
     #[test]
@@ -697,12 +991,12 @@ mod tests {
     fn third_pointer_is_ignored_without_disturbing_transform() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
-        assert!(touch.started(3, 20.0, 0.0, 0).is_empty());
-        assert!(touch.moved(3, 30.0, 0.0, 10).is_empty());
-        assert!(touch.ended(3, 30.0, 0.0, 20, false).is_empty());
+        touch.started(2, 10.0, 0.0, 251);
+        assert!(touch.started(3, 20.0, 0.0, 251).is_empty());
+        assert!(touch.moved(3, 30.0, 0.0, 261).is_empty());
+        assert!(touch.ended(3, 30.0, 0.0, 271, false).is_empty());
         assert!(matches!(
-            touch.moved(2, 15.0, 0.0, 30).as_slice(),
+            touch.moved(2, 15.0, 0.0, 281).as_slice(),
             [TouchOutput::TransformUpdate { .. }]
         ));
     }
@@ -731,19 +1025,27 @@ mod tests {
     fn ignored_third_pointer_cannot_leave_recognizer_suppressed() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
-        touch.started(3, 20.0, 0.0, 0);
-        touch.ended(1, 0.0, 0.0, 10, false);
-        touch.ended(2, 10.0, 0.0, 20, false);
-        touch.ended(3, 20.0, 0.0, 30, false);
+        touch.started(2, 10.0, 0.0, 251);
+        touch.started(3, 20.0, 0.0, 251);
+        touch.ended(1, 0.0, 0.0, 261, false);
+        touch.ended(2, 10.0, 0.0, 271, false);
+        touch.ended(3, 20.0, 0.0, 281, false);
 
         assert_eq!(
-            touch.started(4, 40.0, 40.0, 40),
-            vec![TouchOutput::MotionStop]
+            touch.started(4, 40.0, 40.0, 300),
+            vec![
+                TouchOutput::MotionStop,
+                TouchOutput::PressFeedback {
+                    contact: 4,
+                    x: 40.0,
+                    y: 40.0,
+                    pressed: true,
+                },
+            ]
         );
         assert!(
             touch
-                .ended(4, 40.0, 40.0, 50, false)
+                .ended(4, 40.0, 40.0, 310, false)
                 .iter()
                 .any(|event| { matches!(event, TouchOutput::PointerDown { clicks: 1, .. }) })
         );
@@ -770,15 +1072,15 @@ mod tests {
     fn same_millisecond_moves_accumulate_without_velocity_spike() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
-        touch.moved(1, 2.0, 0.0, 10);
-        let output = touch.moved(2, 12.0, 0.0, 10);
+        touch.started(2, 10.0, 0.0, 251);
+        touch.moved(1, 2.0, 0.0, 261);
+        let output = touch.moved(2, 12.0, 0.0, 261);
         let [TouchOutput::TransformUpdate { velocity_x, .. }] = output.as_slice() else {
             panic!("expected transform update: {output:?}");
         };
         assert!((*velocity_x - 35.0).abs() < f64::EPSILON);
 
-        let output = touch.moved(2, 14.0, 0.0, 20);
+        let output = touch.moved(2, 14.0, 0.0, 271);
         let [TouchOutput::TransformUpdate { velocity_x, .. }] = output.as_slice() else {
             panic!("expected transform update: {output:?}");
         };
@@ -789,11 +1091,11 @@ mod tests {
     fn holding_transform_still_before_release_suppresses_stale_fling() {
         let mut touch = TouchClassifier::default();
         touch.started(1, 0.0, 0.0, 0);
-        touch.started(2, 10.0, 0.0, 0);
-        touch.moved(2, 20.0, 0.0, 20);
+        touch.started(2, 10.0, 0.0, 251);
+        touch.moved(2, 20.0, 0.0, 271);
 
         assert!(matches!(
-            touch.ended(2, 20.0, 0.0, 200, false).as_slice(),
+            touch.ended(2, 20.0, 0.0, 451, false).as_slice(),
             [TouchOutput::TransformEnd {
                 velocity_x: 0.0,
                 velocity_y: 0.0,
@@ -819,15 +1121,269 @@ mod tests {
         );
 
         touch.started(4, 10.0, 10.0, 70);
-        touch.started(5, 20.0, 10.0, 80);
-        touch.ended(5, 20.0, 10.0, 90, false);
-        touch.ended(4, 10.0, 10.0, 100, false);
-        touch.started(6, 10.0, 10.0, 110);
-        let after_transform = touch.ended(6, 10.0, 10.0, 120, false);
+        touch.started(5, 20.0, 10.0, 321);
+        touch.ended(5, 20.0, 10.0, 331, false);
+        touch.ended(4, 10.0, 10.0, 341, false);
+        touch.started(6, 10.0, 10.0, 350);
+        let after_transform = touch.ended(6, 10.0, 10.0, 360, false);
         assert!(
             after_transform
                 .iter()
                 .any(|event| matches!(event, TouchOutput::PointerDown { clicks: 1, .. }))
+        );
+    }
+
+    #[test]
+    fn long_press_releases_as_a_secondary_click_at_450_ms() {
+        let mut touch = TouchClassifier::default();
+        assert_eq!(
+            touch.started(7, 10.0, 20.0, 100),
+            vec![
+                TouchOutput::MotionStop,
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 10.0,
+                    y: 20.0,
+                    pressed: true,
+                },
+            ]
+        );
+
+        assert_eq!(
+            touch.ended(7, 11.0, 21.0, 550, false),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 11.0,
+                    y: 21.0,
+                    pressed: false,
+                },
+                TouchOutput::PointerMove { x: 11.0, y: 21.0 },
+                TouchOutput::PointerDown {
+                    x: 11.0,
+                    y: 21.0,
+                    button: 3,
+                    clicks: 1,
+                },
+                TouchOutput::PointerUp {
+                    x: 11.0,
+                    y: 21.0,
+                    button: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_449_ms_hold_remains_a_primary_click() {
+        let mut touch = TouchClassifier::default();
+        touch.started(7, 10.0, 20.0, 100);
+        let output = touch.ended(7, 10.0, 20.0, 549, false);
+        assert!(output.iter().any(|event| {
+            matches!(
+                event,
+                TouchOutput::PointerDown {
+                    button: 1,
+                    clicks: 1,
+                    ..
+                }
+            )
+        }));
+        assert!(
+            !output
+                .iter()
+                .any(|event| { matches!(event, TouchOutput::PointerDown { button: 3, .. }) })
+        );
+    }
+
+    #[test]
+    fn long_drag_uses_the_secondary_button_through_release() {
+        let mut touch = TouchClassifier::default();
+        touch.started(7, 10.0, 20.0, 100);
+        assert_eq!(
+            touch.moved(7, 30.0, 20.0, 550),
+            vec![
+                TouchOutput::PointerDown {
+                    x: 10.0,
+                    y: 20.0,
+                    button: 3,
+                    clicks: 1,
+                },
+                TouchOutput::PointerMove { x: 30.0, y: 20.0 },
+            ]
+        );
+        assert_eq!(
+            touch.ended(7, 40.0, 20.0, 600, false),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 7,
+                    x: 40.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::PointerMove { x: 40.0, y: 20.0 },
+                TouchOutput::PointerUp {
+                    x: 40.0,
+                    y: 20.0,
+                    button: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn two_finger_tap_emits_one_secondary_click_at_the_centroid() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 20.0, 0);
+        assert_eq!(
+            touch.started(2, 30.0, 40.0, 100),
+            vec![TouchOutput::PressFeedback {
+                contact: 2,
+                x: 30.0,
+                y: 40.0,
+                pressed: true,
+            }]
+        );
+        assert_eq!(
+            touch.ended(1, 10.0, 20.0, 200, false),
+            vec![TouchOutput::PressFeedback {
+                contact: 1,
+                x: 10.0,
+                y: 20.0,
+                pressed: false,
+            }]
+        );
+        assert_eq!(
+            touch.ended(2, 30.0, 40.0, 250, false),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 2,
+                    x: 30.0,
+                    y: 40.0,
+                    pressed: false,
+                },
+                TouchOutput::PointerMove { x: 20.0, y: 30.0 },
+                TouchOutput::PointerDown {
+                    x: 20.0,
+                    y: 30.0,
+                    button: 3,
+                    clicks: 1,
+                },
+                TouchOutput::PointerUp {
+                    x: 20.0,
+                    y: 30.0,
+                    button: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn two_finger_slop_takes_over_the_transform_and_clears_feedback() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 20.0, 0);
+        touch.started(2, 30.0, 20.0, 100);
+        let output = touch.moved(2, 42.0, 20.0, 150);
+        assert!(matches!(
+            output.as_slice(),
+            [
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    pressed: false,
+                    ..
+                },
+                TouchOutput::PressFeedback {
+                    contact: 2,
+                    pressed: false,
+                    ..
+                },
+                TouchOutput::TransformStart { .. },
+                TouchOutput::TransformUpdate { .. },
+            ]
+        ));
+        assert!(
+            !output
+                .iter()
+                .any(|event| { matches!(event, TouchOutput::PointerDown { button: 3, .. }) })
+        );
+    }
+
+    #[test]
+    fn a_late_second_contact_cannot_become_a_secondary_click() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 20.0, 0);
+        assert_eq!(
+            touch.started(2, 30.0, 20.0, 251),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    x: 10.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::PressFeedback {
+                    contact: 2,
+                    x: 30.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::TransformStart {
+                    first_x: 10.0,
+                    first_y: 20.0,
+                    second_x: 30.0,
+                    second_y: 20.0,
+                },
+            ]
+        );
+        let first = touch.ended(1, 10.0, 20.0, 260, false);
+        let second = touch.ended(2, 30.0, 20.0, 270, false);
+        assert!(
+            !first
+                .iter()
+                .chain(&second)
+                .any(|event| { matches!(event, TouchOutput::PointerDown { button: 3, .. }) })
+        );
+    }
+
+    #[test]
+    fn a_late_second_release_cannot_become_a_secondary_click() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 20.0, 0);
+        touch.started(2, 30.0, 20.0, 100);
+        touch.ended(1, 10.0, 20.0, 200, false);
+        let output = touch.ended(2, 30.0, 20.0, 251, false);
+        assert_eq!(
+            output,
+            vec![TouchOutput::PressFeedback {
+                contact: 2,
+                x: 30.0,
+                y: 20.0,
+                pressed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn cancel_all_releases_every_active_press_feedback_contact() {
+        let mut touch = TouchClassifier::default();
+        touch.started(1, 10.0, 20.0, 0);
+        touch.started(2, 30.0, 20.0, 100);
+        assert_eq!(
+            touch.cancel_all(),
+            vec![
+                TouchOutput::PressFeedback {
+                    contact: 1,
+                    x: 10.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+                TouchOutput::PressFeedback {
+                    contact: 2,
+                    x: 30.0,
+                    y: 20.0,
+                    pressed: false,
+                },
+            ]
         );
     }
 }
