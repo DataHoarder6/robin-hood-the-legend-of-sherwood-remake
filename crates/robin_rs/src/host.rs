@@ -101,6 +101,7 @@ pub struct HostScripting {
 /// Independent owners can be borrowed without granting the whole host:
 ///
 /// ```
+/// # robin_build_info::define_test_identity!();
 /// use robin_rs::host::Host;
 /// let mut host = Host::scratch(1024.0, 768.0);
 /// let frontend = &mut host.frontend;

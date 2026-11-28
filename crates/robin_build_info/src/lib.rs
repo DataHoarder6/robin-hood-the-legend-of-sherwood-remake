@@ -16,8 +16,10 @@
 //!   the symbol there);
 //! - test harnesses of a library that must not depend on
 //!   `robin_build_identity` (unit tests and integration tests of
-//!   `robin_replay_format` and `robin_rs`): [`define_test_identity!`], a fixed
-//!   commit nobody built.
+//!   `robin_replay_format` and `robin_rs`, and each linked rustdoc doctest):
+//!   [`define_test_identity!`], a fixed commit nobody built. A linked doctest is
+//!   its own final crate, so it must call the macro itself; the library's
+//!   `cfg(test)` definition is not compiled into it.
 //!
 //! A final artifact without a definition fails to link with an undefined
 //! `robin_build_identity_commit_v1`; one with two fails with a duplicate symbol.
