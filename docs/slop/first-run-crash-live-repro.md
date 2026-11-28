@@ -23,6 +23,14 @@ bundle naming the diplomacy guard; the issue text says no crash-receiver entry
 was produced. Both statements are recorded as given; this page does not
 reconcile them.
 
+## Exact-tree regression status
+
+On the landed tree `9e09789bbdef019ef689f7739fc5c4cbff3a7e87` the named test
+`main_menu::player_select::tests::new_character_play_path_resolves_unresolved_camps_without_a_diplomacy_query`
+passed on the build host (`runbg verify86-current2`, 1 passed, 0 failed, exit
+0). Issue #86 was closed on that evidence; no live repro was claimed or
+supplied. Last verified: 2026-11-28.
+
 ## Exact live repro needed
 
 On the owner laptop, with the stable 0.4.0 install and the full-game data root:
