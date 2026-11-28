@@ -97,6 +97,39 @@ fn element(
     })
 }
 
+/// The two touch-only HUD controls share the topmost cursor layer. Testing
+/// them together keeps their rects from silently overlapping as they move.
+fn touch_hud_element(
+    sw: u16,
+    x: i32,
+    y: i32,
+    quick_group_mode: crate::input_translator::TouchQuickGroupMode,
+) -> Option<Value> {
+    if crate::touch_plan_hud::hit_test(sw, x, y) {
+        let (left, top, right, bottom) = crate::touch_plan_hud::rect(sw);
+        return Some(element(
+            "touch_plan.plan",
+            "Plan actions",
+            CURSOR_LAYERS[0],
+            (left, top, right - left, bottom - top),
+            "PLAN ACTIONS".to_owned(),
+            "control text",
+        ));
+    }
+    if crate::touch_plan_hud::hit_test_quick_group(sw, x, y) {
+        let (left, top, right, bottom) = crate::touch_plan_hud::quick_group_rect(sw);
+        return Some(element(
+            "touch_plan.quick_group",
+            "Quick group",
+            CURSOR_LAYERS[0],
+            (left, top, right - left, bottom - top),
+            crate::touch_plan_hud::quick_group_label(quick_group_mode).to_owned(),
+            "control text",
+        ));
+    }
+    None
+}
+
 /// Resolve the text the player actually sees for a HUD button: the same menu
 /// table the tooltip renderer reads. A missing table is named through
 /// `label_source`, never silently replaced.
@@ -118,6 +151,7 @@ fn cursor_element(
     men_to_blazon: bool,
     frontend: &InteractiveFrontend,
     num_pcs: usize,
+    quick_group_mode: crate::input_translator::TouchQuickGroupMode,
 ) -> Value {
     use crate::corner_hud::CornerButton;
     use crate::sherwood_hud::SherwoodButton;
@@ -146,20 +180,9 @@ fn cursor_element(
     };
 
     let mut tested = Vec::new();
-    let mut found = None;
 
     tested.push(CURSOR_LAYERS[0]);
-    if crate::touch_plan_hud::hit_test(sw, x, y) {
-        let (left, top, right, bottom) = crate::touch_plan_hud::rect(sw);
-        found = Some(element(
-            "touch_plan.plan",
-            "Plan actions",
-            CURSOR_LAYERS[0],
-            (left, top, right - left, bottom - top),
-            "PLAN ACTIONS".to_owned(),
-            "control text",
-        ));
-    }
+    let mut found = touch_hud_element(sw, x, y, quick_group_mode);
 
     if found.is_none() {
         tested.push(CURSOR_LAYERS[1]);
@@ -331,6 +354,7 @@ fn snapshot(
         engine.is_men_to_blazon_conversion_mode(),
         frontend,
         engine.pc_ids().len(),
+        host.frontend.touch_quick_group_mode(),
     );
 
     json!({
@@ -388,6 +412,43 @@ fn build() -> Value {
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest as _, Sha256};
     hex::encode(Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input_translator::TouchQuickGroupMode;
+
+    #[test]
+    fn touch_quick_group_control_is_reported_with_its_mode_label() {
+        let (left, top, right, bottom) = crate::touch_plan_hud::quick_group_rect(1024);
+        for (x, y) in [(left, top), (right, bottom), ((left + right) / 2, top + 1)] {
+            let element = touch_hud_element(1024, x, y, TouchQuickGroupMode::Assign)
+                .expect("the quick-group control owns its whole rect");
+            assert_eq!(element["id"], json!("touch_plan.quick_group"));
+            assert_eq!(element["parent_layer"], json!(CURSOR_LAYERS[0]));
+            assert_eq!(element["label"], json!("QG ASSIGN"));
+            assert_eq!(element["rect"]["x"], json!(left));
+            assert_eq!(element["rect"]["w"], json!(right - left));
+        }
+        assert_eq!(
+            touch_hud_element(1024, right + 1, bottom, TouchQuickGroupMode::Assign),
+            None,
+            "one pixel outside the rect is a miss"
+        );
+        assert_eq!(
+            touch_hud_element(1024, left, top, TouchQuickGroupMode::Recall).unwrap()["label"],
+            json!("QG RECALL"),
+        );
+    }
+
+    #[test]
+    fn touch_quick_group_report_does_not_steal_the_plan_control() {
+        let (left, top, _, _) = crate::touch_plan_hud::rect(1024);
+        let element = touch_hud_element(1024, left, top + 1, TouchQuickGroupMode::Off)
+            .expect("the plan control is still reported");
+        assert_eq!(element["id"], json!("touch_plan.plan"));
+    }
 }
 
 /// Facts about the machine only as far as they explain a symptom: which GPU,

@@ -373,6 +373,15 @@ pub(super) fn collect_event_and_hud_input(context: EventHudContext<'_>) -> Event
             }
         }
     });
+    // The modifier control owns its whole tap. No command is dispatched here:
+    // it only advances the host latch that portrait clicks later consume.
+    events.retain(|event| {
+        !host
+            .frontend
+            .route_touch_quick_group_event(event, admit_touch, |x, y| {
+                crate::touch_plan_hud::hit_test_quick_group(screen_width, x, y)
+            })
+    });
     let planning_active = {
         let keys = &input.threaded.keyboard_state().keys;
         input_modifiers(
@@ -826,5 +835,35 @@ mod tests {
                 plan: false,
             }
         );
+    }
+
+    #[test]
+    fn touch_quick_group_latch_does_not_change_keyboard_modifiers() {
+        let keys = [KeyCode::ShiftLeft, KeyCode::ControlLeft]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut host = crate::host::Host::scratch(800.0, 600.0);
+        let plain = input_modifiers(&keys, false, false, true);
+        host.frontend.cycle_touch_quick_group_mode();
+        host.frontend.cycle_touch_quick_group_mode();
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            crate::input_translator::TouchQuickGroupMode::Recall
+        );
+        // The planning latch is a separate input to modifier collection: it
+        // still works while quick-group is armed, and neither touches keys.
+        let latched = input_modifiers(&keys, false, true, true);
+        assert_eq!(
+            latched,
+            InputModifiers {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                plan: true,
+            }
+        );
+        assert_eq!(latched.shift, plain.shift, "Shift still comes from keys");
+        assert_eq!(latched.ctrl, plain.ctrl, "Ctrl still comes from keys");
+        assert_eq!(latched.alt, plain.alt, "Alt still comes from keys");
     }
 }

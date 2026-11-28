@@ -145,6 +145,9 @@ impl FrontendPreferences {
 
     pub(crate) fn apply(self, frontend: &mut HostFrontend) -> FrontendPreferenceEffects {
         frontend.planning.update_preference(self.plan_quick_actions);
+        if !frontend.planning.enabled() {
+            frontend.cancel_touch_quick_group_mode();
+        }
         let effects = FrontendPreferenceEffects {
             cancel_planned_action: !frontend.planning.enabled(),
             native_refresh_presentation: self.native_refresh_presentation,
@@ -265,6 +268,10 @@ pub struct HostFrontend {
     preferences: FrontendPreferences,
     /// Preference plus sticky touch mode and non-overridable session policy.
     planning: crate::frontend_input::FrontendPlanning,
+    /// Host-only quick-group modifier. Never a profile preference, engine
+    /// modifier, or replay input; it retires at every interaction boundary.
+    touch_quick_group_mode: crate::input_translator::TouchQuickGroupMode,
+    touch_quick_group_captured: bool,
     /// Cosmetic fixed-tick easing, invalidated when the entity timeline changes.
     queue_strip_animations: QueueStripAnimations,
     /// Entity-bound targeting/hover feedback, invalidated at interaction boundaries.
@@ -602,9 +609,61 @@ impl HostFrontend {
     }
     pub fn force_planning_off_for_session(&mut self) {
         self.planning.force_off_for_session();
+        self.cancel_touch_quick_group_mode();
     }
     pub fn cancel_touch_planning(&mut self) {
         self.planning.cancel_touch();
+    }
+
+    pub fn touch_quick_group_mode(&self) -> crate::input_translator::TouchQuickGroupMode {
+        self.touch_quick_group_mode
+    }
+
+    /// One short tap on the touch-only control advances the latch.
+    pub fn cycle_touch_quick_group_mode(&mut self) {
+        self.touch_quick_group_mode = self.touch_quick_group_mode.next();
+    }
+
+    /// Modal/focus/session-policy boundaries forget the latched modifier; a
+    /// later portrait tap must never inherit it from a retired gesture.
+    pub fn cancel_touch_quick_group_mode(&mut self) {
+        self.touch_quick_group_mode = crate::input_translator::TouchQuickGroupMode::Off;
+        self.touch_quick_group_captured = false;
+    }
+
+    /// Own one tap on the quick-group HUD control from press through release.
+    /// Returns `true` when the event was consumed and must not reach the world.
+    pub fn route_touch_quick_group_event(
+        &mut self,
+        event: &crate::gfx_types::GameEvent,
+        admit_touch: bool,
+        hit_test: impl FnOnce(i32, i32) -> bool,
+    ) -> bool {
+        if self.touch_quick_group_captured {
+            match *event {
+                crate::gfx_types::GameEvent::PointerCancel
+                | crate::gfx_types::GameEvent::TouchDragCancelled { button: 1 } => {
+                    self.touch_quick_group_captured = false;
+                    return false;
+                }
+                crate::gfx_types::GameEvent::MouseUp(_, _, 1) => {
+                    self.touch_quick_group_captured = false;
+                    return true;
+                }
+                crate::gfx_types::GameEvent::MouseDown(_, _, 1, _)
+                | crate::gfx_types::GameEvent::MouseMove { .. } => return true,
+                _ => {}
+            }
+        }
+        if let crate::gfx_types::GameEvent::MouseDown(x, y, 1, _) = *event
+            && admit_touch
+            && hit_test(x, y)
+        {
+            self.touch_quick_group_captured = true;
+            self.cycle_touch_quick_group_mode();
+            return true;
+        }
+        false
     }
     pub fn pointer_capture(&self) -> &crate::frontend_input::FrontendPointerCapture {
         self.pointer_sequence.capture()
@@ -652,6 +711,7 @@ impl HostFrontend {
     /// Modal entry disarms the current drag without inventing a release.
     pub fn reset_modal_input(&mut self) {
         self.pointer_sequence.reset_modal(&mut self.input);
+        self.cancel_touch_quick_group_mode();
         self.viewport.cancel_touch_motion();
     }
     pub fn lose_pointer_focus(&mut self) {
@@ -690,6 +750,7 @@ impl HostFrontend {
 
     fn reset_pointer_sequence(&mut self) {
         self.pointer_sequence.reset(&mut self.input);
+        self.cancel_touch_quick_group_mode();
         self.input.gestures.portrait_action_countdown = 0;
         self.input.gestures.portrait_action_pc = None;
         self.viewport.cancel_touch_motion();

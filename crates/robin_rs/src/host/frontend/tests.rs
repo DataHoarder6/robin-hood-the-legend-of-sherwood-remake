@@ -802,3 +802,93 @@ mod host_resource_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod touch_quick_group_tests {
+    use super::*;
+    use crate::gfx_types::GameEvent;
+    use crate::input_translator::TouchQuickGroupMode;
+
+    #[test]
+    fn touch_quick_group_mode_cycles_and_resets_on_cancellation() {
+        use TouchQuickGroupMode::*;
+        let mut frontend = HostFrontend::default();
+        assert_eq!(frontend.touch_quick_group_mode(), Off);
+
+        frontend.cycle_touch_quick_group_mode();
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+        frontend.cycle_touch_quick_group_mode();
+        assert_eq!(frontend.touch_quick_group_mode(), Recall);
+        frontend.cycle_touch_quick_group_mode();
+        assert_eq!(frontend.touch_quick_group_mode(), Off);
+
+        // Modal entry, focus loss and session policy each retire the latch.
+        frontend.cycle_touch_quick_group_mode();
+        frontend.reset_modal_input();
+        assert_eq!(frontend.touch_quick_group_mode(), Off);
+
+        frontend.cycle_touch_quick_group_mode();
+        frontend.lose_pointer_focus();
+        assert_eq!(frontend.touch_quick_group_mode(), Off);
+
+        frontend.cycle_touch_quick_group_mode();
+        frontend.force_planning_off_for_session();
+        assert_eq!(frontend.touch_quick_group_mode(), Off);
+    }
+
+    #[test]
+    fn touch_quick_group_hud_tap_cycles_and_consumes_the_whole_gesture() {
+        use TouchQuickGroupMode::*;
+        let mut frontend = HostFrontend::default();
+        let inside = |x: i32, y: i32| x == 100 && y == 60;
+
+        // A press inside the control is captured and cycles once; no command
+        // or world event is produced by the routing layer.
+        assert!(frontend.route_touch_quick_group_event(
+            &GameEvent::MouseDown(100, 60, 1, 1),
+            true,
+            inside,
+        ));
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+
+        // Movement and release stay owned by the control; only one cycle.
+        assert!(frontend.route_touch_quick_group_event(
+            &GameEvent::MouseMove {
+                x: 140,
+                y: 60,
+                xrel: 40,
+                yrel: 0,
+            },
+            true,
+            |_, _| false,
+        ));
+        assert!(frontend.route_touch_quick_group_event(
+            &GameEvent::MouseUp(140, 60, 1),
+            true,
+            |_, _| false,
+        ));
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+
+        // A press outside the control never cycles.
+        assert!(!frontend.route_touch_quick_group_event(
+            &GameEvent::MouseDown(1, 1, 1, 1),
+            true,
+            inside,
+        ));
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+
+        // Secondary gestures and cancellation are not quick-group taps.
+        assert!(!frontend.route_touch_quick_group_event(
+            &GameEvent::MouseDown(100, 60, 3, 1),
+            true,
+            inside,
+        ));
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+        frontend.route_touch_quick_group_event(
+            &GameEvent::TouchDragCancelled { button: 1 },
+            true,
+            |_, _| false,
+        );
+        assert_eq!(frontend.touch_quick_group_mode(), Assign);
+    }
+}

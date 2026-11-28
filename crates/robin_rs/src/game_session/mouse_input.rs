@@ -1043,6 +1043,25 @@ impl MouseCtx<'_> {
         let (planning_held, ctrl_held) = (self.modifiers.plan, self.modifiers.ctrl);
         let host = &mut *self.host;
         let frame_cmds = &mut *self.frame_cmds;
+
+        // Touch-only quick-group latch. This is the sole consumer of the mode:
+        // keyboard modifiers and unlatched taps keep their existing selection
+        // path, and a latched tap dispatches exactly one quick-group command.
+        let quick_group = match host.frontend.touch_quick_group_mode() {
+            crate::input_translator::TouchQuickGroupMode::Off => None,
+            crate::input_translator::TouchQuickGroupMode::Assign => Some(true),
+            crate::input_translator::TouchQuickGroupMode::Recall => Some(false),
+        };
+        if let Some(assign) = quick_group {
+            let cmd = if assign {
+                PlayerCommand::AssignQuickGroup { index: hit.slot }
+            } else {
+                PlayerCommand::RecallQuickGroup { index: hit.slot }
+            };
+            dispatch_local_command(&host.transport, frame_cmds, &cmd);
+            return;
+        }
+
         let local_seat = host.transport.local_seat();
         let pc_id = hit.pc_id;
         {
@@ -4287,5 +4306,153 @@ mod sherwood_outcome_tests {
             [PlayerCommand::QuitMissionRequested]
         ));
         assert!(game.message_text.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod touch_quick_group_tests {
+    use super::*;
+    use crate::host::test_support::fixture;
+    use crate::input_translator::TouchQuickGroupMode;
+
+    fn click_ctx<'a>(
+        engine: &'a Engine,
+        assets: &'a engine_api::LevelAssets,
+        host: &'a mut Host,
+        commands: &'a mut FrameCommands,
+        cache: &'a PortraitCache,
+        shift: bool,
+    ) -> MouseCtx<'a> {
+        MouseCtx {
+            engine,
+            host,
+            assets,
+            portrait_cache: cache,
+            frame_cmds: commands,
+            screen_width: 800,
+            screen_height: 600,
+            modifiers: InputModifiers {
+                ctrl: false,
+                shift,
+                alt: false,
+                plan: false,
+            },
+        }
+    }
+
+    fn visage_hit(pc_id: engine_element::EntityId, slot: u8) -> ui_panel::PortraitHit {
+        ui_panel::PortraitHit {
+            slot,
+            pc_id,
+            target: PortraitTarget::Pc(pc_id),
+            area: PortraitHitArea::Visage,
+            is_burned: false,
+        }
+    }
+
+    /// `(assign, index)` for the first quick-group command, if any. A tuple
+    /// keeps the assertion independent of `PlayerCommand` not implementing
+    /// `PartialEq`.
+    fn quick_group_command(commands: &FrameCommands) -> Option<(bool, u8)> {
+        commands
+            .commands
+            .iter()
+            .find_map(|input| match &input.command {
+                PlayerCommand::AssignQuickGroup { index } => Some((true, *index)),
+                PlayerCommand::RecallQuickGroup { index } => Some((false, *index)),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn touch_quick_group_latched_portrait_tap_dispatches_slot_command() {
+        let (mut engine, assets, mut host) = fixture();
+        let pc_id = crate::host::test_support::add_pc_with_status(
+            &mut engine,
+            50.0,
+            50.0,
+            Posture::Upright,
+            true,
+            100,
+        );
+        let cache = PortraitCache::new();
+
+        host.frontend.cycle_touch_quick_group_mode();
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Assign
+        );
+        let mut commands = FrameCommands::new();
+        click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
+            .on_normal_portrait_click(&visage_hit(pc_id, 3));
+        assert_eq!(
+            quick_group_command(&commands),
+            Some((true, 3)),
+            "assign mode must store the tapped portrait slot"
+        );
+        assert!(
+            !commands.commands.iter().any(|input| matches!(
+                input.command,
+                PlayerCommand::SelectPc { .. } | PlayerCommand::SelectByPortrait { .. }
+            )),
+            "a latched tap must not also reselect the portrait"
+        );
+
+        host.frontend.cycle_touch_quick_group_mode();
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Recall
+        );
+        let mut commands = FrameCommands::new();
+        click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false)
+            .on_normal_portrait_click(&visage_hit(pc_id, 7));
+        assert_eq!(
+            quick_group_command(&commands),
+            Some((false, 7)),
+            "recall mode must recall the tapped portrait slot"
+        );
+    }
+
+    #[test]
+    fn touch_quick_group_unlatched_and_keyboard_paths_keep_selection_behavior() {
+        let (mut engine, assets, mut host) = fixture();
+        let pc_id = crate::host::test_support::add_pc_with_status(
+            &mut engine,
+            50.0,
+            50.0,
+            Posture::Upright,
+            true,
+            100,
+        );
+        let cache = PortraitCache::new();
+
+        for shift in [false, true] {
+            let mut commands = FrameCommands::new();
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, shift)
+                .on_normal_portrait_click(&visage_hit(pc_id, 2));
+            assert_eq!(quick_group_command(&commands), None);
+            assert!(
+                commands.commands.iter().any(|input| matches!(
+                    input.command,
+                    PlayerCommand::SelectPc { pc_id: clicked, .. } if clicked == pc_id
+                )),
+                "unlatched taps and physical Shift still take the ordinary selection path"
+            );
+        }
+
+        // Secondary gestures never consult the latch: routing button 3 around
+        // the HUD control left it untouched, and a latched tap consumes only
+        // the quick-group command.
+        host.frontend.cycle_touch_quick_group_mode();
+        assert!(!host.frontend.route_touch_quick_group_event(
+            &GameEvent::MouseDown(100, 60, 3, 1),
+            true,
+            |x, _| x == 100,
+        ));
+        assert_eq!(
+            host.frontend.touch_quick_group_mode(),
+            TouchQuickGroupMode::Assign,
+            "a secondary press must not cycle the latch"
+        );
     }
 }

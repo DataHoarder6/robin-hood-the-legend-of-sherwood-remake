@@ -823,6 +823,33 @@ pub struct TouchModifierLatch {
     pub add_to_selection: bool,
 }
 
+/// Touch-only quick-group modifier. The HUD control cycles this mode on a
+/// short tap; a latched portrait tap then assigns or recalls that slot. It is
+/// host presentation state — never persisted, replayed, or sent to the engine
+/// as a modifier, and deliberately independent of physical keyboard modifiers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchQuickGroupMode {
+    #[default]
+    Off,
+    Assign,
+    Recall,
+}
+
+impl TouchQuickGroupMode {
+    /// One tap advances `off → assign → recall → off`.
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Assign,
+            Self::Assign => Self::Recall,
+            Self::Recall => Self::Off,
+        }
+    }
+
+    pub const fn is_active(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 /// One typed output of touch mapping. Pointer actions carry an explicit button
 /// number so the existing right-button handlers need no new code path.
 #[derive(Debug, Clone, PartialEq)]
@@ -1569,6 +1596,24 @@ mod tests {
         let actions =
             map_touch_gesture(TouchGesture::AssignQuickGroup { slot }, &Default::default());
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn touch_quick_group_mode_cycles_off_assign_recall_off() {
+        use crate::input_translator::TouchQuickGroupMode;
+        use TouchQuickGroupMode::*;
+
+        let mut mode = Off;
+        assert_eq!(mode, Off);
+        mode = mode.next();
+        assert_eq!(mode, Assign, "first tap arms assignment");
+        mode = mode.next();
+        assert_eq!(mode, Recall, "second tap arms recall");
+        mode = mode.next();
+        assert_eq!(mode, Off, "third tap returns to plain selection");
+        assert!(!Off.is_active());
+        assert!(Assign.is_active());
+        assert!(Recall.is_active());
     }
 
     #[test]

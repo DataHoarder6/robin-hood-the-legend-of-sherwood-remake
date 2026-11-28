@@ -1907,6 +1907,15 @@ fn render_overlay_pass(
             host.frontend.planning().touch_latched(),
         );
     }
+    // Quick-group latch is independent of the planning preference: it shows
+    // the armed mode and the same presentation-only pressed sample Task 1
+    // wired into every other sprite HUD button.
+    crate::touch_plan_hud::render_quick_group(
+        renderer,
+        hud_fonts,
+        host.frontend.touch_quick_group_mode(),
+        hud_mouse_pressed(host.frontend, threaded_input),
+    );
 
     // ── GPU phase: blazon-bar / requirements icon strips ──
     // Top-of-screen icon strips rebuilt each frame from campaign
