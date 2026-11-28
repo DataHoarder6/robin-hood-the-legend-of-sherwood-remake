@@ -894,7 +894,7 @@ impl ModalInputState {
                     self.pending_double_click_right = false;
                 }
             }
-            GameEvent::PointerCancel => {
+            GameEvent::PointerCancel | GameEvent::TouchDragCancelled { button: 1 } => {
                 self.buttons.remove(MouseButtons::LEFT_DOWN);
                 self.buttons.remove(MouseButtons::LEFT_CLICK);
                 self.buttons.remove(MouseButtons::LEFT_DOUBLE_CLICK);
@@ -1996,6 +1996,34 @@ mod noisy_tracker_tests {
         assert!(!input.buttons.contains(MouseButtons::RIGHT_CLICK));
         assert!(!input.buttons.contains(MouseButtons::RIGHT_DOUBLE_CLICK));
         assert!(!input.pending_double_click_right);
+    }
+
+    #[test]
+    fn touch_primary_cancel_clears_left_edges_without_touching_right() {
+        let mut input = ModalInputState::new();
+        input.buttons |= MouseButtons::LEFT_DOWN
+            | MouseButtons::LEFT_CLICK
+            | MouseButtons::LEFT_DOUBLE_CLICK
+            | MouseButtons::RIGHT_DOWN;
+        input.pending_double_click_left = true;
+        input.pending_double_click_right = true;
+        input.hover_before_press = true;
+
+        input.update_from_event(
+            &GameEvent::TouchDragCancelled { button: 1 },
+            MenuTransform::centered(640, 480),
+        );
+
+        assert!(!input.buttons.contains(MouseButtons::LEFT_DOWN));
+        assert!(!input.buttons.contains(MouseButtons::LEFT_CLICK));
+        assert!(!input.buttons.contains(MouseButtons::LEFT_DOUBLE_CLICK));
+        assert!(!input.pending_double_click_left);
+        assert!(!input.hover_before_press);
+        assert!(
+            input.buttons.contains(MouseButtons::RIGHT_DOWN),
+            "a primary cancel must not retire a secondary press"
+        );
+        assert!(input.pending_double_click_right);
     }
 }
 

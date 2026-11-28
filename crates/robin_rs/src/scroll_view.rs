@@ -263,7 +263,7 @@ impl ScrollView {
                 true
             }
             GameEvent::MouseUp(_, _, 1) => self.drag_grab.take().is_some(),
-            GameEvent::PointerCancel => {
+            GameEvent::PointerCancel | GameEvent::TouchDragCancelled { button: 1 } => {
                 self.drag_grab = None;
                 false
             }
@@ -536,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn dragging_outside_view_consumes_release_and_cancellation_stops_drag() {
+    fn touch_primary_cancel_and_dragging_outside_view_stop_scrollbar_drag() {
         let mut v = view();
         let t = MenuTransform::centered(640, 480);
         let (x, y) = t.to_screen(200, 25);
@@ -553,6 +553,13 @@ mod tests {
             v.drag_grab,
             Some(3),
             "a secondary touch cancel cannot retire a primary scrollbar drag"
+        );
+
+        v.drag_grab = Some(3);
+        assert!(!v.handle_event(&GameEvent::TouchDragCancelled { button: 1 }, t, (200, 25)));
+        assert_eq!(
+            v.drag_grab, None,
+            "a primary touch cancel retires the scrollbar drag"
         );
     }
 }

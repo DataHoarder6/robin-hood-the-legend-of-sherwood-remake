@@ -63,6 +63,64 @@ impl SpriteHudHit {
     }
 }
 
+/// Padded zoom hover used by direct dispatch, cursor reporting and the zoom
+/// widget's own hover/tooltip presentation.
+pub(super) fn zoom_hover_at(
+    layout: &crate::zoom_hud::ZoomHudLayout,
+    x: i32,
+    y: i32,
+) -> Option<ZoomButton> {
+    use crate::touch_plan_hud::touch_target_hit;
+    if touch_target_hit(layout.zoom_up, x, y) {
+        Some(ZoomButton::ZoomUp)
+    } else if touch_target_hit(layout.zoom_down, x, y) {
+        Some(ZoomButton::ZoomDown)
+    } else {
+        None
+    }
+}
+
+/// Padded corner hover, gate open or closed, so a greyed widget still explains
+/// itself through a tooltip.
+pub(super) fn corner_hover_at(layout: &CornerHudLayout, x: i32, y: i32) -> Option<CornerButton> {
+    use crate::touch_plan_hud::touch_target_hit;
+    if touch_target_hit(layout.clock, x, y) {
+        Some(CornerButton::Clock)
+    } else if touch_target_hit(layout.sight, x, y) {
+        Some(CornerButton::Sight)
+    } else if touch_target_hit(layout.quickstart, x, y) {
+        Some(CornerButton::QuickStart)
+    } else {
+        None
+    }
+}
+
+/// Padded stature hover, gate open or closed.
+pub(super) fn stature_hover_at(layout: &StatureHudLayout, x: i32, y: i32) -> Option<StatureButton> {
+    use crate::touch_plan_hud::touch_target_hit;
+    if touch_target_hit(layout.up, x, y) {
+        Some(StatureButton::Up)
+    } else if touch_target_hit(layout.down, x, y) {
+        Some(StatureButton::Down)
+    } else {
+        None
+    }
+}
+
+/// The enable-gated form the stature widget's visual hover uses, matching the
+/// dispatch gate's rule that a closed arrow does not read as interactable.
+pub(super) fn stature_hit_at(
+    layout: &StatureHudLayout,
+    x: i32,
+    y: i32,
+    enable: StatureEnable,
+) -> Option<StatureButton> {
+    stature_hover_at(layout, x, y).filter(|button| match button {
+        StatureButton::Up => enable.up_enabled,
+        StatureButton::Down => enable.down_enabled,
+    })
+}
+
 pub(super) fn sprite_hud_hit(
     zoom_layout: &crate::zoom_hud::ZoomHudLayout,
     corner_layout: &CornerHudLayout,
@@ -71,35 +129,13 @@ pub(super) fn sprite_hud_hit(
     x: i32,
     y: i32,
 ) -> SpriteHudHit {
-    use crate::touch_plan_hud::touch_target_hit;
-
-    let zoom = if touch_target_hit(zoom_layout.zoom_up, x, y) {
-        Some(ZoomButton::ZoomUp)
-    } else if touch_target_hit(zoom_layout.zoom_down, x, y) {
-        Some(ZoomButton::ZoomDown)
-    } else {
-        None
-    };
-    let corner = if is_sherwood {
-        None
-    } else if touch_target_hit(corner_layout.clock, x, y) {
-        Some(CornerButton::Clock)
-    } else if touch_target_hit(corner_layout.sight, x, y) {
-        Some(CornerButton::Sight)
-    } else if touch_target_hit(corner_layout.quickstart, x, y) {
-        Some(CornerButton::QuickStart)
-    } else {
-        None
-    };
-    let stature = if is_sherwood {
-        None
-    } else if touch_target_hit(stature_layout.up, x, y) {
-        Some(StatureButton::Up)
-    } else if touch_target_hit(stature_layout.down, x, y) {
-        Some(StatureButton::Down)
-    } else {
-        None
-    };
+    let zoom = zoom_hover_at(zoom_layout, x, y);
+    let corner = (!is_sherwood)
+        .then(|| corner_hover_at(corner_layout, x, y))
+        .flatten();
+    let stature = (!is_sherwood)
+        .then(|| stature_hover_at(stature_layout, x, y))
+        .flatten();
     SpriteHudHit {
         zoom,
         corner,
@@ -979,6 +1015,54 @@ mod tests {
 
         let miss = sprite_hud_hit(&zoom, &corner, &stature, false, 400, 300);
         assert!(miss.is_empty(), "an empty screen point stays a world point");
+    }
+
+    /// The render pass feeds these narrow helpers into zoom, corner and
+    /// stature hover/tooltip state, so the padded target must reach them too.
+    #[test]
+    fn render_hover_helpers_use_the_padded_targets() {
+        use crate::corner_hud::CornerHudLayout;
+        use crate::stature_hud::StatureHudLayout;
+        use crate::zoom_hud::ZoomHudLayout;
+
+        let (w, h) = (800_u32, 600_u32);
+        let zoom =
+            ZoomHudLayout::for_screen_width(w, &crate::zoom_hud::ZoomButtonSprites::default());
+        let corner = CornerHudLayout::for_resolution(
+            w,
+            h,
+            &crate::corner_hud::CornerButtonSprites::default(),
+        );
+        let stature =
+            StatureHudLayout::for_resolution(w, h, &crate::stature_hud::StatureSprites::default());
+        let below =
+            |rect: crate::gfx_types::Rect| (rect.x() + 2, rect.y() + rect.height() as i32 + 6);
+
+        let (x, y) = below(zoom.zoom_down);
+        assert_eq!(zoom_hover_at(&zoom, x, y), Some(ZoomButton::ZoomDown));
+        let (x, y) = below(corner.sight);
+        assert_eq!(corner_hover_at(&corner, x, y), Some(CornerButton::Sight));
+        let (x, y) = below(stature.down);
+        assert_eq!(stature_hover_at(&stature, x, y), Some(StatureButton::Down));
+        assert_eq!(
+            stature_hit_at(
+                &stature,
+                x,
+                y,
+                StatureEnable {
+                    up_enabled: true,
+                    down_enabled: true,
+                    ..Default::default()
+                },
+            ),
+            Some(StatureButton::Down),
+            "the enable-gated visual hover uses the same padded rect"
+        );
+        assert_eq!(
+            stature_hit_at(&stature, x, y, StatureEnable::default()),
+            None,
+            "a closed arrow keeps its pixels but does not read as interactable"
+        );
     }
 
     /// Sherwood suppresses corner and stature controls but never the zoom

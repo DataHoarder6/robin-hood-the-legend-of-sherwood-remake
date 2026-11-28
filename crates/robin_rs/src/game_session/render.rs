@@ -232,16 +232,17 @@ pub(super) fn prepare_fixed_tick_hud(
             }
         }
     }
-    tooltip_update.sherwood =
-        hud.sherwood_layout
-            .hover_test(mp.x as i32, mp.y as i32, hud.sherwood_rail);
+    tooltip_update.sherwood = super::mouse_input::sherwood_hover_at(
+        &hud.sherwood_layout,
+        mp.x as i32,
+        mp.y as i32,
+        hud.sherwood_rail,
+    );
     if !game.is_sherwood {
-        tooltip_update.stature = hud
-            .stature_layout
-            .hit_test_geometric(mp.x as i32, mp.y as i32);
-        tooltip_update.corner = hud
-            .corner_layout
-            .hit_test_geometric(mp.x as i32, mp.y as i32);
+        tooltip_update.stature =
+            super::event_hud::stature_hover_at(&hud.stature_layout, mp.x as i32, mp.y as i32);
+        tooltip_update.corner =
+            super::event_hud::corner_hover_at(&hud.corner_layout, mp.x as i32, mp.y as i32);
     }
     let hit = hit_test_portrait_detailed(engine, local_seat, portrait_cache, sw, sh, mp.x, mp.y);
     tooltip_update.pc_action = hit.and_then(portrait_action_hover);
@@ -550,7 +551,7 @@ pub(super) fn prepare_zoom_presentation(
     let frame_id = PresentationFrameId::new(engine.frame_counter());
     let enable = ZoomButtonEnable::from_engine(engine, &host.frontend.viewport);
     let mouse = threaded_input.position();
-    let hovered = layout.hit_test_geometric(mouse.x as i32, mouse.y as i32);
+    let hovered = super::event_hud::zoom_hover_at(layout, mouse.x as i32, mouse.y as i32);
     let input = ZoomPresentationUpdate::new(
         enable,
         hovered,
@@ -1907,9 +1908,11 @@ fn render_overlay_pass(
             host.frontend.planning().touch_latched(),
         );
     }
-    // Quick-group latch is independent of the planning preference: it shows
-    // the armed mode and the same presentation-only pressed sample Task 1
-    // wired into every other sprite HUD button.
+    // The quick-group latch is a separate control from the planning latch and
+    // renders regardless of that preference. It is not independent of the
+    // preference *change*: applying options that leave planning disabled is
+    // one of its reset boundaries (see `FrontendPreferences::apply`). The
+    // pressed sample stays presentation-only, as on every sprite HUD button.
     crate::touch_plan_hud::render_quick_group(
         renderer,
         hud_fonts,
@@ -2284,8 +2287,13 @@ impl OverlayHudInputs<'_> {
             )
         };
         let mp = threaded_input.position();
-        let hovered_btn =
-            sherwood_layout.hit_test(mp.x as i32, mp.y as i32, sherwood_rail, sherwood_enable);
+        let hovered_btn = super::mouse_input::sherwood_button_at(
+            sherwood_layout,
+            mp.x as i32,
+            mp.y as i32,
+            sherwood_rail,
+            sherwood_enable,
+        );
         let hover = sherwood_hud::SherwoodHoverState {
             hovered: hovered_btn,
             mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),
@@ -2399,7 +2407,8 @@ impl OverlayHudInputs<'_> {
         } = *self;
         let corner_enable = CornerButtonEnable::from_engine(engine);
         let mp = threaded_input.position();
-        let hovered_btn = corner_layout.hit_test_geometric(mp.x as i32, mp.y as i32);
+        let hovered_btn =
+            super::event_hud::corner_hover_at(corner_layout, mp.x as i32, mp.y as i32);
         let hover = CornerHoverState {
             hovered: hovered_btn,
             mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),
@@ -2426,7 +2435,12 @@ impl OverlayHudInputs<'_> {
         let stature = engine.retrieve_stature_for_seat(host.local_seat, None);
         let stature_enable =
             StatureEnable::from_stature(stature).with_focus_latch(&game.stature_focus);
-        let stature_hovered = stature_layout.hit_test(mp.x as i32, mp.y as i32, stature_enable);
+        let stature_hovered = super::event_hud::stature_hit_at(
+            stature_layout,
+            mp.x as i32,
+            mp.y as i32,
+            stature_enable,
+        );
         let stature_hover = StatureHoverState {
             hovered: stature_hovered,
             mouse_pressed: hud_mouse_pressed(host.frontend, threaded_input),

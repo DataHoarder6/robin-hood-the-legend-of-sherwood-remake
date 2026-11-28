@@ -160,7 +160,7 @@ pub(super) fn handle_mouse_input(
             // drag panning works during replay; nothing to do here.
             GameEvent::ViewportPan { .. } => {}
             GameEvent::TouchMotionStop => {}
-            GameEvent::PointerCancel => {
+            GameEvent::PointerCancel | GameEvent::TouchDragCancelled { button: 1 } => {
                 cancel_left_pointer(ctx.host, ctx.frame_cmds);
             }
             GameEvent::TouchDragCancelled { button: 3 } => {
@@ -1965,7 +1965,7 @@ enum SherwoodRailPress {
 /// The shared padded hit policy applied to each offered Sherwood button, in
 /// draw order. A closed gate still owns its pixels: callers consume a press as
 /// `Claimed` rather than passing it to the world.
-fn sherwood_button_at(
+pub(super) fn sherwood_button_at(
     layout: &SherwoodHudLayout,
     x: i32,
     y: i32,
@@ -4628,6 +4628,48 @@ mod touch_quick_group_tests {
             "the deferred release must not fall through to portrait selection"
         );
         assert!(!host.frontend.touch_primary_click());
+    }
+
+    #[test]
+    fn touch_primary_cancel_event_uses_pointer_cancel_semantics() {
+        let (engine, assets, mut host) = fixture();
+        let cache = PortraitCache::new();
+        let mut commands = FrameCommands::new();
+
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[GameEvent::TouchClickSource { pressed: true }],
+            None,
+            false,
+        );
+        assert!(host.frontend.touch_primary_click());
+
+        // A future emitter may name the primary cancel explicitly instead of
+        // collapsing it into `PointerCancel`. Both spellings must retire the
+        // same state, and neither may panic in this consumer.
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[GameEvent::TouchDragCancelled { button: 1 }],
+            None,
+            false,
+        );
+        assert!(
+            !host.frontend.touch_primary_click(),
+            "primary touch cancel retires pending click provenance"
+        );
+
+        host.frontend
+            .route_touch_click_source(&GameEvent::TouchClickSource { pressed: true });
+        handle_mouse_input(
+            click_ctx(&engine, &assets, &mut host, &mut commands, &cache, false),
+            &[GameEvent::PointerCancel],
+            None,
+            false,
+        );
+        assert!(
+            !host.frontend.touch_primary_click(),
+            "physical-style PointerCancel keeps the same semantics"
+        );
     }
 
     #[test]
